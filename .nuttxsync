@@ -1,5 +1,7 @@
 [nuttx]
-last_synced = 725bdfb0e8c704823669d20931fd0a824c462212
+last_synced = Updating nuttx to version releases/10.3...
+Branch releases/10.3 not found in remote for nuttx
 
 [apps]
-last_synced = 9d4872780f095d7af7414501ccf34ea23d4d565b
+last_synced = Updating apps to version releases/10.3...
+Branch releases/10.3 not found in remote for apps
