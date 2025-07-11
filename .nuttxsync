@@ -866,9 +866,11 @@ Removing nshlib/nsh_fileapps.home.vinicius.git.nuttxspace.apps.nshlib.o
 Removing nshlib/nsh_fscmds.home.vinicius.git.nuttxspace.apps.nshlib.o
 Removing nshlib/nsh_fsutils.home.vinicius.git.nuttxspace.apps.nshlib.o
 Removing nshlib/nsh_init.home.vinicius.git.nuttxspace.apps.nshlib.o
+Removing nshlib/nsh_login.home.vinicius.git.nuttxspace.apps.nshlib.o
 Removing nshlib/nsh_mmcmds.home.vinicius.git.nuttxspace.apps.nshlib.o
 Removing nshlib/nsh_mntcmds.home.vinicius.git.nuttxspace.apps.nshlib.o
 Removing nshlib/nsh_parse.home.vinicius.git.nuttxspace.apps.nshlib.o
+Removing nshlib/nsh_passwdcmds.home.vinicius.git.nuttxspace.apps.nshlib.o
 Removing nshlib/nsh_proccmds.home.vinicius.git.nuttxspace.apps.nshlib.o
 Removing nshlib/nsh_romfsetc.home.vinicius.git.nuttxspace.apps.nshlib.o
 Removing nshlib/nsh_script.home.vinicius.git.nuttxspace.apps.nshlib.o
