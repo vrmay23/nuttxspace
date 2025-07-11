@@ -27,7 +27,7 @@ git add -A
 git commit -m "$COMMIT_MSG"
 
 # Fazer push para o seu repositório remoto
-git push origin master
+git push origin main
 
 echo
 echo "All changes committed and pushed with message:"
