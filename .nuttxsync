@@ -1,7 +1,13 @@
 [nuttx]
 last_synced = Updating nuttx to version releases/9.0...
-Branch releases/9.0 not found in nuttx
+branch 'releases/9.0' set up to track 'origin/releases/9.0'.
+Already up to date.
+nuttx commit hash: 725bdfb0e8c704823669d20931fd0a824c462212
+725bdfb0e8c704823669d20931fd0a824c462212
 
 [apps]
 last_synced = Updating apps to version releases/9.0...
-Branch releases/9.0 not found in apps
+branch 'releases/9.0' set up to track 'origin/releases/9.0'.
+Already up to date.
+apps commit hash: 9d4872780f095d7af7414501ccf34ea23d4d565b
+9d4872780f095d7af7414501ccf34ea23d4d565b
