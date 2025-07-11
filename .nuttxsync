@@ -1,41 +1,9 @@
 [nuttx]
-last_synced = Updating nuttx to version releases/9.0...
-branch 'releases/9.0' set up to track 'origin/releases/9.0'.
-Your branch is up to date with 'origin/releases/9.0'.
-HEAD is now at 725bdfb0e8 tools/sethost.sh:  Correct error in setting a different host.
-Removing .config
-Removing .config.old
-Removing Make.defs
-Removing arch/sim/include/board
-Removing arch/sim/include/chip
-Removing arch/sim/src/board
-Removing arch/sim/src/chip
-Removing defconfig
-Removing drivers/platform
-Removing include/arch
-Already up to date.
-nuttx commit hash: 725bdfb0e8c704823669d20931fd0a824c462212
-725bdfb0e8c704823669d20931fd0a824c462212
+last_synced = Preparing to clone nuttx to version releases/9.0...
+De-initializing submodule nuttx...
+Failed to deinit nuttx
 
 [apps]
-last_synced = Updating apps to version releases/9.0...
-branch 'releases/9.0' set up to track 'origin/releases/9.0'.
-Your branch is up to date with 'origin/releases/9.0'.
-HEAD is now at 9d4872780 CI: Add logic for determining which branches of OS App and Testing repos should be used
-Removing Kconfig
-Removing canutils/Kconfig
-Removing examples/Kconfig
-Removing fsutils/Kconfig
-Removing gpsutils/Kconfig
-Removing graphics/Kconfig
-Removing industry/Kconfig
-Removing interpreters/Kconfig
-Removing netutils/Kconfig
-Removing system/Kconfig
-Removing testing/Kconfig
-Removing wireless/Kconfig
-Removing wireless/bluetooth/Kconfig
-Removing wireless/ieee802154/Kconfig
-Already up to date.
-apps commit hash: 9d4872780f095d7af7414501ccf34ea23d4d565b
-9d4872780f095d7af7414501ccf34ea23d4d565b
+last_synced = Preparing to clone apps to version releases/9.0...
+De-initializing submodule apps...
+Failed to deinit apps
