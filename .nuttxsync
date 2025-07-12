@@ -15,5 +15,5 @@ De-initializing submodule apps...
 Removing existing work tree directory: apps
 Cloning apps with branch 'master' from https://github.com/apache/nuttx-apps.git...
 Cloning of apps for branch 'master' successful.
-apps commit hash: 0c680bcb8e011fcab1d6473da0f175348e75ceb0
-0c680bcb8e011fcab1d6473da0f175348e75ceb0
+apps commit hash: 8b121eb1382c0c66030d7b602c8523532e6ff492
+8b121eb1382c0c66030d7b602c8523532e6ff492
