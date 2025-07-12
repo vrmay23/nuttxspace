@@ -10,7 +10,7 @@
  * "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -28,7 +28,6 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-
 #include "stm32.h"
 
 /****************************************************************************
@@ -41,21 +40,21 @@
  * logic on the board and are not available for software control:
  *
  * LD1 COM:  LD1 default status is red.  LD1 turns to green to indicate that
- *           communications are in progress between the PC and the
- *           ST-LINK/V2-1.
+ * communications are in progress between the PC and the
+ * ST-LINK/V2-1.
  * LD3 PWR:  red LED indicates that the board is powered.
  *
  * And one can be controlled by software:
  *
  * User LD2: green LED is a user LED connected to the I/O PA5 of the
- *           STM32F303RET6.
+ * STM32F303RET6.
  *
  * If CONFIG_ARCH_LEDS is not defined, then the user can control the LED in
  * any way.  The following definition is used to access the LED.
  */
 
-#define GPIO_LED1      (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|\
-                        GPIO_OUTPUT_CLEAR|GPIO_PORTA|GPIO_PIN5)
+#define GPIO_LED1       (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|\
+                         GPIO_OUTPUT_CLEAR|GPIO_PORTA|GPIO_PIN5)
 
 #define LED_DRIVER_PATH "/dev/userleds"
 
@@ -64,9 +63,9 @@
 /* The Nucleo F303RE supports two buttons; only one button is controllable
  * by software:
  *
- *   B1 USER:  user button connected to the I/O PC13 of the STM32F303RET6.
- *   B2 RESET: push button connected to NRST is used to RESET the
- *             STM32F303RET6.
+ * B1 USER:  user button connected to the I/O PC13 of the STM32F303RET6.
+ * B2 RESET: push button connected to NRST is used to RESET the
+ * STM32F303RET6.
  *
  * NOTE that EXTI interrupts are configured.
  */
@@ -105,6 +104,16 @@
                            GPIO_OUTPUT_CLEAR|GPIO_PORTA|GPIO_PIN9)
 #endif
 
+/* MCP2515 IRQ line: PC.8 */
+
+#define GPIO_MCP2515_IRQ (GPIO_INPUT | GPIO_FLOAT | GPIO_EXTI | \
+                          GPIO_PORTC | GPIO_PIN8)
+    
+/* MCP2515 CS: PC.6 */
+                 
+#define GPIO_MCP2515_CS (GPIO_OUTPUT | GPIO_PUSHPULL | GPIO_SPEED_50MHz | \
+                         GPIO_OUTPUT_SET | GPIO_PORTC | GPIO_PIN6)
+
 /****************************************************************************
  * Public Data
  ****************************************************************************/
@@ -117,7 +126,7 @@
  * Name: stm32_spidev_initialize
  *
  * Description:
- *   Called to configure SPI chip select GPIO pins for the board.
+ * Called to configure SPI chip select GPIO pins for the board.
  *
  ****************************************************************************/
 
@@ -125,20 +134,24 @@
 void weak_function stm32_spidev_initialize(void);
 #endif
 
+#ifdef CONFIG_CAN_MCP2515
+int stm32_mcp2515initialize(const char *devpath);
+#endif
+
 /****************************************************************************
  * Name: stm32_timer_driver_setup
  *
  * Description:
- *   Configure the timer driver.
+ * Configure the timer driver.
  *
  * Input Parameters:
- *   devpath - The full path to the timer device.
- *             This should be of the form /dev/timer0
- *   timer   - The timer's number.
+ * devpath - The full path to the timer device.
+ * This should be of the form /dev/timer0
+ * timer   - The timer's number.
  *
  * Returned Value:
- *   Zero (OK) is returned on success; A negated errno value is returned
- *   to indicate the nature of any failure.
+ * Zero (OK) is returned on success; A negated errno value is returned
+ * to indicate the nature of any failure.
  *
  ****************************************************************************/
 
@@ -150,7 +163,7 @@ int stm32_timer_driver_setup(const char *devpath, int timer);
  * Name: stm32_dac_setup
  *
  * Description:
- *   Configure DAC peripheral for the board.
+ * Configure DAC peripheral for the board.
  *
  ****************************************************************************/
 
@@ -162,7 +175,7 @@ int stm32_dac_setup(void);
  * Name: stm32_pwm_setup
  *
  * Description:
- *   Initialize PWM and register the PWM device.
+ * Initialize PWM and register the PWM device.
  *
  ****************************************************************************/
 
@@ -174,7 +187,7 @@ int stm32_pwm_setup(void);
  * Name: stm32_adc_setup
  *
  * Description:
- *   Initialize ADC and register the ADC driver.
+ * Initialize ADC and register the ADC driver.
  *
  ****************************************************************************/
 
@@ -186,7 +199,7 @@ int stm32_adc_setup(void);
  * Name: stm32_can_setup
  *
  * Description:
- *  Initialize CAN and register the CAN device
+ * Initialize CAN and register the CAN device
  *
  ****************************************************************************/
 
