@@ -40,8 +40,7 @@ This repository (`nuttxspace`) acts as a wrapper to manage specific versions of 
 
 ## Utility Scripts
 
-### `clone_branch.sh` (or `set_branch.sh`)
-
+### `clone_branch.sh`
 This script is the main tool for setting up and switching between different versions of NuttX and its applications. It will:
 
 1.  List common branches available in both the `apache/nuttx` and `apache/nuttx-apps` repositories.
