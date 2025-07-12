@@ -1,0 +1,53 @@
+===========================================================================
+MCUs
+
+mcu_2: bluepill (stm32f103-minimum)
+nuttx_config: usbnsh
+edits: unlock memmory + mcp2515
+(ref: https://www.youtube.com/watch?v=0eHpoPZvI3U&list=PLd73yQk5Fd8JEsVD-lhwYRQKVu6glfDa8&index=13)
+
+
+mcu_1: bluepill (stm32f103-minimum)
+nuttx_config: mcp2515
+
+
+mcu_0: nucleo-f767zi (not in use now)
+
+
+===========================================================================
+usbserial: a09(pin6) -> tx
+           a10(pin7) -> rx 
+
+wiriing: mcp2515 + bluepill
+
+
+red  bla  bro  blu  gra  pur  whi   --> bluepill_1
+red  bla  blu  yel  pur  gre  ora   --> nucleo || bluepill_2
+vcc  gnd  c.s  s.o  s.i  sck  int
+( )  ( )  ( )  ( )  ( )  ( )  ( )
+ |    |    |    |    |    |    |
+ |    |    |    |    |    |    | 
+ |    |    |    |    |    |    |
+ |    |    |    |    |    |    |
+ |    |    |    |    |    |    |
+ |    |    |    |    |    |    |__________________________:> 
+ |    |    |    |    |    |
+ |    |    |    |    |    |_______________________________:>
+ |    |    |    |    |
+ |    |    |    |    |____________________________________:>
+ |    |    |    |
+ |    |    |    |_________________________________________:>
+ |    |    |   
+ |    |    |______________________________________________:>
+ |    |
+ |    |___________________________________________________:>
+ |
+ |________________________________________________________:>
+
+
+
+
+
+
+
+
