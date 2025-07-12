@@ -257,6 +257,9 @@ main() {
   git commit -m "Sync NuttX and Apps to branch $version ($NUTTX_COMMIT, $APPS_COMMIT)" --allow-empty-message --no-verify || { echo "No changes to commit in main repository, or commit failed."; }
 
 
+  rm -rf nuttx/.git
+  rm -rf apps/.git
+
   # Show confirmation
   echo
   echo "Submodules synced and commit hashes tracked in .nuttxsync"
