@@ -5,7 +5,6 @@ echo "=== Commit and push all local changes ===="
 echo "==========================================="
 echo
 
-# Descobre branch atual
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # --- Commit message setup ---
@@ -30,18 +29,23 @@ else
   git commit -m "$COMMIT_MSG" || { echo "Failed to commit changes."; exit 1; }
 fi
 
-echo "Pulling latest changes from origin/$CURRENT_BRANCH before pushing..."
-if git pull origin "$CURRENT_BRANCH"; then
-  echo "Successfully pulled latest changes."
+# Check if branch exists on remote before pull
+if git ls-remote --heads origin "$CURRENT_BRANCH" | grep -q "$CURRENT_BRANCH"; then
+  echo "Pulling latest changes from origin/$CURRENT_BRANCH before pushing..."
+  if git pull origin "$CURRENT_BRANCH"; then
+    echo "Successfully pulled latest changes."
+  else
+    echo "Git pull failed or conflicts, fix manually."
+    exit 1
+  fi
 else
-  echo "Git pull failed or conflicts, fix manually."
-  exit 1
+  echo "Branch $CURRENT_BRANCH does not exist on remote. Skipping pull."
 fi
 
 echo "Pushing changes to origin/$CURRENT_BRANCH..."
 git push origin "$CURRENT_BRANCH" || { echo "Failed to push changes to remote."; exit 1; }
 
-# Agora faz merge dessa branch para main
+# Merge into main branch if current is not main
 if [ "$CURRENT_BRANCH" != "main" ]; then
   echo "Checking out main branch..."
   git checkout main || { echo "Failed to checkout main"; exit 1; }
