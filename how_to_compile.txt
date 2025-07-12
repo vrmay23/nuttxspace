@@ -1,0 +1,5 @@
+1 - vi /nuttx/Make.defs
+2 - comment line 107
+3 - save and exit
+4 - make clean && make
+
