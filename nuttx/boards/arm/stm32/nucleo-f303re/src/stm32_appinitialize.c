@@ -49,6 +49,10 @@
 #  define HAVE_DAC 1
 #endif
 
+#ifdef CONFIG_CAN_MCP2515
+#  include <nuttx/can/mcp2515.h>
+#endif
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -123,6 +127,16 @@ int board_app_initialize(uintptr_t arg)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: stm32_adc_setup failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_CAN_MCP2515
+  /* Configure and initialize the MCP2515 CAN device */
+
+  ret = stm32_mcp2515initialize("/dev/can0");
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_mcp2515initialize() failed: %d\n", ret);
     }
 #endif
 
