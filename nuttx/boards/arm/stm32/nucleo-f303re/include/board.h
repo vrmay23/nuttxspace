@@ -233,4 +233,6 @@
 #define ADC3_DMA_CHAN DMACHAN_ADC3
 #define ADC4_DMA_CHAN DMACHAN_ADC4_1
 
+/* SPI channels *************************************************************/
+
 #endif /* __BOARDS_ARM_STM32_NUCLEO_F303RE_INCLUDE_BOARD_H */

@@ -135,6 +135,39 @@ void weak_function stm32_spidev_initialize(void);
 #endif
 
 #ifdef CONFIG_CAN_MCP2515
+/*
+ * SPIDEV_CAN(n) and SPIDEV_MCP2515 definitions:
+ *
+ * These macros define unique device IDs for the MCP2515 CAN controller
+ * when connected via SPI. They follow the NuttX convention for assigning
+ * device IDs to custom or board-specific SPI peripherals.
+ *
+ * SPIDEV_USER(0) is a base identifier provided by NuttX in
+ * include/nuttx/spi/spi.h. It designates a reserved range for user-defined
+ * SPI device IDs, preventing conflicts with standard NuttX SPI device types
+ * (e.g., SD cards, LCDs).
+ *
+ * SPIDEV_CAN(n):
+ * This macro defines a family of IDs for CAN controllers connected via SPI.
+ * It takes an integer 'n' as an argument, allowing for multiple instances
+ * of CAN devices on the same SPI bus (e.g., SPIDEV_CAN(0) for the first,
+ * SPIDEV_CAN(1) for the second, and so on). The expression
+ * (SPIDEV_USER(0) + (n)) calculates a unique ID within the user-defined
+ * range.
+ *
+ * SPIDEV_MCP2515:
+ * This macro specifically assigns the first ID in the SPIDEV_CAN family
+ * (i.e., SPIDEV_CAN(0)) to the MCP2515 chip. This provides a clear and
+ * readable identifier for the MCP2515 in the board's SPI select logic.
+ *
+ * int stm32_mcp2515initialize(const char *devpath):
+ * This is the function prototype for the board-specific initialization
+ * routine of the MCP2515 CAN controller. It is declared here to make it
+ * visible to other parts of the board code (e.g., board_initialize)
+ * that need to set up the MCP2515 driver.
+ */
+# define SPIDEV_CAN(n)         (SPIDEV_USER(0) + (n))
+# define SPIDEV_MCP2515        SPIDEV_CAN(0)
 int stm32_mcp2515initialize(const char *devpath);
 #endif
 
