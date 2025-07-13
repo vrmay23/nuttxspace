@@ -1,12 +1,11 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_sdc.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2014,2015,2016,2017 Sony Video & Sound Products Inc.
- * SPDX-FileCopyrightText: 2014-2015 ON Semiconductor. All rights reserved.
- * SPDX-FileContributor: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
- * SPDX-FileContributor: Masatoshi Tateishi <Masatoshi.Tateishi@jp.sony.com>
- * SPDX-FileContributor: Nobutaka Toyoshima <Nobutaka.Toyoshima@jp.sony.com>
+ *   Copyright (C) 2014-2015 ON Semiconductor. All rights reserved.
+ *   Copyright 2014,2015,2016,2017 Sony Video & Sound Products Inc.
+ *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
+ *   Author: Masatoshi Tateishi <Masatoshi.Tateishi@jp.sony.com>
+ *   Author: Nobutaka Toyoshima <Nobutaka.Toyoshima@jp.sony.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,21 +42,19 @@
 
 #include <nuttx/config.h>
 #include <sys/types.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <nuttx/clock.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
 #include <nuttx/kthread.h>
 #include <arch/board/board.h>
 
-#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "lc823450_sddrv_if.h"
 #include "lc823450_sdc.h"
 #include "lc823450_syscontrol.h"
@@ -80,29 +77,29 @@
  * Private Data
  ****************************************************************************/
 
-static mutex_t _sdc_lock[2] =
+static sem_t _sdc_sem[2] =
 {
-  NXMUTEX_INITIALIZER,
-  NXMUTEX_INITIALIZER,
+  SEM_INITIALIZER(1),
+  SEM_INITIALIZER(1)
 };
 
-static struct sddrcfg_s _sdch0;
-static struct sddrcfg_s _sdch1;
+static struct SdDrCfg_s _sdch0;
+static struct SdDrCfg_s _sdch1;
 
-static struct sddrcfg_s *_cfg[2] =
+static struct SdDrCfg_s *_cfg[2] =
 {
   &_sdch0,
   &_sdch1
 };
 
-static unsigned long _work0[512 / 4];
+static unsigned long _work0[512/4];
 #ifdef CONFIG_LC823450_SDIF_SDC
-static unsigned long _work1[512 / 4];
+static unsigned long _work1[512/4];
 #endif
 
 #ifdef CONFIG_LC823450_SDC_CACHE
 static uint8_t   _sec_cache_enabled;
-static uint32_t  _sec_cache[512 / 4];
+static uint32_t  _sec_cache[512/4];
 static uint32_t  _sec_cache_add = 0xffffffff;
 #endif
 
@@ -114,36 +111,54 @@ static uint32_t  _sec_cache_add = 0xffffffff;
 
 extern uint8_t cpu_ver;
 
-extern SINT_T sddep0_hw_init(struct sddrcfg_s *);
-extern SINT_T sddep0_hw_exit(struct sddrcfg_s *);
-extern SINT_T sddep1_hw_init(struct sddrcfg_s *);
-extern SINT_T sddep1_hw_exit(struct sddrcfg_s *);
+extern SINT_T sddep0_hw_init(struct SdDrCfg_s *);
+extern SINT_T sddep0_hw_exit(struct SdDrCfg_s *);
+extern SINT_T sddep1_hw_init(struct SdDrCfg_s *);
+extern SINT_T sddep1_hw_exit(struct SdDrCfg_s *);
 
-extern SINT_T sddep_os_init(struct sddrcfg_s *);
-extern SINT_T sddep_os_exit(struct sddrcfg_s *);
-extern void   sddep_voltage_switch(struct sddrcfg_s *cfg);
-extern void   sddep_set_clk(struct sddrcfg_s *);
-extern SINT_T sddep_wait(UI_32, struct sddrcfg_s *);
+extern SINT_T sddep_os_init(struct SdDrCfg_s *);
+extern SINT_T sddep_os_exit(struct SdDrCfg_s *);
+extern void   sddep_voltage_switch(struct SdDrCfg_s *cfg);
+extern void   sddep_set_clk(struct SdDrCfg_s *);
+extern SINT_T sddep_wait(UI_32, struct SdDrCfg_s *);
 extern SINT_T sddep_wait_status(UI_32 req, UI_32 *status,
-                                struct sddrcfg_s *cfg);
+                                struct SdDrCfg_s *cfg);
 extern SINT_T sddep_read(void *src, void *dst, UI_32 size, SINT_T type,
-                         struct sddrcfg_s *cfg);
+                         struct SdDrCfg_s *cfg);
 extern SINT_T sddep_write(void *src, void *dst, UI_32 size, SINT_T type,
-                          struct sddrcfg_s *cfg);
+                          struct SdDrCfg_s *cfg);
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: _sdc_semtake
+ ****************************************************************************/
+
+static int _sdc_semtake(FAR sem_t *sem)
+{
+  return nxsem_wait_uninterruptible(sem);
+}
+
+/****************************************************************************
+ * Name: _sdc_semgive
+ ****************************************************************************/
+
+static void _sdc_semgive(FAR sem_t *sem)
+{
+  nxsem_post(sem);
+}
+
+/****************************************************************************
  * Name: _lc823450_sdc_support_trim
  ****************************************************************************/
 
-static int _lc823450_sdc_support_trim(struct sddrcfg_s *cf)
+static int _lc823450_sdc_support_trim(struct SdDrCfg_s *cf)
 {
   /* NOTE: to avoid conflicts, SDDR_SUPPORT_TRIM() macro is not used here */
 
-  int ret = ((sddr_refmediatype(cf) == SDDR_MEDIA_TYPE_MMC) ?
+  int ret = ((SdDrRefMediaType(cf) == SDDR_MEDIA_TYPE_MMC) ?
              (((cf)->ex.mmc.extcsd_sec_feature_support & (1UL << 4)) ?
               1 : 0) : 0);
   return ret;
@@ -184,15 +199,15 @@ int lc823450_sdc_clearcardinfo(uint32_t ch)
 {
   int ret;
 
-  mcinfo("++++ start\n");
+  mcinfo("++++ start \n");
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = sddr_clearcardinfo(_cfg[ch]);
+  ret = SdDrClearCardInfo(_cfg[ch]);
 
 #ifdef CONFIG_LC823450_SDC_CACHE
   if (ch)
@@ -202,8 +217,8 @@ int lc823450_sdc_clearcardinfo(uint32_t ch)
     }
 #endif
 
-  nxmutex_unlock(&_sdc_lock[ch]);
-  mcinfo("---- end ret=%d\n", ret);
+  _sdc_semgive(&_sdc_sem[ch]);
+  mcinfo("---- end ret=%d \n", ret);
   return ret;
 }
 
@@ -219,7 +234,7 @@ int lc823450_sdc_initialize(uint32_t ch)
 
   DEBUGASSERT(1 == cpu_ver);
 
-  struct sddrcfg_s *psd = _cfg[ch];
+  struct SdDrCfg_s *psd = _cfg[ch];
 
   psd->sysclk           = lc823450_get_systemfreq();
   psd->detecttime       = DET_TIME;
@@ -256,17 +271,17 @@ int lc823450_sdc_initialize(uint32_t ch)
 #endif
 
       default:
-        DEBUGPANIC();
+        DEBUGASSERT(false);
     }
 
-  mcinfo("++++ start\n");
+  mcinfo("++++ start \n");
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret >= 0)
     {
-      ret = sddr_initialize(_cfg[ch]);
-      nxmutex_unlock(&_sdc_lock[ch]);
-      mcinfo("---- end ret=%d\n", ret);
+      ret = SdDrInitialize(_cfg[ch]);
+      _sdc_semgive(&_sdc_sem[ch]);
+      mcinfo("---- end ret=%d \n", ret);
     }
 
   return ret;
@@ -280,14 +295,14 @@ int lc823450_sdc_finalize(uint32_t ch)
 {
   int ret;
 
-  mcinfo("++++ start ch=%" PRId32 "\n", ch);
+  mcinfo("++++ start ch=%ld \n", ch);
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret >= 0)
     {
-      ret = sddr_finalize(_cfg[ch]);
-      nxmutex_unlock(&_sdc_lock[ch]);
-      mcinfo("---- end ret=%d\n", ret);
+      ret = SdDrFinalize(_cfg[ch]);
+      _sdc_semgive(&_sdc_sem[ch]);
+      mcinfo("---- end ret=%d \n", ret);
     }
 
   return ret;
@@ -301,15 +316,15 @@ int lc823450_sdc_identifycard(uint32_t ch)
 {
   int ret;
 
-  mcinfo("++++ start\n");
+  mcinfo("++++ start \n");
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = sddr_identifycard(_cfg[ch]);
+  ret = SdDrIdentifyCard(_cfg[ch]);
 
 #ifdef CONFIG_LC823450_SDC_CACHE
   if (ch)
@@ -319,8 +334,8 @@ int lc823450_sdc_identifycard(uint32_t ch)
     }
 #endif
 
-  nxmutex_unlock(&_sdc_lock[ch]);
-  mcinfo("---- end ret=%d\n", ret);
+  _sdc_semgive(&_sdc_sem[ch]);
+  mcinfo("---- end ret=%d \n", ret);
   return ret;
 }
 
@@ -332,15 +347,14 @@ int lc823450_sdc_setclock(uint32_t ch, uint32_t limitclk, uint32_t sysclk)
 {
   int ret;
 
-  mcinfo("++++ start ch=%" PRId32 " limitClk=%" PRId32
-         " sysClk=%" PRId32 "\n", ch, limitclk, sysclk);
+  mcinfo("++++ start ch=%ld limitClk=%ld sysClk=%ld\n", ch, limitClk, sysClk);
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret >= 0)
     {
-      ret = sddr_setclock(limitclk, sysclk, _cfg[ch]);
-      nxmutex_unlock(&_sdc_lock[ch]);
-      mcinfo("---- end ret=%d\n", ret);
+      ret = SdDrSetClock(limitclk, sysclk, _cfg[ch]);
+      _sdc_semgive(&_sdc_sem[ch]);
+      mcinfo("---- end ret=%d \n", ret);
     }
 
   return ret;
@@ -358,14 +372,14 @@ int lc823450_sdc_refmediatype(uint32_t ch)
 {
   int ret;
 
-  mcinfo("++++ start\n");
+  mcinfo("++++ start \n");
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret >= 0)
     {
-      ret = sddr_refmediatype(_cfg[ch]);
-      nxmutex_unlock(&_sdc_lock[ch]);
-      mcinfo("---- end ret=%d\n", ret);
+      ret = SdDrRefMediaType(_cfg[ch]);
+      _sdc_semgive(&_sdc_sem[ch]);
+      mcinfo("---- end ret=%d \n", ret);
     }
 
   return ret;
@@ -380,15 +394,15 @@ int lc823450_sdc_getcardsize(uint32_t ch,
 {
   int ret;
 
-  mcinfo("++++ start\n");
+  mcinfo("++++ start \n");
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret =_sdc_semtake(&_sdc_sem[ch]);
   if (ret >= 0)
     {
-      ret = sddr_getcardsize(psecnum, psecsize, _cfg[ch]);
+      ret = SdDrGetCardSize(psecnum, psecsize, _cfg[ch]);
 
-      nxmutex_unlock(&_sdc_lock[ch]);
-      mcinfo("---- end ret=%d\n", ret);
+      _sdc_semgive(&_sdc_sem[ch]);
+      mcinfo("---- end ret=%d \n", ret);
     }
 
   return ret;
@@ -405,21 +419,21 @@ int lc823450_sdc_readsector(uint32_t ch,
   int ret;
   int i = 0;
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret < 0)
     {
       return ret;
     }
 
 #ifdef CONFIG_LC823450_SDC_LOG
-  mcinfo("++++ start ch=%d, addr=%ld, cnt=%d\n", ch, addr, cnt);
+  mcinfo("++++ start ch=%d, addr=%ld, cnt=%d \n", ch, addr, cnt);
 #endif
 
 #ifdef CONFIG_LC823450_SDC_CACHE
   if (ch && _sec_cache_enabled && 1 == cnt && addr == _sec_cache_add)
     {
       memcpy(pbuf, _sec_cache, sizeof(_sec_cache));
-      goto errout_with_lock;
+      goto errout_with_semaphore;
     }
 #endif
 
@@ -432,16 +446,16 @@ int lc823450_sdc_readsector(uint32_t ch,
   for (i = 0; i < 5; i++)
     {
 #ifdef CONFIG_LC823450_SDIF_PATCH
-      ret = fixed_sddr_readsector(addr, cnt, pbuf, type, _cfg[ch]);
+      ret = fixedSdDrReadSector(addr, cnt, pbuf, type, _cfg[ch]);
 #else
-      ret = sddr_readsector(addr, cnt, pbuf, type, _cfg[ch]);
+      ret = SdDrReadSector(addr, cnt, pbuf, type, _cfg[ch]);
 #endif
       if (0 == ret)
         {
           break;
         }
 
-      mcinfo("ret=%d ch=%" PRId32 " add=%ld cnt=%d i=%d\n",
+      mcinfo("ret=%d ch=%d add=%ld cnt=%d i=%d \n",
              ret, ch, addr, cnt, i);
     }
 
@@ -453,7 +467,7 @@ int lc823450_sdc_readsector(uint32_t ch,
           uint8_t *p = (pbuf + 0x1c2); /* partition id */
           if (0x7 == *p)
             {
-              mcinfo("exFAT (NTFS) detected\n");
+              mcinfo("exFAT (NTFS) detected \n");
               _sec_cache_enabled = 1;
             }
         }
@@ -472,11 +486,11 @@ int lc823450_sdc_readsector(uint32_t ch,
         }
     }
 
-errout_with_lock:
+errout_with_semaphore:
 #endif
-  nxmutex_unlock(&_sdc_lock[ch]);
+  _sdc_semgive(&_sdc_sem[ch]);
 
-  mcinfo("----  end ret=%d\n", ret);
+  mcinfo("----  end ret=%d \n", ret);
   return ret;
 }
 
@@ -490,14 +504,14 @@ int lc823450_sdc_writesector(uint32_t ch,
 {
   int ret;
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret < 0)
     {
       return ret;
     }
 
 #ifdef CONFIG_LC823450_SDC_LOG
-  mcinfo("++++ start ch=%d, addr=%ld, cnt=%d\n", ch, addr, cnt);
+  mcinfo("++++ start ch=%d, addr=%ld, cnt=%d \n", ch, addr, cnt);
 #endif
 
 #ifdef CONFIG_LC823450_SDC_CACHE
@@ -513,16 +527,16 @@ int lc823450_sdc_writesector(uint32_t ch,
   sched_add_bo((uint64_t)cnt);
 #endif
 
-  ret = sddr_writesector(addr, cnt, pbuf, type, _cfg[ch]);
+  ret = SdDrWriteSector(addr, cnt, pbuf, type, _cfg[ch]);
 
   if (0 > ret)
     {
-      mcinfo("ret=%d ch=%" PRId32 " add=%ld cnt=%d\n", ret, ch, addr, cnt);
+      mcinfo("ret=%d ch=%d add=%ld cnt=%d \n", ret, ch, addr, cnt);
     }
 
-  nxmutex_unlock(&_sdc_lock[ch]);
+  _sdc_semgive(&_sdc_sem[ch]);
 
-  mcinfo("----  end ret=%d\n", ret);
+  mcinfo("----  end ret=%d \n", ret);
   return ret;
 }
 
@@ -539,19 +553,18 @@ int lc823450_sdc_checktrim(uint32_t ch)
  * Name: lc823450_sdc_trimsector
  ****************************************************************************/
 
-int lc823450_sdc_trimsector(uint32_t ch, unsigned long addr,
-                            unsigned short cnt)
+int lc823450_sdc_trimsector(uint32_t ch, unsigned long addr, unsigned short cnt)
 {
   int ret;
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret < 0)
     {
       return ret;
     }
 
 #ifdef CONFIG_LC823450_SDC_LOG
-  mcinfo("++++ start ch=%d, addr=%ld, cnt=%d\n", ch, addr, cnt);
+  mcinfo("++++ start ch=%d, addr=%ld, cnt=%d \n", ch, addr, cnt);
 #endif
 
   lc823450_sdc_access_led(ch, addr);
@@ -560,15 +573,15 @@ int lc823450_sdc_trimsector(uint32_t ch, unsigned long addr,
   sched_add_bt((uint64_t)cnt);
 #endif
 
-  ret = sddr_eraseseq(0x00000001, addr, cnt, _cfg[ch]);
+  ret = SdDrEraseSeq(0x00000001, addr, cnt, _cfg[ch]);
   if (0 > ret)
     {
-      mcinfo("ret=%d ch=%" PRId32 " add=%ld cnt=%d\n", ret, ch, addr, cnt);
+      mcinfo("ret=%d ch=%d add=%ld cnt=%d \n", ret, ch, addr, cnt);
     }
 
-  nxmutex_unlock(&_sdc_lock[ch]);
+  _sdc_semgive(&_sdc_sem[ch]);
 
-  mcinfo("----  end ret=%d\n", ret);
+  mcinfo("----  end ret=%d \n", ret);
   return ret;
 }
 
@@ -580,15 +593,15 @@ int lc823450_sdc_cachectl(uint32_t ch, int ctrl)
 {
   int ret;
 
-  mcinfo("++++ ch=%" PRId32 ", ctrl=%d\n", ch, ctrl);
+  mcinfo("++++ ch=%d, ctrl=%d \n", ch, ctrl);
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret >= 0)
     {
-      ret = sddr_cachectrl(ctrl, _cfg[ch]);
+      ret = SdDrCacheCtrl(ctrl, _cfg[ch]);
 
-      nxmutex_unlock(&_sdc_lock[ch]);
-      mcinfo("----  end ret=%d\n", ret);
+      _sdc_semgive(&_sdc_sem[ch]);
+      mcinfo("----  end ret=%d \n", ret);
     }
 
   return ret;
@@ -602,15 +615,15 @@ int lc823450_sdc_changespeedmode(uint32_t ch, int mode)
 {
   int ret;
 
-  mcinfo("++++ ch=%" PRId32 ", mode=%d\n", ch, mode);
+  mcinfo("++++ ch=%d, mode=%d \n", ch, mode);
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = sddr_changespeedmode(mode, _cfg[ch]);
+  ret = SdDrChangeSpeedMode(mode, _cfg[ch]);
 
   if (0 == ret)
     {
@@ -630,8 +643,8 @@ int lc823450_sdc_changespeedmode(uint32_t ch, int mode)
         }
     }
 
-  nxmutex_unlock(&_sdc_lock[ch]);
-  mcinfo("----  end ret=%d\n", ret);
+  _sdc_semgive(&_sdc_sem[ch]);
+  mcinfo("----  end ret=%d \n", ret);
   return ret;
 }
 
@@ -644,15 +657,15 @@ int lc823450_sdc_getcid(uint32_t ch, char *cidstr, int length)
   uint8_t cid[16];
   int ret;
 
-  mcinfo("++++ ch=%" PRId32 "\n", ch);
+  mcinfo("++++ ch=%d \n", ch);
 
-  ret = nxmutex_lock(&_sdc_lock[ch]);
+  ret = _sdc_semtake(&_sdc_sem[ch]);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = sddr_getcid((UI_32 *)cid, _cfg[ch]);
+  ret = SdDrGetCid((UI_32 *)cid, _cfg[ch]);
 
   if (0 == ret && length >= (2 * sizeof(cid) + 1))
     {
@@ -667,8 +680,8 @@ int lc823450_sdc_getcid(uint32_t ch, char *cidstr, int length)
       *cidstr = '\0';
     }
 
-  nxmutex_unlock(&_sdc_lock[ch]);
-  mcinfo("----  end ret=%d\n", ret);
+  _sdc_semgive(&_sdc_sem[ch]);
+  mcinfo("----  end ret=%d \n", ret);
   return ret;
 }
 
@@ -678,6 +691,7 @@ int lc823450_sdc_getcid(uint32_t ch, char *cidstr, int length)
 
 int lc823450_sdc_locked(void)
 {
+  int val;
   int ret;
   int i;
 
@@ -685,7 +699,8 @@ int lc823450_sdc_locked(void)
 
   for (i = 0; i < 2; i++)
     {
-      if (nxmutex_is_locked(&_sdc_lock[i]))
+      nxsem_getvalue(&_sdc_sem[i], &val);
+      if (1 != val)
         {
           ret = 1;
           break;

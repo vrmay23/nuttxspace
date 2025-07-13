@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/arm/src/lpc17xx_40xx/lpc17_40_usbhost.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2010-2012, 2014-2017 Gregory Nutt. All rights reserved.
+ *   Authors: Rafael Noronha <rafael@pdsolucoes.com.br>
+ *            Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,19 +41,16 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/signal.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/usb/usb.h>
 #include <nuttx/usb/ohci.h>
@@ -50,7 +61,9 @@
 
 #include <arch/board/board.h> /* May redefine GPIO settings */
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "chip.h"
 #include "hardware/lpc17_40_usb.h"
 #include "hardware/lpc17_40_syscon.h"
@@ -166,7 +179,7 @@ struct lpc17_40_usbhost_s
   uint8_t          outinterval; /* Minimum periodic IN EP polling interval: 2, 4, 6, 16, or 32 */
 #endif
 
-  mutex_t          lock;        /* Support mutually exclusive access */
+  sem_t            exclsem;     /* Support mutually exclusive access */
   sem_t            pscsem;      /* Semaphore to wait Writeback Done Head event */
 
 #ifdef CONFIG_USBHOST_HUB
@@ -174,8 +187,6 @@ struct lpc17_40_usbhost_s
 
   volatile struct usbhost_hubport_s *hport;
 #endif
-
-  struct usbhost_devaddr_s devgen;  /* Address generation data */
 };
 
 /* This structure describes one asynchronous transfer */
@@ -271,11 +282,15 @@ static void lpc17_40_checkreg(uint32_t addr, uint32_t val, bool iswrite);
 static uint32_t lpc17_40_getreg(uint32_t addr);
 static void lpc17_40_putreg(uint32_t val, uint32_t addr);
 #else
-#  define lpc17_40_getreg(addr)     getreg32(addr)
-#  define lpc17_40_putreg(val,addr) putreg32(val,addr)
+# define lpc17_40_getreg(addr)     getreg32(addr)
+# define lpc17_40_putreg(val,addr) putreg32(val,addr)
 #endif
 
 /* Semaphores ***************************************************************/
+
+static int lpc17_40_takesem(sem_t *sem);
+static int lpc17_40_takesem_noncancelable(sem_t *sem);
+#define lpc17_40_givesem(s) nxsem_post(s);
 
 /* Byte stream access helper functions **************************************/
 
@@ -340,7 +355,7 @@ static int lpc17_40_ctrltd(struct lpc17_40_usbhost_s *priv,
 
 /* Interrupt handling *******************************************************/
 
-static int lpc17_40_usbinterrupt(int irq, void *context, void *arg);
+static int lpc17_40_usbinterrupt(int irq, void *context, FAR void *arg);
 
 /* USB host controller operations *******************************************/
 
@@ -387,16 +402,16 @@ static ssize_t lpc17_40_transfer(struct usbhost_driver_s *drvr,
 #ifdef CONFIG_USBHOST_ASYNCH
 static void lpc17_40_asynch_completion(struct lpc17_40_usbhost_s *priv,
                                        struct lpc17_40_ed_s *ed);
-static int lpc17_40_asynch(struct usbhost_driver_s *drvr,
-                           usbhost_ep_t ep, uint8_t *buffer,
+static int lpc17_40_asynch(FAR struct usbhost_driver_s *drvr,
+                           usbhost_ep_t ep, FAR uint8_t *buffer,
                            size_t buflen, usbhost_asynch_t callback,
-                           void *arg);
+                           FAR void *arg);
 #endif
-static int lpc17_40_cancel(struct usbhost_driver_s *drvr,
+static int lpc17_40_cancel(FAR struct usbhost_driver_s *drvr,
                            usbhost_ep_t ep);
 #ifdef CONFIG_USBHOST_HUB
-static int lpc17_40_connect(struct usbhost_driver_s *drvr,
-                            struct usbhost_hubport_s *hport,
+static int lpc17_40_connect(FAR struct usbhost_driver_s *drvr,
+                            FAR struct usbhost_hubport_s *hport,
                             bool connected);
 #endif
 static void lpc17_40_disconnect(struct usbhost_driver_s *drvr,
@@ -415,18 +430,14 @@ static inline void lpc17_40_ep0init(struct lpc17_40_usbhost_s *priv);
  * single global instance.
  */
 
-static struct lpc17_40_usbhost_s g_usbhost =
-{
-  .lock = NXMUTEX_INITIALIZER,
-  .pscsem = SEM_INITIALIZER(0),
-};
+static struct lpc17_40_usbhost_s g_usbhost;
 
 /* This is the connection/enumeration interface */
 
 static struct usbhost_connection_s g_usbconn =
 {
-  .wait      = lpc17_40_wait,
-  .enumerate = lpc17_40_enumerate,
+  .wait             = lpc17_40_wait,
+  .enumerate        = lpc17_40_enumerate,
 };
 
 /* This is a free list of EDs and TD buffers */
@@ -569,6 +580,54 @@ static void lpc17_40_putreg(uint32_t val, uint32_t addr)
   putreg32(val, addr);
 }
 #endif
+
+/****************************************************************************
+ * Name: lpc17_40_takesem
+ *
+ * Description:
+ *   This is just a wrapper to handle the annoying behavior of semaphore
+ *   waits that return due to the receipt of a signal.
+ *
+ ****************************************************************************/
+
+static int lpc17_40_takesem(sem_t *sem)
+{
+  return nxsem_wait_uninterruptible(sem);
+}
+
+/****************************************************************************
+ * Name: lpc17_40_takesem_noncancelable
+ *
+ * Description:
+ *   This is just a wrapper to handle the annoying behavior of semaphore
+ *   waits that return due to the receipt of a signal.  This version also
+ *   ignores attempts to cancel the thread.
+ *
+ ****************************************************************************/
+
+static int lpc17_40_takesem_noncancelable(sem_t *sem)
+{
+  int result;
+  int ret = OK;
+
+  do
+    {
+      result = nxsem_wait_uninterruptible(sem);
+
+      /* The only expected error is ECANCELED which would occur if the
+       * calling thread were canceled.
+       */
+
+      DEBUGASSERT(result == OK || result == -ECANCELED);
+      if (ret == OK && result < 0)
+        {
+          ret = result;
+        }
+    }
+  while (result < 0);
+
+  return ret;
+}
 
 /****************************************************************************
  * Name: lpc17_40_getle16
@@ -1238,7 +1297,7 @@ static inline int lpc17_40_addinted(struct lpc17_40_usbhost_s *priv,
 
   ed->hw.nexted = head;
   lpc17_40_setinttab((uint32_t)ed, interval, offset);
-  uinfo("head: %p next: %08" PRIx32 "\n", ed, head);
+  uinfo("head: %08x next: %08x\n", ed, head);
 
   /* Re-enabled periodic list processing */
 
@@ -1279,9 +1338,9 @@ static inline int lpc17_40_reminted(struct lpc17_40_usbhost_s *priv,
   struct lpc17_40_ed_s *head;
   struct lpc17_40_ed_s *curr;
   struct lpc17_40_ed_s *prev;
-  unsigned int          interval;
-  unsigned int          offset;
-  uint32_t              regval;
+  unsigned int       interval;
+  unsigned int       offset;
+  uint32_t           regval;
 
   /* Disable periodic list processing.  Does this take effect immediately?
    * Or at the next SOF... need to check.
@@ -1309,7 +1368,7 @@ static inline int lpc17_40_reminted(struct lpc17_40_usbhost_s *priv,
    */
 
   head = (struct lpc17_40_ed_s *)HCCA->inttbl[offset];
-  uinfo("ed: %p head: %p next: %08" PRIx32 " offset: %d\n",
+  uinfo("ed: %08x head: %08x next: %08x offset: %d\n",
         ed, head, head ? head->hw.nexted : 0, offset);
 
   /* Find the ED to be removed in the ED list */
@@ -1323,15 +1382,11 @@ static inline int lpc17_40_reminted(struct lpc17_40_usbhost_s *priv,
   DEBUGASSERT(curr != NULL);
   if (curr != NULL)
     {
-      /* Clear all current entries in the interrupt table for this
-       * direction
-       */
+      /* Clear all current entries in the interrupt table for this direction */
 
       lpc17_40_setinttab(0, 2, offset);
 
-      /* Remove the ED from the list..  Is this ED the first on in the
-       * list?
-       */
+      /* Remove the ED from the list..  Is this ED the first on in the list? */
 
       if (prev == NULL)
         {
@@ -1348,7 +1403,7 @@ static inline int lpc17_40_reminted(struct lpc17_40_usbhost_s *priv,
           prev->hw.nexted = ed->hw.nexted;
         }
 
-        uinfo("ed: %p head: %p next: %08" PRIx32 "\n",
+        uinfo("ed: %08x head: %08x next: %08x\n",
               ed, head, head ? head->hw.nexted : 0);
 
       /* Calculate the new minimum interval for this list */
@@ -1602,7 +1657,7 @@ static int lpc17_40_ctrltd(struct lpc17_40_usbhost_s *priv,
 
       /* Wait for the Writeback Done Head interrupt */
 
-      ret = nxsem_wait_uninterruptible(&ed->wdhsem);
+      ret = lpc17_40_takesem(&ed->wdhsem);
       if (ret < 0)
         {
           /* Task has been canceled */
@@ -1637,7 +1692,7 @@ errout_with_xfrinfo:
  *
  ****************************************************************************/
 
-static int lpc17_40_usbinterrupt(int irq, void *context, void *arg)
+static int lpc17_40_usbinterrupt(int irq, void *context, FAR void *arg)
 {
   struct lpc17_40_usbhost_s *priv = &g_usbhost;
   struct lpc17_40_ed_s *ed;
@@ -1651,7 +1706,7 @@ static int lpc17_40_usbinterrupt(int irq, void *context, void *arg)
 
   intst  = lpc17_40_getreg(LPC17_40_USBHOST_INTST);
   regval = lpc17_40_getreg(LPC17_40_USBHOST_INTEN);
-  uinfo("INST: %08" PRIx32 " INTEN: %08" PRIx32 "\n", intst, regval);
+  uinfo("INST: %08x INTEN: %08x\n", intst, regval);
 
   pending = intst & regval;
   if (pending != 0)
@@ -1661,18 +1716,14 @@ static int lpc17_40_usbinterrupt(int irq, void *context, void *arg)
       if ((pending & OHCI_INT_RHSC) != 0)
         {
           uint32_t rhportst1 = lpc17_40_getreg(LPC17_40_USBHOST_RHPORTST1);
-          uinfo("Root Hub Status Change, RHPORTST1: %08" PRIx32 "\n",
-                rhportst1);
+          uinfo("Root Hub Status Change, RHPORTST1: %08x\n", rhportst1);
 
           if ((rhportst1 & OHCI_RHPORTST_CSC) != 0)
             {
               uint32_t rhstatus = lpc17_40_getreg(LPC17_40_USBHOST_RHSTATUS);
-              uinfo("Connect Status Change, RHSTATUS: %08" PRIx32 "\n",
-                    rhstatus);
+              uinfo("Connect Status Change, RHSTATUS: %08x\n", rhstatus);
 
-              /* If DRWE is set, Connect Status Change indicates a remote
-               * wake-up event
-               */
+              /* If DRWE is set, Connect Status Change indicates a remote wake-up event */
 
               if (rhstatus & OHCI_RHSTATUS_DRWE)
                 {
@@ -1701,7 +1752,7 @@ static int lpc17_40_usbinterrupt(int irq, void *context, void *arg)
 
                           if (priv->pscwait)
                             {
-                              nxsem_post(&priv->pscsem);
+                              lpc17_40_givesem(&priv->pscsem);
                               priv->pscwait = false;
                             }
                         }
@@ -1754,13 +1805,11 @@ static int lpc17_40_usbinterrupt(int irq, void *context, void *arg)
                           priv->rhport.hport.devclass = NULL;
                         }
 
-                      /* Notify any waiters for the Root Hub Status change
-                       * event
-                       */
+                      /* Notify any waiters for the Root Hub Status change event */
 
                       if (priv->pscwait)
                         {
-                          nxsem_post(&priv->pscsem);
+                          lpc17_40_givesem(&priv->pscsem);
                           priv->pscwait = false;
                         }
                     }
@@ -1852,9 +1901,7 @@ static int lpc17_40_usbinterrupt(int irq, void *context, void *arg)
 #ifdef CONFIG_DEBUG_USB
                   if (xfrinfo->tdstatus != TD_CC_NOERROR)
                     {
-                      /* The transfer failed for some reason... dump some
-                       * diagnostic info.
-                       */
+                      /* The transfer failed for some reason... dump some diagnostic info. */
 
                       uerr("ERROR: ED xfrtype:%d TD CTRL:%08x/CC:%d "
                            "RHPORTST1:%08x\n",
@@ -1899,7 +1946,7 @@ static int lpc17_40_usbinterrupt(int irq, void *context, void *arg)
                     {
                       /* Wake up the thread waiting for the WDH event */
 
-                      nxsem_post(&ed->wdhsem);
+                      lpc17_40_givesem(&ed->wdhsem);
                       xfrinfo->wdhwait = false;
                     }
 
@@ -2020,7 +2067,7 @@ static int lpc17_40_wait(struct usbhost_connection_s *conn,
       /* Wait for the next connection event */
 
       priv->pscwait = true;
-      ret = nxsem_wait_uninterruptible(&priv->pscsem);
+      ret = lpc17_40_takesem(&priv->pscsem);
       if (ret < 0)
         {
           return ret;
@@ -2098,8 +2145,8 @@ static int lpc17_40_rh_enumerate(struct usbhost_connection_s *conn,
   return OK;
 }
 
-static int lpc17_40_enumerate(struct usbhost_connection_s *conn,
-                              struct usbhost_hubport_s *hport)
+static int lpc17_40_enumerate(FAR struct usbhost_connection_s *conn,
+                           FAR struct usbhost_hubport_s *hport)
 {
   int ret;
 
@@ -2176,7 +2223,7 @@ static int lpc17_40_ep0configure(struct usbhost_driver_s *drvr,
 
   /* We must have exclusive access to EP0 and the control list */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc17_40_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2194,9 +2241,10 @@ static int lpc17_40_ep0configure(struct usbhost_driver_s *drvr,
     }
 
   ed->hw.ctrl = hwctrl;
-  nxmutex_unlock(&priv->lock);
 
-  uinfo("EP0 CTRL:%08" PRIx32 "\n", ed->hw.ctrl);
+  lpc17_40_givesem(&priv->exclsem);
+
+  uinfo("EP0 CTRL:%08x\n", ed->hw.ctrl);
   return OK;
 }
 
@@ -2241,7 +2289,7 @@ static int lpc17_40_epalloc(struct usbhost_driver_s *drvr,
    * periodic list and the interrupt table.
    */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc17_40_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2304,8 +2352,15 @@ static int lpc17_40_epalloc(struct usbhost_driver_s *drvr,
         }
 #endif
 
-      uinfo("EP%d CTRL:%08" PRIx32 "\n", epdesc->addr, ed->hw.ctrl);
+      uinfo("EP%d CTRL:%08x\n", epdesc->addr, ed->hw.ctrl);
+
+      /* Initialize the semaphore that is used to wait for the endpoint
+       * WDH event. The wdhsem semaphore is used for signaling and, hence,
+       * should not have priority inheritance enabled.
+       */
+
       nxsem_init(&ed->wdhsem, 0, 0);
+      nxsem_setprotocol(&ed->wdhsem, SEM_PRIO_NONE);
 
       /* Link the common tail TD to the ED's TD list */
 
@@ -2356,7 +2411,7 @@ static int lpc17_40_epalloc(struct usbhost_driver_s *drvr,
         }
     }
 
-  nxmutex_unlock(&priv->lock);
+  lpc17_40_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2369,7 +2424,7 @@ static int lpc17_40_epalloc(struct usbhost_driver_s *drvr,
  * Input Parameters:
  *   drvr - The USB host driver instance obtained as a parameter from the
  *     call to the class create() method.
- *   ep - The endpoint to be freed.
+ *   ep - The endpint to be freed.
  *
  * Returned Value:
  *   On success, zero (OK) is returned. On a failure, a negated errno value
@@ -2384,7 +2439,7 @@ static int lpc17_40_epfree(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
 {
   struct lpc17_40_usbhost_s *priv = (struct lpc17_40_usbhost_s *)drvr;
   struct lpc17_40_ed_s      *ed   = (struct lpc17_40_ed_s *)ep;
-  int                        ret;
+  int                     ret;
 
   /* There should not be any pending, real TDs linked to this ED */
 
@@ -2395,7 +2450,7 @@ static int lpc17_40_epfree(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
    * periodic list and the interrupt table.
    */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc17_40_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2433,7 +2488,7 @@ static int lpc17_40_epfree(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
   /* Put the ED back into the free list */
 
   lpc17_40_edfree(ed);
-  nxmutex_unlock(&priv->lock);
+  lpc17_40_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2480,7 +2535,7 @@ static int lpc17_40_alloc(struct usbhost_driver_s *drvr,
 
   /* We must have exclusive access to the transfer buffer pool */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc17_40_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2495,7 +2550,7 @@ static int lpc17_40_alloc(struct usbhost_driver_s *drvr,
       ret = OK;
     }
 
-  nxmutex_unlock(&priv->lock);
+  lpc17_40_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2532,9 +2587,9 @@ static int lpc17_40_free(struct usbhost_driver_s *drvr, uint8_t *buffer)
 
   /* We must have exclusive access to the transfer buffer pool */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc17_40_takesem_noncancelable(&priv->exclsem);
   lpc17_40_tbfree(buffer);
-  nxmutex_unlock(&priv->lock);
+  lpc17_40_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2669,7 +2724,7 @@ static int lpc17_40_ctrlin(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
   struct lpc17_40_usbhost_s *priv = (struct lpc17_40_usbhost_s *)drvr;
   struct lpc17_40_ed_s *ed = (struct lpc17_40_ed_s *)ep0;
   uint16_t len;
-  int ret;
+  int  ret;
 
   DEBUGASSERT(priv != NULL && ed != NULL && req != NULL);
 
@@ -2679,7 +2734,7 @@ static int lpc17_40_ctrlin(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
 
   /* We must have exclusive access to EP0 and the control list */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc17_40_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2701,7 +2756,7 @@ static int lpc17_40_ctrlin(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
         }
     }
 
-  nxmutex_unlock(&priv->lock);
+  lpc17_40_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2722,7 +2777,7 @@ static int lpc17_40_ctrlout(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
 
   /* We must have exclusive access to EP0 and the control list */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc17_40_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2745,7 +2800,7 @@ static int lpc17_40_ctrlout(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
         }
     }
 
-  nxmutex_unlock(&priv->lock);
+  lpc17_40_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2789,14 +2844,12 @@ static int lpc17_40_transfer_common(struct lpc17_40_usbhost_s *priv,
   xfrinfo = ed->xfrinfo;
   in      = (ed->hw.ctrl & ED_CONTROL_D_MASK) == ED_CONTROL_D_IN;
 
-  uinfo("EP%" PRIu32 " %s toggle:%u maxpacket:%" PRIu32 " buflen:%zu\n",
-        (uint32_t)((ed->hw.ctrl  & ED_CONTROL_EN_MASK) >>
-                   ED_CONTROL_EN_SHIFT),
+  uinfo("EP%u %s toggle:%u maxpacket:%u buflen:%lu\n",
+        (ed->hw.ctrl  & ED_CONTROL_EN_MASK) >> ED_CONTROL_EN_SHIFT,
         in ? "IN" : "OUT",
         (ed->hw.headp & ED_HEADP_C) != 0 ? 1 : 0,
-        (uint32_t)((ed->hw.ctrl  & ED_CONTROL_MPS_MASK) >>
-                   ED_CONTROL_MPS_SHIFT),
-        buflen);
+        (ed->hw.ctrl  & ED_CONTROL_MPS_MASK) >> ED_CONTROL_MPS_SHIFT,
+        (unsigned long)buflen);
 
   /* Get the direction of the endpoint */
 
@@ -3021,7 +3074,7 @@ static ssize_t lpc17_40_transfer(struct usbhost_driver_s *drvr,
    * table.
    */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc17_40_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -3038,7 +3091,7 @@ static ssize_t lpc17_40_transfer(struct usbhost_driver_s *drvr,
     {
       uerr("ERROR: lpc17_40_alloc_xfrinfo failed\n");
       nbytes = -ENOMEM;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* Initialize the transfer structure */
@@ -3093,7 +3146,7 @@ static ssize_t lpc17_40_transfer(struct usbhost_driver_s *drvr,
 
   /* Wait for the Writeback Done Head interrupt */
 
-  ret = nxsem_wait_uninterruptible(&ed->wdhsem);
+  ret = lpc17_40_takesem(&ed->wdhsem);
   if (ret < 0)
     {
       return ret;
@@ -3152,8 +3205,8 @@ errout_with_xfrinfo:
   lpc17_40_free_xfrinfo(xfrinfo);
   ed->xfrinfo = NULL;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_sem:
+  lpc17_40_givesem(&priv->exclsem);
   return nbytes;
 }
 
@@ -3300,7 +3353,7 @@ static int lpc17_40_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
    * buffer pool, the bulk and interrupt lists, and the HCCA interrupt table.
    */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc17_40_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -3317,7 +3370,7 @@ static int lpc17_40_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
     {
       uerr("ERROR: lpc17_40_alloc_xfrinfo failed\n");
       ret = -ENOMEM;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* Initialize the transfer structure */
@@ -3337,7 +3390,7 @@ static int lpc17_40_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
   if (ret < 0)
     {
       uerr("ERROR: lpc17_40_dma_alloc failed: %d\n", ret);
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* If a buffer was allocated, then use it instead of the callers buffer */
@@ -3361,7 +3414,7 @@ static int lpc17_40_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
    * completes.
    */
 
-  nxmutex_unlock(&priv->lock);
+  lpc17_40_givesem(&priv->exclsem);
   return OK;
 
 errout_with_asynch:
@@ -3376,8 +3429,8 @@ errout_with_asynch:
   lpc17_40_free_xfrinfo(xfrinfo);
   ed->xfrinfo = NULL;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_sem:
+  lpc17_40_givesem(&priv->exclsem);
   return ret;
 }
 #endif /* CONFIG_USBHOST_ASYNCH */
@@ -3401,7 +3454,7 @@ errout_with_lock:
  *
  ****************************************************************************/
 
-static int lpc17_40_cancel(struct usbhost_driver_s *drvr,
+static int lpc17_40_cancel(FAR struct usbhost_driver_s *drvr,
                            usbhost_ep_t ep)
 {
 #ifdef CONFIG_USBHOST_ASYNCH
@@ -3447,9 +3500,7 @@ static int lpc17_40_cancel(struct usbhost_driver_s *drvr,
               ctrl  = lpc17_40_getreg(LPC17_40_USBHOST_CTRL);
               lpc17_40_putreg(ctrl & ~OHCI_CTRL_BLE, LPC17_40_USBHOST_CTRL);
 
-              /* Remove the TDs attached to the ED, keeping the ED in the
-               * list
-               */
+              /* Remove the TDs attached to the ED, keeping the ED in the list */
 
               td           = (struct lpc17_40_gtd_s *)
                              (ed->hw.headp & ED_HEADP_ADDR_MASK);
@@ -3500,7 +3551,7 @@ static int lpc17_40_cancel(struct usbhost_driver_s *drvr,
 
               /* Wake up the waiting thread */
 
-              nxsem_post(&ed->wdhsem);
+              lpc17_40_givesem(&ed->wdhsem);
               xfrinfo->wdhwait = false;
 
               /* And free the transfer structure */
@@ -3556,8 +3607,8 @@ static int lpc17_40_cancel(struct usbhost_driver_s *drvr,
  ****************************************************************************/
 
 #ifdef CONFIG_USBHOST_HUB
-static int lpc17_40_connect(struct usbhost_driver_s *drvr,
-                            struct usbhost_hubport_s *hport,
+static int lpc17_40_connect(FAR struct usbhost_driver_s *drvr,
+                            FAR struct usbhost_hubport_s *hport,
                             bool connected)
 {
   struct lpc17_40_usbhost_s *priv = (struct lpc17_40_usbhost_s *)drvr;
@@ -3577,7 +3628,7 @@ static int lpc17_40_connect(struct usbhost_driver_s *drvr,
   if (priv->pscwait)
     {
       priv->pscwait = false;
-      nxsem_post(&priv->pscsem);
+      lpc17_40_givesem(&priv->pscsem);
     }
 
   leave_critical_section(flags);
@@ -3638,7 +3689,7 @@ static inline void lpc17_40_ep0init(struct lpc17_40_usbhost_s *priv)
   /* Initialize the common tail TD. */
 
   memset(TDTAIL, 0, sizeof(struct lpc17_40_gtd_s));
-  TDTAIL->ed = EDCTRL;
+  TDTAIL->ed              = EDCTRL;
 
   /* Link the common tail TD to the ED's TD list */
 
@@ -3742,8 +3793,18 @@ struct usbhost_connection_s *lpc17_40_usbhost_initialize(int controller)
 
   /* Initialize function address generation logic */
 
-  usbhost_devaddr_initialize(&priv->devgen);
-  priv->rhport.pdevgen = &priv->devgen;
+  usbhost_devaddr_initialize(&priv->rhport);
+
+  /* Initialize semaphores */
+
+  nxsem_init(&priv->pscsem,  0, 0);
+  nxsem_init(&priv->exclsem, 0, 1);
+
+  /* The pscsem semaphore is used for signaling and, hence, should not
+   * have priority inheritance enabled.
+   */
+
+  nxsem_setprotocol(&priv->pscsem, SEM_PRIO_NONE);
 
 #ifndef CONFIG_USBHOST_INT_DISABLE
   priv->ininterval  = MAX_PERINTERVAL;
@@ -3836,7 +3897,12 @@ struct usbhost_connection_s *lpc17_40_usbhost_initialize(int controller)
   memset((void *)TDTAIL, 0, sizeof(struct ohci_gtd_s));
   memset((void *)EDCTRL, 0, sizeof(struct lpc17_40_ed_s));
 
+  /* The EDCTRL wdhsem semaphore is used for signaling and, hence, should
+   * not have priority inheritance enabled.
+   */
+
   nxsem_init(&EDCTRL->wdhsem, 0, 0);
+  nxsem_setprotocol(&EDCTRL->wdhsem, SEM_PRIO_NONE);
 
   /* Initialize user-configurable EDs */
 

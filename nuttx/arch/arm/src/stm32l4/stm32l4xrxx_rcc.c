@@ -1,22 +1,37 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4xrxx_rcc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011-2012, 2014-2015 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2016 Sebastien Lorquet. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *           Sebastien Lorquet <sebastien@lorquet.fr>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -47,6 +62,10 @@
 
 #define HSIRDY_TIMEOUT HSERDY_TIMEOUT
 #define MSIRDY_TIMEOUT HSERDY_TIMEOUT
+
+/* HSE divisor to yield ~1MHz RTC clock */
+
+#define HSE_DIVISOR (STM32L4_HSE_FREQUENCY + 500000) / 1000000
 
 /* Determine if board wants to use HSI48 as 48 MHz oscillator. */
 
@@ -577,19 +596,16 @@ static inline void rcc_enableccip(void)
 #ifdef CONFIG_STM32L4_I2C1
   /* Select HSI16 as I2C1 clock source. */
 
-  regval &= ~RCC_CCIPR_I2C1SEL_MASK;
   regval |= RCC_CCIPR_I2C1SEL_HSI;
 #endif
 #ifdef CONFIG_STM32L4_I2C2
   /* Select HSI16 as I2C2 clock source. */
 
-  regval &= ~RCC_CCIPR_I2C2SEL_MASK;
   regval |= RCC_CCIPR_I2C2SEL_HSI;
 #endif
 #ifdef CONFIG_STM32L4_I2C3
   /* Select HSI16 as I2C3 clock source. */
 
-  regval &= ~RCC_CCIPR_I2C3SEL_MASK;
   regval |= RCC_CCIPR_I2C3SEL_HSI;
 #endif
 #endif /* STM32L4_I2C_USE_HSI16 */
@@ -600,14 +616,12 @@ static inline void rcc_enableccip(void)
    * warning messages.
    */
 
-  regval &= ~RCC_CCIPR_CLK48SEL_MASK;
   regval |= STM32L4_CLK48_SEL;
 #endif
 
 #if defined(CONFIG_STM32L4_ADC1)
   /* Select SYSCLK as ADC clock source */
 
-  regval &= ~RCC_CCIPR_ADCSEL_MASK;
   regval |= RCC_CCIPR_ADCSEL_SYSCLK;
 #endif
 
@@ -621,7 +635,6 @@ static inline void rcc_enableccip(void)
 #ifdef CONFIG_STM32L4_I2C4
   /* Select HSI16 as I2C4 clock source. */
 
-  regval &= ~RCC_CCIPR2_I2C4SEL_MASK;
   regval |= RCC_CCIPR2_I2C4SEL_HSI;
 #endif
 #endif
@@ -629,7 +642,6 @@ static inline void rcc_enableccip(void)
 #ifdef CONFIG_STM32L4_DFSDM1
   /* Select SAI1 as DFSDM audio clock source. */
 
-  regval &= ~RCC_CCIPR2_ADFSDMSEL_MASK;
   regval |= RCC_CCIPR2_ADFSDMSEL_SAI1;
 
   /* Select SYSCLK as DFSDM kernel clock source. */
@@ -701,7 +713,6 @@ static void stm32l4_stdclockconfig(void)
   /* setting MSIRANGE */
 
   regval  = getreg32(STM32L4_RCC_CR);
-  regval &= ~RCC_CR_MSIRANGE_MASK;
   regval |= (STM32L4_BOARD_MSIRANGE | RCC_CR_MSION);    /* Enable MSI and frequency */
   putreg32(regval, STM32L4_RCC_CR);
 
@@ -794,6 +805,15 @@ static void stm32l4_stdclockconfig(void)
       regval &= ~RCC_CFGR_PPRE1_MASK;
       regval |= STM32L4_RCC_CFGR_PPRE1;
       putreg32(regval, STM32L4_RCC_CFGR);
+
+#ifdef CONFIG_STM32L4_RTC_HSECLOCK
+      /* Set the RTC clock divisor */
+
+      regval  = getreg32(STM32L4_RCC_CFGR);
+      regval &= ~RCC_CFGR_RTCPRE_MASK;
+      regval |= RCC_CFGR_RTCPRE(HSE_DIVISOR);
+      putreg32(regval, STM32L4_RCC_CFGR);
+#endif
 
       /* Set the PLL source and main divider */
 

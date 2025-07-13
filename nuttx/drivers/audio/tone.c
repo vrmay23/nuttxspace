@@ -1,32 +1,43 @@
 /****************************************************************************
  * drivers/audio/tone.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/* This driver is based on Tone Alarm driver from PX4 project. It was
+ * This driver is based on Tone Alarm driver from PX4 project. It was
  * modified to become a NuttX driver and to use the Oneshot Timer API.
  *
  * The PX4 driver is here:
- * https://github.com/PX4/Firmware/blob/master/ \
- * src/drivers/stm32/tone_alarm/tone_alarm.cpp
- */
+ * https://github.com/PX4/Firmware/blob/master/src/drivers/stm32/tone_alarm/tone_alarm.cpp
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -38,6 +49,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <ctype.h>
 #include <unistd.h>
 #include <string.h>
@@ -47,7 +59,6 @@
 #include <debug.h>
 
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/arch.h>
 #include <nuttx/timers/pwm.h>
@@ -69,7 +80,7 @@
 #define MODE_LEGATO   2
 #define MODE_STACCATO 3
 
-/* Max tune string length */
+/* Max tune string length*/
 
 #define MAX_TUNE_LEN (1 * 256)
 
@@ -87,7 +98,7 @@ struct tone_upperhalf_s
   uint8_t channel;                     /* Output channel that drives the tone. */
 #endif
   volatile bool started;               /* True: pulsed output is being generated */
-  mutex_t lock;                        /* Supports mutual exclusion */
+  sem_t exclsem;                       /* Supports mutual exclusion */
   struct pwm_info_s tone;              /* Pulsed output for Audio Tone */
   struct pwm_lowerhalf_s *devtone;
   struct oneshot_lowerhalf_s *oneshot;
@@ -103,10 +114,7 @@ static char tune_buf[MAX_TUNE_LEN];
 
 /* Semitone offsets from C for the characters 'A'-'G' */
 
-static const uint8_t g_note_tab[] =
-{
-  9, 11, 0, 2, 4, 5, 7
-};
+static const uint8_t g_note_tab[] = { 9, 11, 0, 2, 4, 5, 7 };
 
 /* Notes in Frequency */
 
@@ -128,8 +136,8 @@ static const uint16_t g_notes_freq[84] =
 
 /* Global variable used by the tone generator */
 
-static FAR const char *g_tune;
-static FAR const char *g_next;
+static const char *g_tune;
+static const char *g_next;
 static uint8_t g_tempo;
 static uint8_t g_note_mode;
 static uint32_t g_note_length;
@@ -161,6 +169,7 @@ static ssize_t tone_read(FAR struct file *filep, FAR char *buffer,
 static ssize_t tone_write(FAR struct file *filep, FAR const char *buffer,
                           size_t buflen);
 
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -171,6 +180,12 @@ static const struct file_operations g_toneops =
   tone_close,                   /* close */
   tone_read,                    /* read */
   tone_write,                   /* write */
+  NULL,                         /* seek */
+  NULL,                         /* ioctl */
+  NULL                          /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL                        /* unlink */
+#endif
 };
 
 /****************************************************************************
@@ -310,16 +325,7 @@ static void stop_note(FAR struct tone_upperhalf_s *upper)
 {
   FAR struct pwm_lowerhalf_s *tone = upper->devtone;
 
-#ifdef CONFIG_PWM_MULTICHAN
-  upper->tone.channels[0].channel = upper->channel;
-  upper->tone.channels[0].duty    = 0;
-#else
-  upper->tone.duty                = 0;
-#endif
-
-  /* REVISIT: Should check the return value */
-
-  tone->ops->start(tone, &upper->tone);
+  tone->ops->stop(tone);
 }
 
 /****************************************************************************
@@ -352,9 +358,12 @@ static void start_tune(FAR struct tone_upperhalf_s *upper, const char *tune)
   g_silence_length = 0;
   g_repeat         = false;
 
-  /* Start playing tune */
+  /* Schedule a callback to start playing */
 
-  next_note(upper);
+  ts.tv_sec        = 1;
+  ts.tv_nsec       = 0;
+
+  ONESHOT_START(upper->oneshot, oneshot_callback, upper, &ts);
 }
 
 /****************************************************************************
@@ -397,8 +406,7 @@ static void next_note(FAR struct tone_upperhalf_s *upper)
     }
 
   /* Make sure we still have a tune - may be removed by the write / ioctl
-   * handler
-   */
+   * handler */
 
   if ((g_next == NULL) || (g_tune == NULL))
     {
@@ -711,7 +719,7 @@ static uint8_t next_number(void)
   uint8_t number = 0;
   int c;
 
-  for (; ; )
+  for (;;)
     {
       c = next_char();
 
@@ -768,16 +776,15 @@ static int tone_open(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&upper->lock);
+  ret = nxsem_wait(&upper->exclsem);
   if (ret < 0)
     {
       goto errout;
     }
 
-  /* Increment the count of references to the device.
-   * If this the first time that the driver has been opened for this device,
-   * then initialize the device.
-   */
+  /* Increment the count of references to the device.  If this the first time
+   * that the driver has been opened for this device, then initialize the
+   * device. */
 
   tmp = upper->crefs + 1;
   if (tmp == 0)
@@ -785,7 +792,7 @@ static int tone_open(FAR struct file *filep)
       /* More than 255 opens; uint8_t overflows to zero */
 
       ret = -EMFILE;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* Save the new open count on success */
@@ -793,8 +800,8 @@ static int tone_open(FAR struct file *filep)
   upper->crefs = tmp;
   ret = OK;
 
-errout_with_lock:
-  nxmutex_unlock(&upper->lock);
+errout_with_sem:
+  nxsem_post(&upper->exclsem);
 
 errout:
   return ret;
@@ -818,23 +825,21 @@ static int tone_close(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&upper->lock);
+  ret = nxsem_wait(&upper->exclsem);
   if (ret < 0)
     {
       goto errout;
     }
 
-  /* Decrement the references to the driver.
-   * If the reference count will decrement to 0,
-   * then uninitialize the driver.
-   */
+  /* Decrement the references to the driver.  If the reference count will
+   * decrement to 0, then uninitialize the driver. */
 
   if (upper->crefs > 1)
     {
       upper->crefs--;
     }
 
-  nxmutex_unlock(&upper->lock);
+  nxsem_post(&upper->exclsem);
   ret = OK;
 
 errout:
@@ -940,7 +945,9 @@ int tone_register(FAR const char *path, FAR struct pwm_lowerhalf_s *tone,
 
   /* Allocate the upper-half data structure */
 
-  upper = kmm_zalloc(sizeof(struct tone_upperhalf_s));
+  upper =
+    (FAR struct tone_upperhalf_s *)kmm_zalloc(sizeof(struct tone_upperhalf_s));
+
   if (!upper)
     {
       auderr("ERROR: Allocation failed\n");
@@ -951,7 +958,7 @@ int tone_register(FAR const char *path, FAR struct pwm_lowerhalf_s *tone,
    * kmm_zalloc()).
    */
 
-  nxmutex_init(&upper->lock);
+  nxsem_init(&upper->exclsem, 0, 1);
   upper->devtone = tone;
   upper->oneshot = oneshot;
 #ifdef CONFIG_PWM_MULTICHAN

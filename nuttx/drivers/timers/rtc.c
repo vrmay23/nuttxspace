@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/timers/rtc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,14 +43,13 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
 #include <nuttx/clock.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/timers/rtc.h>
 
 /****************************************************************************
@@ -57,7 +69,7 @@ struct rtc_alarminfo_s
 struct rtc_upperhalf_s
 {
   FAR struct rtc_lowerhalf_s *lower;  /* Contained lower half driver */
-  mutex_t lock;                       /* Supports mutual exclusion */
+  sem_t exclsem;                      /* Supports mutual exclusion */
 
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   uint8_t crefs;                      /* Number of open references */
@@ -118,7 +130,7 @@ static int     rtc_unlink(FAR struct inode *inode);
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations g_rtc_fops =
+static const struct file_operations rtc_fops =
 {
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   rtc_open,      /* open */
@@ -131,13 +143,9 @@ static const struct file_operations g_rtc_fops =
   rtc_write,     /* write */
   NULL,          /* seek */
   rtc_ioctl,     /* ioctl */
-  NULL,          /* mmap */
-  NULL,          /* truncate */
   NULL,          /* poll */
-  NULL,          /* readv */
-  NULL           /* writev */
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , rtc_unlink   /* unlink */
+  rtc_unlink     /* unlink */
 #endif
 };
 
@@ -164,7 +172,7 @@ static void rtc_destroy(FAR struct rtc_upperhalf_s *upper)
 
   /* And free our container */
 
-  nxmutex_destroy(&upper->lock);
+  nxsem_destroy(&upper->exclsem);
   kmm_free(upper);
 }
 #endif
@@ -189,15 +197,15 @@ static void rtc_alarm_callback(FAR void *priv, int alarmid)
 
   if (alarminfo->active)
     {
-      /* The alarm is no longer active */
-
-      alarminfo->active = false;
-
       /* Yes.. signal the alarm expiration */
 
       nxsig_notification(alarminfo->pid, &alarminfo->event,
                          SI_QUEUE, &alarminfo->work);
     }
+
+  /* The alarm is no longer active */
+
+  alarminfo->active = false;
 }
 #endif
 
@@ -244,13 +252,14 @@ static int rtc_open(FAR struct file *filep)
    * structure.
    */
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
-  DEBUGASSERT(inode->i_private);
+  DEBUGASSERT(inode && inode->i_private);
   upper = inode->i_private;
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&upper->lock);
+  ret = nxsem_wait(&upper->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -260,7 +269,7 @@ static int rtc_open(FAR struct file *filep)
 
   upper->crefs++;
   DEBUGASSERT(upper->crefs > 0);
-  nxmutex_unlock(&upper->lock);
+  nxsem_post(&upper->exclsem);
   return OK;
 }
 #endif
@@ -280,13 +289,14 @@ static int rtc_close(FAR struct file *filep)
    * structure.
    */
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
-  DEBUGASSERT(inode->i_private);
+  DEBUGASSERT(inode && inode->i_private);
   upper = inode->i_private;
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&upper->lock);
+  ret = nxsem_wait(&upper->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -296,7 +306,7 @@ static int rtc_close(FAR struct file *filep)
 
   DEBUGASSERT(upper->crefs > 0);
   upper->crefs--;
-  nxmutex_unlock(&upper->lock);
+  nxsem_post(&upper->exclsem);
 
   /* If the count has decremented to zero and the driver has been unlinked,
    * then commit Hara-Kiri now.
@@ -339,20 +349,21 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct inode *inode;
   FAR struct rtc_upperhalf_s *upper;
   FAR const struct rtc_ops_s *ops;
-  int ret;
+  int ret = -ENOSYS;
 
   /* Get the reference to our internal state structure from the inode
    * structure.
    */
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
-  DEBUGASSERT(inode->i_private);
+  DEBUGASSERT(inode && inode->i_private);
   upper = inode->i_private;
   DEBUGASSERT(upper->lower && upper->lower->ops);
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&upper->lock);
+  ret = nxsem_wait(&upper->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -363,9 +374,7 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
    * RTC implementation.
    */
 
-  ret = -ENOSYS;
   ops = upper->lower->ops;
-
   switch (cmd)
     {
     /* RTC_RD_TIME returns the current RTC time.
@@ -400,13 +409,13 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         if (ops->settime)
           {
             ret = ops->settime(upper->lower, rtctime);
-            if (ret == 0)
+            if (ret >= 0)
               {
                 /* If the RTC time was set successfully, then update the
                  * current system time to match.
                  */
 
-                clock_synchronize(NULL);
+                clock_synchronize();
               }
           }
       }
@@ -473,23 +482,23 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             pid = alarminfo->pid;
             if (pid == 0)
               {
-                pid = nxsched_getpid();
+                pid = getpid();
               }
 
             /* Save the signal info to be used to notify the caller when the
              * alarm expires.
              */
 
-            upperinfo->active = true;
-            upperinfo->pid    = pid;
-            upperinfo->event  = alarminfo->event;
+            upperinfo->active   = true;
+            upperinfo->pid      = pid;
+            upperinfo->event    = alarminfo->event;
 
             /* Format the alarm info needed by the lower half driver */
 
-            lowerinfo.id   = alarmid;
-            lowerinfo.cb   = rtc_alarm_callback;
-            lowerinfo.priv = (FAR void *)upper;
-            lowerinfo.time = alarminfo->time;
+            lowerinfo.id        = alarmid;
+            lowerinfo.cb        = rtc_alarm_callback;
+            lowerinfo.priv      = (FAR void *)upper;
+            lowerinfo.time      = alarminfo->time;
 
             /* Then set the alarm */
 
@@ -544,23 +553,23 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             pid = alarminfo->pid;
             if (pid == 0)
               {
-                pid = nxsched_getpid();
+                pid = getpid();
               }
 
             /* Save the signal info to be used to notify the caller when the
              * alarm expires.
              */
 
-            upperinfo->active = true;
-            upperinfo->pid    = pid;
-            upperinfo->event  = alarminfo->event;
+            upperinfo->active   = true;
+            upperinfo->pid      = pid;
+            upperinfo->event    = alarminfo->event;
 
             /* Format the alarm info needed by the lower half driver */
 
-            lowerinfo.id      = alarmid;
-            lowerinfo.cb      = rtc_alarm_callback;
-            lowerinfo.priv    = (FAR void *)upper;
-            lowerinfo.reltime = alarminfo->reltime;
+            lowerinfo.id        = alarmid;
+            lowerinfo.cb        = rtc_alarm_callback;
+            lowerinfo.priv      = (FAR void *)upper;
+            lowerinfo.reltime   = alarminfo->reltime;
 
             /* Then set the alarm */
 
@@ -678,23 +687,23 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             pid = alarminfo->pid;
             if (pid == 0)
               {
-                pid = nxsched_getpid();
+                pid = getpid();
               }
 
             /* Save the signal info to be used to notify the caller when the
              * alarm expires.
              */
 
-            upperinfo->active = true;
-            upperinfo->pid    = pid;
-            upperinfo->event  = alarminfo->event;
+            upperinfo->active   = true;
+            upperinfo->pid      = pid;
+            upperinfo->event    = alarminfo->event;
 
             /* Format the alarm info needed by the lower half driver. */
 
-            lowerinfo.id     = id;
-            lowerinfo.cb     = rtc_periodic_callback;
-            lowerinfo.priv   = (FAR void *)upper;
-            lowerinfo.period = alarminfo->period;
+            lowerinfo.id        = id;
+            lowerinfo.cb        = rtc_periodic_callback;
+            lowerinfo.priv      = (FAR void *)upper;
+            lowerinfo.period    = alarminfo->period;
 
             /* Then set the periodic wakeup. */
 
@@ -740,6 +749,7 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
     default:
       {
+        ret = -ENOTTY;
 #ifdef CONFIG_RTC_IOCTL
         if (ops->ioctl)
           {
@@ -750,7 +760,7 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       break;
     }
 
-  nxmutex_unlock(&upper->lock);
+  nxsem_post(&upper->exclsem);
   return ret;
 }
 
@@ -768,12 +778,12 @@ static int rtc_unlink(FAR struct inode *inode)
    * structure.
    */
 
-  DEBUGASSERT(inode->i_private);
+  DEBUGASSERT(inode && inode->i_private);
   upper = inode->i_private;
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&upper->lock);
+  ret = nxsem_wait(&upper->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -782,7 +792,7 @@ static int rtc_unlink(FAR struct inode *inode)
   /* Indicate that the driver has been unlinked */
 
   upper->unlinked = true;
-  nxmutex_unlock(&upper->lock);
+  nxsem_post(&upper->exclsem);
 
   /* If there are no further open references to the driver, then commit
    * Hara-Kiri now.
@@ -821,7 +831,7 @@ static int rtc_unlink(FAR struct inode *inode)
 int rtc_initialize(int minor, FAR struct rtc_lowerhalf_s *lower)
 {
   FAR struct rtc_upperhalf_s *upper;
-  char devpath[20];
+  char devpath[16];
   int ret;
 
   DEBUGASSERT(lower && lower->ops && minor >= 0 && minor < 1000);
@@ -839,25 +849,25 @@ int rtc_initialize(int minor, FAR struct rtc_lowerhalf_s *lower)
   /* Initialize the upper half container */
 
   upper->lower = lower;     /* Contain lower half driver */
-  nxmutex_init(&upper->lock);
+  nxsem_init(&upper->exclsem, 0, 1);
 
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   upper->crefs = 0;         /* No open references */
   upper->unlinked = false;  /* Driver is not  unlinked */
 #endif
 
-  /* Create the driver name.  There is space for the a minor number up to 10
+  /* Create the driver name.  There is space for the a minor number up to  6
    * characters
    */
 
-  snprintf(devpath, sizeof(devpath), "/dev/rtc%d", minor);
+  snprintf(devpath, 16, "/dev/rtc%d", minor);
 
   /* And, finally, register the new RTC driver */
 
-  ret = register_driver(devpath, &g_rtc_fops, 0666, upper);
+  ret = register_driver(devpath, &rtc_fops, 0666, upper);
   if (ret < 0)
     {
-      nxmutex_destroy(&upper->lock);
+      nxsem_destroy(&upper->exclsem);
       kmm_free(upper);
       return ret;
     }

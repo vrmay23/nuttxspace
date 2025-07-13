@@ -1,30 +1,42 @@
-/****************************************************************************
- * arch/arm/src/armv7-r/arm_l2cc_pl310.c
+/************************************************************************************
+ * arch/arm/src/armv7-r/chip/arm-l2cc_pl310.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/* Reference: "CoreLinkâ„¢ Level 2 Cache Controller L2C-310", Revision r3p2,
+ * Reference: "CoreLink™ Level 2 Cache Controller L2C-310", Revision r3p2,
  *   Technical Reference Manual, ARM DDI 0246F (ID011711), ARM
  *
  * NOTE: This logic is incompatible with older versions of the PL310!
- */
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ************************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -33,15 +45,12 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
-#include <sys/param.h>
 #include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
-#include <nuttx/spinlock.h>
-#include <arch/barriers.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "l2cc.h"
 #include "l2cc_pl310.h"
 
@@ -50,15 +59,13 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-/* Configuration ************************************************************/
-
+/* Configuration ***********************************************************/
 /* Number of ways depends on ARM configuration */
 
 #if defined(CONFIG_ARMV7R_ASSOCIATIVITY_8WAY)
 #  define PL310_NWAYS      8
 #  define PL310_WAY_MASK   0x000000ff
-#elif defined(CONFIG_ARMV7R_ASSOCIATIVITY_16WAY)
+#elif defined(CONFIG_ARMV7R_ASSOCIATIVITY_8WAY)
 #  define PL310_NWAYS 16
 #  define PL310_WAY_MASK   0x0000ffff
 #else
@@ -226,11 +233,23 @@
 
 #define PL310_GULP_SIZE            4096
 
-/****************************************************************************
- * Private Data
- ****************************************************************************/
+/* Misc commoly defined and re-defined things */
 
-static volatile spinlock_t g_l2cc_lock = SP_UNLOCKED;
+#ifndef MIN
+#  define MIN(a,b)                 (((a) < (b)) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#  define MAX(a,b)                 (((a) > (b)) ? (a) : (b))
+#endif
+
+#ifndef OK
+#  define OK                       0
+#endif
+
+/* Data synchronization barrier */
+
+#define dsb(a) __asm__ __volatile__ ("dsb " #a : : : "memory")
 
 /****************************************************************************
  * Private Functions
@@ -270,70 +289,11 @@ static void pl310_flush_all(void)
 }
 
 /****************************************************************************
- * Name: l2cc_disable_nolock
- *
- * Description:
- *    Disable the L2CC-P310 L2 cache by clearing the Control Register (CR)
- *
- * Input Parameters:
- *    None
- *
- * Returned Value:
- *    None
- *
- ****************************************************************************/
-
-static void l2cc_disable_nolock(void)
-{
-  /* Flush all ways using the Clean Invalidate Way Register (CIWR). */
-
-  pl310_flush_all();
-
-  /* Disable the L2CC-P310 L2 cache by clearing the Control Register (CR) */
-
-  putreg32(0, L2CC_CR);
-  UP_MB();
-}
-
-/****************************************************************************
- * Name: l2cc_invalidate_all_nolock
- *
- * Description:
- *   Invalidate all ways using the Invalidate Way Register (IWR).
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-static void l2cc_invalidate_all_nolock(void)
-{
-  /* Invalidate all ways by writing the bit mask of ways to be invalidated
-   * the Invalidate Way Register (IWR).
-   */
-
-  putreg32(PL310_WAY_MASK, L2CC_IWR);
-
-  /* Wait for cache operation by way to complete */
-
-  while ((getreg32(L2CC_IWR) & PL310_WAY_MASK) != 0);
-
-  /* Drain the STB. Operation complete when all buffers, LRB, LFB, STB, and
-   * EB, are empty.
-   */
-
-  putreg32(0, L2CC_CSR);
-}
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_l2ccinitialize
+ * Name: up_l2ccinitialize
  *
  * Description:
  *   One time configuration of the L2 cache.  The L2 cache will be enabled
@@ -348,7 +308,7 @@ static void l2cc_invalidate_all_nolock(void)
  *
  ****************************************************************************/
 
-void arm_l2ccinitialize(void)
+void up_l2ccinitialize(void)
 {
   uint32_t regval;
   int i;
@@ -356,17 +316,16 @@ void arm_l2ccinitialize(void)
   /* Make sure that this is a PL310 cache, version r3p2.
    *
    * REVISIT: The SAMA5D4 is supposed to report its ID as 0x410000C8 which is
-   * r3p2, but the chip that I have actually* reports 0x410000C9 which is
-   * some later revision.
+   * r3p2, but the chip that I have actually* reports 0x410000C9 which is some
+   * later revision.
    */
 
-  /* DEBUGASSERT((getreg32(L2CC_IDR) &
-   * L2CC_IDR_REV_MASK) == L2CC_IDR_REV_R3P2);
-   */
+  //DEBUGASSERT((getreg32(L2CC_IDR) & L2CC_IDR_REV_MASK) == L2CC_IDR_REV_R3P2);
 
   /* Make sure that actual cache configuration agrees with the configured
    * cache configuration.
    */
+
 
 #if defined(CONFIG_ARMV7R_ASSOCIATIVITY_8WAY)
   DEBUGASSERT((getreg32(L2CC_ACR) & L2CC_ACR_ASS) == 0);
@@ -377,23 +336,17 @@ void arm_l2ccinitialize(void)
 #endif
 
 #if defined(CONFIG_ARMV7R_WAYSIZE_16KB)
-  DEBUGASSERT((getreg32(L2CC_ACR) &
-              L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_16KB);
+  DEBUGASSERT((getreg32(L2CC_ACR) & L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_16KB);
 #elif defined(CONFIG_ARMV7R_WAYSIZE_32KB)
-  DEBUGASSERT((getreg32(L2CC_ACR) &
-              L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_32KB);
+  DEBUGASSERT((getreg32(L2CC_ACR) & L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_32KB);
 #elif defined(CONFIG_ARMV7R_WAYSIZE_64KB)
-  DEBUGASSERT((getreg32(L2CC_ACR) &
-              L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_64KB);
+  DEBUGASSERT((getreg32(L2CC_ACR) & L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_64KB);
 #elif defined(CONFIG_ARMV7R_WAYSIZE_128KB)
-  DEBUGASSERT((getreg32(L2CC_ACR) &
-              L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_128KB);
+  DEBUGASSERT((getreg32(L2CC_ACR) & L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_128KB);
 #elif defined(CONFIG_ARMV7R_WAYSIZE_256KB)
-  DEBUGASSERT((getreg32(L2CC_ACR) &
-              L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_256KB);
+  DEBUGASSERT((getreg32(L2CC_ACR) & L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_256KB);
 #elif defined(CONFIG_ARMV7R_WAYSIZE_512KB)
-  DEBUGASSERT((getreg32(L2CC_ACR) &
-              L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_512KB);
+  DEBUGASSERT((getreg32(L2CC_ACR) & L2CC_ACR_WAYSIZE_MASK) == L2CC_ACR_WAYSIZE_512KB);
 #else
 #  error No way size selected
 #endif
@@ -409,7 +362,7 @@ void arm_l2ccinitialize(void)
     defined(CONFIG_PL310_TRCR_TWRLAT)
       /* Configure Tag RAM control */
 
-      regval = ((CONFIG_PL310_TRCR_TSETLAT - 1) << L2CC_TRCR_TSETLAT_SHIFT) |
+      regval = ((CONFIG_PL310_TRCR_TSETLAT - 1) << L2CC_TRCR_TSETLAT_SHIFT)
                ((CONFIG_PL310_TRCR_TRDLAT - 1) << L2CC_TRCR_TRDLAT_SHIFT) |
                ((CONFIG_PL310_TRCR_TWRLAT - 1) << L2CC_TRCR_TWRLAT_SHIFT);
       putreg32(regval, L2CC_TRCR);
@@ -456,49 +409,10 @@ void arm_l2ccinitialize(void)
 
       l2cc_invalidate_all();
       putreg32(L2CC_CR_L2CEN, L2CC_CR);
-      UP_MB();
     }
 
   sinfo("(%d ways) * (%d bytes/way) = %d bytes\n",
           PL310_NWAYS, PL310_WAYSIZE, PL310_CACHE_SIZE);
-}
-
-/****************************************************************************
- * Name: l2cc_linesize
- *
- * Description:
- *    Get L2CC-P310 L2 cache linesize
- *
- * Input Parameters:
- *    None
- *
- * Returned Value:
- *    L2 cache linesize
- *
- ****************************************************************************/
-
-uint32_t l2cc_linesize(void)
-{
-  return PL310_CACHE_LINE_SIZE;
-}
-
-/****************************************************************************
- * Name: l2cc_size
- *
- * Description:
- *    Get L2CC-P310 L2 cache size
- *
- * Input Parameters:
- *    None
- *
- * Returned Value:
- *    L2 cache size
- *
- ****************************************************************************/
-
-uint32_t l2cc_size(void)
-{
-  return PL310_CACHE_SIZE;
 }
 
 /****************************************************************************
@@ -522,17 +436,10 @@ void l2cc_enable(void)
 
   /* Invalidate and enable the cache (must be disabled to do this!) */
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
-
-  if ((getreg32(L2CC_CR) & L2CC_CR_L2CEN) != 0)
-    {
-      l2cc_disable_nolock();
-    }
-
-  l2cc_invalidate_all_nolock();
+  flags = enter_critical_section();
+  l2cc_invalidate_all();
   putreg32(L2CC_CR_L2CEN, L2CC_CR);
-  UP_MB();
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -553,11 +460,16 @@ void l2cc_disable(void)
 {
   irqstate_t flags;
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
+  /* Flush all ways using the Clean Invalidate Way Register (CIWR). */
 
-  l2cc_disable_nolock();
+  flags = enter_critical_section();
+  pl310_flush_all();
 
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  /* Disable the L2CC-P310 L2 cache by clearing the Control Register (CR) */
+
+  putreg32(0, L2CC_CR);
+  dsb();
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -583,9 +495,9 @@ void l2cc_sync(void)
    * EB, are empty.
    */
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
+  flags = enter_critical_section();
   putreg32(0, L2CC_CSR);
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -605,12 +517,37 @@ void l2cc_sync(void)
 void l2cc_invalidate_all(void)
 {
   irqstate_t flags;
+  uint32_t regval;
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
+  /* Invalidate all ways */
 
-  l2cc_invalidate_all_nolock();
+  flags = enter_critical_section();
 
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  /* Disable the L2 cache while we invalidate it */
+
+  regval = getreg32(L2CC_CR);
+  l2cc_disable();
+
+  /* Invalidate all ways by writing the bit mask of ways to be invalidated
+   * the Invalidate Way Register (IWR).
+   */
+
+  putreg32(PL310_WAY_MASK, L2CC_IWR);
+
+  /* Wait for cache operation by way to complete */
+
+  while ((getreg32(L2CC_IWR) & PL310_WAY_MASK) != 0);
+
+  /* Drain the STB. Operation complete when all buffers, LRB, LFB, STB, and
+   * EB, are empty.
+   */
+
+  putreg32(0, L2CC_CSR);
+
+  /* Then re-enable the L2 cache if it was enabled before */
+
+  putreg32(regval, L2CC_CR);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -637,7 +574,7 @@ void l2cc_invalidate(uintptr_t startaddr, uintptr_t endaddr)
 
   /* Check if the start address is aligned with a cacheline */
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
+  flags = enter_critical_section();
   if ((startaddr & PL310_CACHE_LINE_MASK) != 0)
     {
       /* No.. align down and flush the cache line by writing the address to
@@ -664,7 +601,7 @@ void l2cc_invalidate(uintptr_t startaddr, uintptr_t endaddr)
       putreg32(endaddr, L2CC_CIPALR);
     }
 
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  leave_critical_section(flags);
 
   /* Loop, invalidated the address range by cache line.  Interrupts are re-
    * enabled momentarily every PL310_GULP_SIZE bytes.
@@ -682,7 +619,7 @@ void l2cc_invalidate(uintptr_t startaddr, uintptr_t endaddr)
 
       /* Disable interrupts and invalidate the gulp */
 
-      flags = spin_lock_irqsave(&g_l2cc_lock);
+      flags = enter_critical_section();
       while (startaddr < gulpend)
         {
           /* Invalidate the cache line by writing the address to the
@@ -698,16 +635,16 @@ void l2cc_invalidate(uintptr_t startaddr, uintptr_t endaddr)
 
       /* Enable interrupts momentarily */
 
-      spin_unlock_irqrestore(&g_l2cc_lock, flags);
+      leave_critical_section(flags);
     }
 
   /* Drain the STB. Operation complete when all buffers, LRB, LFB, STB, and
    * EB, are empty.
    */
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
+  flags = enter_critical_section();
   putreg32(0, L2CC_CSR);
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -732,7 +669,7 @@ void l2cc_clean_all(void)
    * Ways Register (CWR).
    */
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
+  flags = enter_critical_section();
   putreg32(PL310_WAY_MASK, L2CC_CWR);
 
   /* Wait for cache operation by way to complete */
@@ -744,7 +681,7 @@ void l2cc_clean_all(void)
    */
 
   putreg32(0, L2CC_CSR);
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -800,7 +737,7 @@ void l2cc_clean(uintptr_t startaddr, uintptr_t endaddr)
 
       /* Disable interrupts and clean the gulp */
 
-      flags = spin_lock_irqsave(&g_l2cc_lock);
+      flags = enter_critical_section();
       while (startaddr < gulpend)
         {
           /* Clean the cache line by writing the address to the Clean
@@ -816,16 +753,16 @@ void l2cc_clean(uintptr_t startaddr, uintptr_t endaddr)
 
       /* Enable interrupts momentarily */
 
-      spin_unlock_irqrestore(&g_l2cc_lock, flags);
+      leave_critical_section(flags);
     }
 
   /* Drain the STB. Operation complete when all buffers, LRB, LFB, STB, and
    * EB, are empty.
    */
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
+  flags = enter_critical_section();
   putreg32(0, L2CC_CSR);
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -848,9 +785,9 @@ void l2cc_flush_all(void)
 
   /* Flush all ways using the Clean Invalidate Way Register (CIWR). */
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
+  flags = enter_critical_section();
   pl310_flush_all();
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -906,7 +843,7 @@ void l2cc_flush(uint32_t startaddr, uint32_t endaddr)
 
       /* Disable interrupts and flush the gulp */
 
-      flags = spin_lock_irqsave(&g_l2cc_lock);
+      flags = enter_critical_section();
       while (startaddr < gulpend)
         {
           /* Flush the cache line by writing the address to the Clean
@@ -922,16 +859,16 @@ void l2cc_flush(uint32_t startaddr, uint32_t endaddr)
 
       /* Enable interrupts momentarily */
 
-      spin_unlock_irqrestore(&g_l2cc_lock, flags);
+      leave_critical_section(flags);
     }
 
   /* Drain the STB. Operation complete when all buffers, LRB, LFB, STB, and
    * EB, are empty.
    */
 
-  flags = spin_lock_irqsave(&g_l2cc_lock);
+  flags = enter_critical_section();
   putreg32(0, L2CC_CSR);
-  spin_unlock_irqrestore(&g_l2cc_lock, flags);
+  leave_critical_section(flags);
 }
 
 #endif /* CONFIG_ARMV7R_L2CC_PL310 */

@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_gauge.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,6 +40,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <debug.h>
 
 #include <sys/types.h>
 #include <stdio.h>
@@ -35,9 +49,9 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <debug.h>
+#include <math.h>
 
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/power/battery_gauge.h>
 #include <nuttx/power/battery_ioctl.h>
 
@@ -51,25 +65,37 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+/* Debug ********************************************************************/
+
+#ifdef CONFIG_CXD56_GAUGE_DEBUG
+#define baterr(fmt, ...) logerr(fmt, ## __VA_ARGS__)
+#define batdbg(fmt, ...) logdebug(fmt, ## __VA_ARGS__)
+#else
+#define baterr(fmt, ...)
+#define batdbg(fmt, ...)
+#endif
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
 
 struct bat_gauge_dev_s
 {
-  mutex_t batlock;
+  sem_t batsem;
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static ssize_t gauge_read(struct file *filep, char *buffer,
+static int gauge_open(FAR struct file *filep);
+static int gauge_close(FAR struct file *filep);
+static ssize_t gauge_read(FAR struct file *filep, FAR char *buffer,
                             size_t buflen);
-static ssize_t gauge_write(struct file *filep,
-                             const char *buffer, size_t buflen);
-static int gauge_ioctl(struct file *filep, int cmd,
-                       unsigned long arg);
+static ssize_t gauge_write(FAR struct file *filep,
+                             FAR const char *buffer, size_t buflen);
+static int gauge_ioctl(FAR struct file *filep, int cmd,
+                         unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -77,18 +103,21 @@ static int gauge_ioctl(struct file *filep, int cmd,
 
 static const struct file_operations g_gaugeops =
 {
-  NULL,         /* open */
-  NULL,         /* close */
+  gauge_open,   /* open */
+  gauge_close,  /* close */
   gauge_read,   /* read */
   gauge_write,  /* write */
-  NULL,         /* seek */
-  gauge_ioctl,  /* ioctl */
+  0,            /* seek */
+  gauge_ioctl   /* ioctl */
+#ifndef CONFIG_DISABLE_POLL
+  , NULL        /* poll */
+#endif
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL        /* unlink */
+#endif
 };
 
-static struct bat_gauge_dev_s g_gaugedev =
-{
-  .batlock = NXMUTEX_INITIALIZER,
-};
+static struct bat_gauge_dev_s g_gaugedev;
 
 /****************************************************************************
  * Private Functions
@@ -98,7 +127,7 @@ static struct bat_gauge_dev_s g_gaugedev =
  * Name: gauge_get_status
  ****************************************************************************/
 
-static int gauge_get_status(enum battery_status_e *status)
+static int gauge_get_status(FAR enum battery_gauge_status_e *status)
 {
   uint8_t state;
   int ret;
@@ -139,7 +168,7 @@ static int gauge_get_status(enum battery_status_e *status)
         break;
 
       default:
-        batinfo("Charge state %d\n", state);
+        _info("Charge state %d\n", state);
         *status = BATTERY_IDLE;
         break;
     }
@@ -151,7 +180,7 @@ static int gauge_get_status(enum battery_status_e *status)
  * Name: gauge_get_vol
  ****************************************************************************/
 
-static int gauge_get_vol(b16_t *voltage)
+static int gauge_get_vol(FAR b16_t *voltage)
 {
   struct pmic_gauge_s gauge;
   int ret;
@@ -177,7 +206,7 @@ static int gauge_get_vol(b16_t *voltage)
  * Name: gauge_get_capacity
  ****************************************************************************/
 
-static int gauge_get_capacity(b16_t *capacity)
+static int gauge_get_capacity(FAR b16_t *capacity)
 {
   b16_t vol;
   int lower;
@@ -235,7 +264,7 @@ static int gauge_get_capacity(b16_t *capacity)
  * Name: gauge_online
  ****************************************************************************/
 
-static int gauge_online(bool *online)
+static int gauge_online(FAR bool *online)
 {
   if (online == NULL)
     {
@@ -247,10 +276,36 @@ static int gauge_online(bool *online)
 }
 
 /****************************************************************************
+ * Name: gauge_open
+ *
+ * Description:
+ *   This function is called whenever the battery device is opened.
+ *
+ ****************************************************************************/
+
+static int gauge_open(FAR struct file *filep)
+{
+  return OK;
+}
+
+/****************************************************************************
+ * Name: gauge_close
+ *
+ * Description:
+ *   This routine is called when the battery device is closed.
+ *
+ ****************************************************************************/
+
+static int gauge_close(FAR struct file *filep)
+{
+  return OK;
+}
+
+/****************************************************************************
  * Name: gauge_read
  ****************************************************************************/
 
-static ssize_t gauge_read(struct file *filep, char *buffer,
+static ssize_t gauge_read(FAR struct file *filep, FAR char *buffer,
                             size_t buflen)
 {
   /* Return nothing read */
@@ -262,8 +317,8 @@ static ssize_t gauge_read(struct file *filep, char *buffer,
  * Name: gauge_write
  ****************************************************************************/
 
-static ssize_t gauge_write(struct file *filep,
-                             const char *buffer, size_t buflen)
+static ssize_t gauge_write(FAR struct file *filep,
+                             FAR const char *buffer, size_t buflen)
 {
   /* Return nothing written */
 
@@ -274,41 +329,41 @@ static ssize_t gauge_write(struct file *filep,
  * Name: gauge_ioctl
  ****************************************************************************/
 
-static int gauge_ioctl(struct file *filep, int cmd, unsigned long arg)
+static int gauge_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
-  struct inode *inode = filep->f_inode;
-  struct bat_gauge_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct bat_gauge_dev_s *priv  = inode->i_private;
   int ret = -ENOTTY;
 
-  nxmutex_lock(&priv->batlock);
+  nxsem_wait(&priv->batsem);
 
   switch (cmd)
     {
       case BATIOC_STATE:
         {
-          enum battery_status_e *status =
-            (enum battery_status_e *)(uintptr_t)arg;
+          FAR enum battery_gauge_status_e *status =
+            (FAR enum battery_gauge_status_e *)(uintptr_t)arg;
           ret = gauge_get_status(status);
         }
         break;
 
       case BATIOC_VOLTAGE:
         {
-          b16_t *voltage = (b16_t *)(uintptr_t)arg;
+          FAR b16_t *voltage = (FAR b16_t *)(uintptr_t)arg;
           ret = gauge_get_vol(voltage);
         }
         break;
 
       case BATIOC_CAPACITY:
         {
-          b16_t *capacity = (b16_t *)(uintptr_t)arg;
+          FAR b16_t *capacity = (FAR b16_t *)(uintptr_t)arg;
           ret = gauge_get_capacity(capacity);
         }
         break;
 
       case BATIOC_ONLINE:
         {
-          bool *online = (bool *)(uintptr_t)arg;
+          FAR bool *online = (FAR bool *)(uintptr_t)arg;
           ret = gauge_online(online);
         }
         break;
@@ -318,7 +373,8 @@ static int gauge_ioctl(struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxmutex_unlock(&priv->batlock);
+  nxsem_post(&priv->batsem);
+
   return ret;
 }
 
@@ -340,17 +396,21 @@ static int gauge_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-int cxd56_gauge_initialize(const char *devpath)
+int cxd56_gauge_initialize(FAR const char *devpath)
 {
-  struct bat_gauge_dev_s *priv = &g_gaugedev;
+  FAR struct bat_gauge_dev_s *priv = &g_gaugedev;
   int ret;
+
+  /* Initialize the CXD5247 device structure */
+
+  nxsem_init(&priv->batsem, 0, 1);
 
   /* Register battery driver */
 
   ret = register_driver(devpath, &g_gaugeops, 0666, priv);
   if (ret < 0)
     {
-      baterr("ERROR: register_driver failed: %d\n", ret);
+      _err("ERROR: register_driver failed: %d\n", ret);
       return -EFAULT;
     }
 
@@ -371,7 +431,7 @@ int cxd56_gauge_initialize(const char *devpath)
  *
  ****************************************************************************/
 
-int cxd56_gauge_uninitialize(const char *devpath)
+int cxd56_gauge_uninitialize(FAR const char *devpath)
 {
   unregister_driver(devpath);
   return OK;

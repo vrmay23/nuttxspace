@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/socket/recvfrom.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2011-2017, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,10 +41,8 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <string.h>
 
 #include <nuttx/cancelpt.h>
-#include <nuttx/kmalloc.h>
 #include <nuttx/net/net.h>
 
 #include "socket/socket.h"
@@ -53,23 +64,23 @@
  *
  *   - It is not a cancellation point,
  *   - It does not modify the errno variable, and
- *   - It accepts the internal socket structure as an input rather than an
+ *   - I accepts the internal socket structure as an input rather than an
  *     task-specific socket descriptor.
  *
  * Input Parameters:
- *   psock     A pointer to a NuttX-specific, internal socket structure
- *   buf       Buffer to receive data
- *   len       Length of buffer
- *   flags     Receive flags
- *   from      Address of source (may be NULL)
- *   fromlen   The length of the address structure
+ *   psock   - A pointer to a NuttX-specific, internal socket structure
+ *   buf     - Buffer to receive data
+ *   len     - Length of buffer
+ *   flags   - Receive flags
+ *   from    - Address of source (may be NULL)
+ *   fromlen - The length of the address structure
  *
  * Returned Value:
- *   On success, returns the number of characters received.  If no data is
+ *   On success, returns the number of characters sent.  If no data is
  *   available to be received and the peer has performed an orderly shutdown,
- *   psock_recvfrom() will return 0.  Otherwise, on any failure, a negated
- *   errno value is returned (see comments with recvfrom() for a list of
- *   appropriate errno values).
+ *   recv() will return 0.  Otherwise, on any failure, a negated errno value
+ *   is returned (see comments with send() for a list of appropriate errno
+ *   values).
  *
  ****************************************************************************/
 
@@ -77,27 +88,78 @@ ssize_t psock_recvfrom(FAR struct socket *psock, FAR void *buf, size_t len,
                        int flags, FAR struct sockaddr *from,
                        FAR socklen_t *fromlen)
 {
-  struct msghdr msg;
-  struct iovec iov;
-  ssize_t ret;
+  /* Verify that non-NULL pointers were passed */
 
-  iov.iov_base = buf;
-  iov.iov_len = len;
-  msg.msg_name = from;
-  msg.msg_namelen = fromlen ? *fromlen : 0;
-  msg.msg_iov = &iov;
-  msg.msg_iovlen = 1;
-  msg.msg_control = NULL;
-  msg.msg_controllen = 0;
-  msg.msg_flags = 0;
+#ifdef CONFIG_DEBUG_FEATURES
+  if (buf == NULL)
+    {
+      return -EINVAL;
+    }
+#endif
 
-  /* And let psock_recvmsg do all of the work */
+  if (from != NULL && fromlen != NULL && *fromlen <= 0)
+    {
+      return -EINVAL;
+    }
 
-  ret = psock_recvmsg(psock, &msg, flags);
-  if (ret >= 0 && fromlen != NULL)
-    *fromlen = msg.msg_namelen;
+  /* Verify that the sockfd corresponds to valid, allocated socket */
 
-  return ret;
+  if (psock == NULL || psock->s_crefs <= 0)
+    {
+      return -EBADF;
+    }
+
+  /* Let logic specific to this address family handle the recvfrom()
+   * operation.
+   */
+
+  DEBUGASSERT(psock->s_sockif != NULL &&
+             psock->s_sockif->si_recvfrom != NULL);
+
+  return psock->s_sockif->si_recvfrom(psock, buf, len, flags, from, fromlen);
+}
+
+/****************************************************************************
+ * Name: nx_recvfrom
+ *
+ * Description:
+ *   nx_recvfrom() receives messages from a socket, and may be used to
+ *   receive data on a socket whether or not it is connection-oriented.
+ *   This is an internal OS interface.  It is functionally equivalent to
+ *   recvfrom() except that:
+ *
+ *   - It is not a cancellation point, and
+ *   - It does not modify the errno variable.
+ *
+ * Input Parameters:
+ *   sockfd  - Socket descriptor of socket
+ *   buf     - Buffer to receive data
+ *   len     - Length of buffer
+ *   flags   - Receive flags
+ *   from    - Address of source (may be NULL)
+ *   fromlen - The length of the address structure
+ *
+ * Returned Value:
+ *   On success, returns the number of characters sent.  If no data is
+ *   available to be received and the peer has performed an orderly shutdown,
+ *   recv() will return 0.  Otherwise, on any failure, a negated errno value
+ *   is returned (see comments with send() for a list of appropriate errno
+ *   values).
+ *
+ ****************************************************************************/
+
+ssize_t nx_recvfrom(int sockfd, FAR void *buf, size_t len, int flags,
+                    FAR struct sockaddr *from, FAR socklen_t *fromlen)
+{
+  FAR struct socket *psock;
+
+  /* Get the underlying socket structure */
+
+  psock = sockfd_socket(sockfd);
+
+  /* Then let psock_recvfrom() do all of the work */
+
+  return psock_recvfrom(psock, buf, len, flags, from, fromlen);
 }
 
 /****************************************************************************
@@ -113,32 +175,31 @@ ssize_t psock_recvfrom(FAR struct socket *psock, FAR void *buf, size_t len,
  *   on return to indicate the actual size of the address stored there.
  *
  * Input Parameters:
- *   sockfd    Socket descriptor of socket
- *   buf       Buffer to receive data
- *   len       Length of buffer
- *   flags     Receive flags
- *   from      Address of source (may be NULL)
- *   fromlen   The length of the address structure
+ *   sockfd  - Socket descriptor of socket
+ *   buf     - Buffer to receive data
+ *   len     - Length of buffer
+ *   flags   - Receive flags
+ *   from    - Address of source (may be NULL)
+ *   fromlen - The length of the address structure
  *
  * Returned Value:
  *   On success, returns the number of characters received.  On  error,
  *   -1 is returned, and errno is set appropriately:
  *
  *   EAGAIN
- *     The socket is marked non-blocking and the receive operation would
- *     block, or a receive timeout had been set and the timeout expired
- *     before data was received.
+ *     The socket is marked non-blocking and the receive operation would block,
+ *     or a receive timeout had been set and the timeout expired before data
+ *     was received.
  *   EBADF
  *     The argument sockfd is an invalid descriptor.
  *   ECONNREFUSED
- *     A remote host refused to allow the network connection (typically
- *     because it is not running the requested service).
+ *     A remote host refused to allow the network connection (typically because
+ *     it is not running the requested service).
  *   EFAULT
- *     The receive buffer pointer(s) point outside the process's address
- *     space.
+ *     The receive buffer pointer(s) point outside the process's address space.
  *   EINTR
- *     The receive was interrupted by delivery of a signal before any data
- *     were available.
+ *     The receive was interrupted by delivery of a signal before any data were
+ *     available.
  *   EINVAL
  *     Invalid argument passed.
  *   ENOMEM
@@ -155,76 +216,26 @@ ssize_t recvfrom(int sockfd, FAR void *buf, size_t len, int flags,
                  FAR struct sockaddr *from, FAR socklen_t *fromlen)
 {
   FAR struct socket *psock;
-  FAR struct file *filep;
   ssize_t ret;
-#ifdef CONFIG_BUILD_KERNEL
-  struct sockaddr_storage kaddr;
-  FAR struct sockaddr *ufrom;
-  FAR void *kbuf;
-  FAR void *ubuf;
-#endif
 
   /* recvfrom() is a cancellation point */
 
   enter_cancellation_point();
 
-#ifdef CONFIG_BUILD_KERNEL
-  /* Allocate memory and copy user buffer to kernel */
-
-  kbuf = kmm_malloc(len);
-  if (!kbuf)
-    {
-      /* Out of memory */
-
-      ret = -ENOMEM;
-      goto errout_with_cancelpt;
-    }
-
-  ubuf = buf;
-  buf = kbuf;
-
-  /* Copy the address data to kernel, store the original user pointer */
-
-  if ((ufrom = from) != NULL)
-    {
-      from = (FAR struct sockaddr *)&kaddr;
-    }
-#endif
-
   /* Get the underlying socket structure */
 
-  ret = sockfd_socket(sockfd, &filep, &psock);
+  psock = sockfd_socket(sockfd);
 
-  /* Then let psock_recvfrom() do all of the work */
+  /* Let psock_recvfrom() do all of the work */
 
-  if (ret == OK)
-    {
-      ret = psock_recvfrom(psock, buf, len, flags, from, fromlen);
-      file_put(filep);
-    }
-
-#ifdef CONFIG_BUILD_KERNEL
-  memcpy(ubuf, buf, len);
-  kmm_free(kbuf);
-
-  /* Copy the address back to user */
-
-  if (ufrom)
-    {
-      memcpy(ufrom, &kaddr, *fromlen);
-    }
-
-errout_with_cancelpt:
-#endif
-
-  leave_cancellation_point();
-
+  ret = psock_recvfrom(psock, buf, len, flags, from, fromlen);
   if (ret < 0)
     {
-      set_errno(-ret);
+      _SO_SETERRNO(psock, -ret);
       ret = ERROR;
     }
 
+  leave_cancellation_point();
   return ret;
 }
 

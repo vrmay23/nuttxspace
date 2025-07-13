@@ -1,8 +1,7 @@
 /****************************************************************************
  * apps/interpreters/bas/bas_program.h
  *
- * SPDX-License-Identifier: MIT
- * SPDX-FileCopyrightText: 1999-2014 Michael Haardt
+ *   Copyright (c) 1999-2014 Michael Haardt
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -22,6 +21,39 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  *
+ * Adapted to NuttX and re-released under a 3-clause BSD license:
+ *
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
+ *   Authors: Alan Carvalho de Assis <Alan Carvalho de Assis>
+ *            Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
  ****************************************************************************/
 
 #ifndef __APPS_EXAMPLES_BAS_BAS_PROGRAM_H
@@ -38,45 +70,45 @@
  * Public Function Prototypes
  ****************************************************************************/
 
-struct Program *Program_new(struct Program *self);
-void Program_destroy(struct Program *self);
-void Program_norun(struct Program *self);
-void Program_store(struct Program *self, struct Token *line,
+struct Program *Program_new(struct Program *this);
+void Program_destroy(struct Program *this);
+void Program_norun(struct Program *this);
+void Program_store(struct Program *this, struct Token *line,
                    long int where);
-void Program_delete(struct Program *self, const struct Pc *from,
+void Program_delete(struct Program *this, const struct Pc *from,
                     const struct Pc *to);
-void Program_addScope(struct Program *self, struct Scope *scope);
-struct Pc *Program_goLine(struct Program *self, long int line,
+void Program_addScope(struct Program *this, struct Scope *scope);
+struct Pc *Program_goLine(struct Program *this, long int line,
                           struct Pc *pc);
-struct Pc *Program_fromLine(struct Program *self, long int line,
+struct Pc *Program_fromLine(struct Program *this, long int line,
                             struct Pc *pc);
-struct Pc *Program_toLine(struct Program *self, long int line,
+struct Pc *Program_toLine(struct Program *this, long int line,
                           struct Pc *pc);
-int Program_scopeCheck(struct Program *self, struct Pc *pc, struct Pc *fn);
-struct Pc *Program_dataLine(struct Program *self, long int line,
+int Program_scopeCheck(struct Program *this, struct Pc *pc, struct Pc *fn);
+struct Pc *Program_dataLine(struct Program *this, long int line,
                             struct Pc *pc);
-struct Pc *Program_imageLine(struct Program *self, long int line,
+struct Pc *Program_imageLine(struct Program *this, long int line,
                              struct Pc *pc);
-long int Program_lineNumber(const struct Program *self,
+long int Program_lineNumber(const struct Program *this,
                             const struct Pc *pc);
-struct Pc *Program_beginning(struct Program *self, struct Pc *pc);
-struct Pc *Program_end(struct Program *self, struct Pc *pc);
-struct Pc *Program_nextLine(struct Program *self, struct Pc *pc);
-int Program_skipEOL(struct Program *self, struct Pc *pc, int dev, int tr);
-void Program_trace(struct Program *self, struct Pc *pc, int dev, int tr);
-void Program_PCtoError(struct Program *self, struct Pc *pc,
+struct Pc *Program_beginning(struct Program *this, struct Pc *pc);
+struct Pc *Program_end(struct Program *this, struct Pc *pc);
+struct Pc *Program_nextLine(struct Program *this, struct Pc *pc);
+int Program_skipEOL(struct Program *this, struct Pc *pc, int dev, int tr);
+void Program_trace(struct Program *this, struct Pc *pc, int dev, int tr);
+void Program_PCtoError(struct Program *this, struct Pc *pc,
                        struct Value *v);
-struct Value *Program_merge(struct Program *self, int dev,
+struct Value *Program_merge(struct Program *this, int dev,
                             struct Value *value);
-int Program_lineNumberWidth(struct Program *self);
-struct Value *Program_list(struct Program *self, int dev, int watchIntr,
+int Program_lineNumberWidth(struct Program *this);
+struct Value *Program_list(struct Program *this, int dev, int watchIntr,
                            struct Pc *from, struct Pc *to,
                            struct Value *value);
-struct Value *Program_analyse(struct Program *self, struct Pc *pc,
+struct Value *Program_analyse(struct Program *this, struct Pc *pc,
                               struct Value *value);
-void Program_renum(struct Program *self, int first, int inc);
-void Program_unnum(struct Program *self);
-int Program_setname(struct Program *self, const char *filename);
-void Program_xref(struct Program *self, int chn);
+void Program_renum(struct Program *this, int first, int inc);
+void Program_unnum(struct Program *this);
+int Program_setname(struct Program *this, const char *filename);
+void Program_xref(struct Program *this, int chn);
 
 #endif /* __APPS_EXAMPLES_BAS_BAS_PROGRAM_H */

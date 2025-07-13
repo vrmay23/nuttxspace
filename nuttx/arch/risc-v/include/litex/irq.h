@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/risc-v/include/litex/irq.h
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,45 +25,89 @@
  * Included Files
  ****************************************************************************/
 
-#ifdef CONFIG_LITEX_USE_CUSTOM_IRQ_DEFINITIONS
-#include CONFIG_LITEX_CUSTOM_IRQ_DEFINITIONS_PATH
-#else
-
-#include <arch/mode.h>
+#include <arch/irq.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
+/* In mstatus register */
+
+#define MSTATUS_MIE   (0x1 << 3)  /* Machine Interrupt Enable */
+#define MSTATUS_MPIE  (0x1 << 7)  /* Machine Previous Interrupt Enable */
+#define MSTATUS_MPPM  (0x3 << 11) /* Machine Previous Privilege (m-mode) */
+
+/* In mie (machine interrupt enable) register */
+
+#define MIE_MSIE      (0x1 << 3)  /* Machine Software Interrupt Enable */
+#define MIE_MTIE      (0x1 << 7)  /* Machine Timer Interrupt Enable */
+#define MIE_MEIE      (0x1 << 11) /* Machine External Interrupt Enable */
+#define MIP_MTIP (1 << 7)
+
 /* Map RISC-V exception code to NuttX IRQ */
 
-#define LITEX_IRQ_UART0       (RISCV_IRQ_EXT + 1)
-#define LITEX_IRQ_TIMER0      (RISCV_IRQ_EXT + 2)
-#define LITEX_IRQ_ETHMAC      (RISCV_IRQ_EXT + 3)
-#define LITEX_IRQ_SDCARD      (RISCV_IRQ_EXT + 4)
-#define LITEX_IRQ_GPIO_BASE   (RISCV_IRQ_EXT + 5)
-#define LITEX_IRQ_GPIO_LENGTH 8
+/* IRQ 0-15 : (exception:interrupt=0) */
 
-/* The last hardware IRQ number */
+#define LITEX_IRQ_IAMISALIGNED  (0) /* Instruction Address Misaligned */
+#define LITEX_IRQ_IAFAULT       (1) /* Instruction Address Fault */
+#define LITEX_IRQ_IINSTRUCTION  (2) /* Illegal Instruction */
+#define LITEX_IRQ_BPOINT        (3) /* Break Point */
+#define LITEX_IRQ_LAMISALIGNED  (4) /* Load Address Misaligned */
+#define LITEX_IRQ_LAFAULT       (5) /* Load Access Fault */
+#define LITEX_IRQ_SAMISALIGNED  (6) /* Store/AMO Address Misaligned */
+#define LITEX_IRQ_SAFAULT       (7) /* Store/AMO Access Fault */
+#define LITEX_IRQ_ECALLU        (8) /* Environment Call from U-mode */
+                                    /* 9-10: Reserved */
 
-#define LITEX_IRQ_LAST        (LITEX_IRQ_GPIO_BASE + LITEX_IRQ_GPIO_LENGTH)
+#define LITEX_IRQ_ECALLM       (11) /* Environment Call from M-mode */
+                                    /* 12-15: Reserved */
 
-/* Second level GPIO interrupts.  GPIO interrupts are decoded and dispatched
- * as a second level of decoding:  The first level dispatches to the GPIO
- * interrupt handler.  The second to the decoded GPIO interrupt handler.
- */
+/* IRQ 16- : (async event:interrupt=1) */
 
-#ifdef CONFIG_LITEX_GPIO_IRQ
-#  define LITEX_NIRQ_GPIO           LITEX_IRQ_GPIO_LENGTH * 32
-#  define LITEX_FIRST_GPIOIRQ       (LITEX_IRQ_LAST + 1)
-#  define LITEX_LAST_GPIOIRQ        (LITES_FIRST_GPIOIRQ + LITEX_NIRQ_GPIO)
-#else
-#  define LITEX_NIRQ_GPIO           0
-#endif
+#define LITEX_IRQ_ASYNC        (16)
+#define LITEX_IRQ_MSOFT    (LITEX_IRQ_ASYNC + 3)  /* Machine Software Int */
+#define LITEX_IRQ_MTIMER   (LITEX_IRQ_ASYNC + 7)  /* Machine Timer Int */
+#define LITEX_IRQ_MEXT     (LITEX_IRQ_ASYNC + 11) /* Machine External Int */
+
+/* Machine Global External Interrupt */
+
+#define LITEX_IRQ_UART0    (LITEX_IRQ_MEXT + 1)
+#define LITEX_IRQ_TIMER0   (LITEX_IRQ_MEXT + 2)
 
 /* Total number of IRQs */
 
-#define NR_IRQS            (LITEX_IRQ_LAST + LITEX_NIRQ_GPIO + 1)
+#define NR_IRQS            (LITEX_IRQ_TIMER0 + 1)
 
-#endif /* CONFIG_LITEX_USE_CUSTOM_IRQ_DEFINITIONS */
+/****************************************************************************
+ * Public Types
+ ****************************************************************************/
+
+#ifndef __ASSEMBLY__
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+#undef EXTERN
+#if defined(__cplusplus)
+#define EXTERN extern "C"
+extern "C"
+{
+#else
+#define EXTERN extern
+#endif
+
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
+
+EXTERN irqstate_t  up_irq_save(void);
+EXTERN void up_irq_restore(irqstate_t);
+EXTERN irqstate_t up_irq_enable(void);
+
+#undef EXTERN
+#if defined(__cplusplus)
+}
+#endif
+#endif /* __ASSEMBLY__ */
 #endif /* __ARCH_RISCV_INCLUDE_LITEX_IRQ_H */

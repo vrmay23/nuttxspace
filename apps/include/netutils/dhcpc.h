@@ -1,10 +1,13 @@
 /****************************************************************************
  * apps/include/netutils/dhcpc.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2007, 2009-2011, 2015 Gregory Nutt
- * SPDX-FileCopyrightText: 2005 Swedish Institute of Computer Science
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2007, 2009-2011, 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This logic was leveraged from uIP which also has a BSD-style license:
+ *
+ *   Copyright (c) 2005, Swedish Institute of Computer Science
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -60,8 +63,6 @@ struct dhcpc_state
   uint32_t       lease_time;      /* Lease expires in this number of seconds */
 };
 
-typedef void (*dhcpc_callback_t)(FAR struct dhcpc_state *presult);
-
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
@@ -77,8 +78,6 @@ extern "C"
 FAR void *dhcpc_open(FAR const char *interface,
                      FAR const void *mac_addr, int mac_len);
 int  dhcpc_request(FAR void *handle, FAR struct dhcpc_state *presult);
-int  dhcpc_request_async(FAR void *handle, dhcpc_callback_t callback);
-void dhcpc_cancel(FAR void *handle);
 void dhcpc_close(FAR void *handle);
 
 #undef EXTERN

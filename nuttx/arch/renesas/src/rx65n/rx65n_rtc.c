@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/renesas/src/rx65n/rx65n_rtc.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,7 +25,6 @@
 #include <nuttx/config.h>
 
 #include <time.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -35,10 +32,10 @@
 #include <nuttx/irq.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/compiler.h>
-#include <nuttx/spinlock.h>
 #include <arch/board/board.h>
 #include <rx65n_rtc.h>
-#include "renesas_internal.h"
+#include "up_arch.h"
+
 #include "nuttx/compiler.h"
 #ifdef CONFIG_RX65N_RTC
 
@@ -46,8 +43,8 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#  define rx65n_getreg(addr)     getreg8(addr)
-#  define rx65n_putreg(val,addr) putreg8(val,addr)
+# define rx65n_getreg(addr)      getreg8(addr)
+# define rx65n_putreg(val,addr)  putreg8(val,addr)
 
 /* Configuration ************************************************************/
 
@@ -72,9 +69,7 @@ void up_enable_irq(int irq);
 void up_disable_irq(int irq);
 void  rtc_prd_interrupt(void);
 static uint32_t rtc_dec2bcd(uint8_t value);
-#if defined (CONFIG_RTC_HIRES) || defined (CONFIG_RTC_ALARM) || defined (CONFIG_RTC_DATETIME)
 static int rtc_bcd2dec(uint32_t value);
-#endif
 
 /****************************************************************************
  * Private Data
@@ -86,7 +81,7 @@ static int rtc_bcd2dec(uint32_t value);
 struct alm_cbinfo_s
 {
   volatile alm_callback_t ac_cb; /* Client callback function */
-  volatile void *ac_arg;         /* Argument to pass with the callback function */
+  volatile FAR void *ac_arg;     /* Argument to pass with the callback function */
 };
 #endif
 
@@ -96,15 +91,13 @@ struct alm_cbinfo_s
 struct prd_cbinfo_s
 {
   volatile periodiccb_t prd_cb; /* Client callback function */
-  volatile void *prd_arg;       /* Argument to pass with the callback function */
+  volatile FAR void *prd_arg;     /* Argument to pass with the callback function */
 };
 #endif
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-static spinlock_t g_rtc_lock = SP_UNLOCKED;
 
 #ifdef CONFIG_RTC_ALARM
 /* Callback to use when an EXTI is activated  */
@@ -153,7 +146,7 @@ volatile bool g_rtc_enabled = false;
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_RTC_INFO
-static void rtc_dumpregs(const char *msg)
+static void rtc_dumpregs(FAR const char *msg)
 {
   rtcinfo("%s:\n", msg);
   rtcinfo("  64-Hz Counter: %08x\n", getreg8(RX65N_RTC_R64CNT));
@@ -196,7 +189,7 @@ static void rtc_dumpregs(const char *msg)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_RTC_INFO
-static void rtc_dumptime(struct tm *tp, const char *msg)
+static void rtc_dumptime(FAR struct tm *tp, FAR const char *msg)
 {
   rtcinfo("%s:\n", msg);
   rtcinfo("  tm_sec: %08x\n", tp->tm_sec);
@@ -243,12 +236,10 @@ static uint32_t rtc_dec2bcd(uint8_t value)
  *
  ****************************************************************************/
 
-#if defined (CONFIG_RTC_HIRES) || defined (CONFIG_RTC_ALARM) || defined (CONFIG_RTC_DATETIME)
 static int rtc_bcd2dec(uint32_t value)
 {
   return (int) ((((value & 0xf0) >> 4) * 10) + (value & 0x0f));
 }
-#endif
 
 /****************************************************************************
  * Name: rtc_interrupt
@@ -266,9 +257,9 @@ static int rtc_bcd2dec(uint32_t value)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int rtc_alm_interrupt(int irq, void *context, void *arg)
+static int rtc_alm_interrupt(int irq, void *context, FAR void *arg)
 {
-  struct alm_cbinfo_s *cbinfo;
+  FAR struct alm_cbinfo_s *cbinfo;
   alm_callback_t cb;
   uint8_t source = rx65n_getreg(RX65N_RTC_RCR1);
   if ((source & RTC_ALARM_INT_ENABLE) != 0)
@@ -276,9 +267,9 @@ static int rtc_alm_interrupt(int irq, void *context, void *arg)
       /* Alarm callback */
 
       cbinfo = &g_alarmcb;
-      cb = cbinfo->ac_cb;
-      arg = (void *)cbinfo->ac_arg;
-      cbinfo->ac_cb  = NULL;
+          cb = cbinfo->ac_cb;
+          arg = (FAR void *)cbinfo->ac_arg;
+          cbinfo->ac_cb  = NULL;
       cbinfo->ac_arg = NULL;
       cb(arg, 0);
     }
@@ -289,9 +280,9 @@ static int rtc_alm_interrupt(int irq, void *context, void *arg)
 #endif
 
 #ifdef CONFIG_RTC_PERIODIC
-static int rtc_periodic_interrupt(int irq, void *context, void *arg)
+static int rtc_periodic_interrupt(int irq, void *context, FAR void *arg)
 {
-  struct prd_cbinfo_s *cbinfo;
+  FAR struct prd_cbinfo_s *cbinfo;
   periodiccb_t cb;
   uint8_t source = rx65n_getreg(RX65N_RTC_RCR1);
   if ((source & RTC_PERIOD_INT_ENABLE) != 0)
@@ -300,7 +291,7 @@ static int rtc_periodic_interrupt(int irq, void *context, void *arg)
 
       cbinfo = &g_periodiccb;
       cb = cbinfo->prd_cb;
-      arg = (void *)cbinfo->prd_arg;
+      arg = (FAR void *)cbinfo->prd_arg;
       cb(arg, 0);
     }
 
@@ -309,7 +300,7 @@ static int rtc_periodic_interrupt(int irq, void *context, void *arg)
 #endif
 
 #ifdef CONFIG_RX65N_CARRY
-static int rtc_carry_interrupt(int irq, void *context, void *arg)
+static int rtc_carry_interrupt(int irq, void *context, FAR void *arg)
 {
   uint8_t source = rx65n_getreg(RX65N_RTC_RCR1);
   if ((source & RTC_CARRY_INT_ENABLE) != 0)
@@ -462,9 +453,8 @@ int up_rtc_initialize(void)
  ****************************************************************************/
 
 #if defined(CONFIG_RTC_HIRES)
-int up_rtc_gettime(struct timespec *tp)
+int up_rtc_gettime(FAR struct timespec *tp)
 {
-  irqstate_t flags;
   uint8_t weekcnt;
   uint8_t daycnt;
   uint8_t monthcnt;
@@ -479,9 +469,6 @@ int up_rtc_gettime(struct timespec *tp)
   uint16_t bcd_years;
   uint8_t regval;
   struct tm t;
-
-  flags = spin_lock_irqsave(&g_rtc_lock);
-  sched_lock();
 
   if (RTC.RCR2.BIT.START == 0)
     {
@@ -540,7 +527,7 @@ int up_rtc_gettime(struct timespec *tp)
 
       t.tm_year = rtc_bcd2dec((uint8_t) (bcd_years & 0xff)) + 100;
 
-          tp->tv_sec = timegm(&t);
+          tp->tv_sec = mktime(&t);
           tp->tv_nsec = 0;
     }
 
@@ -548,148 +535,9 @@ int up_rtc_gettime(struct timespec *tp)
   UNUSED(hrcnt);
   UNUSED(mincnt);
   UNUSED(seccnt);
-
-  spin_unlock_irqrestore(&g_rtc_lock, flags);
-  sched_unlock();
   return OK;
 }
 #endif
-
-int rx65n_rtc_setdatetime(const struct tm *tp)
-{
-  int i;
-  volatile uint8_t dummy_byte;
-  volatile uint16_t dummy_word;
-
-  /* Break out the time values (note that the time is set only to units of
-   * seconds)
-   */
-
-  /* gmtime_r(&tp->tv_sec, &tp); */
-
-  rtc_dumptime(&tp, "Setting time");
-
-  /* Then write the broken out values to the RTC */
-
-  /* Convert the struct tm format to RTC time register fields.
-   *
-   *   struct tm       TIMR register
-   *   tm_sec    0-61* SEC    (0-59)
-   *   tm_min    0-59  MIN    (0-59)
-   *   tm_hour   0-23  HOUR   (0-23)
-   *
-   *  *To allow for leap seconds.  But these never actually happen.
-   */
-
-  /* Stop all counters */
-
-  RTC.RCR2.BIT.START = 0U;
-  while (0U != RTC.RCR2.BIT.START)
-    {
-      /* Ensure the clock is stopped while configuring it. */
-    }
-
-  /* Execute RTC software reset */
-
-  RTC.RCR2.BIT.RESET = 1U;
-  while (1U != RTC.RCR2.BIT.RESET)
-    {
-      /* Wait for the reset to complete */
-    }
-
-  RTC.RCR2.BIT.HR24 = 1;
-
-  /* Set time */
-
-  /* Set seconds. (0-59) */
-
-  RTC.RSECCNT.BYTE = rtc_dec2bcd((uint8_t)tp->tm_sec);
-
-  /* WAIT_LOOP */
-
-  for (i = 0; i < RTC_DUMMY_READ; i++)
-    {
-      dummy_byte = RTC.RSECCNT.BYTE;
-    }
-
-  /* Set minutes (0-59) */
-
-  RTC.RMINCNT.BYTE = rtc_dec2bcd((uint8_t) tp->tm_min);
-
-  /* WAIT_LOOP */
-
-  for (i = 0; i < RTC_DUMMY_READ; i++)
-    {
-      dummy_byte = RTC.RMINCNT.BYTE;
-    }
-
-  /* Set hours. (0-23) */
-
-  RTC.RHRCNT.BYTE = rtc_dec2bcd((uint8_t) tp->tm_hour);
-
-  /* WAIT_LOOP */
-
-  for (i = 0; i < RTC_DUMMY_READ; i++)
-    {
-      dummy_byte = RTC.RHRCNT.BYTE;
-    }
-
-  /* Set the date */
-
-  /* Day of the week (0-6, 0=Sunday) */
-
-#if defined(CONFIG_LIBC_LOCALTIME) || defined(CONFIG_TIME_EXTENDED)
-  RTC.RWKCNT.BYTE = rtc_dec2bcd((uint8_t) tp->tm_wday);
-
-  /* WAIT_LOOP */
-
-  for (i = 0; i < RTC_DUMMY_READ; i++)
-    {
-      dummy_byte = RTC.RWKCNT.BYTE;
-    }
-#endif
-
-  /* Day of the month (1-31) */
-
-  RTC.RDAYCNT.BYTE = rtc_dec2bcd((uint8_t) tp->tm_mday);
-
-  /* WAIT_LOOP */
-
-  for (i = 0; i < RTC_DUMMY_READ; i++)
-    {
-      dummy_byte = RTC.RDAYCNT.BYTE;
-    }
-
-  /* Month. (1-12, 1=January) */
-
-  RTC.RMONCNT.BYTE = rtc_dec2bcd((uint8_t) (tp->tm_mon + 1));
-
-  /* WAIT_LOOP */
-
-  for (i = 0; i < RTC_DUMMY_READ; i++)
-    {
-      dummy_byte = RTC.RMONCNT.BYTE;
-    }
-
-  /* Year. (00-99) */
-
-  RTC.RYRCNT.WORD = (uint16_t) (rtc_dec2bcd((uint8_t)
-                               ((tp->tm_year + 1900) % 100)));
-
-  /* WAIT_LOOP */
-
-  for (i = 0; i < RTC_DUMMY_READ; i++)
-    {
-      dummy_word = RTC.RYRCNT.WORD;
-    }
-
-  RTC.RCR2.BIT.START = 1U;
-
-  rtc_dumpregs("New time setting");
-  UNUSED(dummy_word);
-  UNUSED(dummy_byte);
-  return OK;
-}
 
 /****************************************************************************
  * Name: up_rtc_settime
@@ -707,18 +555,16 @@ int rx65n_rtc_setdatetime(const struct tm *tp)
  *
  ****************************************************************************/
 
-int up_rtc_settime(const struct timespec *tp)
+int up_rtc_settime(FAR const struct timespec *tp)
 {
-  struct tm newtime;
+  FAR struct tm newtime;
   int i;
   volatile uint8_t dummy_byte;
   volatile uint16_t dummy_word;
 
-  /* Break out the time values (note that the time is set only to units of
-   * seconds)
-   */
+  /* Break out the time values (note that the time is set only to units of seconds) */
 
-  gmtime_r(&tp->tv_sec, &newtime);
+  (void)gmtime_r(&tp->tv_sec, &newtime);
   rtc_dumptime(&newtime, "Setting time");
 
   /* Then write the broken out values to the RTC */
@@ -730,7 +576,7 @@ int up_rtc_settime(const struct timespec *tp)
    *   tm_min    0-59  MIN    (0-59)
    *   tm_hour   0-23  HOUR   (0-23)
    *
-   *  *To allow for leap seconds.  But these never actually happen.
+   *  *To allow for leap seconds.  But these never actuall happen.
    */
 
   /* Stop all counters */
@@ -790,6 +636,7 @@ int up_rtc_settime(const struct timespec *tp)
 
   /* Day of the week (0-6, 0=Sunday) */
 
+#if defined(CONFIG_LIBC_LOCALTIME) || defined(CONFIG_TIME_EXTENDED)
   RTC.RWKCNT.BYTE = rtc_dec2bcd((uint8_t) newtime.tm_wday);
 
   /* WAIT_LOOP */
@@ -798,6 +645,7 @@ int up_rtc_settime(const struct timespec *tp)
     {
       dummy_byte = RTC.RWKCNT.BYTE;
     }
+#endif
 
   /* Day of the month (1-31) */
 
@@ -857,10 +705,10 @@ int up_rtc_settime(const struct timespec *tp)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int rx65n_rtc_getalarmdatetime(struct tm *tp)
+static int rx65n_rtc_getalarmdatetime(FAR struct tm *tp)
 {
   uint8_t bcd_years;
-  DEBUGASSERT(tp != NULL);
+  DEBUGASSERT(tp != NULL)
 
   tp->tm_sec  = rtc_bcd2dec((uint8_t) (RTC.RSECAR.BYTE & 0x7fu));
   tp->tm_min  = rtc_bcd2dec((uint8_t) (RTC.RMINAR.BYTE & 0x7fu));
@@ -892,7 +740,7 @@ static int rx65n_rtc_getalarmdatetime(struct tm *tp)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-int rx65n_rtc_rdalarm(struct alm_rdalarm_s *alminfo)
+int rx65n_rtc_rdalarm(FAR struct alm_rdalarm_s *alminfo)
 {
   int ret = -EINVAL;
   DEBUGASSERT(alminfo != NULL);
@@ -917,16 +765,17 @@ int rx65n_rtc_rdalarm(struct alm_rdalarm_s *alminfo)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-int rx65n_rtc_setalarm(struct alm_setalarm_s *alminfo)
+int rx65n_rtc_setalarm(FAR struct alm_setalarm_s *alminfo)
 {
   irqstate_t flags;
   uint8_t dummy_byte;
   uint8_t dummy_word;
   uint8_t i;
+  int ret = -EBUSY;
 
   /* Is there already something waiting on the ALARM? */
 
-  flags = spin_lock_irqsave(&g_rtc_lock);
+  flags = enter_critical_section();
 
   /* Save the callback info */
 
@@ -1061,6 +910,8 @@ int rx65n_rtc_setalarm(struct alm_setalarm_s *alminfo)
       dummy_word = RTC.RYRAR.WORD;
     }
 
+  rtc_dumpregs("New alarm setting");
+
   /* Enable RTC ALARM interrupt */
 
   RTC.RCR1.BIT.AIE = 1U;
@@ -1076,23 +927,22 @@ int rx65n_rtc_setalarm(struct alm_setalarm_s *alminfo)
   /* Set Priority of ALM interrupt */
 
   IPR(RTC, ALM) = _0F_RTC_PRIORITY_LEVEL15;
-  spin_unlock_irqrestore(&g_rtc_lock, flags);
-
-  rtc_dumpregs("New alarm setting");
+  ret = OK;
+  leave_critical_section(flags);
   UNUSED(dummy_byte);
   UNUSED(dummy_word);
-  return OK;
+  return ret;
 }
 #endif
 
 #ifdef CONFIG_RTC_PERIODIC
-int rx65n_rtc_setperiodic(const struct timespec *period,
+int rx65n_rtc_setperiodic(FAR const struct timespec *period,
                           periodiccb_t callback)
 {
   irqstate_t flags;
   volatile uint8_t regval;
   uint8_t prd;
-  flags = spin_lock_irqsave(&g_rtc_lock);
+  flags = enter_critical_section();
 
   /* No.. Save the callback function pointer */
 
@@ -1126,8 +976,8 @@ int rx65n_rtc_setperiodic(const struct timespec *period,
   /* Set PRD priority level */
 
   IPR(RTC, PRD) = _0F_RTC_PRIORITY_LEVEL15;
-  spin_unlock_irqrestore(&g_rtc_lock, flags);
   return OK;
+  leave_critical_section(flags);
 }
 #endif
 
@@ -1135,7 +985,7 @@ int rx65n_rtc_setperiodic(const struct timespec *period,
 void rx65n_rtc_set_carry(carrycb_t callback)
 {
   irqstate_t flags;
-  flags = spin_lock_irqsave(&g_rtc_lock);
+  flags = enter_critical_section();
 
   /* No.. Save the callback function pointer */
 
@@ -1158,7 +1008,7 @@ void rx65n_rtc_set_carry(carrycb_t callback)
   IPR(PERIB, INTB176) = 15;
   RTC.RCR1.BIT.CIE = 1U;
 
-  spin_unlock_irqrestore(&g_rtc_lock, flags);
+  leave_critical_section(flags);
 }
 
 #endif
@@ -1168,7 +1018,7 @@ int rx65n_rtc_cancelalarm(void)
   irqstate_t flags;
   int ret = -ENODATA;
 
-  flags = spin_lock_irqsave(&g_rtc_lock);
+  flags = enter_critical_section();
 
   /* Cancel the global callback function */
 
@@ -1186,7 +1036,7 @@ int rx65n_rtc_cancelalarm(void)
   rx65n_putreg(0x0, RX65N_RTC_RYRAR);
   ret = OK;
 
-  spin_unlock_irqrestore(&g_rtc_lock, flags);
+  leave_critical_section(flags);
 
   return ret;
 }
@@ -1200,7 +1050,7 @@ int rx65n_rtc_cancelperiodic(void)
 
   IEN(RTC, PRD) = 0U;
 
-  /* Clear IR flag of PRD interrupt */
+  /* Clear IR flag of PRD interrupt*/
 
   IR(RTC, PRD) = 0U;
 
@@ -1209,7 +1059,7 @@ int rx65n_rtc_cancelperiodic(void)
   RTC.RCR1.BIT.PIE = 0U;
   while (0U != RTC.RCR1.BIT.PIE)
     {
-      /* Wait for this write to complete. */
+      /* Wait for this write to complete.*/
     }
 
   return OK;
@@ -1221,7 +1071,7 @@ int rx65n_rtc_cancelperiodic(void)
 
 int rx65n_rtc_cancelcarry(void)
 {
-  /* Clear IR flag of CUP interrupt */
+  /* Clear IR flag of CUP interrupt*/
 
   IR(PERIB, INTB176) = 0U;
 
@@ -1261,7 +1111,7 @@ int rx65n_rtc_cancelcarry(void)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_DATETIME
-int up_rtc_getdatetime(struct tm *tp)
+int up_rtc_getdatetime(FAR struct tm *tp)
 {
   uint8_t weekcnt;
   uint8_t daycnt;
@@ -1314,7 +1164,7 @@ int up_rtc_getdatetime(struct tm *tp)
    *   tm_min    0-59  MIN    (0-59)
    *   tm_hour   0-23  HOUR   (0-23)
    *
-   *  *To allow for leap seconds.  But these never actually happen.
+   *  *To allow for leap seconds.  But these never actuall happen.
    */
 
   /* Disable ICU CUP interrupt */
@@ -1367,7 +1217,9 @@ int up_rtc_getdatetime(struct tm *tp)
 
       /* Days since Sunday (0-6) */
 
-      tp->tm_wday = (int) (RTC.RWKCNT.BYTE & 0x07u);
+#if defined(CONFIG_LIBC_LOCALTIME) || defined(CONFIG_TIME_EXTENDED)
+    tp->tm_wday = (int) (RTC.RWKCNT.BYTE & 0x07u);
+#endif
       rtc_dumptime(tp, "Returning");
     }
 

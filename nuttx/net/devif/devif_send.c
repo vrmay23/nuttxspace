@@ -1,8 +1,6 @@
 /****************************************************************************
  * net/devif/devif_send.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- *
  *   Copyright (C) 2007, 2008 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -46,7 +44,6 @@
 #include <string.h>
 #include <assert.h>
 #include <debug.h>
-#include <errno.h>
 
 #include <nuttx/net/netdev.h>
 
@@ -68,56 +65,10 @@
  *
  ****************************************************************************/
 
-int devif_send(FAR struct net_driver_s *dev, FAR const void *buf,
-               int len, int offset)
+void devif_send(struct net_driver_s *dev, const void *buf, int len)
 {
-  int ret;
+  DEBUGASSERT(dev != NULL && len > 0 && len < NETDEV_PKTSIZE(dev));
 
-  if (dev == NULL)
-    {
-      ret = -ENODEV;
-      goto errout;
-    }
-
-  if (len == 0)
-    {
-      ret = -EINVAL;
-      goto errout;
-    }
-
-#ifndef CONFIG_NET_IPFRAG
-  if (len > NETDEV_PKTSIZE(dev) - NET_LL_HDRLEN(dev) - offset)
-    {
-      ret = -EMSGSIZE;
-      goto errout;
-    }
-#endif
-
-  /* Append the send buffer after device buffer */
-
-  if (len > iob_navail(false) * CONFIG_IOB_BUFSIZE ||
-      netdev_iob_prepare(dev, false, 0) != OK)
-    {
-      ret = -ENOMEM;
-      goto errout;
-    }
-
-  /* Prepare device buffer before poll callback */
-
-  iob_update_pktlen(dev->d_iob, offset < 0 ? 0 : offset, false);
-
-  ret = iob_trycopyin(dev->d_iob, buf, len, offset, false);
-  if (ret != len)
-    {
-      netdev_iob_release(dev);
-      goto errout;
-    }
-
+  memcpy(dev->d_appdata, buf, len);
   dev->d_sndlen = len;
-
-  return dev->d_sndlen;
-
-errout:
-  nerr("ERROR: devif_send error: %d\n", ret);
-  return ret;
 }

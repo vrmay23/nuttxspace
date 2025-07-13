@@ -1,8 +1,6 @@
 /****************************************************************************
  * libs/libc/netdb/lib_gethostbyname2r.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -33,6 +31,8 @@
 #include <netdb.h>
 
 #include "netdb/lib_netdb.h"
+
+#ifdef CONFIG_LIBC_NETDB
 
 /****************************************************************************
  * Public Functions
@@ -83,7 +83,7 @@ int gethostbyname2_r(FAR const char *name, int type,
 
   *result = NULL;
 
-  ret = gethostentbyname_r(name, &tmp, buf, buflen, h_errnop, 0);
+  ret = gethostentbyname_r(name, &tmp, buf, buflen, h_errnop);
   if (ret == OK)
     {
       if (convert_hostent(&tmp, type, host))
@@ -104,3 +104,4 @@ int gethostbyname2_r(FAR const char *name, int type,
   return ret;
 }
 
+#endif /* CONFIG_LIBC_NETDB */

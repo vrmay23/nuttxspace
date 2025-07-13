@@ -1,11 +1,10 @@
 /****************************************************************************
  * fs/nfs/nfs_node.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2012 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2012 Jose Pablo Rojas Vargas. All rights reserved.
- * SPDX-FileContributor: Jose Pablo Rojas Vargas <jrojas@nx-engineering.com>
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2012-2013, 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2012 Jose Pablo Rojas Vargas. All rights reserved.
+ *   Author: Jose Pablo Rojas Vargas <jrojas@nx-engineering.com>
+ *           Gregory Nutt <gnutt@nuttx.org>
  *
  * Leveraged from OpenBSD:
  *
@@ -66,9 +65,9 @@ struct nfsnode
   uint8_t             n_type;       /* File type */
   uint8_t             n_fhsize;     /* Size in bytes of the file handle */
   uint16_t            n_mode;       /* File mode for fstat() */
-  struct timespec     n_atime;      /* File access time */
-  struct timespec     n_mtime;      /* File modification time */
-  struct timespec     n_ctime;      /* File creation time */
+  time_t              n_atime;      /* File access time */
+  time_t              n_mtime;      /* File modification time */
+  time_t              n_ctime;      /* File creation time */
   nfsfh_t             n_fhandle;    /* NFS File Handle */
   uint64_t            n_size;       /* Current size of file */
 };

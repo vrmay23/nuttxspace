@@ -16,7 +16,7 @@ if SYSTEM_SYSTEM
 
 config SYSTEM_SYSTEM_SHPATH
 	string "Path to shell command"
-	default "/bin/sh"
+	default "/bin/nsh"
 	depends on SYSTEM_NSH=m
 	---help---
 		This is the full path to the program in a mounted file system that
@@ -40,11 +40,5 @@ config SYSTEM_SYSTEM_PRIORITY
 	default 100
 	---help---
 		The priority of the shell.
-
-config SYSTEM_SYSTEM_DUMPINFO
-	bool "dump the system information"
-	default n
-	---help---
-		Dump the system information when the system() command is executed.
 
 endif

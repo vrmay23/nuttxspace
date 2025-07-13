@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/ipforward/ipforward.c
+ * examplex/ipforward/ipforward.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -75,7 +88,7 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Name: Private Types
  ****************************************************************************/
 
 struct ipfwd_tun_s
@@ -189,7 +202,7 @@ static const uint32_t g_netmask    = HTONL(0xffffff00);
 #endif
 
 #ifdef CONFIG_EXAMPLES_IPFORWARD_TCP
-static const char g_payload[] = "Hi there TUN receiver!";
+static const char g_payload[] = "Hi there, TUN receiver!";
 #endif
 
 #ifdef CONFIG_NET_IPv4
@@ -230,7 +243,7 @@ static int ipfwd_tun_configure(FAR struct ipfwd_tun_s *tun)
       return -errcode;
     }
 
-  strlcpy(tun->it_devname, ifr.ifr_name, MAX_DEVNAME);
+  strncpy(tun->it_devname, ifr.ifr_name, MAX_DEVNAME);
   printf("Created TUN device: %s\n", tun->it_devname);
   return 0;
 }
@@ -252,7 +265,7 @@ static int ipfwd_netconfig(FAR struct ipfwd_tun_s *tun, IPADDR_TYPE ipaddr,
   ret = netlib_set_ipv6addr(tun->it_devname, &addr);
   if (ret < 0)
     {
-      fprintf(stderr, "ERROR: netlib_set_ipv6addr() failed with %d\n", ret);
+      fprintf(stderr, "ERROR: netlib_set_ipv6addr() failed\n", ret);
       return ret;
     }
 
@@ -260,8 +273,7 @@ static int ipfwd_netconfig(FAR struct ipfwd_tun_s *tun, IPADDR_TYPE ipaddr,
   ret = netlib_set_ipv6netmask(tun->it_devname, &addr);
   if (ret < 0)
     {
-      fprintf(stderr, "ERROR: netlib_set_ipv6netmask() failed with %d\n",
-              ret);
+      fprintf(stderr, "ERROR: netlib_set_ipv6netmask() failed\n", ret);
       return ret;
     }
 
@@ -291,11 +303,10 @@ static int ipfwd_netconfig(FAR struct ipfwd_tun_s *tun, IPADDR_TYPE ipaddr,
 }
 
 /****************************************************************************
- * Name: check_sum
+ * Name: Checksums
  ****************************************************************************/
 
-static uint16_t check_sum(uint16_t sum, FAR const uint8_t *data,
-                          uint16_t len)
+static uint16_t chksum(uint16_t sum, FAR const uint8_t *data, uint16_t len)
 {
   FAR const uint8_t *dataptr;
   FAR const uint8_t *last_byte;
@@ -338,7 +349,7 @@ static uint16_t ipv4_chksum(FAR const uint8_t *buffer)
 {
   uint16_t sum;
 
-  sum = check_sum(0, buffer, IPv4_HDRLEN);
+  sum = chksum(0, buffer, IPv4_HDRLEN);
   return (sum == 0) ? 0xffff : htons(sum);
 }
 #endif
@@ -365,12 +376,12 @@ static uint16_t common_chksum(FAR uint8_t *buffer, uint8_t proto)
 
   /* Sum IP source and destination addresses. */
 
-  sum = check_sum(sum, (FAR uint8_t *)&ipv6->srcipaddr,
-                  2 * sizeof(net_ipv6addr_t));
+  sum = chksum(sum, (FAR uint8_t *)&ipv6->srcipaddr,
+               2 * sizeof(net_ipv6addr_t));
 
   /* Sum IP payload data. */
 
-  sum = check_sum(sum, &buffer[IPv6_HDRLEN], upperlen);
+  sum = chksum(sum, &buffer[IPv6_HDRLEN], upperlen);
   return (sum == 0) ? 0xffff : htons(sum);
 #else
   FAR struct ipv4_hdr_s *ipv4 = (FAR struct ipv4_hdr_s *)buffer;
@@ -392,12 +403,11 @@ static uint16_t common_chksum(FAR uint8_t *buffer, uint8_t proto)
 
   /* Sum IP source and destination addresses. */
 
-  sum = check_sum(sum, (FAR uint8_t *)&ipv4->srcipaddr,
-                  2 * sizeof(in_addr_t));
+  sum = chksum(sum, (FAR uint8_t *)&ipv4->srcipaddr, 2 * sizeof(in_addr_t));
 
   /* Sum IP payload data. */
 
-  sum = check_sum(sum, &buffer[IPv4_HDRLEN], upperlen);
+  sum = chksum(sum, &buffer[IPv4_HDRLEN], upperlen);
   return (sum == 0) ? 0xffff : htons(sum);
 #endif
 }
@@ -614,7 +624,7 @@ static FAR void *ipfwd_sender(FAR void *arg)
       ipv6->len[0] = (pktlen >> 8);
       ipv6->len[1] = (pktlen & 0xff);
 
-      ipv6->proto  = proto;                        /* Next header */
+      ipv6->proto  = proto;                 /* Next header */
       ipv6->ttl    = 255;                          /* Hop limit */
 
 #ifdef CONFIG_EXAMPLES_IPFORWARD_TCP
@@ -692,7 +702,7 @@ static FAR void *ipfwd_sender(FAR void *arg)
 
       memset(tcp, 0, sizeof(struct tcp_hdr_s));
 
-      tcp->srcport     = HTONS((0x1234 + i) & 0xffff);
+      tcp->srcport     = HTONS(0x1234);
       tcp->destport    = HTONS(0xabcd);
       tcp->tcpoffset   = (TCP_HDRLEN / 4) << 4;
 
@@ -716,7 +726,7 @@ static FAR void *ipfwd_sender(FAR void *arg)
 
       /* Set up the options */
 
-      sol->opttype  = ICMPv6_OPT_SRCLLADDR;            /* Option type */
+      sol->opttype  = ICMPv6_OPT_SRCLLADDR;           /* Option type */
       sol->optlen   = ICMPv6_OPT_OCTECTS(MAC_ADDRLEN); /* Option length in octets */
 
       /* Copy our link layer address into the message */
@@ -770,7 +780,7 @@ int main(int argc, FAR char *argv[])
   if (ret < 0)
     {
       fprintf(stderr, "ERROR: Failed to create tun0: %d\n", ret);
-      return ret;
+      goto errout;
     }
 
   ret = ipfwd_netconfig(&fwd.if_tun0, g_tun0_laddr, g_netmask);
@@ -852,5 +862,6 @@ errout_with_tun1:
   close(fwd.if_tun1.it_fd);
 errout_with_tun0:
   close(fwd.if_tun0.it_fd);
+errout:
   return errcode;
 }

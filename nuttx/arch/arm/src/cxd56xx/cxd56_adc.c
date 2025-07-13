@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_adc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -38,12 +50,11 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/irq.h>
-#include <nuttx/mutex.h>
 #include <arch/chip/scu.h>
 #include <arch/chip/adc.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "hardware/cxd56_adc.h"
 #include "hardware/cxd56_scuseq.h"
 #include "cxd56_clock.h"
@@ -113,40 +124,6 @@
 #define ADC_BYTESPERSAMPLE   2
 #define ADC_ELEMENTSIZE      0
 
-/* Input Gain setting */
-
-#define INPUT_GAIN(a, g1, g2) (((a) << 24) | ((g2) << 16) | ((g1) << 12))
-#define INPUT_GAIN_MASK         INPUT_GAIN(3, 15, 15)
-#define INPUT_GAIN_MINUS_6DB    INPUT_GAIN(2, 0, 0)
-#define INPUT_GAIN_THROUGH      INPUT_GAIN(0, 0, 0)
-#define INPUT_GAIN_PLUS_6DB     INPUT_GAIN(0, 4, 0)
-#define INPUT_GAIN_PLUS_12DB    INPUT_GAIN(0, 12, 0)
-#define INPUT_GAIN_PLUS_14DB    INPUT_GAIN(0, 4, 8)
-
-#if defined(CONFIG_CXD56_HPADC0_INPUT_GAIN_M6DB)
-#define HPADC0_INPUT_GAIN       INPUT_GAIN_MINUS_6DB
-#elif defined(CONFIG_CXD56_HPADC0_INPUT_GAIN_6DB)
-#define HPADC0_INPUT_GAIN       INPUT_GAIN_PLUS_6DB
-#elif defined(CONFIG_CXD56_HPADC0_INPUT_GAIN_12DB)
-#define HPADC0_INPUT_GAIN       INPUT_GAIN_PLUS_12DB
-#elif defined(CONFIG_CXD56_HPADC0_INPUT_GAIN_14DB)
-#define HPADC0_INPUT_GAIN       INPUT_GAIN_PLUS_14DB
-#else
-#define HPADC0_INPUT_GAIN       INPUT_GAIN_THROUGH
-#endif
-
-#if defined(CONFIG_CXD56_HPADC1_INPUT_GAIN_M6DB)
-#define HPADC1_INPUT_GAIN       INPUT_GAIN_MINUS_6DB
-#elif defined(CONFIG_CXD56_HPADC1_INPUT_GAIN_6DB)
-#define HPADC1_INPUT_GAIN       INPUT_GAIN_PLUS_6DB
-#elif defined(CONFIG_CXD56_HPADC1_INPUT_GAIN_12DB)
-#define HPADC1_INPUT_GAIN       INPUT_GAIN_PLUS_12DB
-#elif defined(CONFIG_CXD56_HPADC1_INPUT_GAIN_14DB)
-#define HPADC1_INPUT_GAIN       INPUT_GAIN_PLUS_14DB
-#else
-#define HPADC1_INPUT_GAIN       INPUT_GAIN_THROUGH
-#endif
-
 typedef enum adc_ch
 {
   CH0 = 0,    /* LPADC0 */
@@ -167,7 +144,7 @@ typedef enum adc_ch
 struct cxd56adc_dev_s
 {
   adc_ch_t         ch;            /* adc channel number */
-  struct seq_s     *seq;          /* sequencer */
+  FAR struct seq_s *seq;          /* sequencer */
   uint8_t          freq;          /* coefficient of adc sampling frequency */
   uint16_t         fsize;         /* SCU FIFO size */
   uint16_t         ofst;          /* offset */
@@ -175,9 +152,7 @@ struct cxd56adc_dev_s
   uint8_t          fifomode;      /* fifo mode */
   struct scufifo_wm_s *wm;        /* water mark */
   struct math_filter_s *filter;   /* math filter */
-  struct scuev_notify_s *notify;  /* notify */
-  mutex_t          lock;          /* exclusive mutex */
-  int              crefs;         /* reference count */
+  struct scuev_notify_s * notify; /* notify */
 };
 
 /****************************************************************************
@@ -186,11 +161,11 @@ struct cxd56adc_dev_s
 
 /* Character driver methods */
 
-static int cxd56_adc_open(struct file *filep);
-static int cxd56_adc_close(struct file *filep);
-static ssize_t cxd56_adc_read(struct file *filep, char *buffer,
+static int cxd56_adc_open(FAR struct file *filep);
+static int cxd56_adc_close(FAR struct file *filep);
+static ssize_t cxd56_adc_read(FAR struct file *filep, FAR char *buffer,
                               size_t len);
-static int cxd56_adc_ioctl(struct file *filep, int cmd,
+static int cxd56_adc_ioctl(FAR struct file *filep, int cmd,
                            unsigned long arg);
 
 /****************************************************************************
@@ -204,9 +179,12 @@ static const struct file_operations g_adcops =
   cxd56_adc_open,            /* open */
   cxd56_adc_close,           /* close */
   cxd56_adc_read,            /* read */
-  NULL,                      /* write */
-  NULL,                      /* seek */
+  0,                         /* write */
+  0,                         /* seek */
   cxd56_adc_ioctl,           /* ioctl */
+#ifndef CONFIG_DISABLE_POLL
+  0,                         /* poll */
+#endif
 };
 
 #if defined (CONFIG_CXD56_LPADC0) || defined (CONFIG_CXD56_LPADC0_1) || defined (CONFIG_CXD56_LPADC_ALL)
@@ -221,8 +199,6 @@ static struct cxd56adc_dev_s g_lpadc0priv =
   .wm     = NULL,
   .filter = NULL,
   .notify = NULL,
-  .lock   = NXMUTEX_INITIALIZER,
-  .crefs  = 0,
 };
 #endif
 
@@ -238,8 +214,6 @@ static struct cxd56adc_dev_s g_lpadc1priv =
   .wm     = NULL,
   .filter = NULL,
   .notify = NULL,
-  .lock   = NXMUTEX_INITIALIZER,
-  .crefs  = 0,
 };
 #endif
 
@@ -255,8 +229,6 @@ static struct cxd56adc_dev_s g_lpadc2priv =
   .wm     = NULL,
   .filter = NULL,
   .notify = NULL,
-  .lock   = NXMUTEX_INITIALIZER,
-  .crefs  = 0,
 };
 #endif
 
@@ -272,8 +244,6 @@ static struct cxd56adc_dev_s g_lpadc3priv =
   .wm     = NULL,
   .filter = NULL,
   .notify = NULL,
-  .lock   = NXMUTEX_INITIALIZER,
-  .crefs  = 0,
 };
 #endif
 
@@ -289,8 +259,6 @@ static struct cxd56adc_dev_s g_hpadc0priv =
   .wm     = NULL,
   .filter = NULL,
   .notify = NULL,
-  .lock   = NXMUTEX_INITIALIZER,
-  .crefs  = 0,
 };
 #endif
 
@@ -306,8 +274,6 @@ static struct cxd56adc_dev_s g_hpadc1priv =
   .wm     = NULL,
   .filter = NULL,
   .notify = NULL,
-  .lock   = NXMUTEX_INITIALIZER,
-  .crefs  = 0,
 };
 #endif
 
@@ -328,7 +294,7 @@ static bool adc_active[CH_MAX] =
  *
  ****************************************************************************/
 
-static int set_ofstgain(struct cxd56adc_dev_s *priv)
+static int set_ofstgain(FAR struct cxd56adc_dev_s *priv)
 {
   int ret = OK;
   uint32_t addr;
@@ -374,7 +340,7 @@ static int set_ofstgain(struct cxd56adc_dev_s *priv)
  *
  ****************************************************************************/
 
-static int adc_start(adc_ch_t ch, uint8_t freq, struct seq_s *seq,
+static int adc_start(adc_ch_t ch, uint8_t freq, FAR struct seq_s *seq,
         int fsize, int fifomode,
         struct scufifo_wm_s *wm,
         struct math_filter_s *filter,
@@ -557,15 +523,6 @@ static int adc_start(adc_ch_t ch, uint8_t freq, struct seq_s *seq,
                            (uint32_t *)SCUADCIF_HPADC1_A2;
       putreg32(1, addr);
 
-      /* HPADC.A3 */
-
-      addr = (ch == CH4) ? (uint32_t *)SCUADCIF_HPADC0_A3 :
-                           (uint32_t *)SCUADCIF_HPADC1_A3;
-
-      val = getreg32(addr) & ~INPUT_GAIN_MASK;
-      val |= (ch == CH4) ? HPADC0_INPUT_GAIN : HPADC1_INPUT_GAIN;
-      putreg32(val, addr);
-
       /* HPADC.D0 */
 
       addr = (ch == CH4) ? (uint32_t *)SCUADCIF_HPADC0_D0 :
@@ -623,7 +580,7 @@ static int adc_start(adc_ch_t ch, uint8_t freq, struct seq_s *seq,
  *
  ****************************************************************************/
 
-static int adc_stop(adc_ch_t ch, struct seq_s *seq)
+static int adc_stop(adc_ch_t ch, FAR struct seq_s *seq)
 {
   uint32_t *addr;
   uint32_t val;
@@ -710,30 +667,16 @@ static bool adc_validcheck(int cmd)
  *
  ****************************************************************************/
 
-static int cxd56_adc_open(struct file *filep)
+static int cxd56_adc_open(FAR struct file *filep)
 {
-  struct inode *inode = filep->f_inode;
-  struct cxd56adc_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct cxd56adc_dev_s *priv = inode->i_private;
   int ret = OK;
   int type;
 
   DEBUGASSERT(priv != NULL);
-  DEBUGASSERT(priv->ch < CH_MAX);
-
-  /* Increment reference counter */
-
-  nxmutex_lock(&priv->lock);
-
-  priv->crefs++;
-  DEBUGASSERT(priv->crefs > 0);
-
-  if (priv->crefs > 1)
-    {
-      nxmutex_unlock(&priv->lock);
-      return OK;
-    }
-
   DEBUGASSERT(priv->seq == NULL);
+  DEBUGASSERT(priv->ch < CH_MAX);
 
   type = SCU_BUS_LPADC0 + priv->ch;
 
@@ -742,7 +685,6 @@ static int cxd56_adc_open(struct file *filep)
   priv->seq = seq_open(SEQ_TYPE_NORMAL, type);
   if (!priv->seq)
     {
-      nxmutex_unlock(&priv->lock);
       return -ENOENT;
     }
 
@@ -755,13 +697,11 @@ static int cxd56_adc_open(struct file *filep)
   ret = set_ofstgain(priv);
   if (ret < 0)
     {
-      nxmutex_unlock(&priv->lock);
       return ret;
     }
 
   ainfo("open ch%d freq%d scufifo%d\n", priv->ch, priv->freq, priv->fsize);
 
-  nxmutex_unlock(&priv->lock);
   return OK;
 }
 
@@ -773,27 +713,14 @@ static int cxd56_adc_open(struct file *filep)
  *
  ****************************************************************************/
 
-static int cxd56_adc_close(struct file *filep)
+static int cxd56_adc_close(FAR struct file *filep)
 {
-  struct inode *inode = filep->f_inode;
-  struct cxd56adc_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct cxd56adc_dev_s *priv = inode->i_private;
 
   DEBUGASSERT(priv != NULL);
   DEBUGASSERT(priv->seq != NULL);
   DEBUGASSERT(priv->ch < CH_MAX);
-
-  /* Decrement reference counter */
-
-  nxmutex_lock(&priv->lock);
-
-  DEBUGASSERT(priv->crefs > 0);
-  priv->crefs--;
-
-  if (priv->crefs > 0)
-    {
-      nxmutex_unlock(&priv->lock);
-      return OK;
-    }
 
   /* Close sequencer */
 
@@ -818,7 +745,6 @@ static int cxd56_adc_close(struct file *filep)
       priv->notify = NULL;
     }
 
-  nxmutex_unlock(&priv->lock);
   return OK;
 }
 
@@ -830,11 +756,11 @@ static int cxd56_adc_close(struct file *filep)
  *
  ****************************************************************************/
 
-static ssize_t cxd56_adc_read(struct file *filep, char *buffer,
+static ssize_t cxd56_adc_read(FAR struct file *filep, FAR char *buffer,
                               size_t len)
 {
-  struct inode *inode = filep->f_inode;
-  struct cxd56adc_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct cxd56adc_dev_s *priv = inode->i_private;
   int ret = OK;
 
   DEBUGASSERT(priv != NULL);
@@ -855,11 +781,11 @@ static ssize_t cxd56_adc_read(struct file *filep, char *buffer,
  *
  ****************************************************************************/
 
-static int cxd56_adc_ioctl(struct file *filep, int cmd,
+static int cxd56_adc_ioctl(FAR struct file *filep, int cmd,
                            unsigned long arg)
 {
-  struct inode *inode = filep->f_inode;
-  struct cxd56adc_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct cxd56adc_dev_s *priv = inode->i_private;
   int ret = OK;
   DEBUGASSERT(priv != NULL);
   DEBUGASSERT(priv->seq != NULL);
@@ -932,14 +858,6 @@ static int cxd56_adc_ioctl(struct file *filep, int cmd,
           }
         break;
 
-      case ANIOC_GET_NCHANNELS:
-        {
-          /* Return the number of configured channels */
-
-          ret = 1;
-        }
-        break;
-
       default:
         {
           if (adc_validcheck(cmd))
@@ -951,7 +869,7 @@ static int cxd56_adc_ioctl(struct file *filep, int cmd,
           else
             {
               aerr("Unrecognized cmd: %d\n", cmd);
-              ret = -ENOTTY;
+              ret = -EINVAL;
             }
         }
         break;
@@ -1111,8 +1029,8 @@ int cxd56_adcinitialize(void)
       aerr("Failed to register driver(lpadc0): %d\n", ret);
       return ret;
     }
-#endif
 
+#endif
 #if defined (CONFIG_CXD56_LPADC1) || defined (CONFIG_CXD56_LPADC0_1) || defined (CONFIG_CXD56_LPADC_ALL)
   ret = register_driver("/dev/lpadc1", &g_adcops, 0666, &g_lpadc1priv);
   if (ret < 0)
@@ -1120,8 +1038,8 @@ int cxd56_adcinitialize(void)
       aerr("Failed to register driver(lpadc1): %d\n", ret);
       return ret;
     }
-#endif
 
+#endif
 #if defined (CONFIG_CXD56_LPADC2) || defined (CONFIG_CXD56_LPADC_ALL)
   ret = register_driver("/dev/lpadc2", &g_adcops, 0666, &g_lpadc2priv);
   if (ret < 0)
@@ -1129,8 +1047,8 @@ int cxd56_adcinitialize(void)
       aerr("Failed to register driver(lpadc2): %d\n", ret);
       return ret;
     }
-#endif
 
+#endif
 #if defined (CONFIG_CXD56_LPADC3) || defined (CONFIG_CXD56_LPADC_ALL)
   ret = register_driver("/dev/lpadc3", &g_adcops, 0666, &g_lpadc3priv);
   if (ret < 0)
@@ -1138,8 +1056,8 @@ int cxd56_adcinitialize(void)
       aerr("Failed to register driver(lpadc3): %d\n", ret);
       return ret;
     }
-#endif
 
+#endif
 #ifdef CONFIG_CXD56_HPADC0
   ret = register_driver("/dev/hpadc0", &g_adcops, 0666, &g_hpadc0priv);
   if (ret < 0)
@@ -1147,8 +1065,8 @@ int cxd56_adcinitialize(void)
       aerr("Failed to register driver(hpadc0): %d\n", ret);
       return ret;
     }
-#endif
 
+#endif
 #ifdef CONFIG_CXD56_HPADC1
   ret = register_driver("/dev/hpadc1", &g_adcops, 0666, &g_hpadc1priv);
   if (ret < 0)
@@ -1156,6 +1074,7 @@ int cxd56_adcinitialize(void)
       aerr("Failed to register driver(hpadc1): %d\n", ret);
       return ret;
     }
+
 #endif
 
   return ret;

@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_procfs_dvfs.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Video & Sound Products Inc.
+ *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,15 +40,14 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
+#include <sys/statfs.h>
 #include <sys/stat.h>
 
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/param.h>
 #include <fcntl.h>
 #include <assert.h>
 #include <errno.h>
@@ -46,6 +58,7 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/procfs.h>
+#include <nuttx/fs/dirent.h>
 
 #include <arch/irq.h>
 
@@ -56,6 +69,14 @@
  ****************************************************************************/
 
 #define DVFS_LINELEN  128
+
+#ifndef MIN
+#  define MIN(a,b) (a < b ? a : b)
+#endif
+
+#ifndef CONFIG_SMP_NCPUS
+#  define CONFIG_SMP_NCPUS 1
+#endif
 
 /****************************************************************************
  * Private Types
@@ -72,16 +93,16 @@ struct dvfs_file_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static int     dvfs_open(struct file *filep, const char *relpath,
+static int     dvfs_open(FAR struct file *filep, FAR const char *relpath,
                          int oflags, mode_t mode);
-static int     dvfs_close(struct file *filep);
-static ssize_t dvfs_read(struct file *filep, char *buffer,
+static int     dvfs_close(FAR struct file *filep);
+static ssize_t dvfs_read(FAR struct file *filep, FAR char *buffer,
                          size_t buflen);
-static ssize_t dvfs_write(struct file *filep, const char *buffer,
+static ssize_t dvfs_write(FAR struct file *filep, FAR const char *buffer,
                           size_t buflen);
-static int     dvfs_dup(const struct file *oldp,
-                        struct file *newp);
-static int     dvfs_stat(const char *relpath, struct stat *buf);
+static int     dvfs_dup(FAR const struct file *oldp,
+                        FAR struct file *newp);
+static int     dvfs_stat(FAR const char *relpath, FAR struct stat *buf);
 
 /****************************************************************************
  * Private Data
@@ -93,7 +114,6 @@ static const struct procfs_operations dvfs_procfsoperations =
   dvfs_close,     /* close */
   dvfs_read,      /* read */
   dvfs_write,     /* write */
-  NULL,           /* poll */
   dvfs_dup,       /* dup */
   NULL,           /* opendir */
   NULL,           /* closedir */
@@ -117,6 +137,7 @@ extern int8_t   g_dvfs_auto;
 extern uint16_t g_dvfs_cur_freq;
 extern uint32_t g_dvfs_freq_stat[3];
 
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
@@ -125,16 +146,24 @@ extern uint32_t g_dvfs_freq_stat[3];
  * Name: dvfs_open
  ****************************************************************************/
 
-static int dvfs_open(struct file *filep, const char *relpath,
+static int dvfs_open(FAR struct file *filep, FAR const char *relpath,
                     int oflags, mode_t mode)
 {
-  struct dvfs_file_s *priv;
+  FAR struct dvfs_file_s *priv;
 
   finfo("Open '%s'\n", relpath);
 
+  /* "dvfs" is the only acceptable value for the relpath */
+
+  if (strcmp(relpath, "dvfs") != 0)
+    {
+      ferr("ERROR: relpath is '%s'\n", relpath);
+      return -ENOENT;
+    }
+
   /* Allocate a container to hold the task and attribute selection */
 
-  priv = kmm_zalloc(sizeof(struct dvfs_file_s));
+  priv = (FAR struct dvfs_file_s *)kmm_zalloc(sizeof(struct dvfs_file_s));
   if (!priv)
     {
       ferr("ERROR: Failed to allocate file attributes\n");
@@ -143,7 +172,7 @@ static int dvfs_open(struct file *filep, const char *relpath,
 
   /* Save the index as the open-specific state in filep->f_priv */
 
-  filep->f_priv = (void *)priv;
+  filep->f_priv = (FAR void *)priv;
   return OK;
 }
 
@@ -151,13 +180,13 @@ static int dvfs_open(struct file *filep, const char *relpath,
  * Name: dvfs_close
  ****************************************************************************/
 
-static int dvfs_close(struct file *filep)
+static int dvfs_close(FAR struct file *filep)
 {
-  struct dvfs_file_s *priv;
+  FAR struct dvfs_file_s *priv;
 
   /* Recover our private data from the struct file instance */
 
-  priv = (struct dvfs_file_s *)filep->f_priv;
+  priv = (FAR struct dvfs_file_s *)filep->f_priv;
   DEBUGASSERT(priv);
 
   /* Release the file attributes structure */
@@ -171,10 +200,10 @@ static int dvfs_close(struct file *filep)
  * Name: dvfs_read
  ****************************************************************************/
 
-static ssize_t dvfs_read(struct file *filep, char *buffer,
+static ssize_t dvfs_read(FAR struct file *filep, FAR char *buffer,
                          size_t buflen)
 {
-  struct dvfs_file_s *priv;
+  FAR struct dvfs_file_s *priv;
   size_t linesize;
   size_t copysize;
   size_t remaining;
@@ -185,7 +214,7 @@ static ssize_t dvfs_read(struct file *filep, char *buffer,
 
   finfo("buffer=%p buflen=%d\n", buffer, (int)buflen);
 
-  priv = (struct dvfs_file_s *)filep->f_priv;
+  priv = (FAR struct dvfs_file_s *)filep->f_priv;
   DEBUGASSERT(priv);
 
   remaining = buflen;
@@ -193,7 +222,7 @@ static ssize_t dvfs_read(struct file *filep, char *buffer,
 
   linesize = snprintf(priv->line,
                       DVFS_LINELEN,
-                      "cur_freq %d\n", g_dvfs_cur_freq);
+                      "cur_freq %d \n", g_dvfs_cur_freq);
   copysize = procfs_memcpy(priv->line, linesize, buffer, remaining, &offset);
   totalsize += copysize;
   buffer    += copysize;
@@ -206,7 +235,7 @@ static ssize_t dvfs_read(struct file *filep, char *buffer,
 
   linesize = snprintf(priv->line,
                       DVFS_LINELEN,
-                      "enable %d\n", g_dvfs_enabled);
+                      "enable %d \n", g_dvfs_enabled);
   copysize = procfs_memcpy(priv->line, linesize, buffer, remaining, &offset);
   totalsize += copysize;
   buffer    += copysize;
@@ -214,7 +243,7 @@ static ssize_t dvfs_read(struct file *filep, char *buffer,
 
   linesize = snprintf(priv->line,
                       DVFS_LINELEN,
-                      "auto %d\n", g_dvfs_auto);
+                      "auto %d \n", g_dvfs_auto);
   copysize = procfs_memcpy(priv->line, linesize, buffer, remaining, &offset);
   totalsize += copysize;
   buffer    += copysize;
@@ -222,7 +251,7 @@ static ssize_t dvfs_read(struct file *filep, char *buffer,
 
   linesize = snprintf(priv->line,
                       DVFS_LINELEN,
-                      "fstat %" PRId32 " %" PRId32 " %" PRId32 "\n",
+                      "fstat %d %d %d \n",
                       g_dvfs_freq_stat[0],
                       g_dvfs_freq_stat[1],
                       g_dvfs_freq_stat[2]);
@@ -237,11 +266,10 @@ static ssize_t dvfs_read(struct file *filep, char *buffer,
     {
       linesize = snprintf(priv->line,
                           DVFS_LINELEN,
-                          "idle%d %lld\n",
+                          "idle%d %lld \n",
                           i, idletime[i]);
 
-      copysize = procfs_memcpy(priv->line, linesize, buffer,
-                               remaining, &offset);
+      copysize = procfs_memcpy(priv->line, linesize, buffer, remaining, &offset);
       totalsize += copysize;
       buffer    += copysize;
       remaining -= copysize;
@@ -261,7 +289,7 @@ static ssize_t dvfs_read(struct file *filep, char *buffer,
  * Name: procfs_write
  ****************************************************************************/
 
-static ssize_t dvfs_write(struct file *filep, const char *buffer,
+static ssize_t dvfs_write(FAR struct file *filep, FAR const char *buffer,
                           size_t buflen)
 {
   char line[DVFS_LINELEN];
@@ -269,12 +297,13 @@ static ssize_t dvfs_write(struct file *filep, const char *buffer,
   int  n;
   int  tmp;
 
-  n = MIN(buflen, DVFS_LINELEN);
-  strlcpy(line, buffer, n);
+  n = MIN(buflen, DVFS_LINELEN - 1);
+  strncpy(line, buffer, n);
+  line[n] = '\0';
 
-  n = strcspn(line, " ");
-  n = MIN(n, sizeof(cmd));
-  strlcpy(cmd, line, n);
+  n = MIN(strcspn(line, " "), sizeof(cmd) - 1);
+  strncpy(cmd, line, n);
+  cmd[n] = '\0';
 
   if (0 == strcmp(cmd, "cur_freq"))
     {
@@ -303,21 +332,21 @@ static ssize_t dvfs_write(struct file *filep, const char *buffer,
  * Name: dvfs_dup
  ****************************************************************************/
 
-static int dvfs_dup(const struct file *oldp, struct file *newp)
+static int dvfs_dup(FAR const struct file *oldp, FAR struct file *newp)
 {
-  struct dvfs_file_s *oldpriv;
-  struct dvfs_file_s *newpriv;
+  FAR struct dvfs_file_s *oldpriv;
+  FAR struct dvfs_file_s *newpriv;
 
   finfo("Dup %p->%p\n", oldp, newp);
 
   /* Recover our private data from the old struct file instance */
 
-  oldpriv = (struct dvfs_file_s *)oldp->f_priv;
+  oldpriv = (FAR struct dvfs_file_s *)oldp->f_priv;
   DEBUGASSERT(oldpriv);
 
   /* Allocate a new container to hold the task and attribute selection */
 
-  newpriv = kmm_zalloc(sizeof(struct dvfs_file_s));
+  newpriv = (FAR struct dvfs_file_s *)kmm_zalloc(sizeof(struct dvfs_file_s));
   if (!newpriv)
     {
       ferr("ERROR: Failed to allocate file attributes\n");
@@ -330,7 +359,7 @@ static int dvfs_dup(const struct file *oldp, struct file *newp)
 
   /* Save the new attributes in the new file structure */
 
-  newp->f_priv = (void *)newpriv;
+  newp->f_priv = (FAR void *)newpriv;
   return OK;
 }
 
@@ -340,6 +369,12 @@ static int dvfs_dup(const struct file *oldp, struct file *newp)
 
 static int dvfs_stat(const char *relpath, struct stat *buf)
 {
+  if (strcmp(relpath, "dvfs") != 0)
+    {
+      ferr("ERROR: relpath is '%s'\n", relpath);
+      return -ENOENT;
+    }
+
   buf->st_mode    =
     S_IFREG |
     S_IROTH | S_IWOTH |

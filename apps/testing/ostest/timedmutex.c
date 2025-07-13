@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/testing/ostest/timedmutex.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -24,19 +37,23 @@
  * Included Files
  ****************************************************************************/
 
-#include <assert.h>
-#include <errno.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <pthread.h>
 #include <time.h>
-#include <unistd.h>
-
 #include "ostest.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+#ifndef NULL
+# define NULL (void*)0
+#endif
+
+#ifndef OK
+# define OK 0
+#endif
 
 /****************************************************************************
  * Private Data
@@ -68,9 +85,7 @@ static void *thread_func(FAR void *parameter)
       if (status < 0)
         {
           int errcode = errno;
-          fprintf(stderr, "pthread: "
-                  "ERROR clock_gettime() failed: %d\n", errcode);
-          ASSERT(false);
+          fprintf(stderr, "pthread: clock_gettime() failed: %d\n", errcode);
           g_result = errcode;
           break;
         }
@@ -92,10 +107,8 @@ static void *thread_func(FAR void *parameter)
             }
           else
             {
-              fprintf(stderr, "pthread: "
-                      "ERROR pthread_mutex_timedlock() failed: %d\n",
+              fprintf(stderr, "pthread: pthread_mutex_timedlock() failed: %d\n",
                       status);
-              ASSERT(false);
             }
 
           g_result = status;
@@ -107,7 +120,7 @@ static void *thread_func(FAR void *parameter)
       /* Release the lock and wait a bit in case the main thread wants it. */
 
       pthread_mutex_unlock(&g_mutex);
-      usleep(500 * 1000);
+      usleep(500*1000);
     }
 
   g_running = false;
@@ -136,8 +149,7 @@ void timedmutex_test(void)
   status = pthread_mutex_lock(&g_mutex);
   if (status != OK)
     {
-      fprintf(stderr, "mutex_test: ERROR Failed to get mutex: %d\n", status);
-      ASSERT(false);
+      fprintf(stderr, "mutex_test: Failed to get mutex: %d\n", status);
       goto errout_with_mutex;
     }
 
@@ -152,14 +164,13 @@ void timedmutex_test(void)
 #endif
   if (status != 0)
     {
-      fprintf(stderr, "mutex_test: ERROR in thread creation: %d\n", status);
-      ASSERT(false);
+      fprintf(stderr, "mutex_test: Error in thread creation: %d\n", status);
       goto errout_with_lock;
     }
 
   /* Wait a bit to assure that the thread gets a chance to start */
 
-  usleep(500 * 1000);
+  usleep(500*1000);
 
   /* Then unlock the mutex.  This should wake up the pthread. */
 
@@ -170,7 +181,7 @@ void timedmutex_test(void)
    * least once (it may probably loop and retake the mutex several times)
    */
 
-  usleep(500 * 1000);
+  usleep(500*1000);
 
   /* The re-lock the mutex.  The pthread should now be waiting for the lock
    * or a timeout.
@@ -179,8 +190,7 @@ void timedmutex_test(void)
   status = pthread_mutex_lock(&g_mutex);
   if (status != OK)
     {
-      fprintf(stderr, "mutex_test: ERROR Failed to get mutex: %d\n", status);
-      ASSERT(false);
+      fprintf(stderr, "mutex_test: Failed to get mutex: %d\n", status);
       goto errout_with_mutex;
     }
 
@@ -197,13 +207,11 @@ void timedmutex_test(void)
   if (g_running)
     {
       fprintf(stderr, "mutex_test: ERROR: The pthread is still running!\n");
-      ASSERT(false);
     }
   else if (g_result != ETIMEDOUT)
     {
       fprintf(stderr, "mutex_test: ERROR: Result was not ETIMEDOUT: %d\n",
               g_result);
-      ASSERT(false);
     }
   else
     {

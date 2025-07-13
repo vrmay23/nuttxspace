@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/stm32f0l0g0/stm32_aes.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Haltian Ltd. All rights reserved.
+ *   Author:  Juha Niskanen <juha.niskanen@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,10 +49,12 @@
 #include <nuttx/crypto/crypto.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 #include "stm32_rcc.h"
 #include "stm32_aes.h"
@@ -60,18 +75,18 @@
 
 static void stm32aes_enable(bool on);
 static void stm32aes_ccfc(void);
-static void stm32aes_setkey(const void *key, size_t key_len);
-static void stm32aes_setiv(const void *iv);
-static void stm32aes_encryptblock(void *block_out,
-                                  const void *block_in);
+static void stm32aes_setkey(FAR const void *key, size_t key_len);
+static void stm32aes_setiv(FAR const void *iv);
+static void stm32aes_encryptblock(FAR void *block_out,
+                                  FAR const void *block_in);
 static int  stm32aes_setup_cr(int mode, int encrypt);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static mutex_t g_stm32aes_lock = NXMUTEX_INITIALIZER;
-static bool    g_stm32aes_initdone;
+static sem_t g_stm32aes_lock;
+static bool  g_stm32aes_initdone = false;
 
 /****************************************************************************
  * Public Data
@@ -111,9 +126,9 @@ static void stm32aes_ccfc(void)
 
 /* TODO: Handle other AES key lengths or fail if length is not valid */
 
-static void stm32aes_setkey(const void *key, size_t key_len)
+static void stm32aes_setkey(FAR const void *key, size_t key_len)
 {
-  uint32_t *in = (uint32_t *)key;
+  FAR uint32_t *in = (FAR uint32_t *)key;
 
   putreg32(__builtin_bswap32(*in), STM32_AES_KEYR3);
   in++;
@@ -124,9 +139,9 @@ static void stm32aes_setkey(const void *key, size_t key_len)
   putreg32(__builtin_bswap32(*in), STM32_AES_KEYR0);
 }
 
-static void stm32aes_setiv(const void *iv)
+static void stm32aes_setiv(FAR const void *iv)
 {
-  uint32_t *in = (uint32_t *)iv;
+  FAR uint32_t *in = (FAR uint32_t *)iv;
 
   putreg32(__builtin_bswap32(*in), STM32_AES_IVR3);
   in++;
@@ -137,11 +152,10 @@ static void stm32aes_setiv(const void *iv)
   putreg32(__builtin_bswap32(*in), STM32_AES_IVR0);
 }
 
-static void stm32aes_encryptblock(void *block_out,
-                                  const void *block_in)
+static void stm32aes_encryptblock(FAR void *block_out, FAR const void *block_in)
 {
-  uint32_t *in  = (uint32_t *)block_in;
-  uint32_t *out = (uint32_t *)block_out;
+  FAR uint32_t *in  = (FAR uint32_t *)block_in;
+  FAR uint32_t *out = (FAR uint32_t *)block_out;
 
   putreg32(*in, STM32_AES_DINR);
   in++;
@@ -233,6 +247,8 @@ int stm32_aesinitialize(void)
 {
   uint32_t regval;
 
+  nxsem_init(&g_stm32aes_lock, 0, 1);
+
   regval  = getreg32(STM32_RCC_AHBENR);
   regval |= RCC_AHBENR_AESEN;
   putreg32(regval, STM32_RCC_AHBENR);
@@ -252,11 +268,13 @@ int stm32_aesuninitialize(void)
   regval &= ~RCC_AHBENR_AESEN;
   putreg32(regval, STM32_RCC_AHBENR);
 
+  nxsem_destroy(&g_stm32aes_lock);
+
   return OK;
 }
 
-int aes_cypher(void *out, const void *in, size_t size,
-               const void *iv, const void *key, size_t keysize,
+int aes_cypher(FAR void *out, FAR const void *in, uint32_t size,
+               FAR const void *iv, FAR const void *key, uint32_t keysize,
                int mode, int encrypt)
 {
   int ret = OK;
@@ -274,7 +292,7 @@ int aes_cypher(void *out, const void *in, size_t size,
       g_stm32aes_initdone = true;
     }
 
-  if ((size & (AES_BLOCK_SIZE - 1)) != 0)
+  if ((size & (AES_BLOCK_SIZE-1)) != 0)
     {
       return -EINVAL;
     }
@@ -284,7 +302,7 @@ int aes_cypher(void *out, const void *in, size_t size,
       return -EINVAL;
     }
 
-  ret = nxmutex_lock(&g_stm32aes_lock);
+  ret = nxsem_wait(&g_stm32aes_lock);
   if (ret < 0)
     {
       return ret;
@@ -309,14 +327,14 @@ int aes_cypher(void *out, const void *in, size_t size,
   while (size)
     {
       stm32aes_encryptblock(out, in);
-      out   = (uint8_t *)out + AES_BLOCK_SIZE;
-      in    = (uint8_t *)in  + AES_BLOCK_SIZE;
+      out   = (FAR uint8_t *)out + AES_BLOCK_SIZE;
+      in    = (FAR uint8_t *)in  + AES_BLOCK_SIZE;
       size -= AES_BLOCK_SIZE;
     }
 
   stm32aes_enable(false);
 
 out:
-  nxmutex_unlock(&g_stm32aes_lock);
+  nxsem_post(&g_stm32aes_lock);
   return ret;
 }

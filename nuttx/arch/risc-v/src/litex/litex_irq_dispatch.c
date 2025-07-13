@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/risc-v/src/litex/litex_irq_dispatch.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -31,62 +29,37 @@
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/board.h>
+#include <arch/board/board.h>
 
-#include "riscv_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "litex.h"
 
 /****************************************************************************
- * Pre-processor Definitions
+ * Public Data
  ****************************************************************************/
 
-#define RV_IRQ_MASK 27
+volatile uint32_t * g_current_regs;
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * riscv_dispatch_irq
+ * litex_dispatch_irq
  ****************************************************************************/
 
-#ifdef CONFIG_LITEX_CORE_VEXRISCV_SMP
-void *riscv_dispatch_irq(uintptr_t vector, uintreg_t *regs)
+void *litex_dispatch_irq(uint32_t vector, uint32_t *regs)
 {
-  int irq = (vector & 0x3f);
-  DEBUGASSERT(irq <= RISCV_IRQ_EXT);
-
-  if ((vector & RISCV_IRQ_BIT) != 0)
-    {
-       irq += RISCV_IRQ_ASYNC;
-    }
-
-  if (irq < RISCV_IRQ_EXT)
-    {
-      regs = riscv_doirq(irq, regs);
-    }
-  else
-    {
-      uint32_t ext = getreg32(LITEX_PLIC_CLAIM);
-      do
-        {
-          regs = riscv_doirq(RISCV_IRQ_EXT + ext, regs);
-          putreg32(ext, LITEX_PLIC_CLAIM);
-          ext = getreg32(LITEX_PLIC_CLAIM);
-        }
-      while (ext);
-    }
-
-  return regs;
-}
-#else
-void *riscv_dispatch_irq(uintptr_t vector, uintreg_t *regs)
-{
+  uint32_t  irq = (vector >> 27) | (vector & 0xf);
+  uint32_t *mepc = regs;
   int i;
-  int irq = (vector >> RV_IRQ_MASK) | (vector & 0xf);
 
   /* Firstly, check if the irq is machine external interrupt */
 
-  if (RISCV_IRQ_MEXT == irq)
+  if (LITEX_IRQ_MEXT == irq)
     {
       /* litex vexriscv dont follow riscv plic standard */
 
@@ -111,14 +84,43 @@ void *riscv_dispatch_irq(uintptr_t vector, uintreg_t *regs)
       irq += val;
     }
 
+  /* NOTE: In case of ecall, we need to adjust mepc in the context */
+
+  if (LITEX_IRQ_ECALLM == irq)
+    {
+      *mepc += 4;
+    }
+
   /* Acknowledge the interrupt */
 
-  riscv_ack_irq(irq);
+  up_ack_irq(irq);
+
+#ifdef CONFIG_SUPPRESS_INTERRUPTS
+  PANIC();
+#else
+  /* Current regs non-zero indicates that we are processing an interrupt;
+   * g_current_regs is also used to manage interrupt level context switches.
+   *
+   * Nested interrupts are not supported
+   */
+
+  DEBUGASSERT(g_current_regs == NULL);
+  g_current_regs = regs;
 
   /* Deliver the IRQ */
 
-  regs = riscv_doirq(irq, regs);
+  irq_dispatch(irq, regs);
+
+#endif
+
+  /* If a context switch occurred while processing the interrupt then
+   * g_current_regs may have change value.  If we return any value different
+   * from the input regs, then the lower level will know that a context
+   * switch occurred during interrupt processing.
+   */
+
+  regs = (uint32_t *)g_current_regs;
+  g_current_regs = NULL;
 
   return regs;
 }
-#endif

@@ -1,7 +1,5 @@
 ############################################################################
-# boards/z80/ez80/z20x/src/Makefile
-#
-# SPDX-License-Identifier: Apache-2.0
+# boards/z80/ez80/z20x/Makefile
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -20,11 +18,12 @@
 #
 ############################################################################
 
-include $(TOPDIR)/Make.defs
+-include $(TOPDIR)/Make.defs
 
+ASRCS =
 CSRCS = ez80_boot.c ez80_bringup.c
 
-ifeq ($(CONFIG_BOARDCTL),y)
+ifeq ($(CONFIG_LIB_BOARDCTL),y)
 CSRCS += ez80_appinit.c
 endif
 

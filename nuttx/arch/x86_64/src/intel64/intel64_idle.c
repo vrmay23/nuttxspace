@@ -1,7 +1,5 @@
 /****************************************************************************
- * arch/x86_64/src/intel64/intel64_idle.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  arch/x86_64/src/intel64/intel64_idle.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -27,7 +25,7 @@
 #include <nuttx/config.h>
 
 #include <nuttx/arch.h>
-#include "x86_64_internal.h"
+#include "up_internal.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -49,7 +47,7 @@
  * Name: up_idle
  *
  * Description:
- *   up_idle() is the logic that will be executed when there is no other
+ *   up_idle() is the logic that will be executed when their is no other
  *   ready-to-run task.  This is processor idle time and will continue until
  *   some interrupt occurs to cause a context switch from the idle task.
  *
@@ -66,27 +64,9 @@ void up_idle(void)
    * "fake" timer interrupts. Hopefully, something will wake up.
    */
 
-  nxsched_process_timer();
-#elif defined(CONFIG_ARCH_X86_64_IDLE_NOP)
-  __asm__ volatile("nop");
-#elif defined(CONFIG_ARCH_X86_64_IDLE_MWAIT_ECX)
-  /* Dummy value to make MONITOR/MWAIT work */
-
-  int dummy;
-
-  /* MONITOR eax, ecx, edx */
-
-  __asm__ volatile(".byte 0x0f, 0x01, 0xc8" ::
-                   "a"(&dummy), "c"(0), "d"(0));
-
-  /* We enable sub C-state here and wait for interrupts */
-
-  /* MWAIT eax, ecx */
-
-  __asm__ volatile(".byte 0x0f, 0x01, 0xc9" ::
-                   "a"(0), "c"(CONFIG_ARCH_X86_64_IDLE_MWAIT_ECX));
+  sched_process_timer();
 #else
-  __asm__ volatile("hlt");
+  asm volatile("hlt");
 #endif
 }
 #endif

@@ -1,16 +1,11 @@
-/****************************************************************************
+/*******************************************************************************
  * arch/arm/src/samd5e5/sam_i2c_master.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2020 Falker Automacao Agricola LTDA.
- * SPDX-FileCopyrightText: 2018 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2015 Filament - www.filament.com
- * SPDX-FileCopyrightText: 2013-2014 Gregory Nutt. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: Matt Thompson <mthompson@hexwave.com>
- * SPDX-FileContributor: Alan Carvalho de Assis <acassis@gmail.com>
- * SPDX-FileContributor: Leomar Mateus Radke <leomar@falker.com.br>
- * SPDX-FileContributor: Ricardo Wartchow <wartchow@gmail.com>
+ *   Copyright (C) 2013-2014, 2018 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2015 Filament - www.filament.com
+ *   Author: Matt Thompson <mthompson@hexwave.com>
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,18 +34,17 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ *******************************************************************************/
 
-/****************************************************************************
+/*******************************************************************************
  * Included Files
- ****************************************************************************/
+ *******************************************************************************/
 
 #include <nuttx/config.h>
 
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -58,13 +52,14 @@
 #include <nuttx/irq.h>
 #include <nuttx/wdog.h>
 #include <nuttx/clock.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/i2c/i2c_master.h>
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "hardware/sam_i2c_master.h"
 #include "hardware/sam_pinmap.h"
 #include "sam_gclk.h"
@@ -73,11 +68,11 @@
 
 #if defined(SAMD5E5_HAVE_I2C_MASTER)
 
-/****************************************************************************
+/*******************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ *******************************************************************************/
 
-/* Configuration ************************************************************/
+/* Configuration ***************************************************************/
 
 #ifndef CONFIG_SAM_I2C0_FREQUENCY
 #  define CONFIG_SAM_I2C0_FREQUENCY 100000
@@ -103,14 +98,13 @@
 #  define CONFIG_SAM_I2C5_FREQUENCY 100000
 #endif
 
-/* Driver internal definitions **********************************************/
+/* Driver internal definitions *************************************************/
 
-/* If verbose I2C debug output is enable, then allow more time before we
- * declare a timeout.
- * The debug output from i2c_interrupt will really slow things down!
+/* If verbose I2C debug output is enable, then allow more time before we declare
+ * a timeout.  The debug output from i2c_interrupt will really slow things down!
  *
- * With a very slow clock (say 100,000 Hz), less than 100 usec would be
- * required to transfer on byte.  So these define a "long" timeout.
+ * With a very slow clock (say 100,000 Hz), less than 100 usec would be required
+ * to transfer on byte.  So these define a "long" timeout.
  */
 
 #ifdef CONFIG_DEBUG_I2C_INFO
@@ -125,9 +119,9 @@
 
 #define I2C_MAX_FREQUENCY 66000000    /* Maximum I2C frequency */
 
-/****************************************************************************
+/*******************************************************************************
  * Private Types
- ****************************************************************************/
+ *******************************************************************************/
 
 /* Invariant attributes of a I2C bus */
 
@@ -164,14 +158,14 @@ struct sam_i2c_dev_s
   uint16_t flags;                /* Transfer flags */
   uint16_t nextflags;            /* Next message flags */
 
-  mutex_t lock;               /* Only one thread can access at a time */
+  sem_t exclsem;              /* Only one thread can access at a time */
   sem_t waitsem;              /* Wait for I2C transfer completion */
   volatile int result;        /* The result of the transfer */
   volatile int xfrd;          /* Number of bytes transfers */
 
   /* Debug stuff */
 
-#ifdef CONFIG_SAMD5E5_I2C_REGDEBUG
+#ifdef CONFIG_SAM_I2C_REGDEBUG
   bool wrlast;                /* Last was a write */
   uint32_t addrlast;          /* Last address */
   uint32_t vallast;           /* Last value */
@@ -179,26 +173,27 @@ struct sam_i2c_dev_s
 #endif
 };
 
-/****************************************************************************
+/*******************************************************************************
  * Private Function Prototypes
- ****************************************************************************/
+ *******************************************************************************/
 
 /* Low-level helper functions */
 
-static uint8_t i2c_getreg8(struct sam_i2c_dev_s *priv,
-                           unsigned int offset);
+static uint8_t i2c_getreg8(struct sam_i2c_dev_s *priv, unsigned int offset);
 static void i2c_putreg8(struct sam_i2c_dev_s *priv, uint8_t regval,
                         unsigned int offset);
-static uint16_t i2c_getreg16(struct sam_i2c_dev_s *priv,
-                             unsigned int offset);
+static uint16_t i2c_getreg16(struct sam_i2c_dev_s *priv, unsigned int offset);
 static void i2c_putreg16(struct sam_i2c_dev_s *priv, uint16_t regval,
                          unsigned int offset);
-static uint32_t i2c_getreg32(struct sam_i2c_dev_s *priv,
-                             unsigned int offset);
+static uint32_t i2c_getreg32(struct sam_i2c_dev_s *priv, unsigned int offset);
 static void i2c_putreg32(struct sam_i2c_dev_s *priv, uint32_t regval,
                          unsigned int offset);
 
-#ifdef CONFIG_SAMD5E5_I2C_REGDEBUG
+static int i2c_takesem(sem_t * sem);
+static int i2c_takesem_noncancelable(sem_t * sem);
+#define i2c_givesem(sem) (nxsem_post(sem))
+
+#ifdef CONFIG_SAM_I2C_REGDEBUG
 static bool i2c_checkreg(struct sam_i2c_dev_s *priv, bool wr,
                          uint32_t value, uintptr_t address);
 static uint32_t i2c_getabs(struct sam_i2c_dev_s *priv, uintptr_t address);
@@ -212,8 +207,7 @@ static void i2c_putabs(struct sam_i2c_dev_s *priv, uintptr_t address,
 
 static inline uint32_t i2c_getrel(struct sam_i2c_dev_s *priv,
                                   unsigned int offset);
-static inline void i2c_putrel(struct sam_i2c_dev_s *priv,
-                              unsigned int offset,
+static inline void i2c_putrel(struct sam_i2c_dev_s *priv, unsigned int offset,
                               uint32_t value);
 
 /* I2C transfer helper functions */
@@ -221,44 +215,33 @@ static inline void i2c_putrel(struct sam_i2c_dev_s *priv,
 static int i2c_wait_for_bus(struct sam_i2c_dev_s *priv, unsigned int size);
 
 static void i2c_wakeup(struct sam_i2c_dev_s *priv, int result);
-static int i2c_interrupt(int irq, void *context, void *arg);
+static int i2c_interrupt(int irq, FAR void *context, void *arg);
 
 static void i2c_startread(struct sam_i2c_dev_s *priv, struct i2c_msg_s *msg);
-static void i2c_startwrite(struct sam_i2c_dev_s *priv,
-                           struct i2c_msg_s *msg);
-static void i2c_startmessage(struct sam_i2c_dev_s *priv,
-                             struct i2c_msg_s *msg);
+static void i2c_startwrite(struct sam_i2c_dev_s *priv, struct i2c_msg_s *msg);
+static void i2c_startmessage(struct sam_i2c_dev_s *priv, struct i2c_msg_s *msg);
 
-static int sam_i2c_transfer(struct i2c_master_s *dev,
-                            struct i2c_msg_s *msgs, int count);
+static int sam_i2c_transfer(FAR struct i2c_master_s *dev,
+                            FAR struct i2c_msg_s *msgs, int count);
 
 /* Initialization */
 
 static uint32_t sam_i2c_setfrequency(struct sam_i2c_dev_s *priv,
                                      uint32_t frequency);
-static void i2c_hw_initialize(struct sam_i2c_dev_s *priv,
-                              uint32_t frequency);
+static void i2c_hw_initialize(struct sam_i2c_dev_s *priv, uint32_t frequency);
 static void i2c_wait_synchronization(struct sam_i2c_dev_s *priv);
 static void i2c_pad_configure(struct sam_i2c_dev_s *priv);
 
-/****************************************************************************
+/*******************************************************************************
  * Private Data
- ****************************************************************************/
-
-static static struct i2c_ops_s g_i2cops =
-{
-  .transfer = sam_i2c_transfer,
-#ifdef CONFIG_I2C_RESET
-  .reset = sam_i2c_reset,
-#endif
-};
+ *******************************************************************************/
 
 #ifdef SAMD5E5_HAVE_I2C0_MASTER
 static const struct i2c_attr_s g_i2c0attr =
 {
   .i2c       = 0,
   .sercom    = 0,
-  .irq       = SAM_IRQ_SERCOM0_0,
+  .irq       = SAM_IRQ_SERCOM0,
   .coregen   = BOARD_SERCOM0_GCLKGEN,
   .slowgen   = BOARD_SERCOM0_SLOW_GCLKGEN,
   .pad0      = BOARD_SERCOM0_PINMAP_PAD0,
@@ -268,16 +251,7 @@ static const struct i2c_attr_s g_i2c0attr =
   .base      = SAM_SERCOM0_BASE,
 };
 
-static struct sam_i2c_dev_s g_i2c0 =
-{
-  .dev       =
-  {
-    .ops     = &g_i2cops,
-  },
-  .attr      = &g_i2c0attr,
-  .lock      = NXMUTEX_INITIALIZER,
-  .waitsem   = SEM_INITIALIZER(0),
-};
+static struct sam_i2c_dev_s g_i2c0;
 #endif
 
 #ifdef SAMD5E5_HAVE_I2C1_MASTER
@@ -285,7 +259,7 @@ static const struct i2c_attr_s g_i2c1attr =
 {
   .i2c       = 1,
   .sercom    = 1,
-  .irq       = SAM_IRQ_SERCOM1_0,
+  .irq       = SAM_IRQ_SERCOM1,
   .coregen   = BOARD_SERCOM1_GCLKGEN,
   .slowgen   = BOARD_SERCOM1_SLOW_GCLKGEN,
   .pad0      = BOARD_SERCOM1_PINMAP_PAD0,
@@ -295,16 +269,7 @@ static const struct i2c_attr_s g_i2c1attr =
   .base      = SAM_SERCOM1_BASE,
 };
 
-static struct sam_i2c_dev_s g_i2c1 =
-{
-  .dev       =
-  {
-    .ops     = &g_i2cops,
-  },
-  .attr      = &g_i2c1attr,
-  .lock      = NXMUTEX_INITIALIZER,
-  .waitsem   = SEM_INITIALIZER(0),
-};
+static struct sam_i2c_dev_s g_i2c1;
 #endif
 
 #ifdef SAMD5E5_HAVE_I2C2_MASTER
@@ -312,7 +277,7 @@ static const struct i2c_attr_s g_i2c2attr =
 {
   .i2c       = 2,
   .sercom    = 2,
-  .irq       = SAM_IRQ_SERCOM2_0,
+  .irq       = SAM_IRQ_SERCOM2,
   .coregen   = BOARD_SERCOM2_GCLKGEN,
   .slowgen   = BOARD_SERCOM2_SLOW_GCLKGEN,
   .pad0      = BOARD_SERCOM2_PINMAP_PAD0,
@@ -322,16 +287,7 @@ static const struct i2c_attr_s g_i2c2attr =
   .base      = SAM_SERCOM2_BASE,
 };
 
-static struct sam_i2c_dev_s g_i2c2 =
-{
-  .dev       =
-  {
-    .ops     = &g_i2cops,
-  },
-  .attr      = &g_i2c2attr,
-  .lock      = NXMUTEX_INITIALIZER,
-  .waitsem   = SEM_INITIALIZER(0),
-};
+static struct sam_i2c_dev_s g_i2c2;
 #endif
 
 #ifdef SAMD5E5_HAVE_I2C3_MASTER
@@ -339,7 +295,7 @@ static const struct i2c_attr_s g_i2c3attr =
 {
   .i2c       = 3,
   .sercom    = 3,
-  .irq       = SAM_IRQ_SERCOM3_0, /* !!! SAM_IRQ_SERCOM3 */
+  .irq       = SAM_IRQ_SERCOM3,
   .coregen   = BOARD_SERCOM3_GCLKGEN,
   .slowgen   = BOARD_SERCOM3_SLOW_GCLKGEN,
   .pad0      = BOARD_SERCOM3_PINMAP_PAD0,
@@ -349,16 +305,7 @@ static const struct i2c_attr_s g_i2c3attr =
   .base      = SAM_SERCOM3_BASE,
 };
 
-static struct sam_i2c_dev_s g_i2c3 =
-{
-  .dev       =
-  {
-    .ops     = &g_i2cops,
-  },
-  .attr      = &g_i2c3attr,
-  .lock      = NXMUTEX_INITIALIZER,
-  .waitsem   = SEM_INITIALIZER(0),
-};
+static struct sam_i2c_dev_s g_i2c3;
 #endif
 
 #ifdef SAMD5E5_HAVE_I2C4_MASTER
@@ -366,7 +313,7 @@ static const struct i2c_attr_s g_i2c4attr =
 {
   .i2c       = 4,
   .sercom    = 4,
-  .irq       = SAM_IRQ_SERCOM4_0,
+  .irq       = SAM_IRQ_SERCOM4,
   .coregen   = BOARD_SERCOM4_GCLKGEN,
   .slowgen   = BOARD_SERCOM4_SLOW_GCLKGEN,
   .pad0      = BOARD_SERCOM4_PINMAP_PAD0,
@@ -376,16 +323,7 @@ static const struct i2c_attr_s g_i2c4attr =
   .base      = SAM_SERCOM4_BASE,
 };
 
-static struct sam_i2c_dev_s g_i2c4 =
-{
-  .dev       =
-  {
-    .ops     = &g_i2cops,
-  },
-  .attr      = &g_i2c4attr,
-  .lock      = NXMUTEX_INITIALIZER,
-  .waitsem   = SEM_INITIALIZER(0),
-};
+static struct sam_i2c_dev_s g_i2c4;
 #endif
 
 #ifdef SAMD5E5_HAVE_I2C5_MASTER
@@ -393,7 +331,7 @@ static const struct i2c_attr_s g_i2c5attr =
 {
   .i2c       = 5,
   .sercom    = 5,
-  .irq       = SAM_IRQ_SERCOM5_0, /* !!! SAM_IRQ_SERCOM5 */
+  .irq       = SAM_IRQ_SERCOM5,
   .coregen   = BOARD_SERCOM5_GCLKGEN,
   .slowgen   = BOARD_SERCOM5_SLOW_GCLKGEN,
   .pad0      = BOARD_SERCOM5_PINMAP_PAD0,
@@ -403,16 +341,7 @@ static const struct i2c_attr_s g_i2c5attr =
   .base      = SAM_SERCOM5_BASE,
 };
 
-static struct sam_i2c_dev_s g_i2c5 =
-{
-  .dev       =
-  {
-    .ops     = &g_i2cops,
-  },
-  .attr      = &g_i2c5attr,
-  .lock      = NXMUTEX_INITIALIZER,
-  .waitsem   = SEM_INITIALIZER(0),
-};
+static struct sam_i2c_dev_s g_i2c5;
 #endif
 
 #ifdef SAMD5E5_HAVE_I2C6_MASTER
@@ -430,16 +359,7 @@ static const struct i2c_attr_s g_i2c6attr =
   .base      = SAM_SERCOM6_BASE,
 };
 
-static struct sam_i2c_dev_s g_i2c6 =
-{
-  .dev       =
-  {
-    .ops     = &g_i2cops,
-  },
-  .attr      = &g_i2c6attr,
-  .lock      = NXMUTEX_INITIALIZER,
-  .waitsem   = SEM_INITIALIZER(0),
-};
+static struct sam_i2c_dev_s g_i2c6;
 #endif
 
 #ifdef SAMD5E5_HAVE_I2C7_MASTER
@@ -457,42 +377,41 @@ static const struct i2c_attr_s g_i2c7attr =
   .base      = SAM_SERCOM7_BASE,
 };
 
-static struct sam_i2c_dev_s g_i2c7 =
-{
-  .dev       =
-  {
-    .ops     = &g_i2cops,
-  },
-  .attr      = &g_i2c7attr,
-  .lock      = NXMUTEX_INITIALIZER,
-  .waitsem   = SEM_INITIALIZER(0),
-};
+static struct sam_i2c_dev_s g_i2c7;
 #endif
 
-/****************************************************************************
- * Low-level Helpers
- ****************************************************************************/
+struct i2c_ops_s g_i2cops =
+{
+  .transfer = sam_i2c_transfer,
+#ifdef CONFIG_I2C_RESET
+  .reset = sam_i2c_reset,
+#endif
+};
 
-/****************************************************************************
+/*******************************************************************************
+ * Low-level Helpers
+ *******************************************************************************/
+
+/*******************************************************************************
  * Name: i2c_getreg8
  *
  * Description:
  *   Get a 8-bit register value by offset
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static uint8_t i2c_getreg8(struct sam_i2c_dev_s *priv, unsigned int offset)
 {
   return getreg8(priv->attr->base + offset);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_putreg8
  *
  * Description:
  *  Put a 8-bit register value by offset
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static void i2c_putreg8(struct sam_i2c_dev_s *priv, uint8_t regval,
                         unsigned int offset)
@@ -500,26 +419,26 @@ static void i2c_putreg8(struct sam_i2c_dev_s *priv, uint8_t regval,
   putreg8(regval, priv->attr->base + offset);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_getreg16
  *
  * Description:
  *   Get a 16-bit register value by offset
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static uint16_t i2c_getreg16(struct sam_i2c_dev_s *priv, unsigned int offset)
 {
   return getreg16(priv->attr->base + offset);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_putreg16
  *
  * Description:
  *  Put a 16-bit register value by offset
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static void i2c_putreg16(struct sam_i2c_dev_s *priv, uint16_t regval,
                          unsigned int offset)
@@ -527,26 +446,26 @@ static void i2c_putreg16(struct sam_i2c_dev_s *priv, uint16_t regval,
   putreg16(regval, priv->attr->base + offset);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_getreg32
  *
  * Description:
  *   Get a 32-bit register value by offset
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static uint32_t i2c_getreg32(struct sam_i2c_dev_s *priv, unsigned int offset)
 {
   return getreg32(priv->attr->base + offset);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_putreg32
  *
  * Description:
  *  Put a 32-bit register value by offset
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static void i2c_putreg32(struct sam_i2c_dev_s *priv, uint32_t regval,
                          unsigned int offset)
@@ -554,7 +473,46 @@ static void i2c_putreg32(struct sam_i2c_dev_s *priv, uint32_t regval,
   putreg32(regval, priv->attr->base + offset);
 }
 
-/****************************************************************************
+/*******************************************************************************
+ * Name: i2c_takesem
+ *
+ * Description:
+ *   Take the wait semaphore.  May be interrupted by a signal.
+ *
+ * Input Parameters:
+ *   dev - Instance of the SDIO device driver state structure.
+ *
+ * Returned Value:
+ *   None
+ *
+ *******************************************************************************/
+
+static int i2c_takesem(sem_t *sem)
+{
+  return nxsem_wait(sem);
+}
+
+/*******************************************************************************
+ * Name: i2c_takesem_noncancelable
+ *
+ * Description:
+ *   Take the wait semaphore (handling false alarm wake-ups due to the receipt
+ *   of signals).
+ *
+ * Input Parameters:
+ *   dev - Instance of the SDIO device driver state structure.
+ *
+ * Returned Value:
+ *   None
+ *
+ *******************************************************************************/
+
+static int i2c_takesem_noncancelable(sem_t *sem)
+{
+  return nxsem_wait_uninterruptible(sem);
+}
+
+/*******************************************************************************
  * Name: i2c_checkreg
  *
  * Description:
@@ -568,9 +526,9 @@ static void i2c_putreg32(struct sam_i2c_dev_s *priv, uint32_t regval,
  *   true:  This is the first register access of this type.
  *   false: This is the same as the preceding register access.
  *
- ****************************************************************************/
+ *******************************************************************************/
 
-#ifdef CONFIG_SAMD5E5_I2C_REGDEBUG
+#ifdef CONFIG_SAM_I2C_REGDEBUG
 static bool i2c_checkreg(struct sam_i2c_dev_s *priv, bool wr, uint32_t value,
                          uint32_t address)
 {
@@ -608,15 +566,15 @@ static bool i2c_checkreg(struct sam_i2c_dev_s *priv, bool wr, uint32_t value,
 }
 #endif
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_getabs
  *
  * Description:
  *  Read any 32-bit register using an absolute
  *
- ****************************************************************************/
+ *******************************************************************************/
 
-#ifdef CONFIG_SAMD5E5_I2C_REGDEBUG
+#ifdef CONFIG_SAM_I2C_REGDEBUG
 static uint32_t i2c_getabs(struct sam_i2c_dev_s *priv, uintptr_t address)
 {
   uint32_t value = getreg32(address);
@@ -630,15 +588,15 @@ static uint32_t i2c_getabs(struct sam_i2c_dev_s *priv, uintptr_t address)
 }
 #endif
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_putabs
  *
  * Description:
  *  Write to any 32-bit register using an absolute address
  *
- ****************************************************************************/
+ *******************************************************************************/
 
-#ifdef CONFIG_SAMD5E5_I2C_REGDEBUG
+#ifdef CONFIG_SAM_I2C_REGDEBUG
 static void i2c_putabs(struct sam_i2c_dev_s *priv, uintptr_t address,
                        uint32_t value)
 {
@@ -651,13 +609,13 @@ static void i2c_putabs(struct sam_i2c_dev_s *priv, uintptr_t address,
 }
 #endif
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_getrel
  *
  * Description:
  *  Read a I2C register using an offset relative to the I2C base address
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static inline uint32_t i2c_getrel(struct sam_i2c_dev_s *priv,
                                   unsigned int offset)
@@ -665,27 +623,26 @@ static inline uint32_t i2c_getrel(struct sam_i2c_dev_s *priv,
   return i2c_getabs(priv, priv->attr->base + offset);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_putrel
  *
  * Description:
  *  Write a value to a I2C register using an offset relative to the I2C base
  *  address.
  *
- ****************************************************************************/
+ *******************************************************************************/
 
-static inline void i2c_putrel(struct sam_i2c_dev_s *priv,
-                              unsigned int offset,
+static inline void i2c_putrel(struct sam_i2c_dev_s *priv, unsigned int offset,
                               uint32_t value)
 {
   i2c_putabs(priv, priv->attr->base + offset, value);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * I2C transfer helper functions
- ****************************************************************************/
+ *******************************************************************************/
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_wait_for_bus
  *
  * Description:
@@ -695,29 +652,33 @@ static inline void i2c_putrel(struct sam_i2c_dev_s *priv,
  * Assumptions:
  *   Interrupts are disabled
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static int i2c_wait_for_bus(struct sam_i2c_dev_s *priv, unsigned int size)
 {
+  struct timespec ts;
   int ret;
 
-  ret = nxsem_tickwait(&priv->waitsem, USEC2TICK(size * I2C_TIMEOUT_MSPB));
+  clock_gettime(CLOCK_REALTIME, &ts);
+  ts.tv_nsec += 200e3;
+
+  ret = nxsem_timedwait(&priv->waitsem, (const struct timespec *)&ts);
   if (ret < 0)
     {
-      i2cinfo("nxsem_tickwait error %d\n", ret);
+      i2cinfo("timedwait error %d\n", ret);
       return ret;
     }
 
   return priv->result;
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_wakeup
  *
  * Description:
  *   A terminal event has occurred.  Wake-up the waiting thread
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static void i2c_wakeup(struct sam_i2c_dev_s *priv, int result)
 {
@@ -731,15 +692,15 @@ static void i2c_wakeup(struct sam_i2c_dev_s *priv, int result)
   nxsem_post(&priv->waitsem);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_interrupt
  *
  * Description:
  *   The I2C Interrupt Handler
  *
- ****************************************************************************/
+ *******************************************************************************/
 
-static int i2c_interrupt(int irq, void *context, void *arg)
+static int i2c_interrupt(int irq, FAR void *context, FAR void *arg)
 {
   struct sam_i2c_dev_s *priv = (struct sam_i2c_dev_s *)arg;
   struct i2c_msg_s *msg;
@@ -820,7 +781,6 @@ static int i2c_interrupt(int irq, void *context, void *arg)
 
   if ((i2c_getreg8(priv, SAM_I2C_INTFLAG_OFFSET) & I2C_INT_MB) == I2C_INT_MB)
     {
-      i2cinfo("I2C INT MB!\n");
       /* If no device responded to the address packet, STATUS.RXNACK will be
        * set
        */
@@ -864,13 +824,13 @@ static int i2c_interrupt(int irq, void *context, void *arg)
   return OK;
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_startread
  *
  * Description:
  *   Start the next read message
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static void i2c_startread(struct sam_i2c_dev_s *priv, struct i2c_msg_s *msg)
 {
@@ -909,18 +869,17 @@ static void i2c_startread(struct sam_i2c_dev_s *priv, struct i2c_msg_s *msg)
 
   /* Set the ADDR register */
 
-  i2cinfo("readaddr=%x\n", regval);
   i2c_putreg32(priv, regval, SAM_I2C_ADDR_OFFSET);
   i2c_wait_synchronization(priv);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_startwrite
  *
  * Description:
  *   Start the next write message
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static void i2c_startwrite(struct sam_i2c_dev_s *priv, struct i2c_msg_s *msg)
 {
@@ -965,46 +924,41 @@ static void i2c_startwrite(struct sam_i2c_dev_s *priv, struct i2c_msg_s *msg)
 
   if ((msg->flags & I2C_M_NOSTART) == 0)
     {
-      i2cinfo("writeaddr=%x\n", regval);
       i2c_putreg32(priv, regval, SAM_I2C_ADDR_OFFSET);
     }
   else
     {
-      i2cinfo("data=%x\n", msg->buffer[priv->xfrd]);
       i2c_putreg8(priv, msg->buffer[priv->xfrd++], SAM_I2C_DATA_OFFSET);
     }
 
   i2c_wait_synchronization(priv);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_startmessage
  *
  * Description:
  *   Start the next write message
  *
- ****************************************************************************/
+ *******************************************************************************/
 
-static void i2c_startmessage(struct sam_i2c_dev_s *priv,
-                             struct i2c_msg_s *msg)
+static void i2c_startmessage(struct sam_i2c_dev_s *priv, struct i2c_msg_s *msg)
 {
   if ((msg->flags & I2C_M_READ) != 0)
     {
-      i2cinfo("startread\n");
       i2c_startread(priv, msg);
     }
   else
     {
-      i2cinfo("startwrite\n");
       i2c_startwrite(priv, msg);
     }
 }
 
-/****************************************************************************
+/*******************************************************************************
  * I2C device operations
- ****************************************************************************/
+ *******************************************************************************/
 
-/****************************************************************************
+/*******************************************************************************
  * Name: sam_i2c_transfer
  *
  * Description:
@@ -1014,16 +968,16 @@ static void i2c_startmessage(struct sam_i2c_dev_s *priv,
  * Returned Value:
  *   Returns zero on success; a negated errno value on failure.
  *
- ****************************************************************************/
+ *******************************************************************************/
 
-static int sam_i2c_transfer(struct i2c_master_s *dev,
-                            struct i2c_msg_s *msgs, int count)
+static int sam_i2c_transfer(FAR struct i2c_master_s *dev,
+                            FAR struct i2c_msg_s *msgs, int count)
 {
   struct sam_i2c_dev_s *priv = (struct sam_i2c_dev_s *)dev;
   irqstate_t flags;
   unsigned int size;
   int i;
-  int ret = -EBUSY;
+  int ret;
 
   DEBUGASSERT(dev != NULL && msgs != NULL && count > 0);
 
@@ -1031,10 +985,8 @@ static int sam_i2c_transfer(struct i2c_master_s *dev,
 
   if (count)
     {
-      i2cinfo("msgs->frequency=%d\n", msgs->frequency);
       if (priv->frequency != msgs->frequency)
         {
-          i2cinfo("priv->frequency=%d\n", priv->frequency);
           sam_i2c_setfrequency(priv, msgs->frequency);
           priv->frequency = msgs->frequency;
         }
@@ -1054,16 +1006,21 @@ static int sam_i2c_transfer(struct i2c_master_s *dev,
 
   /* Get exclusive access to the device */
 
-  nxmutex_lock(&priv->lock);
+  ret = i2c_takesem(&priv->exclsem);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Initiate the message transfer */
+
+  ret = -EBUSY;
 
   /* Initiate the transfer.  The rest will be handled from interrupt logic.
    * Interrupts must be disabled to prevent re-entrance from the interrupt
    * level.
    */
 
-  i2cinfo("count=%d\n", count);
   while (count--)
     {
       priv->msg = msgs;
@@ -1071,15 +1028,22 @@ static int sam_i2c_transfer(struct i2c_master_s *dev,
       flags = enter_critical_section();
       i2c_startmessage(priv, msgs);
 
-      /* And wait for the transfers to complete.
-       * Interrupts will be re-enabled while we are waiting.
+      /* And wait for the transfers to complete.  Interrupts will be re-enabled
+       * while we are waiting.
        */
 
       ret = i2c_wait_for_bus(priv, msgs->length);
       if (ret < 0)
         {
+#if 0
+          i2cerr("ERROR: Transfer failed: %d\n", ret);
+          i2cinfo("STATUS: 0x%08x\n",
+                  i2c_getreg16(priv, SAM_I2C_STATUS_OFFSET));
+          i2cinfo("INTFLAG: 0x%02x\n",
+                  i2c_getreg8(priv, SAM_I2C_INTFLAG_OFFSET));
+#endif
           leave_critical_section(flags);
-          nxmutex_unlock(&priv->lock);
+          i2c_givesem(&priv->exclsem);
           return ret;
         }
 
@@ -1090,21 +1054,21 @@ static int sam_i2c_transfer(struct i2c_master_s *dev,
       msgs++;
     }
 
-  nxmutex_unlock(&priv->lock);
+  i2c_givesem(&priv->exclsem);
   return ret;
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Initialization
- ****************************************************************************/
+ *******************************************************************************/
 
-/****************************************************************************
+/*******************************************************************************
  * Name: sam_i2c_setfrequency
  *
  * Description:
  *   Set the frequency for the next transfer
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static uint32_t sam_i2c_setfrequency(struct sam_i2c_dev_s *priv,
                                      uint32_t frequency)
@@ -1113,8 +1077,6 @@ static uint32_t sam_i2c_setfrequency(struct sam_i2c_dev_s *priv,
   uint32_t baud = 0;
   uint32_t baud_hs = 0;
   uint32_t ctrla;
-
-  i2cinfo("sercom=%d frequency=%d\n", priv->attr->sercom, frequency);
 
   /* Check if the configured BAUD is within the valid range */
 
@@ -1127,9 +1089,7 @@ static uint32_t sam_i2c_setfrequency(struct sam_i2c_dev_s *priv,
       frequency = maxfreq;
     }
 
-  /* Check if the requested frequency is the same as the frequency
-   * selection
-   */
+  /* Check if the requested frequency is the same as the frequency selection */
 
   if (priv->frequency == frequency)
     {
@@ -1199,15 +1159,15 @@ static uint32_t sam_i2c_setfrequency(struct sam_i2c_dev_s *priv,
   return priv->frequency;
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_hw_initialize
  *
  * Description:
  *   Initialize/Re-initialize the I2C peripheral.  This logic performs only
- *   repeatable initialization after either (1) the one-time initialization,
- *   or (2) after each bus reset.
+ *   repeatable initialization after either (1) the one-time initialization, or
+ *   (2) after each bus reset.
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static void i2c_hw_initialize(struct sam_i2c_dev_s *priv, uint32_t frequency)
 {
@@ -1234,7 +1194,6 @@ static void i2c_hw_initialize(struct sam_i2c_dev_s *priv, uint32_t frequency)
     {
       i2cerr("ERROR: Cannot initialize I2C "
              "because it is already initialized!\n");
-      leave_critical_section(flags);
       return;
     }
 
@@ -1244,7 +1203,6 @@ static void i2c_hw_initialize(struct sam_i2c_dev_s *priv, uint32_t frequency)
   if (regval & I2C_CTRLA_SWRST)
     {
       i2cerr("ERROR: Module is in RESET process!\n");
-      leave_critical_section(flags);
       return;
     }
 
@@ -1252,7 +1210,7 @@ static void i2c_hw_initialize(struct sam_i2c_dev_s *priv, uint32_t frequency)
 
   i2c_pad_configure(priv);
 
-  ctrla = I2C_CTRLA_MODE_MASTER | I2C_CTRLA_RUNSTDBY | I2C_CTRLA_SPEED_STD |
+  ctrla = I2C_CTRLA_MODE_MASTER | I2C_CTRLA_RUNSTDBY | I2C_CTRLA_SPEED_FAST |
           I2C_CTRLA_SDAHOLD_450NS | priv->attr->muxconfig;
   i2c_putreg32(priv, ctrla, SAM_I2C_CTRLA_OFFSET);
   i2c_wait_synchronization(priv);
@@ -1261,11 +1219,7 @@ static void i2c_hw_initialize(struct sam_i2c_dev_s *priv, uint32_t frequency)
 
   i2c_putreg32(priv, I2C_CTRLB_SMEN, SAM_I2C_CTRLB_OFFSET);
 
-  /* 8bit Mode */
-
-  i2c_putreg32(priv, I2C_CTRLC_DATA32B_8BIT, SAM_I2C_CTRLC_OFFSET);
-
-  /* Set an initial baud value */
+  /* Set an initial baud value. */
 
   sam_i2c_setfrequency(priv, 100000);
 
@@ -1287,30 +1241,29 @@ static void i2c_hw_initialize(struct sam_i2c_dev_s *priv, uint32_t frequency)
   /* Enable SERCOM interrupts at the NVIC */
 
   up_enable_irq(priv->attr->irq);
-  up_enable_irq(priv->attr->irq + 1);
   leave_critical_section(flags);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_wait_synchronization
  *
  * Description:
  *   Wait until the SERCOM I2C reports that it is synchronized.
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static void i2c_wait_synchronization(struct sam_i2c_dev_s *priv)
 {
   while ((i2c_getreg16(priv, SAM_I2C_SYNCBUSY_OFFSET) & 0x7) != 0);
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: i2c_pad_configure
  *
  * Description:
  *   Configure the SERCOM I2C pads.
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 static void i2c_pad_configure(struct sam_i2c_dev_s *priv)
 {
@@ -1327,17 +1280,17 @@ static void i2c_pad_configure(struct sam_i2c_dev_s *priv)
     }
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Public Functions
- ****************************************************************************/
+ *******************************************************************************/
 
-/****************************************************************************
+/*******************************************************************************
  * Name: sam_i2c_master_initialize
  *
  * Description:
  *   Initialize a I2C device for I2C operation
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 struct i2c_master_s *sam_i2c_master_initialize(int bus)
 {
@@ -1349,9 +1302,13 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
 #ifdef SAMD5E5_HAVE_I2C0_MASTER
   if (bus == 0)
     {
-      /* Select up I2C0 and the (initial) I2C frequency */
+      /* Select up I2C0 and setup invariant attributes */
 
       priv = &g_i2c0;
+      priv->attr = &g_i2c0attr;
+
+      /* Select the (initial) I2C frequency */
+
       frequency = CONFIG_SAM_I2C0_FREQUENCY;
     }
   else
@@ -1359,9 +1316,13 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
 #ifdef SAMD5E5_HAVE_I2C1_MASTER
   if (bus == 1)
     {
-      /* Select up I2C1 and the (initial) I2C frequency */
+      /* Select up I2C1 and setup invariant attributes */
 
       priv = &g_i2c1;
+      priv->attr = &g_i2c1attr;
+
+      /* Select the (initial) I2C frequency */
+
       frequency = CONFIG_SAM_I2C1_FREQUENCY;
     }
   else
@@ -1369,9 +1330,13 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
 #ifdef SAMD5E5_HAVE_I2C2_MASTER
   if (bus == 2)
     {
-      /* Select up I2C2 and the (initial) I2C frequency */
+      /* Select up I2C2 and setup invariant attributes */
 
       priv = &g_i2c2;
+      priv->attr = &g_i2c2attr;
+
+      /* Select the (initial) I2C frequency */
+
       frequency = CONFIG_SAM_I2C2_FREQUENCY;
     }
   else
@@ -1379,9 +1344,13 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
 #ifdef SAMD5E5_HAVE_I2C3_MASTER
   if (bus == 3)
     {
-      /* Select up I2C3 and the (initial) I2C frequency */
+      /* Select up I2C3 and setup invariant attributes */
 
       priv = &g_i2c3;
+      priv->attr = &g_i2c3attr;
+
+      /* Select the (initial) I2C frequency */
+
       frequency = CONFIG_SAM_I2C3_FREQUENCY;
     }
   else
@@ -1389,9 +1358,13 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
 #ifdef SAMD5E5_HAVE_I2C4_MASTER
   if (bus == 4)
     {
-      /* Select up I2C4 and the (initial) I2C frequency */
+      /* Select up I2C4 and setup invariant attributes */
 
       priv = &g_i2c4;
+      priv->attr = &g_i2c4attr;
+
+      /* Select the (initial) I2C frequency */
+
       frequency = CONFIG_SAM_I2C4_FREQUENCY;
     }
   else
@@ -1399,9 +1372,13 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
 #ifdef SAMD5E5_HAVE_I2C5_MASTER
   if (bus == 5)
     {
-      /* Select up I2C5 and the (initial) I2C frequency */
+      /* Select up I2C5 and setup invariant attributes */
 
       priv = &g_i2c5;
+      priv->attr = &g_i2c5attr;
+
+      /* Select the (initial) I2C frequency */
+
       frequency = CONFIG_SAM_I2C5_FREQUENCY;
     }
   else
@@ -1409,9 +1386,13 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
 #ifdef SAMD5E5_HAVE_I2C6_MASTER
   if (bus == 6)
     {
-      /* Select up I2C6 and the (initial) I2C frequency */
+      /* Select up I2C6 and setup invariant attributes */
 
       priv = &g_i2c6;
+      priv->attr = &g_i2c6attr;
+
+      /* Select the (initial) I2C frequency */
+
       frequency = CONFIG_SAM_I2C6_FREQUENCY;
     }
   else
@@ -1419,9 +1400,13 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
 #ifdef SAMD5E5_HAVE_I2C7_MASTER
   if (bus == 7)
     {
-      /* Select up I2C7 and the (initial) I2C frequency */
+      /* Select up I2C7 and setup invariant attributes */
 
       priv = &g_i2c7;
+      priv->attr = &g_i2c7attr;
+
+      /* Select the (initial) I2C frequency */
+
       frequency = CONFIG_SAM_I2C7_FREQUENCY;
     }
   else
@@ -1445,13 +1430,13 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
       return NULL;
     }
 
-  ret = irq_attach(priv->attr->irq + 1, i2c_interrupt, priv);
-  if (ret < 0)
-    {
-      i2cerr("ERROR: Failed to attach irq %d\n", priv->attr->irq);
-      leave_critical_section(flags);
-      return NULL;
-    }
+  /* Initialize the I2C driver structure */
+
+  priv->dev.ops = &g_i2cops;
+  priv->flags = 0;
+
+  nxsem_init(&priv->exclsem, 0, 1);
+  nxsem_init(&priv->waitsem, 0, 0);
 
   /* Perform repeatable I2C hardware initialization */
 
@@ -1460,15 +1445,15 @@ struct i2c_master_s *sam_i2c_master_initialize(int bus)
   return &priv->dev;
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: sam_i2c_uninitialize
  *
  * Description:
  *   Uninitialize an I2C device
  *
- ****************************************************************************/
+ *******************************************************************************/
 
-int sam_i2c_uninitialize(struct i2c_master_s *dev)
+int sam_i2c_uninitialize(FAR struct i2c_master_s *dev)
 {
   struct sam_i2c_dev_s *priv = (struct sam_i2c_dev_s *)dev;
 
@@ -1477,7 +1462,11 @@ int sam_i2c_uninitialize(struct i2c_master_s *dev)
   /* Disable I2C interrupts */
 
   up_disable_irq(priv->attr->irq);
-  up_disable_irq(priv->attr->irq + 1);
+
+  /* Reset data structures */
+
+  nxsem_destroy(&priv->exclsem);
+  nxsem_destroy(&priv->waitsem);
 
   /* Detach Interrupt Handler */
 
@@ -1485,16 +1474,16 @@ int sam_i2c_uninitialize(struct i2c_master_s *dev)
   return OK;
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Name: sam_i2c_reset
  *
  * Description:
  *   Reset an I2C bus
  *
- ****************************************************************************/
+ *******************************************************************************/
 
 #ifdef CONFIG_I2C_RESET
-int sam_i2c_reset(struct i2c_master_s *dev)
+int sam_i2c_reset(FAR struct i2c_master_s *dev)
 {
   struct sam_i2c_dev_s *priv = (struct sam_i2c_dev_s *)dev;
   int ret;
@@ -1503,12 +1492,15 @@ int sam_i2c_reset(struct i2c_master_s *dev)
 
   /* Get exclusive access to the I2C device */
 
-  nxmutex_lock(&priv->lock);
+  ret = i2c_takesem_noncancelable(&priv->exclsem);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Disable I2C interrupts */
 
   up_disable_irq(priv->attr->irq);
-  up_disable_irq(priv->attr->irq + 1);
 
   /* Disable I2C */
 
@@ -1533,7 +1525,7 @@ int sam_i2c_reset(struct i2c_master_s *dev)
 
   /* Release our lock on the bus */
 
-  nxmutex_unlock(&priv->lock);
+  i2c_givesem(&priv->exclsem);
   return ret;
 }
 #endif /* CONFIG_I2C_RESET */

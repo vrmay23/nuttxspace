@@ -1,37 +1,41 @@
 /****************************************************************************
  * wireless/bluetooth/bt_att.c
+ * Attribute protocol handling.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Ported from the Intel/Zephyr arduino101_firmware_source-v1.tar package
+ * where the code was released with a compatible 3-clause BSD license:
  *
  *   Copyright (c) 2016, Intel Corporation
  *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
  *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
  * 3. Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
+ *    contributors may be used to endorse or promote products derived from this
+ *    software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS
- * ; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -43,7 +47,6 @@
 
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -188,105 +191,98 @@ struct handler_info_s
  ****************************************************************************/
 
 static void    att_req_destroy(FAR struct bt_att_req_s *req);
-static void    send_err_rsp(FAR struct bt_conn_s *conn, uint8_t req,
-                            uint16_t handle, uint8_t err);
-static uint8_t att_mtu_req(FAR struct bt_conn_s *conn,
-                           FAR struct bt_buf_s *data);
-static uint8_t att_handle_rsp(FAR struct bt_conn_s *conn, FAR void *pdu,
-                              uint16_t len, uint8_t err);
+static void    send_err_rsp(struct bt_conn_s *conn, uint8_t req,
+                 uint16_t handle, uint8_t err);
+static uint8_t att_mtu_req(struct bt_conn_s *conn, struct bt_buf_s *data);
+static uint8_t att_handle_rsp(struct bt_conn_s *conn, void *pdu,
+                 uint16_t len, uint8_t err);
 static uint8_t att_mtu_rsp(FAR struct bt_conn_s *conn,
-                           FAR struct bt_buf_s *buf);
+                 FAR struct bt_buf_s *buf);
 static bool    range_is_valid(uint16_t start, uint16_t end,
-                              FAR uint16_t *err);
+                 FAR uint16_t *err);
 static uint8_t find_info_cb(FAR const struct bt_gatt_attr_s *attr,
-                            FAR void *user_data);
+                 FAR void *user_data);
 static uint8_t att_find_info_rsp(FAR struct bt_conn_s *conn,
-                                 uint16_t start_handle,
-                                 uint16_t end_handle);
+                 uint16_t start_handle, uint16_t end_handle);
 static uint8_t att_find_info_req(FAR struct bt_conn_s *conn,
-                                 FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t find_type_cb(FAR const struct bt_gatt_attr_s *attr,
-                            FAR void *user_data);
+                 FAR void *user_data);
 static uint8_t att_find_type_rsp(FAR struct bt_conn_s *conn,
-                                 FAR uint16_t start_handle,
-                                 uint16_t end_handle, FAR const void *value,
-                                 uint8_t value_len);
+                 FAR uint16_t start_handle, uint16_t end_handle,
+                 FAR const void *value, uint8_t value_len);
 static uint8_t att_find_type_req(FAR struct bt_conn_s *conn,
-                                 FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static bool uuid_create(FAR struct bt_uuid_s *uuid,
-                        FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t read_type_cb(FAR const struct bt_gatt_attr_s *attr,
-                            FAR void *user_data);
+                 FAR void *user_data);
 static uint8_t att_read_type_rsp(FAR struct bt_conn_s *conn,
-                                 FAR struct bt_uuid_s *uuid,
-                                 uint16_t start_handle,
-                                 uint16_t end_handle);
+                 FAR struct bt_uuid_s *uuid, uint16_t start_handle,
+                 uint16_t end_handle);
 static uint8_t att_read_type_req(FAR struct bt_conn_s *conn,
-                                 FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t err_to_att(int err);
 static uint8_t check_perm(FAR struct bt_conn_s *conn,
-                          FAR const struct bt_gatt_attr_s *attr,
-                          uint8_t mask);
+                 FAR const struct bt_gatt_attr_s *attr, uint8_t mask);
 static uint8_t read_cb(FAR const struct bt_gatt_attr_s *attr,
-                       FAR void *user_data);
+                 FAR void *user_data);
 static uint8_t att_read_rsp(FAR struct bt_conn_s *conn, uint8_t op,
-                            uint8_t rsp, uint16_t handle, uint16_t offset);
+                 uint8_t rsp, uint16_t handle, uint16_t offset);
 static uint8_t att_read_req(FAR struct bt_conn_s *conn,
-                            FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t att_read_blob_req(FAR struct bt_conn_s *conn,
-                                 FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t att_read_mult_req(FAR struct bt_conn_s *conn,
-                                 FAR struct bt_buf_s *buf);
+                 FAR struct bt_buf_s *buf);
 static uint8_t read_group_cb(FAR const struct bt_gatt_attr_s *attr,
-                             FAR void *user_data);
+                 FAR void *user_data);
 static uint8_t att_read_group_rsp(FAR struct bt_conn_s *conn,
-                                  FAR struct bt_uuid_s *uuid,
-                                  uint16_t start_handle,
-                                  uint16_t end_handle);
+                 FAR struct bt_uuid_s *uuid, uint16_t start_handle,
+                 uint16_t end_handle);
 static uint8_t att_read_group_req(FAR struct bt_conn_s *conn,
-                                  FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t write_cb(FAR const struct bt_gatt_attr_s *attr,
-                        FAR void *user_data);
+                 FAR void *user_data);
 static uint8_t att_write_rsp(FAR struct bt_conn_s *conn, uint8_t op,
-                             uint8_t rsp, uint16_t handle, uint16_t offset,
-                             FAR const void *value, uint8_t len);
+                 uint8_t rsp, uint16_t handle, uint16_t offset,
+                 FAR const void *value, uint8_t len);
 static uint8_t att_write_req(FAR struct bt_conn_s *conn,
-                             FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t att_prepare_write_req(FAR struct bt_conn_s *conn,
-                                     FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t flush_cb(FAR const struct bt_gatt_attr_s *attr,
-                        FAR void *user_data);
+                 FAR void *user_data);
 static uint8_t att_exec_write_rsp(FAR struct bt_conn_s *conn,
-                                  uint8_t flags);
+                 uint8_t flags);
 static uint8_t att_exec_write_req(FAR struct bt_conn_s *conn,
-                                  FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t att_write_cmd(FAR struct bt_conn_s *conn,
-                             FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t att_signed_write_cmd(FAR struct bt_conn_s *conn,
-                                    FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t att_error_rsp(FAR struct bt_conn_s *conn,
-                             FAR struct bt_buf_s *data);
+                 FAR struct bt_buf_s *data);
 static uint8_t att_handle_find_info_rsp(FAR struct bt_conn_s *conn,
-                                        FAR struct bt_buf_s *buf);
+                 FAR struct bt_buf_s *buf);
 static uint8_t att_handle_find_type_rsp(FAR struct bt_conn_s *conn,
-                                        FAR struct bt_buf_s *buf);
+                 FAR struct bt_buf_s *buf);
 static uint8_t att_handle_read_type_rsp(FAR struct bt_conn_s *conn,
-                                        FAR struct bt_buf_s *buf);
+                 FAR struct bt_buf_s *buf);
 static uint8_t att_handle_read_rsp(FAR struct bt_conn_s *conn,
-                                   FAR struct bt_buf_s *buf);
+                 FAR struct bt_buf_s *buf);
 static uint8_t att_handle_read_blob_rsp(FAR struct bt_conn_s *conn,
-                                        FAR struct bt_buf_s *buf);
+                 FAR struct bt_buf_s *buf);
 static uint8_t att_handle_read_mult_rsp(FAR struct bt_conn_s *conn,
-                                        FAR struct bt_buf_s *buf);
+                 FAR struct bt_buf_s *buf);
 static uint8_t att_handle_write_rsp(FAR struct bt_conn_s *conn,
-                                    FAR struct bt_buf_s *buf);
+                 FAR struct bt_buf_s *buf);
 static void bt_att_receive(FAR struct bt_conn_s *conn,
-                           FAR struct bt_buf_s *buf, FAR void *context,
-                           uint16_t cid);
+                 FAR struct bt_buf_s *buf, FAR void *context, uint16_t cid);
 static void bt_att_connected(FAR struct bt_conn_s *conn, FAR void *context,
-                             uint16_t cid);
+                 uint16_t cid);
 static void bt_att_disconnected(FAR struct bt_conn_s *conn,
-                                FAR void *context, uint16_t cid);
+                 FAR void *context, uint16_t cid);
 
 /****************************************************************************
  * Private Data
@@ -440,14 +436,13 @@ static void att_req_destroy(FAR struct bt_att_req_s *req)
   memset(req, 0, sizeof(*req));
 }
 
-static void send_err_rsp(FAR struct bt_conn_s *conn, uint8_t req,
-                         uint16_t handle, uint8_t err)
+static void send_err_rsp(struct bt_conn_s *conn, uint8_t req, uint16_t handle,
+                         uint8_t err)
 {
   struct bt_att_error_rsp_s *rsp;
   struct bt_buf_s *buf;
 
   /* Ignore opcode 0x00 */
-
   if (!req)
     {
       return;
@@ -467,17 +462,16 @@ static void send_err_rsp(FAR struct bt_conn_s *conn, uint8_t req,
   bt_l2cap_send(conn, BT_L2CAP_CID_ATT, buf);
 }
 
-static uint8_t att_mtu_req(FAR struct bt_conn_s *conn,
-                           FAR struct bt_buf_s *data)
+static uint8_t att_mtu_req(struct bt_conn_s *conn, struct bt_buf_s *data)
 {
   FAR struct bt_att_s *att = conn->att;
-  FAR struct bt_att_exchange_mtu_req_s *req;
-  FAR struct bt_att_exchange_mtu_rsp_s *rsp;
-  FAR struct bt_buf_s *buf;
+  struct bt_att_exchange_mtu_req_s *req;
+  struct bt_att_exchange_mtu_rsp_s *rsp;
+  struct bt_buf_s *buf;
   uint16_t maxmtu;
   uint16_t mtu;
 
-  req = (FAR void *)data->data;
+  req = (void *)data->data;
 
   mtu = BT_LE162HOST(req->mtu);
 
@@ -516,8 +510,8 @@ static uint8_t att_mtu_req(FAR struct bt_conn_s *conn,
   return 0;
 }
 
-static uint8_t att_handle_rsp(FAR struct bt_conn_s *conn, FAR void *pdu,
-                              uint16_t len, uint8_t err)
+static uint8_t att_handle_rsp(struct bt_conn_s *conn, void *pdu, uint16_t len,
+                              uint8_t err)
 {
   FAR struct bt_att_s *att = conn->att;
   struct bt_att_req_s req;
@@ -538,8 +532,7 @@ static uint8_t att_handle_rsp(FAR struct bt_conn_s *conn, FAR void *pdu,
   return 0;
 }
 
-static uint8_t att_mtu_rsp(FAR struct bt_conn_s *conn,
-                           FAR struct bt_buf_s *buf)
+static uint8_t att_mtu_rsp(FAR struct bt_conn_s *conn, FAR struct bt_buf_s *buf)
 {
   FAR struct bt_att_s *att = conn->att;
   FAR struct bt_att_exchange_mtu_rsp_s *rsp;
@@ -551,7 +544,7 @@ static uint8_t att_mtu_rsp(FAR struct bt_conn_s *conn,
       return 0;
     }
 
-  rsp = (FAR void *)buf->data;
+  rsp = (void *)buf->data;
   mtu = BT_LE162HOST(rsp->mtu);
 
   wlinfo("Server MTU %u\n", mtu);
@@ -635,8 +628,7 @@ static uint8_t find_info_cb(FAR const struct bt_gatt_attr_s *attr,
 
         /* Fast forward to next item position */
 
-        data->u.info16         = bt_buf_extend(data->buf,
-                                               sizeof(*data->u.info16));
+        data->u.info16         = bt_buf_extend(data->buf, sizeof(*data->u.info16));
         data->u.info16->handle = BT_HOST2LE16(attr->handle);
         data->u.info16->uuid   = BT_HOST2LE16(attr->uuid->u.u16);
 
@@ -651,11 +643,9 @@ static uint8_t find_info_cb(FAR const struct bt_gatt_attr_s *attr,
 
         /* Fast forward to next item position */
 
-        data->u.info128         = bt_buf_extend(data->buf,
-                                                sizeof(*data->u.info128));
+        data->u.info128         = bt_buf_extend(data->buf, sizeof(*data->u.info128));
         data->u.info128->handle = BT_HOST2LE16(attr->handle);
-        memcpy(data->u.info128->uuid,
-               attr->uuid->u.u128,
+        memcpy(data->u.info128->uuid, attr->uuid->u.u128,
                sizeof(data->u.info128->uuid));
 
         return att->mtu - data->buf->len > sizeof(*data->u.info128) ?
@@ -666,7 +656,8 @@ static uint8_t find_info_cb(FAR const struct bt_gatt_attr_s *attr,
 }
 
 static uint8_t att_find_info_rsp(FAR struct bt_conn_s *conn,
-                                 uint16_t start_handle, uint16_t end_handle)
+                                 uint16_t start_handle,
+                                 uint16_t end_handle)
 {
   struct find_info_data_s data;
 
@@ -704,7 +695,7 @@ static uint8_t att_find_info_req(FAR struct bt_conn_s *conn,
   uint16_t end_handle;
   uint16_t err_handle;
 
-  req = (FAR void *)data->data;
+  req = (void *)data->data;
 
   start_handle = BT_LE162HOST(req->start_handle);
   end_handle   = BT_LE162HOST(req->end_handle);
@@ -783,7 +774,8 @@ static uint8_t find_type_cb(FAR const struct bt_gatt_attr_s *attr,
 
 static uint8_t att_find_type_rsp(FAR struct bt_conn_s *conn,
                                  FAR uint16_t start_handle,
-                                 uint16_t end_handle, FAR const void *value,
+                                 uint16_t end_handle,
+                                 FAR const void *value,
                                  uint8_t value_len)
 {
   struct find_type_data_s data;
@@ -845,7 +837,7 @@ static uint8_t att_find_type_req(FAR struct bt_conn_s *conn,
     }
 
   /* The Attribute Protocol Find By Type Value Request shall be used with the
-   * Attribute Type parameter set to the UUID for "Primary Service" and the
+   * Attribute Type parameter set to the UUID for «Primary Service» and the
    * Attribute Value set to the 16-bit Bluetooth UUID or 128-bit UUID for the
    * specific primary service.
    */
@@ -860,8 +852,7 @@ static uint8_t att_find_type_req(FAR struct bt_conn_s *conn,
   return att_find_type_rsp(conn, start_handle, end_handle, value, data->len);
 }
 
-static bool uuid_create(FAR struct bt_uuid_s *uuid,
-                        FAR struct bt_buf_s *data)
+static bool uuid_create(FAR struct bt_uuid_s *uuid, FAR struct bt_buf_s *data)
 {
   if (data->len > sizeof(uuid->u.u128))
     {
@@ -1037,31 +1028,22 @@ static uint8_t check_perm(FAR struct bt_conn_s *conn,
                           FAR const struct bt_gatt_attr_s *attr,
                           uint8_t mask)
 {
-  if ((mask & BT_GATT_PERM_READ) &&
-      (!(attr->perm & BT_GATT_PERM_READ_MASK) || !attr->read))
+  if ((mask & BT_GATT_PERM_READ) && !(attr->perm & BT_GATT_PERM_READ))
     {
       return BT_ATT_ERR_READ_NOT_PERMITTED;
     }
 
-  if ((mask & BT_GATT_PERM_WRITE) &&
-      (!(attr->perm & BT_GATT_PERM_WRITE_MASK) || !attr->write))
+  if ((mask & BT_GATT_PERM_WRITE) && !(attr->perm & BT_GATT_PERM_WRITE))
     {
-      return BT_ATT_ERR_WRITE_NOT_PERMITTED;
+      return BT_ATT_ERR_READ_NOT_PERMITTED;
     }
 
   mask &= attr->perm;
   if (mask & BT_GATT_PERM_AUTHEN_MASK)
     {
-      if (!conn->encrypt || conn->sec_level < BT_SECURITY_HIGH)
-        {
-          wlerr("Auth Fail - encrypt=%d, level=%d (need >= %d)\n",
-                conn->encrypt, conn->sec_level, BT_SECURITY_HIGH);
-          return BT_ATT_ERR_AUTHENTICATION;
-        }
+      /* TODO: Check conn authentication */
 
-      wlinfo("Auth OK - encrypt=%d, level=%d\n",
-          conn->encrypt, conn->sec_level);
-      mask &= ~BT_GATT_PERM_AUTHEN_MASK;
+      return BT_ATT_ERR_AUTHENTICATION;
     }
 
   if ((mask & BT_GATT_PERM_ENCRYPT_MASK) && !conn->encrypt)
@@ -1161,25 +1143,20 @@ static uint8_t att_read_req(FAR struct bt_conn_s *conn,
   FAR struct bt_att_read_req_s *req;
   uint16_t handle;
 
-  req = (FAR void *)data->data;
+  req = (void *)data->data;
 
   handle = BT_LE162HOST(req->handle);
 
   wlinfo("handle 0x%04x\n", handle);
 
-  return att_read_rsp(conn,
-                      BT_ATT_OP_READ_REQ,
-                      BT_ATT_OP_READ_RSP,
-                      handle,
-                      0);
+  return att_read_rsp(conn, BT_ATT_OP_READ_REQ, BT_ATT_OP_READ_RSP, handle, 0);
 }
 
 static uint8_t att_read_blob_req(FAR struct bt_conn_s *conn,
                                  FAR struct bt_buf_s *data)
 {
   FAR struct bt_att_read_blob_req_s *req;
-  uint16_t handle;
-  uint16_t offset;
+  uint16_t handle, offset;
 
   req = (FAR void *)data->data;
 
@@ -1212,7 +1189,7 @@ static uint8_t att_read_mult_req(FAR struct bt_conn_s *conn,
     {
       handle = bt_buf_get_le16(buf);
 
-      wlinfo("handle 0x%04x\n", handle);
+      wlinfo("handle 0x%04x \n", handle);
 
       bt_gatt_foreach_attr(handle, handle, read_cb, &data);
 
@@ -1380,13 +1357,12 @@ static uint8_t att_read_group_req(FAR struct bt_conn_s *conn,
 
   /* Core v4.2, Vol 3, sec 2.5.3 Attribute Grouping: Not all of the grouping
    * attributes can be used in the ATT Read By Group Type Request. The
-   * "Primary Service" and "Secondary Service" grouping types may be used
-   * in the Read By Group Type Request. The "Characteristic" grouping type
+   * «Primary Service» and «Secondary Service» grouping types may be used
+   * in the Read By Group Type Request. The «Characteristic» grouping type
    * shall not be used in the ATT Read By Group Type Request.
    */
 
-  if (bt_uuid_cmp(&uuid, &g_primary_uuid) &&
-      bt_uuid_cmp(&uuid, &g_secondary_uuid))
+  if (bt_uuid_cmp(&uuid, &g_primary_uuid) && bt_uuid_cmp(&uuid, &g_secondary_uuid))
     {
       send_err_rsp(conn, BT_ATT_OP_READ_GROUP_REQ, start_handle,
                    BT_ATT_ERR_UNSUPPORTED_GROUP_TYPE);
@@ -1406,8 +1382,7 @@ static uint8_t write_cb(FAR const struct bt_gatt_attr_s *attr,
 
   /* Check for write support and flush support in case of prepare */
 
-  if (!attr->write ||
-      (data->op == BT_ATT_OP_PREPARE_WRITE_REQ && !attr->flush))
+  if (!attr->write || (data->op == BT_ATT_OP_PREPARE_WRITE_REQ && !attr->flush))
     {
       data->err = BT_ATT_ERR_WRITE_NOT_PERMITTED;
       return BT_GATT_ITER_STOP;
@@ -1423,11 +1398,7 @@ static uint8_t write_cb(FAR const struct bt_gatt_attr_s *attr,
 
   /* Read attribute value and store in the buffer */
 
-  write = attr->write(data->conn,
-                      attr,
-                      data->value,
-                      data->len,
-                      data->offset);
+  write = attr->write(data->conn, attr, data->value, data->len, data->offset);
   if (write < 0 || write != data->len)
     {
       data->err = err_to_att(write);
@@ -1557,7 +1528,6 @@ static uint8_t att_prepare_write_req(FAR struct bt_conn_s *conn,
                        BT_ATT_OP_PREPARE_WRITE_RSP, handle, offset,
                        data->data, data->len);
 }
-
 typedef CODE uint8_t
   (*bt_gatt_attr_func_t)(FAR const struct bt_gatt_attr_s *attr,
                          FAR void *user_data);
@@ -1859,21 +1829,19 @@ void bt_att_initialize(void)
     .disconnected = bt_att_disconnected,
   };
 
-  memset(g_bt_att_pool, 0, sizeof(g_bt_att_pool));
-
   bt_l2cap_chan_register(&chan);
 }
 
-FAR struct bt_buf_s *bt_att_create_pdu(FAR struct bt_conn_s *conn,
-                                       uint8_t op, size_t len)
+FAR struct bt_buf_s *bt_att_create_pdu(FAR struct bt_conn_s *conn, uint8_t op,
+                                     size_t len)
 {
   FAR struct bt_att_hdr_s *hdr;
   FAR struct bt_buf_s *buf;
-  FAR struct bt_att_s *att = conn->att;
+  FAR FAR struct bt_att_s *att = conn->att;
 
   if (len + sizeof(op) > att->mtu)
     {
-      wlwarn("ATT MTU exceeded, max %u, wanted %zu\n", att->mtu, len);
+      wlwarn("ATT MTU exceeded, max %u, wanted %u\n", att->mtu, len);
       return NULL;
     }
 
@@ -1919,7 +1887,7 @@ int bt_att_send(FAR struct bt_conn_s *conn, FAR struct bt_buf_s *buf,
           return -EBUSY;
         }
 
-      hdr                = (FAR void *)buf->data;
+      hdr                = (void *)buf->data;
       att->req.op        = hdr->code;
       att->req.func      = func;
       att->req.user_data = user_data;

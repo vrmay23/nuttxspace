@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/z80/src/z180/z180_mmu.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +42,6 @@
 #include <nuttx/config.h>
 
 #include <errno.h>
-#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -44,7 +56,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Configuration ************************************************************/
 
 #ifndef CONFIG_ARCH_ADDRENV
@@ -60,7 +71,7 @@
  ****************************************************************************/
 
 static GRAN_HANDLE g_physhandle;
-static struct z180_cbr_s g_cbrs[CONFIG_Z180_MAX_TASKS];
+static struct z180_cbr_s g_cbrs[CONFIG_MAX_TASKS];
 
 /****************************************************************************
  * Private Functions
@@ -70,8 +81,7 @@ static struct z180_cbr_s g_cbrs[CONFIG_Z180_MAX_TASKS];
  * Name: z180_mmu_alloccbr
  *
  * Description:
- *   Find an unused structure in g_cbrs
- *   (i.e., one with reference count == 0).
+ *   Find an unused structure in g_cbrs (i.e., one with reference count == 0).
  *   If a structure is found, its reference count is set to one and a pointer
  *   to the structure is returned.
  *
@@ -81,7 +91,7 @@ static inline FAR struct z180_cbr_s *z180_mmu_alloccbr(void)
 {
   int i;
 
-  for (i = 0; i < CONFIG_Z180_MAX_TASKS; i++)
+  for (i = 0; i < CONFIG_MAX_TASKS; i++)
     {
       FAR struct z180_cbr_s *cbr = &g_cbrs[i];
       if (cbr->crefs == 0)
@@ -130,13 +140,13 @@ void z180_mmu_lowinit(void) __naked
    */
 
   __asm
-  ld c, #Z180_MMU_CBAR ; port
-  ld a, #Z180_CBAR_VALUE ; value
-  out (c), a
+	ld	c, #Z180_MMU_CBAR		; port
+	ld	a, #Z180_CBAR_VALUE		; value
+	out	(c), a
 
-  ld c, #Z180_MMU_BBR ; port
-  ld a, #Z180_BBR_VALUE ; value
-  out (c), a
+	ld	c, #Z180_MMU_BBR		; port
+	ld	a, #Z180_BBR_VALUE		; value
+	out	(c), a
   __endasm;
 }
 
@@ -155,16 +165,16 @@ int z80_mmu_initialize(void)
    * say that 1 page is 1 byte.
    */
 
-  g_physhandle = gran_initialize((FAR void *)Z180_PHYSHEAP_STARTPAGE,
+g_physhandle = gran_initialize((FAR void *)Z180_PHYSHEAP_STARTPAGE,
                                Z180_PHYSHEAP_NPAGES, 0, 0);
-  return g_physhandle ? OK : -ENOMEM;
+return g_physhandle ? OK : -ENOMEM;
 }
 
 /****************************************************************************
  * Address Environment Interfaces
  *
  * Low-level interfaces used in binfmt/ to instantiate tasks with address
- * environments.  These interfaces all operate on type arch_addrenv_t which
+ * environments.  These interfaces all operate on type group_addrenv_t which
  * is an abstract representation of a task group's address environment and
  * must be defined in arch/arch.h if CONFIG_ARCH_ADDRENV is defined.
  *
@@ -176,6 +186,7 @@ int z80_mmu_initialize(void)
  *                         address environment
  *   up_addrenv_heapsize - Returns the size of the initial heap allocation.
  *   up_addrenv_select   - Instantiate an address environment
+ *   up_addrenv_restore  - Restore an address environment
  *   up_addrenv_clone    - Copy an address environment from one location to
  *                        another.
  *
@@ -191,7 +202,6 @@ int z80_mmu_initialize(void)
  *                         environment when a task/thread exits.
  *
  ****************************************************************************/
-
 /****************************************************************************
  * Name: up_addrenv_create
  *
@@ -220,7 +230,7 @@ int z80_mmu_initialize(void)
  ****************************************************************************/
 
 int up_addrenv_create(size_t textsize, size_t datasize, size_t heapsize,
-                      FAR arch_addrenv_t *addrenv)
+                      FAR group_addrenv_t *addrenv)
 {
   FAR struct z180_cbr_s *cbr;
   irqstate_t flags;
@@ -280,7 +290,7 @@ int up_addrenv_create(size_t textsize, size_t datasize, size_t heapsize,
 
   cbr->cbr     = (uint8_t)alloc;
   cbr->pages   = (uint8_t)npages;
-  *addrenv     = (arch_addrenv_t)cbr;
+  *addrenv     = (group_addrenv_t)cbr;
 
   leave_critical_section(flags);
   return OK;
@@ -309,7 +319,7 @@ errout_with_irq:
  *
  ****************************************************************************/
 
-int up_addrenv_destroy(FAR arch_addrenv_t *addrenv)
+int up_addrenv_destroy(FAR group_addrenv_t *addrenv)
 {
   FAR struct z180_cbr_s *cbr = (FAR struct z180_cbr_s *)*addrenv;
 
@@ -319,7 +329,7 @@ int up_addrenv_destroy(FAR arch_addrenv_t *addrenv)
 
   gran_free(g_physhandle, (FAR void *)cbr->cbr, cbr->pages);
 
-  /* And make the CBR structure available for reuse */
+  /* And make the CBR structure available for re-use */
 
   z180_mmu_freecbr(cbr);
   return OK;
@@ -343,7 +353,7 @@ int up_addrenv_destroy(FAR arch_addrenv_t *addrenv)
  *
  ****************************************************************************/
 
-int up_addrenv_vtext(FAR arch_addrenv_t *addrenv, FAR void **vtext)
+int up_addrenv_vtext(FAR group_addrenv_t *addrenv, FAR void **vtext)
 {
   return CONFIG_Z180_COMMON1AREA_VIRTBASE;
 }
@@ -370,38 +380,11 @@ int up_addrenv_vtext(FAR arch_addrenv_t *addrenv, FAR void **vtext)
  *
  ****************************************************************************/
 
-int up_addrenv_vdata(FAR arch_addrenv_t *addrenv, uintptr_t textsize,
+int up_addrenv_vdata(FAR group_addrenv_t *addrenv, uintptr_t textsize,
                      FAR void **vdata)
 {
   return CONFIG_Z180_COMMON1AREA_VIRTBASE + textsize;
 }
-
-/****************************************************************************
- * Name: up_addrenv_vheap
- *
- * Description:
- *   Return the heap virtual address associated with the newly created
- *   address environment.  This function is used by the binary loaders in
- *   order get an address that can be used to initialize the new task.
- *
- * Input Parameters:
- *   addrenv - The representation of the task address environment previously
- *      returned by up_addrenv_create.
- *   vheap - The location to return the virtual address.
- *
- * Returned Value:
- *   Zero (OK) on success; a negated errno value on failure.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_BUILD_KERNEL
-int up_addrenv_vheap(FAR const arch_addrenv_t *addrenv, FAR void **vheap)
-{
-  /* Not implemented */
-
-  return -ENOSYS;
-}
-#endif
 
 /****************************************************************************
  * Name: up_addrenv_heapsize
@@ -423,7 +406,7 @@ int up_addrenv_vheap(FAR const arch_addrenv_t *addrenv, FAR void **vheap)
  ****************************************************************************/
 
 #ifdef CONFIG_BUILD_KERNEL
-ssize_t up_addrenv_heapsize(FAR const arch_addrenv_t *addrenv)
+ssize_t up_addrenv_heapsize(FAR const group_addrenv_t *addrenv)
 {
   /* Not implemented */
 
@@ -444,25 +427,58 @@ ssize_t up_addrenv_heapsize(FAR const arch_addrenv_t *addrenv)
  * Input Parameters:
  *   addrenv - The representation of the task address environment previously
  *     returned by up_addrenv_create.
+ *   oldenv
+ *     The address environment that was in place before up_addrenv_select().
+ *     This may be used with up_addrenv_restore() to restore the original
+ *     address environment that was in place before up_addrenv_select() was
+ *     called.  Note that this may be a task agnostic, hardware
+ *     representation that is different from group_addrenv_t.
  *
  * Returned Value:
  *   Zero (OK) on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-int up_addrenv_select(FAR const arch_addrenv_t *addrenv)
+int up_addrenv_select(FAR const group_addrenv_t *addrenv,
+                      FAR save_addrenv_t *oldenv)
 {
   FAR struct z180_cbr_s *cbr = (FAR struct z180_cbr_s *)addrenv;
   irqstate_t flags;
 
-  DEBUGASSERT(cbr);
+  DEBUGASSERT(cbr && oldenv);
+
+  /* Return the current CBR value from the CBR register */
 
   flags = enter_critical_section();
+  *oldenv = (save_addrenv_t)inp(Z180_MMU_CBR);
 
   /* Write the new CBR value into CBR register */
 
   outp(Z180_MMU_CBR, cbr->cbr);
   leave_critical_section(flags);
+  return OK;
+}
+
+/****************************************************************************
+ * Name: up_addrenv_restore
+ *
+ * Description:
+ *   After an address environment has been temporarily instantiated by
+ *   up_addrenv_select, this function may be called to restore the
+ *   original address environment.
+ *
+ * Input Parameters:
+ *   oldenv - The hardware representation of the address environment
+ *     previously returned by up_addrenv_select.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+int up_addrenv_restore(FAR const save_addrenv_t *oldenv)
+{
+  outp(Z180_MMU_CBR, (uint8_t)*oldenv);
   return OK;
 }
 
@@ -482,7 +498,7 @@ int up_addrenv_select(FAR const arch_addrenv_t *addrenv)
  *
  ****************************************************************************/
 
-int up_addrenv_coherent(FAR const arch_addrenv_t *addrenv)
+int up_addrenv_coherent(FAR const group_addrenv_t *addrenv)
 {
   /* There are no caches */
 
@@ -506,8 +522,8 @@ int up_addrenv_coherent(FAR const arch_addrenv_t *addrenv)
  *
  ****************************************************************************/
 
-int up_addrenv_clone(FAR const arch_addrenv_t *src,
-                     FAR arch_addrenv_t *dest)
+int up_addrenv_clone(FAR const group_addrenv_t *src,
+                     FAR group_addrenv_t *dest)
 {
   DEBUGASSERT(src && dest);
 
@@ -528,7 +544,7 @@ int up_addrenv_clone(FAR const arch_addrenv_t *src,
  *   group.
  *
  * Input Parameters:
- *   ptcb  - The tcb of the parent task.
+ *   group - The task group to which the new thread belongs.
  *   tcb   - The tcb of the thread needing the address environment.
  *
  * Returned Value:
@@ -536,7 +552,7 @@ int up_addrenv_clone(FAR const arch_addrenv_t *src,
  *
  ****************************************************************************/
 
-int up_addrenv_attach(FAR struct tcb_s *ptcb, FAR struct tcb_s *tcb)
+int up_addrenv_attach(FAR struct task_group_s *group, FAR struct tcb_s *tcb)
 {
   /* There is nothing that needs to be done */
 
@@ -558,6 +574,7 @@ int up_addrenv_attach(FAR struct tcb_s *ptcb, FAR struct tcb_s *tcb)
  *   may be sufficient.
  *
  * Input Parameters:
+ *   group - The group to which the thread belonged.
  *   tcb - The TCB of the task or thread whose the address environment will
  *     be released.
  *
@@ -566,7 +583,7 @@ int up_addrenv_attach(FAR struct tcb_s *ptcb, FAR struct tcb_s *tcb)
  *
  ****************************************************************************/
 
-int up_addrenv_detach(FAR struct tcb_s *tcb)
+int up_addrenv_detach(FAR struct task_group_s *group, FAR struct tcb_s *tcb)
 {
   /* There is nothing that needs to be done */
 

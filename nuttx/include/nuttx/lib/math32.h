@@ -1,22 +1,35 @@
 /****************************************************************************
  * include/nuttx/lib/math32.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,46 +42,7 @@
 
 #include <nuttx/config.h>
 
-#include <inttypes.h>
 #include <stdint.h>
-#include <strings.h>
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define div_round_up(n, d)      (((n) + (d) - 1) / (d))
-#define div_round_closest(n, d) ((((n) < 0) ^ ((d) < 0)) ? \
-                                (((n) - (d)/2)/(d)) : (((n) + (d)/2)/(d)))
-
-/* Returns one plus the index of the most significant 1-bit of n,
- * or if n is zero, returns zero.
- */
-
-#if UINTPTR_MAX > UINT32_MAX
-#  define FLS(n) ((n) & UINT64_C(0xffffffff00000000) ? 32 + \
-                  FLS32((size_t)(n) >> 32) : FLS32(n))
-#else
-#  define FLS(n) FLS32(n)
-#endif
-
-#define FLS32(n) ((n) & 0xffff0000 ? 16 + FLS16((n) >> 16) : FLS16(n))
-#define FLS16(n) ((n) & 0xff00     ?  8 + FLS8 ((n) >>  8) : FLS8 (n))
-#define FLS8(n)  ((n) & 0xf0       ?  4 + FLS4 ((n) >>  4) : FLS4 (n))
-#define FLS4(n)  ((n) & 0xc        ?  2 + FLS2 ((n) >>  2) : FLS2 (n))
-#define FLS2(n)  ((n) & 0x2        ?  1 + FLS1 ((n) >>  1) : FLS1 (n))
-#define FLS1(n)  ((n) & 0x1        ?  1 : 0)
-
-/* Checks if an integer is power of two at compile time */
-
-#define IS_POWER_OF_2(n)           ((n) > 0 && ((n) & (n - 1)) == 0)
-
-/* Returns round up and round down value of log2(n). Note: it can be used at
- * compile time.
- */
-
-#define LOG2_CEIL(n)  (IS_POWER_OF_2(n) ? FLS(n) - 1 : FLS(n))
-#define LOG2_FLOOR(n) (FLS(n) - 1)
 
 /****************************************************************************
  * Public Types
@@ -113,233 +87,6 @@ extern "C"
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
-
-#define flsx(n) ((sizeof(n) <= sizeof(long)) ? flsl(n) : flsll(n))
-
-/****************************************************************************
- * Name: log2ceil
- *
- * Description:
- *   Calculate the up-rounded power-of-two for input.
- *
- * Input Parameters:
- *   x - Argument to calculate the power-of-two from.
- *
- * Returned Value:
- *   Power-of-two for argument, rounded up.
- *
- ****************************************************************************/
-
-#define log2ceil(n) (IS_POWER_OF_2(n) ? (flsx(n) - 1) : flsx(n))
-
-/****************************************************************************
- * Name: log2floor
- *
- * Description:
- *   Calculate the down-rounded (truncated) power-of-two for input.
- *
- * Input Parameters:
- *   x - Argument to calculate the power-of-two from.
- *
- * Returned Value:
- *   Power-of-two for argument, rounded (truncated) down.
- *
- ****************************************************************************/
-
-#define log2floor(n) (flsx(n) - 1)
-
-/* roundup_pow_of_two() - Round up to nearest power of two
- * n: value to round up
- */
-
-#define roundup_pow_of_two(n) (((n) - (n) + 1) << flsx((n) - 1))
-
-/* rounddown_pow_of_two() - Round down to nearest power of two
- * n: value to round down
- */
-
-#define rounddown_pow_of_two(n) (((n) - (n) + 1) << (flsx(n) - 1))
-
-/* order_base_2 - Calculate the (rounded up) base 2 order of the argument
- * n: parameter
- *
- * The first few values calculated by this routine:
- *  ob2(0) = 0
- *  ob2(1) = 0
- *  ob2(2) = 1
- *  ob2(3) = 2
- *  ob2(4) = 2
- *  ob2(5) = 3
- *  ... and so on.
- */
-
-#define order_base_2(n) ((n) > 1 ? log2floor((n) - 1) + 1 : 0)
-
-/* If the divisor happens to be constant, we determine the appropriate
- * inverse at compile time to turn the division into a few inline
- * multiplications which ought to be much faster.
- *
- * (It is unfortunate that gcc doesn't perform all this internally.)
- */
-
-#ifdef CONFIG_HAVE_LONG_LONG
-/* Default C implementation for umul64_const()
- *
- * Prototype: uint64_t umul64_const(uint64_t retval, uint64_t m,
- *                                  uint64_t n, bool bias);
- * Semantic:  retval = ((bias ? m : 0) + m * n) >> 64
- *
- * The product is a 128-bit value, scaled down to 64 bits.
- * Assuming constant propagation to optimize away unused conditional code.
- * Architectures may provide their own optimized assembly implementation.
- */
-
-#  ifdef up_umul64_const
-#    define umul64_const(res, m, n, bias) \
-      (res) = up_umul64_const(m, n, bias)
-#  else
-#    define umul64_const(res, m, n, bias) \
-      do \
-        { \
-          uint32_t __m_lo = (m) & 0xffffffff; \
-          uint32_t __m_hi = (m) >> 32; \
-          uint32_t __n_lo = (n) & 0xffffffff; \
-          uint32_t __n_hi = (n) >> 32; \
-          uint32_t __res_lo; \
-          uint32_t __res_hi; \
-          uint32_t __tmp; \
-          \
-          if (!(bias)) \
-            { \
-              (res) = ((uint64_t)__m_lo * __n_lo) >> 32; \
-            } \
-          else if (!((m) & ((1ULL << 63) | (1ULL << 31)))) \
-            { \
-              (res) = ((m) + (uint64_t)__m_lo * __n_lo) >> 32; \
-            } \
-          else \
-            { \
-              (res) = (m) + (uint64_t)__m_lo * __n_lo; \
-              __res_lo = (res) >> 32; \
-              __res_hi = (__res_lo < __m_hi); \
-              (res) = __res_lo | ((uint64_t)__res_hi << 32); \
-            } \
-          \
-          if (!((m) & ((1ULL << 63) | (1ULL << 31)))) \
-            { \
-              (res) += (uint64_t)__m_lo * __n_hi; \
-              (res) += (uint64_t)__m_hi * __n_lo; \
-              (res) >>= 32; \
-            } \
-          else \
-            { \
-              (res) += (uint64_t)__m_lo * __n_hi; \
-              __tmp = (res) >> 32; \
-              (res) += (uint64_t)__m_hi * __n_lo; \
-              __res_lo = (res) >> 32; \
-              __res_hi = (__res_lo < __tmp); \
-              (res) = __res_lo | ((uint64_t)__res_hi << 32); \
-            } \
-          \
-          (res) += (uint64_t)__m_hi * __n_hi; \
-        } \
-      while (0)
-#  endif
-
-#  define div64_const32(n, b) \
-    do \
-      { \
-        uint64_t ___res; \
-        uint64_t ___x; \
-        uint64_t ___t; \
-        uint64_t ___m; \
-        uint64_t ___n = (n); \
-        uint32_t ___p; \
-        uint32_t ___bias; \
-        uint32_t ___b = (b); \
-        ___p = 1 << LOG2_FLOOR(___b); \
-        ___m = (~0ULL / ___b) * ___p; \
-        ___m += (((~0ULL % ___b + 1) * ___p) + ___b - 1) / ___b; \
-        ___x = ~0ULL / ___b * ___b - 1; \
-        ___res = ((___m & 0xffffffff) * (___x & 0xffffffff)) >> 32; \
-        ___t = ___res += (___m & 0xffffffff) * (___x >> 32); \
-        ___res += (___x & 0xffffffff) * (___m >> 32); \
-        ___t = (___res < ___t) ? (1ULL << 32) : 0; \
-        ___res = (___res >> 32) + ___t; \
-        ___res += (___m >> 32) * (___x >> 32); \
-        ___res /= ___p; \
-        if (~0ULL % (___b / (___b & -___b)) == 0) \
-          { \
-            ___n /= (___b & -___b); \
-            ___m = ~0ULL / (___b / (___b & -___b)); \
-            ___p = 1; \
-            ___bias = 1; \
-          } \
-        else if (___res != ___x / ___b) \
-          { \
-            ___bias = 1; \
-            ___m = (~0ULL / ___b) * ___p; \
-            ___m += ((~0ULL % ___b + 1) * ___p) / ___b; \
-          } \
-        else \
-          { \
-            uint32_t ___bits = -(___m & -___m); \
-            ___bits |= ___m >> 32; \
-            ___bits = (~___bits) << 1; \
-            if (!___bits) \
-              { \
-                ___p /= (___m & -___m); \
-                ___m /= (___m & -___m); \
-              } \
-            else \
-              { \
-                ___p >>= LOG2_FLOOR(___bits); \
-                ___m >>= LOG2_FLOOR(___bits); \
-              } \
-            ___bias = 0; \
-          } \
-        umul64_const(___res, ___m, ___n, ___bias); \
-        \
-        ___res /= ___p; \
-        (n) = ___res; \
-      } \
-    while (0)
-
-#endif
-
-#if defined(CONFIG_HAVE_LONG_LONG) && defined(CONFIG_HAVE_EXPRESSION_STATEMENT)
-#  define div64_const(n, base) \
-    ({ \
-      uint64_t __n = (n); \
-      uint32_t __base = (base); \
-      if (IS_POWER_OF_2(__base)) \
-        { \
-          (__n) >>= LOG2_FLOOR(__base); \
-        } \
-      else if (UINTPTR_MAX == UINT32_MAX) \
-        { \
-          div64_const32(__n, __base); \
-        } \
-      else \
-        { \
-          __n /= __base; \
-        } \
-        __n; \
-      })
-
-#  define div_const(n, base) \
-    ((sizeof(typeof(n)) == sizeof(uint64_t)) ? div64_const(n, base) : ((n) / (base)))
-#  define div_const_roundup(n, base) \
-    ((sizeof(typeof(n)) == sizeof(uint64_t)) ? div64_const((n) + (base) - 1, base) : \
-     (((n) + (base) - 1) / (base)))
-#  define div_const_roundnearest(n, base) \
-    ((sizeof(typeof(n)) == sizeof(uint64_t)) ? div64_const((n) + ((base) / 2), base) : \
-     (((n) + ((base) / 2)) / (base)))
-#else
-#  define div_const(n, base) ((n) / (base))
-#  define div_const_roundup(n, base) (((n) + (base) - 1) / (base))
-#  define div_const_roundnearest(n, base) (((n) + ((base) / 2)) / (base))
-#endif
 
 /****************************************************************************
  * Name: uneg64
@@ -451,8 +198,7 @@ void usub64(FAR const struct uint64_s *minuend,
  *
  ****************************************************************************/
 
-void umul32(uint32_t factor1, uint32_t factor2,
-            FAR struct uint64_s *product);
+void umul32(uint32_t factor1, uint32_t factor2, FAR struct uint64_s *product);
 
 /****************************************************************************
  * Name: umul32x64

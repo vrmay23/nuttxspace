@@ -1,8 +1,6 @@
 /****************************************************************************
  * net/tcp/tcp_listen.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- *
  *   Copyright (C) 2007-2009, 2011 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -54,7 +52,6 @@
 #include <nuttx/net/net.h>
 
 #include "devif/devif.h"
-#include "inet/inet.h"
 #include "tcp/tcp.h"
 
 /****************************************************************************
@@ -81,12 +78,9 @@ static FAR struct tcp_conn_s *tcp_listenports[CONFIG_NET_MAX_LISTENPORTS];
  ****************************************************************************/
 
 #if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
-FAR struct tcp_conn_s *tcp_findlistener(FAR union ip_binding_u *uaddr,
-                                        uint16_t portno,
-                                        uint8_t domain)
+FAR struct tcp_conn_s *tcp_findlistener(uint16_t portno, uint8_t domain)
 #else
-FAR struct tcp_conn_s *tcp_findlistener(FAR union ip_binding_u *uaddr,
-                                        uint16_t portno)
+FAR struct tcp_conn_s *tcp_findlistener(uint16_t portno)
 #endif
 {
   int ndx;
@@ -106,35 +100,9 @@ FAR struct tcp_conn_s *tcp_findlistener(FAR union ip_binding_u *uaddr,
       if (conn && conn->lport == portno)
 #endif
         {
-#ifdef CONFIG_NET_IPv6
-#  ifdef CONFIG_NET_IPv4
-          if (domain == PF_INET6)
-#  endif
-            {
-              if (net_ipv6addr_cmp(conn->u.ipv6.laddr, uaddr->ipv6.laddr) ||
-                  net_ipv6addr_cmp(conn->u.ipv6.laddr, g_ipv6_unspecaddr))
-                {
-                  /* Yes.. we found a listener on this port */
+          /* Yes.. we found a listener on this port */
 
-                  return conn;
-                }
-            }
-#endif
-
-#ifdef CONFIG_NET_IPv4
-#  ifdef CONFIG_NET_IPv6
-          if (domain == PF_INET)
-#  endif
-            {
-              if (net_ipv4addr_cmp(conn->u.ipv4.laddr, uaddr->ipv4.laddr) ||
-                  net_ipv4addr_cmp(conn->u.ipv4.laddr, INADDR_ANY))
-                {
-                  /* Yes.. we found a listener on this port */
-
-                  return conn;
-                }
-            }
-#endif
+          return conn;
         }
     }
 
@@ -146,6 +114,27 @@ FAR struct tcp_conn_s *tcp_findlistener(FAR union ip_binding_u *uaddr,
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: tcp_listen_initialize
+ *
+ * Description:
+ *   Setup the listening data structures
+ *
+ * Assumptions:
+ *   Called early in the initialization phase while the system is still
+ *   single-threaded.
+ *
+ ****************************************************************************/
+
+void tcp_listen_initialize(void)
+{
+  int ndx;
+  for (ndx = 0; ndx < CONFIG_NET_MAX_LISTENPORTS; ndx++)
+    {
+      tcp_listenports[ndx] = NULL;
+    }
+}
 
 /****************************************************************************
  * Name: tcp_unlisten
@@ -203,9 +192,9 @@ int tcp_listen(FAR struct tcp_conn_s *conn)
   /* First, check if there is already a socket listening on this port */
 
 #if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
-  if (tcp_islistener(&conn->u, conn->lport, conn->domain))
+  if (tcp_islistener(conn->lport, conn->domain))
 #else
-  if (tcp_islistener(&conn->u, conn->lport))
+  if (tcp_islistener(conn->lport))
 #endif
     {
       /* Yes, then we must refuse this request */
@@ -253,15 +242,14 @@ int tcp_listen(FAR struct tcp_conn_s *conn)
  ****************************************************************************/
 
 #if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
-bool tcp_islistener(FAR union ip_binding_u *uaddr, uint16_t portno,
-                    uint8_t domain)
+bool tcp_islistener(uint16_t portno, uint8_t domain)
 {
-  return tcp_findlistener(uaddr, portno, domain) != NULL;
+  return tcp_findlistener(portno, domain) != NULL;
 }
 #else
-bool tcp_islistener(FAR union ip_binding_u *uaddr, uint16_t portno)
+bool tcp_islistener(uint16_t portno)
 {
-  return tcp_findlistener(uaddr, portno) != NULL;
+  return tcp_findlistener(portno) != NULL;
 }
 #endif
 
@@ -288,9 +276,9 @@ int tcp_accept_connection(FAR struct net_driver_s *dev,
    */
 
 #if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
-  listener = tcp_findlistener(&conn->u, portno, conn->domain);
+  listener = tcp_findlistener(portno, conn->domain);
 #else
-  listener = tcp_findlistener(&conn->u, portno);
+  listener = tcp_findlistener(portno);
 #endif
   if (listener != NULL)
     {

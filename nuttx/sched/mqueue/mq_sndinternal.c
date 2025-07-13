@@ -1,7 +1,5 @@
 /****************************************************************************
- * sched/mqueue/mq_sndinternal.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  sched/mqueue/mq_sndinternal.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -31,12 +29,12 @@
 #include <fcntl.h>
 #include <mqueue.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <sched.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
+#include <nuttx/kmalloc.h>
 #include <nuttx/arch.h>
 #include <nuttx/sched.h>
 #include <nuttx/cancelpt.h>
@@ -45,56 +43,143 @@
 #include "mqueue/mqueue.h"
 
 /****************************************************************************
- * Private Functions
+ * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: nxmq_sndtimeout
+ * Name: nxmq_verify_send
  *
  * Description:
- *   This function is called if the timeout elapses before the message queue
- *   becomes non-full.
+ *   This is internal, common logic shared by both [nx]mq_send and
+ *   [nx]mq_timesend.  This function verifies the input parameters that are
+ *   common to both functions.
  *
  * Input Parameters:
- *   arg - The argument that was provided when the timeout was configured.
+ *   mqdes - Message queue descriptor
+ *   msg - Message to send
+ *   msglen - The length of the message in bytes
+ *   prio - The priority of the message
  *
  * Returned Value:
- *   None
+ *   One success, 0 (OK) is returned. On failure, a negated errno value is
+ *   returned.
  *
- * Assumptions:
+ *     EINVAL   Either msg or mqdes is NULL or the value of prio is invalid.
+ *     EPERM    Message queue opened not opened for writing.
+ *     EMSGSIZE 'msglen' was greater than the maxmsgsize attribute of the
+ *               message queue.
  *
  ****************************************************************************/
 
-static void nxmq_sndtimeout(wdparm_t arg)
+int nxmq_verify_send(mqd_t mqdes, FAR const char *msg, size_t msglen,
+                     unsigned int prio)
 {
-  FAR struct tcb_s *wtcb = (FAR struct tcb_s *)(uintptr_t)arg;
-  irqstate_t flags;
+  /* Verify the input parameters */
 
-  /* Disable interrupts.  This is necessary because an interrupt handler may
-   * attempt to send a message while we are doing this.
-   */
-
-  flags = enter_critical_section();
-
-  /* It is also possible that an interrupt/context switch beat us to the
-   * punch and already changed the task's state.
-   */
-
-  if (wtcb->task_state == TSTATE_WAIT_MQNOTFULL)
+  if (msg == NULL || mqdes == NULL || prio > MQ_PRIO_MAX)
     {
-      /* Restart with task with a timeout error */
-
-      nxmq_wait_irq(wtcb, ETIMEDOUT);
+      return -EINVAL;
     }
 
-  /* Interrupts may now be re-enabled. */
+  if ((mqdes->oflags & O_WROK) == 0)
+    {
+      return -EPERM;
+    }
 
-  leave_critical_section(flags);
+  if (msglen > (size_t)mqdes->msgq->maxmsgsize)
+    {
+      return -EMSGSIZE;
+    }
+
+  return OK;
 }
 
 /****************************************************************************
- * Public Functions
+ * Name: nxmq_alloc_msg
+ *
+ * Description:
+ *   The nxmq_alloc_msg function will get a free message for use by the
+ *   operating system.  The message will be allocated from the g_msgfree
+ *   list.
+ *
+ *   If the list is empty AND the message is NOT being allocated from the
+ *   interrupt level, then the message will be allocated.  If a message
+ *   cannot be obtained, the operating system is dead and therefore cannot
+ *   continue.
+ *
+ *   If the list is empty AND the message IS being allocated from the
+ *   interrupt level.  This function will attempt to get a message from
+ *   the g_msgfreeirq list.  If this is unsuccessful, the calling interrupt
+ *   handler will be notified.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   A reference to the allocated msg structure.  On a failure to allocate,
+ *   this function PANICs.
+ *
  ****************************************************************************/
+
+FAR struct mqueue_msg_s *nxmq_alloc_msg(void)
+{
+  FAR struct mqueue_msg_s *mqmsg;
+  irqstate_t flags;
+
+  /* If we were called from an interrupt handler, then try to get the message
+   * from generally available list of messages. If this fails, then try the
+   * list of messages reserved for interrupt handlers
+   */
+
+  if (up_interrupt_context())
+    {
+      /* Try the general free list */
+
+      mqmsg = (FAR struct mqueue_msg_s *)sq_remfirst(&g_msgfree);
+      if (mqmsg == NULL)
+        {
+          /* Try the free list reserved for interrupt handlers */
+
+          mqmsg = (FAR struct mqueue_msg_s *)sq_remfirst(&g_msgfreeirq);
+        }
+    }
+
+  /* We were not called from an interrupt handler. */
+
+  else
+    {
+      /* Try to get the message from the generally available free list.
+       * Disable interrupts -- we might be called from an interrupt handler.
+       */
+
+      flags = enter_critical_section();
+      mqmsg = (FAR struct mqueue_msg_s *)sq_remfirst(&g_msgfree);
+      leave_critical_section(flags);
+
+      /* If we cannot a message from the free list, then we will have to
+       * allocate one.
+       */
+
+      if (mqmsg == NULL)
+        {
+          mqmsg = (FAR struct mqueue_msg_s *)
+            kmm_malloc((sizeof (struct mqueue_msg_s)));
+
+          /* Check if we allocated the message */
+
+          if (mqmsg != NULL)
+            {
+              /* Yes... remember that this message was dynamically
+               * allocated.
+               */
+
+              mqmsg->type = MQ_ALLOC_DYN;
+            }
+        }
+    }
+
+  return mqmsg;
+}
 
 /****************************************************************************
  * Name: nxmq_wait_send
@@ -105,18 +190,17 @@ static void nxmq_sndtimeout(wdparm_t arg)
  *   full.
  *
  * Input Parameters:
- *   msgq   - Message queue descriptor
- *   abstime - The absolute time to wait until
+ *   mqdes - Message queue descriptor
  *
  * Returned Value:
  *   On success, nxmq_wait_send() returns 0 (OK); a negated errno value is
  *   returned on any failure:
  *
- *   EAGAIN    The queue was full and the O_NONBLOCK flag was set for the
- *             message queue description referred to by msgq.
- *   EINTR     The call was interrupted by a signal handler.
- *   ETIMEDOUT A timeout expired before the message queue became non-full
- *             (mq_timedsend only).
+ *   EAGAIN   The queue was full and the O_NONBLOCK flag was set for the
+ *            message queue description referred to by mqdes.
+ *   EINTR    The call was interrupted by a signal handler.
+ *   ETIMEOUT A timeout expired before the message queue became non-full
+ *            (mq_timedsend only).
  *
  * Assumptions/restrictions:
  * - The caller has verified the input parameters using nxmq_verify_send().
@@ -124,11 +208,11 @@ static void nxmq_sndtimeout(wdparm_t arg)
  *
  ****************************************************************************/
 
-int nxmq_wait_send(FAR struct mqueue_inode_s *msgq,
-                   FAR const struct timespec *abstime,
-                   sclock_t ticks)
+int nxmq_wait_send(mqd_t mqdes)
 {
-  FAR struct tcb_s *rtcb = this_task();
+  FAR struct tcb_s *rtcb;
+  FAR struct mqueue_inode_s *msgq;
+  int ret;
 
 #ifdef CONFIG_CANCELLATION_POINTS
   /* nxmq_wait_send() is not a cancellation point, but may be called via
@@ -145,107 +229,159 @@ int nxmq_wait_send(FAR struct mqueue_inode_s *msgq,
     }
 #endif
 
-  if (abstime)
-    {
-      wd_start_realtime(&rtcb->waitdog, abstime,
-                        nxmq_sndtimeout, (wdparm_t)rtcb);
-    }
-  else if (ticks >= 0)
-    {
-      wd_start(&rtcb->waitdog, ticks,
-               nxmq_sndtimeout, (wdparm_t)rtcb);
-    }
+  /* Get a pointer to the message queue */
+
+  msgq = mqdes->msgq;
 
   /* Verify that the queue is indeed full as the caller thinks */
 
-  /* Loop until there are fewer than max allowable messages in the
-   * receiving message queue
-   */
-
-  while (msgq->nmsgs >= msgq->maxmsgs)
+  if (msgq->nmsgs >= msgq->maxmsgs)
     {
-      /* Block until the message queue is no longer full.
-       * When we are unblocked, we will try again
+      /* Should we block until there is sufficient space in the
+       * message queue?
        */
 
-      rtcb          = this_task();
-      rtcb->waitobj = msgq;
-      msgq->cmn.nwaitnotfull++;
-
-      /* Initialize the errcode used to communication wake-up error
-       * conditions.
-       */
-
-      rtcb->errcode = OK;
-
-      /* Make sure this is not the idle task, descheduling that
-       * isn't going to end well.
-       */
-
-      DEBUGASSERT(!is_idle_task(rtcb));
-
-      /* Remove the tcb task from the running list. */
-
-      nxsched_remove_self(rtcb);
-
-      /* Add the task to the specified blocked task list */
-
-      rtcb->task_state = TSTATE_WAIT_MQNOTFULL;
-      nxsched_add_prioritized(rtcb, MQ_WNFLIST(msgq->cmn));
-
-      /* Now, perform the context switch */
-
-      up_switch_context(this_task(), rtcb);
-
-      /* When we resume at this point, either (1) the message queue
-       * is no longer empty, or (2) the wait has been interrupted by
-       * a signal.  We can detect the latter case be examining the
-       * per-task errno value (should be EINTR or ETIMEDOUT).
-       */
-
-      if (rtcb->errcode != OK)
+      if ((mqdes->oflags & O_NONBLOCK) != 0)
         {
-          break;
+          /* No... We will return an error to the caller. */
+
+          return -EAGAIN;
+        }
+
+      /* Yes... We will not return control until the message queue is
+       * available or we receive a signal or at timeout occurs.
+       */
+
+      else
+        {
+          /* Loop until there are fewer than max allowable messages in the
+           * receiving message queue
+           */
+
+          while (msgq->nmsgs >= msgq->maxmsgs)
+            {
+              int saved_errno;
+
+              /* Block until the message queue is no longer full.
+               * When we are unblocked, we will try again
+               */
+
+              rtcb           = this_task();
+              rtcb->msgwaitq = msgq;
+              msgq->nwaitnotfull++;
+
+              /* "Borrow" the per-task errno to communication wake-up error
+               * conditions.
+               */
+
+              saved_errno   = rtcb->pterrno;
+              rtcb->pterrno = OK;
+
+              /* Make sure this is not the idle task, descheduling that
+               * isn't going to end well.
+               */
+
+              DEBUGASSERT(NULL != rtcb->flink);
+              up_block_task(rtcb, TSTATE_WAIT_MQNOTFULL);
+
+              /* When we resume at this point, either (1) the message queue
+               * is no longer empty, or (2) the wait has been interrupted by
+               * a signal.  We can detect the latter case be examining the
+               * per-task errno value (should be EINTR or ETIMEOUT).
+               */
+
+              ret           = rtcb->pterrno;
+              rtcb->pterrno = saved_errno;
+
+              if (ret != OK)
+                {
+                  return -ret;
+                }
+            }
         }
     }
 
-  if (abstime || ticks >= 0)
-    {
-      wd_cancel(&rtcb->waitdog);
-    }
-
-  return -rtcb->errcode;
+  return OK;
 }
 
 /****************************************************************************
- * Name: nxmq_notify_send
+ * Name: nxmq_do_send
  *
  * Description:
- *   This function is called when a message is sent to a message queue.
- *   It will notify any tasks that are waiting for the message queue to be
- *   non-full.
+ *   This is internal, common logic shared by both [nx]mq_send and
+ *   [nx]mq_timesend.  This function adds the specified message (msg) to the
+ *   message queue (mqdes).  Then it notifies any tasks that were waiting
+ *   for message queue notifications setup by mq_notify.  And, finally, it
+ *   awakens any tasks that were waiting for the message not empty event.
  *
  * Input Parameters:
- *   msgq   - Message queue descriptor
+ *   mqdes  - Message queue descriptor
+ *   msg    - Message to send
+ *   msglen - The length of the message in bytes
+ *   prio   - The priority of the message
  *
  * Returned Value:
- *   None
- *
- * Assumptions/restrictions:
- * - Executes within a critical section established by the caller.
+ *   This function always returns OK.
  *
  ****************************************************************************/
 
-void nxmq_notify_send(FAR struct mqueue_inode_s *msgq)
+int nxmq_do_send(mqd_t mqdes, FAR struct mqueue_msg_s *mqmsg,
+                 FAR const char *msg, size_t msglen, unsigned int prio)
 {
   FAR struct tcb_s *btcb;
+  FAR struct mqueue_inode_s *msgq;
+  FAR struct mqueue_msg_s *next;
+  FAR struct mqueue_msg_s *prev;
+  irqstate_t flags;
+
+  /* Get a pointer to the message queue */
+
+  sched_lock();
+  msgq = mqdes->msgq;
+
+  /* Construct the message header info */
+
+  mqmsg->priority = prio;
+  mqmsg->msglen   = msglen;
+
+  /* Copy the message data into the message */
+
+  memcpy((FAR void *)mqmsg->mail, (FAR const void *)msg, msglen);
+
+  /* Insert the new message in the message queue */
+
+  flags = enter_critical_section();
+
+  /* Search the message list to find the location to insert the new
+   * message. Each is list is maintained in ascending priority order.
+   */
+
+  for (prev = NULL, next = (FAR struct mqueue_msg_s *)msgq->msglist.head;
+       next && prio <= next->priority;
+       prev = next, next = next->next);
+
+  /* Add the message at the right place */
+
+  if (prev)
+    {
+      sq_addafter((FAR sq_entry_t *)prev, (FAR sq_entry_t *)mqmsg,
+                  &msgq->msglist);
+    }
+  else
+    {
+      sq_addfirst((FAR sq_entry_t *)mqmsg, &msgq->msglist);
+    }
+
+  /* Increment the count of messages in the queue */
+
+  msgq->nmsgs++;
+  leave_critical_section(flags);
 
   /* Check if we need to notify any tasks that are attached to the
    * message queue
    */
 
-#ifndef CONFIG_DISABLE_MQUEUE_NOTIFICATION
-  if (msgq->ntpid != INVALID_PROCESS_ID)
+  if (msgq->ntmqdes)
     {
       struct sigevent event;
       pid_t pid;
@@ -258,49 +394,42 @@ void nxmq_notify_send(FAR struct mqueue_inode_s *msgq)
       /* Detach the notification */
 
       memset(&msgq->ntevent, 0, sizeof(struct sigevent));
-      msgq->ntpid = INVALID_PROCESS_ID;
+      msgq->ntpid   = INVALID_PROCESS_ID;
+      msgq->ntmqdes = NULL;
 
       /* Notification the client */
 
       DEBUGVERIFY(nxsig_notification(pid, &event,
                                      SI_MESGQ, &msgq->ntwork));
     }
-#endif
 
   /* Check if any tasks are waiting for the MQ not empty event. */
 
-  if (msgq->cmn.nwaitnotempty > 0)
+  flags = enter_critical_section();
+  if (msgq->nwaitnotempty > 0)
     {
-      FAR struct tcb_s *rtcb = this_task();
-
       /* Find the highest priority task that is waiting for
-       * this queue to be non-empty in waitfornotempty
-       * list. leave_critical_section() should give us sufficient
-       * protection since interrupts should never cause a change
-       * in this list
+       * this queue to be non-empty in g_waitingformqnotempty
+       * list. sched_lock() should give us sufficient protection since
+       * interrupts should never cause a change in this list
        */
 
-      btcb = (FAR struct tcb_s *)dq_remfirst(MQ_WNELIST(msgq->cmn));
+      for (btcb = (FAR struct tcb_s *)g_waitingformqnotempty.head;
+           btcb && btcb->msgwaitq != msgq;
+           btcb = btcb->flink)
+        {
+        }
 
       /* If one was found, unblock it */
 
       DEBUGASSERT(btcb);
 
-      wd_cancel(&btcb->waitdog);
-
-      msgq->cmn.nwaitnotempty--;
-
-      /* Indicate that the wait is over. */
-
-      btcb->waitobj = NULL;
-
-      /* Add the task to ready-to-run task list and
-       * perform the context switch if one is needed
-       */
-
-      if (nxsched_add_readytorun(btcb))
-        {
-          up_switch_context(btcb, rtcb);
-        }
+      btcb->msgwaitq = NULL;
+      msgq->nwaitnotempty--;
+      up_unblock_task(btcb);
     }
+
+  leave_critical_section(flags);
+  sched_unlock();
+  return OK;
 }

@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/analog/opamp.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Mateusz Szafoni <raiden00@railab.me>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -43,15 +56,16 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-static int opamp_open(FAR struct file *filep);
-static int opamp_close(FAR struct file *filep);
-static int opamp_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
+static int     opamp_open(FAR struct file *filep);
+static int     opamp_close(FAR struct file *filep);
+static int     opamp_ioctl(FAR struct file *filep, int cmd,
+                           unsigned long arg);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations g_opamp_fops =
+static const struct file_operations opamp_fops =
 {
   opamp_open,                    /* open */
   opamp_close,                   /* close */
@@ -59,6 +73,10 @@ static const struct file_operations g_opamp_fops =
   NULL,                          /* write */
   NULL,                          /* seek */
   opamp_ioctl,                   /* ioctl */
+  NULL                           /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL                         /* unlink */
+#endif
 };
 
 /****************************************************************************
@@ -80,15 +98,13 @@ static int opamp_open(FAR struct file *filep)
   uint8_t                tmp;
   int                    ret;
 
-  /* If the port is the middle of closing, wait until the close is
-   * finished.
-   */
+  /* If the port is the middle of closing, wait until the close is finished */
 
-  ret = nxmutex_lock(&dev->ad_closelock);
+  ret = nxsem_wait(&dev->ad_closesem);
   if (ret >= 0)
     {
-      /* Increment the count of references to the device.  If this is the
-       * first time that the driver has been opened for this device, then
+      /* Increment the count of references to the device.  If this the first
+       * time that the driver has been opened for this device, then
        * initialize the device.
        */
 
@@ -101,9 +117,7 @@ static int opamp_open(FAR struct file *filep)
         }
       else
         {
-          /* Check if this is the first time that the driver has been
-           * opened.
-           */
+          /* Check if this is the first time that the driver has been opened. */
 
           if (tmp == 1)
             {
@@ -122,7 +136,7 @@ static int opamp_open(FAR struct file *filep)
             }
         }
 
-      nxmutex_unlock(&dev->ad_closelock);
+      nxsem_post(&dev->ad_closesem);
     }
 
   return ret;
@@ -144,7 +158,7 @@ static int opamp_close(FAR struct file *filep)
   irqstate_t            flags;
   int                   ret;
 
-  ret = nxmutex_lock(&dev->ad_closelock);
+  ret = nxsem_wait(&dev->ad_closesem);
   if (ret >= 0)
     {
       /* Decrement the references to the driver.  If the reference count will
@@ -154,7 +168,7 @@ static int opamp_close(FAR struct file *filep)
       if (dev->ad_ocount > 1)
         {
           dev->ad_ocount--;
-          nxmutex_unlock(&dev->ad_closelock);
+          nxsem_post(&dev->ad_closesem);
         }
       else
         {
@@ -168,7 +182,7 @@ static int opamp_close(FAR struct file *filep)
           dev->ad_ops->ao_shutdown(dev);          /* Disable the OPAMP */
           leave_critical_section(flags);
 
-          nxmutex_unlock(&dev->ad_closelock);
+          nxsem_post(&dev->ad_closesem);
         }
     }
 
@@ -205,16 +219,16 @@ int opamp_register(FAR const char *path, FAR struct opamp_dev_s *dev)
 
   dev->ad_ocount = 0;
 
-  /* Initialize mutex */
+  /* Initialize semaphores */
 
-  nxmutex_init(&dev->ad_closelock);
+  nxsem_init(&dev->ad_closesem, 0, 1);
 
   /* Register the OPAMP character driver */
 
-  ret = register_driver(path, &g_opamp_fops, 0444, dev);
+  ret =  register_driver(path, &opamp_fops, 0444, dev);
   if (ret < 0)
     {
-      nxmutex_destroy(&dev->ad_closelock);
+      nxsem_destroy(&dev->ad_closesem);
     }
 
   return ret;

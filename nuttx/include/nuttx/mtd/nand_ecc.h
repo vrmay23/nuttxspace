@@ -1,8 +1,14 @@
 /****************************************************************************
  * include/nuttx/mtd/nand_ecc.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2012, Atmel Corporation
+ *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This logic was based largely on Atmel sample code with modifications for
+ * better integration with NuttX.  The Atmel sample code has a BSD
+ * compatible license that requires this copyright notice:
+ *
+ *   Copyright (c) 2012, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,16 +39,16 @@
  *
  ****************************************************************************/
 
-#ifndef __INCLUDE_NUTTX_MTD_NAND_ECC_H
-#define __INCLUDE_NUTTX_MTD_NAND_ECC_H
+#ifndef __INCLUDE_NUTTX_MTD_ECC_H
+#define __INCLUDE_NUTTX_MTD_ECC_H
 
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/mtd/nand_config.h>
 
-#include <sys/types.h>
 #include <stdint.h>
 
 /****************************************************************************
@@ -127,4 +133,4 @@ int nandecc_writepage(FAR struct nand_dev_s *nand, off_t block,
 #endif
 
 #endif /* __ASSEMBLY__ */
-#endif /* __INCLUDE_NUTTX_MTD_NAND_ECC_H */
+#endif /* __INCLUDE_NUTTX_MTD_ECC_H */

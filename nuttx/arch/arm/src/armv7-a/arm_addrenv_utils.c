@@ -1,22 +1,35 @@
 /****************************************************************************
- * arch/arm/src/armv7-a/arm_addrenv_utils.c
+ * arch/arm/src/armv7/arm_addrenv.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +40,6 @@
 #include <nuttx/config.h>
 
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -57,15 +69,18 @@
  *
  ****************************************************************************/
 
-int arm_addrenv_create_region(uintptr_t *l1table, unsigned int listlen,
+int arm_addrenv_create_region(FAR uintptr_t **list, unsigned int listlen,
                               uintptr_t vaddr, size_t regionsize,
                               uint32_t mmuflags)
 {
+  irqstate_t flags;
   uintptr_t paddr;
-  uintptr_t *l2table;
+  FAR uint32_t *l2table;
+#ifndef CONFIG_ARCH_PGPOOL_MAPPING
+  uint32_t l1save;
+#endif
   size_t nmapped;
   unsigned int npages;
-  unsigned int nlist;
   unsigned int i;
   unsigned int j;
 
@@ -92,31 +107,39 @@ int arm_addrenv_create_region(uintptr_t *l1table, unsigned int listlen,
    * the L1 page table).
    */
 
-  nlist = (npages + ENTRIES_PER_L2TABLE - 1) / ENTRIES_PER_L2TABLE;
   nmapped = 0;
-  for (i = 0; i < nlist; i++)
+  for (i = 0; i < npages; i += ENTRIES_PER_L2TABLE)
     {
       /* Allocate one physical page for the L2 page table */
 
       paddr = mm_pgalloc(1);
-      binfo("a new l2 page table (paddr=%x)\n", paddr);
       if (!paddr)
         {
           return -ENOMEM;
         }
 
       DEBUGASSERT(MM_ISALIGNED(paddr));
+      list[i] = (FAR uintptr_t *)paddr;
 
-      mmu_l1table_setentry(l1table, paddr, vaddr + i * SECTION_SIZE,
-                           MMU_L1_PGTABFLAGS);
+      flags = enter_critical_section();
 
+#ifdef CONFIG_ARCH_PGPOOL_MAPPING
       /* Get the virtual address corresponding to the physical page address */
 
-      l2table = (uintptr_t *)arm_pgvaddr(paddr);
+      l2table = (FAR uint32_t *)arm_pgvaddr(paddr);
+#else
+      /* Temporarily map the page into the virtual address space */
+
+      l1save = mmu_l1_getentry(ARCH_SCRATCH_VBASE);
+      mmu_l1_setentry(paddr & ~SECTION_MASK, ARCH_SCRATCH_VBASE,
+                      MMU_MEMFLAGS);
+      l2table = (FAR uint32_t *)(ARCH_SCRATCH_VBASE |
+                                 (paddr & SECTION_MASK));
+#endif
 
       /* Initialize the page table */
 
-      memset(l2table, 0, ENTRIES_PER_L2TABLE * sizeof(uintptr_t));
+      memset(l2table, 0, ENTRIES_PER_L2TABLE * sizeof(uint32_t));
 
       /* Back up L2 entries with physical memory */
 
@@ -125,9 +148,12 @@ int arm_addrenv_create_region(uintptr_t *l1table, unsigned int listlen,
           /* Allocate one physical page for region data */
 
           paddr = mm_pgalloc(1);
-          binfo("a new page (paddr=%x)\n", paddr);
           if (!paddr)
             {
+#ifndef CONFIG_ARCH_PGPOOL_MAPPING
+              mmu_l1_restore(ARCH_SCRATCH_VBASE, l1save);
+#endif
+              leave_critical_section(flags);
               return -ENOMEM;
             }
 
@@ -144,7 +170,14 @@ int arm_addrenv_create_region(uintptr_t *l1table, unsigned int listlen,
 
       up_flush_dcache((uintptr_t)l2table,
                       (uintptr_t)l2table +
-                      ENTRIES_PER_L2TABLE * sizeof(uintptr_t));
+                      ENTRIES_PER_L2TABLE * sizeof(uint32_t));
+
+#ifndef CONFIG_ARCH_PGPOOL_MAPPING
+      /* Restore the scratch section L1 page table entry */
+
+      mmu_l1_restore(ARCH_SCRATCH_VBASE, l1save);
+#endif
+      leave_critical_section(flags);
     }
 
   return npages;
@@ -158,11 +191,15 @@ int arm_addrenv_create_region(uintptr_t *l1table, unsigned int listlen,
  *
  ****************************************************************************/
 
-void arm_addrenv_destroy_region(uintptr_t *l1table, unsigned int listlen,
+void arm_addrenv_destroy_region(FAR uintptr_t **list, unsigned int listlen,
                                 uintptr_t vaddr, bool keep)
 {
-  uintptr_t l1entry;
-  uintptr_t *l2table;
+  irqstate_t flags;
+  uintptr_t paddr;
+  FAR uint32_t *l2table;
+#ifndef CONFIG_ARCH_PGPOOL_MAPPING
+  uint32_t l1save;
+#endif
   int i;
   int j;
 
@@ -170,18 +207,30 @@ void arm_addrenv_destroy_region(uintptr_t *l1table, unsigned int listlen,
 
   for (i = 0; i < listlen; vaddr += SECTION_SIZE, i++)
     {
+      /* Unhook the L2 page table from the L1 page table */
+
+      mmu_l1_clrentry(vaddr);
+
       /* Has this page table been allocated? */
 
-      l1entry = mmu_l1table_getentry(l1table, vaddr);
-      if (l1entry != 0)
+      paddr = (uintptr_t)list[i];
+      if (paddr != 0)
         {
-          l1entry &= PTE_SMALL_PADDR_MASK;
+          flags = enter_critical_section();
 
-          /* Get the virtual address corresponding to the physical page
-           * address
-           */
+#ifdef CONFIG_ARCH_PGPOOL_MAPPING
+          /* Get the virtual address corresponding to the physical page address */
 
-          l2table = (uintptr_t *)arm_pgvaddr(l1entry);
+          l2table = (FAR uint32_t *)arm_pgvaddr(paddr);
+#else
+          /* Temporarily map the page into the virtual address space */
+
+          l1save = mmu_l1_getentry(ARCH_SCRATCH_VBASE);
+          mmu_l1_setentry(paddr & ~SECTION_MASK, ARCH_SCRATCH_VBASE,
+                          MMU_MEMFLAGS);
+          l2table = (FAR uint32_t *)(ARCH_SCRATCH_VBASE |
+                                     (paddr & SECTION_MASK));
+#endif
 
           /* Return the allocated pages to the page allocator unless we were
            * asked to keep the page data.  We keep the page data only for
@@ -194,8 +243,7 @@ void arm_addrenv_destroy_region(uintptr_t *l1table, unsigned int listlen,
             {
               for (j = 0; j < ENTRIES_PER_L2TABLE; j++)
                 {
-                  uintptr_t paddr = *l2table++;
-
+                  paddr = *l2table++;
                   if (paddr != 0)
                     {
                       paddr &= PTE_SMALL_PADDR_MASK;
@@ -204,11 +252,16 @@ void arm_addrenv_destroy_region(uintptr_t *l1table, unsigned int listlen,
                 }
             }
 
-          /* And free the L2 page table itself.
-           * The l1table will be entire free, so don't need to set 0,
-           */
+#ifndef CONFIG_ARCH_PGPOOL_MAPPING
+          /* Restore the scratch section L1 page table entry */
 
-          mm_pgfree((uintptr_t)l1entry, 1);
+          mmu_l1_restore(ARCH_SCRATCH_VBASE, l1save);
+#endif
+          leave_critical_section(flags);
+
+          /* And free the L2 page table itself */
+
+          mm_pgfree((uintptr_t)list[i], 1);
         }
     }
 }

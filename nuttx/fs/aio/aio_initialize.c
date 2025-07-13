@@ -1,8 +1,6 @@
 /****************************************************************************
  * fs/aio/aio_initialize.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,10 +26,10 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <queue.h>
 
 #include <nuttx/sched.h>
-#include <nuttx/mutex.h>
-#include <nuttx/queue.h>
+#include <nuttx/semaphore.h>
 
 #include "aio/aio.h"
 
@@ -51,14 +49,16 @@ static dq_queue_t g_aioc_free;
 
 /* This counting semaphore tracks the number of free AIO containers */
 
-static sem_t g_aioc_freesem = SEM_INITIALIZER(CONFIG_FS_NAIOC);
+static sem_t g_aioc_freesem;
 
-/* This binary lock supports exclusive access to the list of pending
+/* This binary semaphore supports exclusive access to the list of pending
  * asynchronous I/O.  g_aio_holder and a_aio_count support the reentrant
  * lock.
  */
 
-static rmutex_t g_aio_lock = NXRMUTEX_INITIALIZER;
+static sem_t g_aio_exclsem;
+static pid_t g_aio_holder;
+static uint16_t g_aio_count;
 
 /****************************************************************************
  * Public Data
@@ -92,6 +92,19 @@ void aio_initialize(void)
 {
   int i;
 
+  /* Initialize counting semaphores */
+
+  nxsem_init(&g_aioc_freesem, 0, CONFIG_FS_NAIOC);
+  nxsem_setprotocol(&g_aioc_freesem, SEM_PRIO_NONE);
+  nxsem_init(&g_aio_exclsem, 0, 1);
+
+  g_aio_holder = INVALID_PROCESS_ID;
+
+  /* Initialize the container queues */
+
+  dq_init(&g_aioc_free);
+  dq_init(&g_aio_pending);
+
   /* Add all of the pre-allocated AIO containers to the free list */
 
   for (i = 0; i < CONFIG_FS_NAIOC; i++)
@@ -118,12 +131,53 @@ void aio_initialize(void)
 
 int aio_lock(void)
 {
-  return nxrmutex_lock(&g_aio_lock);
+  pid_t me = getpid();
+  int ret = OK;
+
+  /* Does this thread already hold the semaphore? */
+
+  if (g_aio_holder == me)
+    {
+      /* Yes, just increment the counts held */
+
+      DEBUGASSERT(g_aio_count > 0 && g_aio_count < UINT16_MAX);
+      g_aio_count++;
+    }
+  else
+    {
+      ret = nxsem_wait_uninterruptible(&g_aio_exclsem);
+      if (ret >= 0)
+        {
+          /* And mark it as ours */
+
+          g_aio_holder = me;
+          g_aio_count  = 1;
+        }
+    }
+
+  return ret;
 }
 
 void aio_unlock(void)
 {
-  nxrmutex_unlock(&g_aio_lock);
+  DEBUGASSERT(g_aio_holder == getpid() && g_aio_count > 0);
+
+  /* Would decrementing the count release the lock? */
+
+  if (g_aio_count <= 1)
+    {
+      /* Yes.. that we will no longer be the holder */
+
+      g_aio_holder = INVALID_PROCESS_ID;
+      g_aio_count  = 0;
+      nxsem_post(&g_aio_exclsem);
+    }
+  else
+    {
+      /* Otherwise, just decrement the count.  We still hold the lock. */
+
+      g_aio_count--;
+    }
 }
 
 /****************************************************************************

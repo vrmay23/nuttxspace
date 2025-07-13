@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/s32k1xx/s32k144evb/src/s32k1xx_bringup.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,10 +40,10 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <stdint.h>
+#include <sys/mount.h>
 #include <syslog.h>
 
-#ifdef CONFIG_INPUT_BUTTONS
+#ifdef CONFIG_BUTTONS
 #  include <nuttx/input/buttons.h>
 #endif
 
@@ -38,20 +51,9 @@
 #  include <nuttx/leds/userled.h>
 #endif
 
-#ifdef CONFIG_FS_PROCFS
-#  include <nuttx/fs/fs.h>
-
-#  ifdef CONFIG_S32K1XX_RESETCAUSE_PROCFS
-#    include "s32k1xx_resetcause_procfs.h"
-#  endif
-#endif
-
-#ifdef CONFIG_S32K1XX_PROGMEM
-#  include <nuttx/mtd/mtd.h>
-#endif
-
-#ifdef CONFIG_S32K1XX_EEEPROM
-#  include "s32k1xx_eeeprom.h"
+#ifdef CONFIG_I2C_DRIVER
+#  include <nuttx/i2c/i2c_master.h>
+#  include "s32k1xx_lpi2c.h"
 #endif
 
 #include "s32k144evb.h"
@@ -69,7 +71,7 @@
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_LIB_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -78,7 +80,7 @@ int s32k1xx_bringup(void)
 {
   int ret = OK;
 
-#ifdef CONFIG_INPUT_BUTTONS
+#ifdef CONFIG_BUTTONS
   /* Register the BUTTON driver */
 
   ret = btn_lower_initialize("/dev/buttons");
@@ -99,65 +101,39 @@ int s32k1xx_bringup(void)
 #endif
 
 #ifdef CONFIG_FS_PROCFS
-  /* Register procfs entries before mounting */
-
-#  ifdef CONFIG_S32K1XX_RESETCAUSE_PROCFS
-  ret = s32k1xx_resetcause_procfs_register();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR,
-             "ERROR: Failed to register resetcause procfs entry: %d\n", ret);
-    }
-#  endif /* CONFIG_RESETCAUSE_PROCFS */
-
   /* Mount the procfs file system */
 
-  ret = nx_mount(NULL, "/proc", "procfs", 0, NULL);
+  ret = mount(NULL, "/proc", "procfs", 0, NULL);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to mount procfs at /proc: %d\n", ret);
     }
 #endif
 
-#ifdef CONFIG_S32K1XX_PROGMEM
-  struct mtd_dev_s *mtd;
-
-  mtd = progmem_initialize();
-  if (mtd == NULL)
-    {
-      syslog(LOG_ERR, "ERROR: progmem_initialize() failed\n");
-    }
-#endif
-
-#ifdef CONFIG_S32K1XX_EEEPROM
-  /* Register EEEPROM block device */
-
-  ret = s32k1xx_eeeprom_register(0, 4096);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: s32k1xx_eeeprom_register() failed\n");
-    }
-#endif
-
-#ifdef CONFIG_S32K1XX_LPI2C
-  /* Initialize I2C driver */
-
-  ret = s32k1xx_i2cdev_initialize();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: s32k1xx_i2cdev_initialize() failed: %d\n",
-             ret);
-    }
-#endif
-
 #ifdef CONFIG_S32K1XX_LPSPI
-  /* Initialize SPI driver */
+  /* Configure SPI chip selects if 1) SPI is not disabled, and 2) the weak
+   * function s32k1xx_spidev_initialize() has been brought into the link.
+   */
 
-  ret = s32k1xx_spidev_initialize();
-  if (ret < 0)
+  s32k1xx_spidev_initialize();
+#endif
+
+#if defined(CONFIG_S32K1XX_LPI2C0) && defined(CONFIG_I2C_DRIVER)
+  FAR struct i2c_master_s *i2c;
+
+  i2c = s32k1xx_i2cbus_initialize(0);
+  if (i2c == NULL)
     {
-      syslog(LOG_ERR, "ERROR: s32k1xx_spidev_initialize() failed: %d\n",
-             ret);
+      serr("ERROR: Failed to get I2C%d interface\n", bus);
+    }
+  else
+    {
+      ret = i2c_register(i2c, 0);
+      if (ret < 0)
+        {
+          serr("ERROR: Failed to register I2C%d driver: %d\n", bus, ret);
+          s32k1xx_i2cbus_uninitialize(i2c);
+        }
     }
 #endif
 

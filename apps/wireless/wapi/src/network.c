@@ -1,17 +1,19 @@
 /****************************************************************************
- * apps/wireless/wapi/src/network.c
+ * apps/wireless/wapi/examples/network.c
  *
- * SPDX-License-Identifier: BSD-2-Clause
- * SPDX-FileCopyrightText: 2011, 2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2010, Volkan YAZICI <volkan.yazici@gmail.com>
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2011, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Adapted for Nuttx from WAPI:
+ *
+ *   Copyright (c) 2010, Volkan YAZICI <volkan.yazici@gmail.com>
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * modification, are permitted provided that the following conditions are met:
  *
- *  - Redistributions of  source code must  retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ *  - Redistributions of  source code must  retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
  *
  *  - Redistributions in binary form must reproduce the above copyright
  *    notice, this list of  conditions and the  following disclaimer in the
@@ -61,7 +63,7 @@ static int wapi_get_addr(int sock, FAR const char *ifname, int cmd,
 
   WAPI_VALIDATE_PTR(addr);
 
-  strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
+  strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
   if ((ret = ioctl(sock, cmd, (unsigned long)((uintptr_t)&ifr))) >= 0)
     {
       struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
@@ -87,10 +89,9 @@ static int wapi_set_addr(int sock, FAR const char *ifname, int cmd,
   WAPI_VALIDATE_PTR(addr);
 
   sin.sin_family = AF_INET;
-  sin.sin_port = 0;
   memcpy(&sin.sin_addr, addr, sizeof(struct in_addr));
   memcpy(&ifr.ifr_addr, &sin, sizeof(struct sockaddr_in));
-  strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
+  strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
   if ((ret = ioctl(sock, cmd, (unsigned long)((uintptr_t)&ifr))) < 0)
     {
       int errcode = errno;
@@ -175,9 +176,8 @@ int wapi_get_ifup(int sock, FAR const char *ifname, FAR int *is_up)
 
   WAPI_VALIDATE_PTR(is_up);
 
-  strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
-  ret = ioctl(sock, SIOCGIFFLAGS, (unsigned long)((uintptr_t)&ifr));
-  if (ret >= 0)
+  strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+  if ((ret = ioctl(sock, SIOCGIFFLAGS, (unsigned long)((uintptr_t)&ifr))) >= 0)
     {
       *is_up = (ifr.ifr_flags & IFF_UP) == IFF_UP;
     }
@@ -204,9 +204,8 @@ int wapi_set_ifup(int sock, FAR const char *ifname)
   struct ifreq ifr;
   int ret;
 
-  strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
-  ret = ioctl(sock, SIOCGIFFLAGS, (unsigned long)((uintptr_t)&ifr));
-  if (ret >= 0)
+  strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+  if ((ret = ioctl(sock, SIOCGIFFLAGS, (unsigned long)((uintptr_t)&ifr))) >= 0)
     {
       ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
       ret = ioctl(sock, SIOCSIFFLAGS, (unsigned long)((uintptr_t)&ifr));
@@ -240,9 +239,8 @@ int wapi_set_ifdown(int sock, FAR const char *ifname)
   struct ifreq ifr;
   int ret;
 
-  strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
-  ret = ioctl(sock, SIOCGIFFLAGS, (unsigned long)((uintptr_t)&ifr));
-  if (ret >= 0)
+  strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+  if ((ret = ioctl(sock, SIOCGIFFLAGS, (unsigned long)((uintptr_t)&ifr))) >= 0)
     {
       ifr.ifr_flags &= ~IFF_UP;
       ret = ioctl(sock, SIOCSIFFLAGS, (unsigned long)((uintptr_t)&ifr));

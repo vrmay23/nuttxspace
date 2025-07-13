@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/efm32/efm32_pwm.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014 Pierre-Noel Bouteville. All rights reserved.
+ *   Author: Pierre-Noel Bouteville <pnb990@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -37,7 +50,9 @@
 #include <nuttx/timers/pwm.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "hardware/efm32_cmu.h"
 #include "hardware/efm32_timer.h"
 #include "efm32_timer.h"
@@ -56,9 +71,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* PWM/Timer Definitions ****************************************************/
-
 /* The following definitions are used to identify the various time types */
 
 /* Debug ********************************************************************/
@@ -72,34 +85,32 @@
 /****************************************************************************
  * Private Types
  ****************************************************************************/
-
 /* This structure represents the state of one PWM timer */
 
 struct efm32_pwmtimer_s
 {
-  const struct pwm_ops_s *ops;     /* PWM operations */
-  uint8_t                 timid;   /* Timer ID {1,...,14} */
-  uint8_t                 channel; /* Timer output channel: {1,..4} */
-  uint8_t                 pinloc;  /* Timer output channel pin location */
+  FAR const struct pwm_ops_s *ops;     /* PWM operations */
+  uint8_t                     timid;   /* Timer ID {1,...,14} */
+  uint8_t                     channel; /* Timer output channel: {1,..4} */
+  uint8_t                     pinloc;  /* Timer output channel pin location */
 #ifdef CONFIG_PWM_PULSECOUNT
-  uint8_t                 irq;     /* Timer update IRQ */
-  uint8_t                 prev;    /* The previous value of the RCR (pre-loaded) */
-  uint8_t                 curr;    /* The current value of the RCR (pre-loaded) */
-  uint32_t                count;   /* Remaining pulse count */
+  uint8_t                     irq;     /* Timer update IRQ */
+  uint8_t                     prev;    /* The previous value of the RCR (pre-loaded) */
+  uint8_t                     curr;    /* The current value of the RCR (pre-loaded) */
+  uint32_t                    count;   /* Remaining pulse count */
 #endif
-  uint32_t                base;    /* The base address of the timer */
-  uint32_t                pincfg;  /* Output pin configuration */
-  uint32_t                pclk;    /* The frequency of the peripheral clock
-                                    * that drives the timer module. */
+  uint32_t                    base;    /* The base address of the timer */
+  uint32_t                    pincfg;  /* Output pin configuration */
+  uint32_t                    pclk;    /* The frequency of the peripheral clock
+                                        * that drives the timer module. */
 #ifdef CONFIG_PWM_PULSECOUNT
-  void                   *handle;  /* Handle used for upper-half callback */
+  FAR void                   *handle;  /* Handle used for upper-half callback */
 #endif
 };
 
 /****************************************************************************
  * Static Function Prototypes
  ****************************************************************************/
-
 /* Register access */
 
 static uint32_t pwm_getreg(struct efm32_pwmtimer_s *priv, int offset);
@@ -107,51 +118,48 @@ static void pwm_putreg(struct efm32_pwmtimer_s *priv, int offset,
                        uint32_t value);
 
 #ifdef CONFIG_DEBUG_PWM_INFO
-static void pwm_dumpregs(struct efm32_pwmtimer_s *priv, const char *msg);
+static void pwm_dumpregs(struct efm32_pwmtimer_s *priv, FAR const char *msg);
 #else
 #  define pwm_dumpregs(priv,msg)
 #endif
 
 /* Timer management */
 
-static int pwm_timer(struct efm32_pwmtimer_s *priv,
-                     const struct pwm_info_s *info);
+static int pwm_timer(FAR struct efm32_pwmtimer_s *priv,
+                     FAR const struct pwm_info_s *info);
 
 #if defined(CONFIG_PWM_PULSECOUNT) && (defined(CONFIG_EFM32_TIMER0_PWM) || \
                                        defined(CONFIG_EFM32_TIMER1_PWM) || \
                                        defined(CONFIG_EFM32_TIMER2_PWM) || \
                                        defined(CONFIG_EFM32_TIMER3_PWM) \
                                        )
-static int pwm_interrupt(int irq, void *context, void *arg);
+static int pwm_interrupt(int irq, void *context, FAR void *arg);
 static uint8_t pwm_pulsecount(uint32_t count);
 
 #endif
 
 /* PWM driver methods */
 
-static int pwm_setup(struct pwm_lowerhalf_s *dev);
-static int pwm_shutdown(struct pwm_lowerhalf_s *dev);
+static int pwm_setup(FAR struct pwm_lowerhalf_s *dev);
+static int pwm_shutdown(FAR struct pwm_lowerhalf_s *dev);
 
 #ifdef CONFIG_PWM_PULSECOUNT
-static int pwm_start(struct pwm_lowerhalf_s *dev,
-                     const struct pwm_info_s *info,
-                     void *handle);
+static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
+                     FAR const struct pwm_info_s *info,
+                     FAR void *handle);
 #else
-static int pwm_start(struct pwm_lowerhalf_s *dev,
-                     const struct pwm_info_s *info);
+static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
+                     FAR const struct pwm_info_s *info);
 #endif
 
-static int pwm_stop(struct pwm_lowerhalf_s *dev);
-static int pwm_ioctl(struct pwm_lowerhalf_s *dev,
+static int pwm_stop(FAR struct pwm_lowerhalf_s *dev);
+static int pwm_ioctl(FAR struct pwm_lowerhalf_s *dev,
                      int cmd, unsigned long arg);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-/* This is the list of lower half PWM driver methods used by the upper half
- * driver
- */
+/* This is the list of lower half PWM driver methods used by the upper half driver */
 
 static const struct pwm_ops_s g_pwmops =
 {
@@ -265,8 +273,7 @@ static uint32_t pwm_getreg(struct efm32_pwmtimer_s *priv, int offset)
  *
  ****************************************************************************/
 
-static void pwm_putreg(struct efm32_pwmtimer_s *priv,
-                       int offset, uint32_t value)
+static void pwm_putreg(struct efm32_pwmtimer_s *priv, int offset, uint32_t value)
 {
   putreg32(value, priv->base + offset);
 }
@@ -286,7 +293,7 @@ static void pwm_putreg(struct efm32_pwmtimer_s *priv,
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_PWM_INFO
-static void pwm_dumpregs(struct efm32_pwmtimer_s *priv, const char *msg)
+static void pwm_dumpregs(struct efm32_pwmtimer_s *priv, FAR const char *msg)
 {
   /* TODO debug pwm_dumpregs */
 
@@ -347,8 +354,8 @@ static void pwm_dumpregs(struct efm32_pwmtimer_s *priv, const char *msg)
  *
  ****************************************************************************/
 
-static int pwm_timer(struct efm32_pwmtimer_s *priv,
-                     const struct pwm_info_s *info)
+static int pwm_timer(FAR struct efm32_pwmtimer_s *priv,
+                     FAR const struct pwm_info_s *info)
 {
   /* Register contents */
 
@@ -398,15 +405,14 @@ static int pwm_timer(struct efm32_pwmtimer_s *priv,
       break;
 
     default:
-      DEBUGPANIC();
+      DEBUGASSERT(false);
     }
 
   pwm_putreg(priv, EFM32_TIMER_ROUTE_OFFSET, regval);
 
   regval = (info->duty * pwm_getreg(priv, EFM32_TIMER_TOP_OFFSET)) >> 16;
   pwm_putreg(priv, cc_offet + EFM32_TIMER_CC_CCV_OFFSET, regval);
-
-  /* pwm_putreg(priv, cc_offet + EFM32_TIMER_CC_CCVB_OFFSET, regval); */
+  //pwm_putreg(priv, cc_offet + EFM32_TIMER_CC_CCVB_OFFSET, regval);
 
   regval = (_TIMER_CC_CTRL_MODE_PWM   << _TIMER_CC_CTRL_MODE_SHIFT)   | \
            (_TIMER_CC_CTRL_CMOA_CLEAR << _TIMER_CC_CTRL_CMOA_SHIFT)   | \
@@ -441,7 +447,7 @@ static int pwm_timer(struct efm32_pwmtimer_s *priv,
                                        defined(CONFIG_EFM32_TIMER3_PWM) \
                                        )
 #warning "not yet implemented"
-static int pwm_interrupt(int irq, void *context, void *arg)
+static int pwm_interrupt(int irq, void *context, FAR void *arg)
 {
   /* TODO pwm_interrupt */
 #if 0
@@ -475,7 +481,7 @@ static int pwm_interrupt(int irq, void *context, void *arg)
 
       /* Disable first interrupts, stop and reset the timer */
 
-      pwm_stop((struct pwm_lowerhalf_s *)priv);
+      pwm_stop((FAR struct pwm_lowerhalf_s *)priv);
 
       /* Then perform the callback into the upper half driver */
 
@@ -505,9 +511,7 @@ static int pwm_interrupt(int irq, void *context, void *arg)
       pwm_putreg(priv, STM32_ATIM_RCR_OFFSET, (uint32_t)priv->curr - 1);
     }
 
-  /* Now all of the time critical stuff is done so we can do some debug
-   * output
-   */
+  /* Now all of the time critical stuff is done so we can do some debug output */
 
   pwminfo("Update interrupt SR: %04x prev: %d curr: %d count: %d\n",
           regval, priv->prev, priv->curr, priv->count);
@@ -570,6 +574,7 @@ static uint8_t pwm_pulsecount(uint32_t count)
 }
 #endif
 
+
 /****************************************************************************
  * Name: pwm_setup
  *
@@ -590,9 +595,9 @@ static uint8_t pwm_pulsecount(uint32_t count)
  *
  ****************************************************************************/
 
-static int pwm_setup(struct pwm_lowerhalf_s *dev)
+static int pwm_setup(FAR struct pwm_lowerhalf_s *dev)
 {
-  struct efm32_pwmtimer_s *priv = (struct efm32_pwmtimer_s *)dev;
+  FAR struct efm32_pwmtimer_s *priv = (FAR struct efm32_pwmtimer_s *)dev;
 
   pwminfo("TIMER%d pincfg: %08x\n", priv->timid, priv->pincfg);
   pwm_dumpregs(priv, "Initially");
@@ -620,7 +625,7 @@ static int pwm_setup(struct pwm_lowerhalf_s *dev)
       break;
 
     default:
-      DEBUGPANIC();
+      DEBUGASSERT(false);
       break;
     }
 
@@ -646,9 +651,9 @@ static int pwm_setup(struct pwm_lowerhalf_s *dev)
  *
  ****************************************************************************/
 
-static int pwm_shutdown(struct pwm_lowerhalf_s *dev)
+static int pwm_shutdown(FAR struct pwm_lowerhalf_s *dev)
 {
-  struct efm32_pwmtimer_s *priv = (struct efm32_pwmtimer_s *)dev;
+  FAR struct efm32_pwmtimer_s *priv = (FAR struct efm32_pwmtimer_s *)dev;
   uint32_t pincfg;
 
   pwminfo("TIMER%d pincfg: %08x\n", priv->timid, priv->pincfg);
@@ -683,11 +688,11 @@ static int pwm_shutdown(struct pwm_lowerhalf_s *dev)
  ****************************************************************************/
 
 #ifdef CONFIG_PWM_PULSECOUNT
-static int pwm_start(struct pwm_lowerhalf_s *dev,
-                     const struct pwm_info_s *info,
-                     void *handle)
+static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
+                     FAR const struct pwm_info_s *info,
+                     FAR void *handle)
 {
-  struct efm32_pwmtimer_s *priv = (struct efm32_pwmtimer_s *)dev;
+  FAR struct efm32_pwmtimer_s *priv = (FAR struct efm32_pwmtimer_s *)dev;
 
   /* Save the handle */
 
@@ -698,10 +703,10 @@ static int pwm_start(struct pwm_lowerhalf_s *dev,
   return pwm_timer(priv, info);
 }
 #else
-static int pwm_start(struct pwm_lowerhalf_s *dev,
-                     const struct pwm_info_s *info)
+static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
+                     FAR const struct pwm_info_s *info)
 {
-  struct efm32_pwmtimer_s *priv = (struct efm32_pwmtimer_s *)dev;
+  FAR struct efm32_pwmtimer_s *priv = (FAR struct efm32_pwmtimer_s *)dev;
   return pwm_timer(priv, info);
 }
 #endif
@@ -725,9 +730,9 @@ static int pwm_start(struct pwm_lowerhalf_s *dev,
  *
  ****************************************************************************/
 
-static int pwm_stop(struct pwm_lowerhalf_s *dev)
+static int pwm_stop(FAR struct pwm_lowerhalf_s *dev)
 {
-  struct efm32_pwmtimer_s *priv = (struct efm32_pwmtimer_s *)dev;
+  FAR struct efm32_pwmtimer_s *priv = (FAR struct efm32_pwmtimer_s *)dev;
   irqstate_t flags;
 
   pwminfo("TIMER%d\n", priv->timid);
@@ -766,11 +771,10 @@ static int pwm_stop(struct pwm_lowerhalf_s *dev)
  *
  ****************************************************************************/
 
-static int pwm_ioctl(struct pwm_lowerhalf_s *dev,
-                     int cmd, unsigned long arg)
+static int pwm_ioctl(FAR struct pwm_lowerhalf_s *dev, int cmd, unsigned long arg)
 {
 #ifdef CONFIG_DEBUG_PWM_INFO
-  struct efm32_pwmtimer_s *priv = (struct efm32_pwmtimer_s *)dev;
+  FAR struct efm32_pwmtimer_s *priv = (FAR struct efm32_pwmtimer_s *)dev;
 
   /* There are no platform-specific ioctl commands */
 
@@ -800,9 +804,9 @@ static int pwm_ioctl(struct pwm_lowerhalf_s *dev,
  *
  ****************************************************************************/
 
-struct pwm_lowerhalf_s *efm32_pwminitialize(int timer)
+FAR struct pwm_lowerhalf_s *efm32_pwminitialize(int timer)
 {
-  struct efm32_pwmtimer_s *lower;
+  FAR struct efm32_pwmtimer_s *lower;
 
   pwminfo("TIMER%d\n", timer);
 
@@ -842,7 +846,7 @@ struct pwm_lowerhalf_s *efm32_pwminitialize(int timer)
   up_disable_irq(lower->irq);
 #endif
 
-  return (struct pwm_lowerhalf_s *)lower;
+  return (FAR struct pwm_lowerhalf_s *)lower;
 }
 
 #endif /* CONFIG_EFM32_TIMn_PWM, n = 0,..,3 */

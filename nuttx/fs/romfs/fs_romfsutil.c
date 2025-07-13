@@ -1,64 +1,62 @@
 /****************************************************************************
- * fs/romfs/fs_romfsutil.c
+ * rm/romfs/fs_romfsutil.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2013, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References: Linux/Documentation/filesystems/romfs.txt
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
-/* References: Linux/Documentation/filesystems/romfs.txt */
 
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
-
 #include <sys/types.h>
-#include <inttypes.h>
+
+#include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/ioctl.h>
+#include <nuttx/fs/dirent.h>
+#include <nuttx/mtd/mtd.h>
 
 #include "fs_romfs.h"
-#include "fs_heap.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define LINK_NOT_FOLLOWED 0
-#define LINK_FOLLOWED     1
-#define NODEINFO_NINCR    4
-
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-struct romfs_entryname_s
-{
-  FAR const char *re_name;
-  size_t re_len;
-};
 
 /****************************************************************************
  * Private Functions
@@ -75,12 +73,8 @@ struct romfs_entryname_s
  *
  ****************************************************************************/
 
-static uint32_t romfs_devread32(FAR struct romfs_mountpt_s *rm, int ndx)
+static uint32_t romfs_devread32(struct romfs_mountpt_s *rm, int ndx)
 {
-  /* This should not read past the end of the sector since the directory
-   * entries are aligned at 16-byte boundaries.
-   */
-
   return ((((uint32_t)rm->rm_buffer[ndx]     & 0xff) << 24) |
           (((uint32_t)rm->rm_buffer[ndx + 1] & 0xff) << 16) |
           (((uint32_t)rm->rm_buffer[ndx + 2] & 0xff) << 8) |
@@ -95,11 +89,10 @@ static uint32_t romfs_devread32(FAR struct romfs_mountpt_s *rm, int ndx)
  *
  ****************************************************************************/
 
-#ifndef CONFIG_FS_ROMFS_CACHE_NODE
-static inline int romfs_checkentry(FAR struct romfs_mountpt_s *rm,
-                                   uint32_t offset,
-                                   FAR const char *entryname, int entrylen,
-                                   FAR struct romfs_nodeinfo_s *nodeinfo)
+static inline int romfs_checkentry(struct romfs_mountpt_s *rm,
+                                   uint32_t offset, const char *entryname,
+                                   int entrylen,
+                                   struct romfs_dirinfo_s *dirinfo)
 {
   char name[NAME_MAX + 1];
   uint32_t linkoffset;
@@ -118,44 +111,51 @@ static inline int romfs_checkentry(FAR struct romfs_mountpt_s *rm,
       return ret;
     }
 
-  /* Get the name of the directory entry. */
-
-  ret = romfs_parsefilename(rm, offset, name);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  /* Then check if this the name segment we are looking for.  The
-   * string comparison is awkward because there is no terminator
-   * on entryname (there is a terminator on name, however)
+  /* Now we are pointing to the real entry of interest. Is it a
+   * directory? Or a file?
    */
 
-  if (strlen(name) == entrylen &&
-      memcmp(entryname, name, entrylen) == 0)
+  if (IS_DIRECTORY(next) || IS_FILE(next))
     {
-      /* Found it -- save the component info and return success */
+      /* Get the name of the directory entry. */
 
-      if (IS_DIRECTORY(next))
+      ret = romfs_parsefilename(rm, offset, name);
+      if (ret < 0)
         {
-          nodeinfo->rn_offset = info;
-          nodeinfo->rn_size   = 0;
-        }
-      else
-        {
-          nodeinfo->rn_offset = linkoffset;
-          nodeinfo->rn_size   = size;
+          return ret;
         }
 
-      nodeinfo->rn_next       = next;
-      return 0;
+      /* Then check if this the name segment we are looking for.  The
+       * string comparison is awkward because there is no terminator
+       * on entryname (there is a terminator on name, however)
+       */
+
+      if (memcmp(entryname, name, entrylen) == 0 &&
+          strlen(name) == entrylen)
+        {
+          /* Found it -- save the component info and return success */
+
+          if (IS_DIRECTORY(next))
+            {
+              dirinfo->rd_dir.fr_firstoffset = info;
+              dirinfo->rd_dir.fr_curroffset  = info;
+              dirinfo->rd_size               = 0;
+            }
+          else
+            {
+              dirinfo->rd_dir.fr_curroffset  = offset;
+              dirinfo->rd_size               = size;
+            }
+
+          dirinfo->rd_next                   = next;
+          return OK;
+        }
     }
 
   /* The entry is not a directory or it does not have the matching name */
 
   return -ENOENT;
 }
-#endif
 
 /****************************************************************************
  * Name: romfs_devcacheread
@@ -166,14 +166,13 @@ static inline int romfs_checkentry(FAR struct romfs_mountpt_s *rm,
  *
  ****************************************************************************/
 
-static int16_t romfs_devcacheread(FAR struct romfs_mountpt_s *rm,
-                                  uint32_t offset)
+int16_t romfs_devcacheread(struct romfs_mountpt_s *rm, uint32_t offset)
 {
   uint32_t sector;
   int      ret;
 
   /* rm->rm_cachesector holds the current sector that is buffer in or
-   * referenced by rm->rm_buffer. If the requested sector is the same as this
+   * referenced by rm->tm_buffer. If the requested sector is the same as this
    * this then we do nothing.
    */
 
@@ -219,20 +218,14 @@ static int16_t romfs_devcacheread(FAR struct romfs_mountpt_s *rm,
  *   If so, traverse the hard links until the terminal, non-linked header
  *   so found and return that offset.
  *
- * Return value:
- *   < 0  :  An error occurred
- *     0  :  No link followed
- *     1  :  Link followed, poffset is the new volume offset
- *
  ****************************************************************************/
 
-static int romfs_followhardlinks(FAR struct romfs_mountpt_s *rm,
-                                 uint32_t offset, FAR uint32_t *poffset)
+static int romfs_followhardlinks(struct romfs_mountpt_s *rm, uint32_t offset,
+                                 uint32_t *poffset)
 {
   uint32_t next;
   int16_t  ndx;
   int      i;
-  int      ret = LINK_NOT_FOLLOWED;
 
   /* Loop while we are redirected by hardlinks */
 
@@ -252,96 +245,30 @@ static int romfs_followhardlinks(FAR struct romfs_mountpt_s *rm,
       if (!IS_HARDLINK(next))
         {
           *poffset = offset;
-          return ret;
+          return OK;
         }
 
-      /* Follow the hard-link.  Set return to indicate that we followed a
-       * link and that poffset was set to the link offset is valid.
-       */
+      /* Follow the hard-link */
 
       offset = romfs_devread32(rm, ndx + ROMFS_FHDR_INFO);
-      ret    = LINK_FOLLOWED;
     }
 
   return -ELOOP;
 }
 
 /****************************************************************************
- * Name: romfs_nodeinfo_search/romfs_nodeinfo_compare
- *
- * Description:
- *   Compare two names
- *
- ****************************************************************************/
-
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-static int romfs_nodeinfo_search(FAR const void *a, FAR const void *b)
-{
-  FAR struct romfs_nodeinfo_s *nodeinfo = *(FAR struct romfs_nodeinfo_s **)b;
-  FAR const struct romfs_entryname_s *entry = a;
-  FAR const char *name = nodeinfo->rn_name;
-  size_t len = nodeinfo->rn_namesize;
-  int ret;
-
-  if (len > entry->re_len)
-    {
-      len = entry->re_len;
-    }
-
-  ret = memcmp(entry->re_name, name, len);
-  if (ret == 0)
-    {
-      if (entry->re_name[len] == '/' || entry->re_name[len] == '\0')
-        {
-          return name[len] == '\0' ? 0 : -1;
-        }
-      else
-        {
-          return 1;
-        }
-    }
-
-  return ret;
-}
-
-static int romfs_nodeinfo_compare(FAR const void *a, FAR const void *b)
-{
-  FAR struct romfs_nodeinfo_s *nodeinfo = *(FAR struct romfs_nodeinfo_s **)a;
-  struct romfs_entryname_s entry;
-
-  entry.re_name = nodeinfo->rn_name;
-  entry.re_len = nodeinfo->rn_namesize;
-  return romfs_nodeinfo_search(&entry, b);
-}
-#endif
-
-/****************************************************************************
  * Name: romfs_searchdir
  *
  * Description:
- *   This is part of the romfs_finddirentry.  Search the directory
- *   beginning at nodeinfo->rn_offset for entryname.
+ *   This is part of the romfs_finddirentry log.  Search the directory
+ *   beginning at dirinfo->fr_firstoffset for entryname.
  *
  ****************************************************************************/
 
-static inline int romfs_searchdir(FAR struct romfs_mountpt_s *rm,
-                                  FAR const char *entryname, int entrylen,
-                                  FAR struct romfs_nodeinfo_s *nodeinfo)
+static inline int romfs_searchdir(struct romfs_mountpt_s *rm,
+                                  const char *entryname, int entrylen,
+                                  struct romfs_dirinfo_s *dirinfo)
 {
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-  FAR struct romfs_nodeinfo_s **cnodeinfo;
-  struct romfs_entryname_s entry;
-
-  entry.re_name = entryname;
-  entry.re_len = entrylen;
-  cnodeinfo = bsearch(&entry, nodeinfo->rn_child, nodeinfo->rn_count,
-                      sizeof(*nodeinfo->rn_child), romfs_nodeinfo_search);
-  if (cnodeinfo)
-    {
-      memcpy(nodeinfo, *cnodeinfo, sizeof(*nodeinfo));
-      return 0;
-    }
-#else
   uint32_t offset;
   uint32_t next;
   int16_t  ndx;
@@ -352,8 +279,7 @@ static inline int romfs_searchdir(FAR struct romfs_mountpt_s *rm,
    * the directory have been examined.
    */
 
-  offset = nodeinfo->rn_offset;
-
+  offset = dirinfo->rd_dir.fr_firstoffset;
   do
     {
       /* Read the sector into memory (do this before calling
@@ -377,12 +303,12 @@ static inline int romfs_searchdir(FAR struct romfs_mountpt_s *rm,
        * name
        */
 
-      ret = romfs_checkentry(rm, offset, entryname, entrylen, nodeinfo);
-      if (ret >= 0)
+      ret = romfs_checkentry(rm, offset, entryname, entrylen, dirinfo);
+      if (ret == OK)
         {
           /* Its a match! Return success */
 
-          return ret;
+          return OK;
         }
 
       /* No match... select the offset to the next entry */
@@ -390,357 +316,33 @@ static inline int romfs_searchdir(FAR struct romfs_mountpt_s *rm,
       offset = next;
     }
   while (next != 0);
-#endif
 
   /* There is nothing in this directory with that name */
 
   return -ENOENT;
 }
 
-#ifdef CONFIG_FS_ROMFS_WRITEABLE
-/****************************************************************************
- * Name: romfs_alloc_sparenode
- *
- * Description:
- *   Allocate the spare node
- *
- ****************************************************************************/
-
-static FAR struct romfs_sparenode_s *
-romfs_alloc_sparenode(uint32_t start, uint32_t end)
-{
-  FAR struct romfs_sparenode_s *node;
-  node = fs_heap_malloc(sizeof(struct romfs_sparenode_s));
-  if (node == NULL)
-    {
-      ferr("romfs_alloc_sparenode: no memory\n");
-      return NULL;
-    }
-
-  node->start = start;
-  node->end = end;
-  return node;
-}
-
-/****************************************************************************
- * Name: romfs_init_sparelist
- *
- * Description:
- *   Init the sparelist
- *
- ****************************************************************************/
-
-static int romfs_init_sparelist(FAR struct romfs_mountpt_s *rm, bool rw)
-{
-  FAR struct romfs_sparenode_s *node;
-
-  list_initialize(&rm->rm_sparelist);
-  if (!rw)
-    {
-      return 0;
-    }
-
-  node = romfs_alloc_sparenode(0, rm->rm_hwsectorsize *
-                               rm->rm_hwnsectors);
-  if (node == NULL)
-    {
-      return -ENOMEM;
-    }
-
-  list_add_head(&rm->rm_sparelist, &node->node);
-  rm->rm_volsize = 0;
-  return 0;
-}
-
-/****************************************************************************
- * Name: romfs_alloc_spareregion
- *
- * Description:
- *   Allocate the spare region
- *
- ****************************************************************************/
-
-static int romfs_alloc_spareregion(FAR struct list_node *list,
-                                   uint32_t start, uint32_t end)
-{
-  FAR struct romfs_sparenode_s *node;
-
-  list_for_every_entry(list, node, struct romfs_sparenode_s, node)
-    {
-      /* Find the node that start ~ end
-       * is in node->start ~ node->end
-       */
-
-      if (start == node->start && end == node->end)
-        {
-          /* Delete the node */
-
-          list_delete(&node->node);
-          fs_heap_free(node);
-          return 0;
-        }
-      else if (start == node->start)
-        {
-          /* Update the node */
-
-          node->start = end;
-          return 0;
-        }
-      else if (end == node->end)
-        {
-          /* Update the node */
-
-          node->end = start;
-          return 0;
-        }
-      else if (start > node->start && end < node->end)
-        {
-          /* Split the node */
-
-          FAR struct romfs_sparenode_s *new;
-          new = romfs_alloc_sparenode(end, node->end);
-          if (new == NULL)
-            {
-              return -ENOMEM;
-            }
-
-          node->end = start;
-          list_add_after(&node->node, &new->node);
-          return 0;
-        }
-    }
-
-  /* Not found */
-
-  ferr("No space for start %" PRIu32 ", end %" PRIu32 "\n", start, end);
-  return -ENOENT;
-}
-
-/****************************************************************************
- * Name: romfs_devmemcpy
- ****************************************************************************/
-
-static void romfs_devmemcpy(FAR struct romfs_mountpt_s *rm,
-                            int ndx, FAR const void *buf, size_t len)
-{
-  memcpy(rm->rm_devbuffer + ndx, buf, len);
-}
-
-/****************************************************************************
- * Name: romfs_devstrcpy
- ****************************************************************************/
-
-static void romfs_devstrcpy(FAR struct romfs_mountpt_s *rm,
-                            int ndx, FAR const char *buf)
-{
-  strcpy((FAR char *)rm->rm_devbuffer + ndx, buf);
-}
-
-/****************************************************************************
- * Name: romfs_devwrite32
- *
- * Description:
- *   Write the big-endian 32-bit value to the mount device buffer
- *
- ****************************************************************************/
-
-static void romfs_devwrite32(FAR struct romfs_mountpt_s *rm,
-                             int ndx, uint32_t value)
-{
-  /* Write the 32-bit value to the specified index in the buffer */
-
-  rm->rm_devbuffer[ndx]     = (uint8_t)(value >> 24) & 0xff;
-  rm->rm_devbuffer[ndx + 1] = (uint8_t)(value >> 16) & 0xff;
-  rm->rm_devbuffer[ndx + 2] = (uint8_t)(value >> 8) & 0xff;
-  rm->rm_devbuffer[ndx + 3] = (uint8_t)(value & 0xff);
-}
-
-/****************************************************************************
- * Name: romfs_hwwrite
- *
- * Description:
- *   Write the specified number of sectors to the block device
- *
- ****************************************************************************/
-
-static int romfs_hwwrite(FAR struct romfs_mountpt_s *rm, FAR uint8_t *buffer,
-                         uint32_t sector, unsigned int nsectors)
-{
-  FAR struct inode *inode = rm->rm_blkdriver;
-  ssize_t ret = -ENODEV;
-
-  if (inode->u.i_bops->write)
-    {
-      ret = inode->u.i_bops->write(inode, buffer, sector, nsectors);
-    }
-
-  if (ret == (ssize_t)nsectors)
-    {
-      ret = 0;
-    }
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: romfs_devcachewrite
- *
- * Description:
- *   Write the specified sector for specified offset into the sector cache.
- *
- ****************************************************************************/
-
-static int romfs_devcachewrite(FAR struct romfs_mountpt_s *rm,
-                               uint32_t sector)
-{
-  int ret;
-
-  ret = romfs_hwwrite(rm, rm->rm_devbuffer, sector, 1);
-  if (ret >= 0)
-    {
-      rm->rm_cachesector = sector;
-    }
-  else
-    {
-      rm->rm_cachesector = (uint32_t)-1;
-    }
-
-  return ret;
-}
-#endif
-
-/****************************************************************************
- * Name: romfs_cachenode
- *
- * Description:
- *   Alloc all entry node at once when filesystem is mounted
- *
- ****************************************************************************/
-
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-static int romfs_cachenode(FAR struct romfs_mountpt_s *rm,
-                           uint32_t origoffset, uint32_t offset,
-                           uint32_t next, uint32_t size,
-                           FAR const char *name,
-                           FAR struct romfs_nodeinfo_s **pnodeinfo)
-{
-  FAR struct romfs_nodeinfo_s **child;
-  FAR struct romfs_nodeinfo_s *nodeinfo;
-  char childname[NAME_MAX + 1];
-  uint16_t count = 0;
-  uint32_t info;
-  size_t nsize;
-  int ret;
-
-  nsize = strlen(name);
-  nodeinfo = fs_heap_zalloc(sizeof(struct romfs_nodeinfo_s) + nsize);
-  if (nodeinfo == NULL)
-    {
-      return -ENOMEM;
-    }
-
-  *pnodeinfo              = nodeinfo;
-  nodeinfo->rn_offset     = offset;
-  nodeinfo->rn_origoffset = origoffset;
-  nodeinfo->rn_next       = next;
-  nodeinfo->rn_namesize   = nsize;
-  memcpy(nodeinfo->rn_name, name, nsize + 1);
-
-#ifdef CONFIG_FS_ROMFS_WRITEABLE
-  if (!list_is_empty(&rm->rm_sparelist))
-    {
-      uint32_t totalsize = ROMFS_ALIGNUP(ROMFS_FHDR_NAME + nsize + 1);
-      if (offset == origoffset)
-        {
-          totalsize += ROMFS_ALIGNUP(size);
-        }
-
-      rm->rm_volsize += totalsize;
-      ret = romfs_alloc_spareregion(&rm->rm_sparelist, origoffset,
-                                    origoffset + totalsize);
-      if (ret < 0)
-        {
-          return ret;
-        }
-    }
-#endif
-
-  if (!IS_DIRECTORY(next) || (strcmp(name, ".") == 0) ||
-      (strcmp(name, "..") == 0))
-    {
-      nodeinfo->rn_size = size;
-      return 0;
-    }
-
-  origoffset = offset;
-  child = nodeinfo->rn_child;
-
-  do
-    {
-      /* Fetch the directory entry at this offset */
-
-      ret = romfs_parsedirentry(rm, origoffset, &offset, &next, &info,
-                                &size);
-      if (ret < 0)
-        {
-          return ret;
-        }
-
-      ret = romfs_parsefilename(rm, origoffset, childname);
-      if (ret < 0)
-        {
-          return ret;
-        }
-
-      if (child == NULL || nodeinfo->rn_count == count - 1)
-        {
-          FAR void *tmp;
-
-          tmp = fs_heap_realloc(nodeinfo->rn_child,
-                (count + NODEINFO_NINCR) * sizeof(*nodeinfo->rn_child));
-          if (tmp == NULL)
-            {
-              return -ENOMEM;
-            }
-
-          nodeinfo->rn_child = tmp;
-          memset(nodeinfo->rn_child + count, 0, NODEINFO_NINCR *
-                  sizeof(*nodeinfo->rn_child));
-          count += NODEINFO_NINCR;
-        }
-
-      child = &nodeinfo->rn_child[nodeinfo->rn_count++];
-      if (IS_DIRECTORY(next))
-        {
-          offset = info;
-        }
-
-      ret = romfs_cachenode(rm, origoffset, offset, next, size,
-                            childname, child);
-      if (ret < 0)
-        {
-          nodeinfo->rn_count--;
-          return ret;
-        }
-
-      next &= RFNEXT_OFFSETMASK;
-      origoffset = next;
-    }
-  while (next != 0);
-
-  if (nodeinfo->rn_count > 1)
-    {
-      qsort(nodeinfo->rn_child, nodeinfo->rn_count,
-            sizeof(*nodeinfo->rn_child), romfs_nodeinfo_compare);
-    }
-
-  return 0;
-}
-#endif
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: romfs_semtake
+ ****************************************************************************/
+
+int romfs_semtake(struct romfs_mountpt_s *rm)
+{
+  return nxsem_wait_uninterruptible(&rm->rm_sem);
+}
+
+/****************************************************************************
+ * Name: romfs_semgive
+ ****************************************************************************/
+
+void romfs_semgive(struct romfs_mountpt_s *rm)
+{
+  nxsem_post(&rm->rm_sem);
+}
 
 /****************************************************************************
  * Name: romfs_hwread
@@ -749,10 +351,10 @@ static int romfs_cachenode(FAR struct romfs_mountpt_s *rm,
  *
  ****************************************************************************/
 
-int romfs_hwread(FAR struct romfs_mountpt_s *rm, FAR uint8_t *buffer,
+int romfs_hwread(struct romfs_mountpt_s *rm, uint8_t *buffer,
                  uint32_t sector, unsigned int nsectors)
 {
-  int ret = 0;
+  int ret = OK;
 
   /* Check the access mode */
 
@@ -761,24 +363,35 @@ int romfs_hwread(FAR struct romfs_mountpt_s *rm, FAR uint8_t *buffer,
       /* In XIP mode, we just copy the requested data */
 
       memcpy(buffer,
-             rm->rm_xipbase + sector * rm->rm_hwsectorsize,
-             nsectors * rm->rm_hwsectorsize);
+             rm->rm_xipbase + sector*rm->rm_hwsectorsize,
+             nsectors*rm->rm_hwsectorsize);
     }
   else
     {
       /* In non-XIP mode, we have to read the data from the device */
 
-      FAR struct inode *inode = rm->rm_blkdriver;
-      ssize_t nsectorsread =
-        inode->u.i_bops->read(inode, buffer, sector, nsectors);
+      struct inode *inode = rm->rm_blkdriver;
+      ssize_t nsectorsread = -ENODEV;
 
-      if (nsectorsread < 0)
+      DEBUGASSERT(inode);
+      if (INODE_IS_MTD(inode))
+        {
+          nsectorsread =
+            MTD_BREAD(inode->u.i_mtd, sector, nsectors, buffer);
+        }
+      else if (inode->u.i_bops->read)
+        {
+          nsectorsread =
+            inode->u.i_bops->read(inode, buffer, sector, nsectors);
+        }
+
+      if (nsectorsread == (ssize_t)nsectors)
+        {
+          ret = OK;
+        }
+      else if (nsectorsread < 0)
         {
           ret = nsectorsread;
-        }
-      else if (nsectorsread != (ssize_t)nsectors)
-        {
-          ret = -EINVAL;
         }
     }
 
@@ -793,23 +406,21 @@ int romfs_hwread(FAR struct romfs_mountpt_s *rm, FAR uint8_t *buffer,
  *
  ****************************************************************************/
 
-int romfs_filecacheread(FAR struct romfs_mountpt_s *rm,
-                        FAR struct romfs_file_s *rf, uint32_t sector)
+int romfs_filecacheread(struct romfs_mountpt_s *rm, struct romfs_file_s *rf,
+                        uint32_t sector)
 {
   int ret;
 
-  finfo("sector: %" PRId32 " cached: %" PRId32 " ncached: %" PRId32 ""
-        " sectorsize: %d XIP base: %p buffer: %p\n",
-        sector, rf->rf_cachesector, rf->rf_ncachesector,
-        rm->rm_hwsectorsize, rm->rm_xipbase, rf->rf_buffer);
+  finfo("sector: %d cached: %d sectorsize: %d XIP base: %p buffer: %p\n",
+        sector, rf->rf_cachesector, rm->rm_hwsectorsize,
+        rm->rm_xipbase, rf->rf_buffer);
 
   /* rf->rf_cachesector holds the current sector that is buffer in or
    * referenced by rf->rf_buffer. If the requested sector is the same as this
    * sector then we do nothing.
    */
 
-  if (rf->rf_cachesector > sector ||
-      rf->rf_cachesector + rf->rf_ncachesector <= sector)
+  if (rf->rf_cachesector != sector)
     {
       /* Check the access mode */
 
@@ -824,15 +435,10 @@ int romfs_filecacheread(FAR struct romfs_mountpt_s *rm,
         }
       else
         {
-          if (sector + rf->rf_ncachesector - 1 > rf->rf_endsector)
-            {
-              sector = rf->rf_endsector + 1 - rf->rf_ncachesector;
-            }
-
           /* In non-XIP mode, we will have to read the new sector. */
 
           finfo("Calling romfs_hwread\n");
-          ret = romfs_hwread(rm, rf->rf_buffer, sector, rf->rf_ncachesector);
+          ret = romfs_hwread(rm, rf->rf_buffer, sector, 1);
           if (ret < 0)
             {
               ferr("ERROR: romfs_hwread failed: %d\n", ret);
@@ -845,7 +451,7 @@ int romfs_filecacheread(FAR struct romfs_mountpt_s *rm,
       rf->rf_cachesector = sector;
     }
 
-  return 0;
+  return OK;
 }
 
 /****************************************************************************
@@ -859,10 +465,9 @@ int romfs_filecacheread(FAR struct romfs_mountpt_s *rm,
  *
  ****************************************************************************/
 
-int romfs_hwconfigure(FAR struct romfs_mountpt_s *rm)
+int romfs_hwconfigure(struct romfs_mountpt_s *rm)
 {
-  FAR struct inode *inode = rm->rm_blkdriver;
-  struct geometry geo;
+  struct inode *inode = rm->rm_blkdriver;
   int ret;
 
   /* Get the underlying device geometry */
@@ -874,75 +479,84 @@ int romfs_hwconfigure(FAR struct romfs_mountpt_s *rm)
     }
 #endif
 
-  ret = inode->u.i_bops->geometry(inode, &geo);
-  if (ret < 0)
+  if (INODE_IS_MTD(inode))
     {
-      return ret;
+      struct mtd_geometry_s mgeo;
+
+      ret = MTD_IOCTL(inode->u.i_mtd, MTDIOC_GEOMETRY,
+                      (unsigned long)&mgeo);
+      if (ret != OK)
+        {
+          return ret;
+        }
+
+      /* Save that information in the mount structure */
+
+      rm->rm_hwsectorsize = mgeo.blocksize;
+      rm->rm_hwnsectors   = mgeo.neraseblocks *
+                            (mgeo.erasesize / mgeo.blocksize);
     }
-
-  if (!geo.geo_available)
+  else
     {
-      return -EBUSY;
-    }
+      struct geometry geo;
 
-  /* Save that information in the mount structure */
+      ret = inode->u.i_bops->geometry(inode, &geo);
+      if (ret != OK)
+        {
+          return ret;
+        }
 
-  rm->rm_hwsectorsize = geo.geo_sectorsize;
-  rm->rm_hwnsectors   = geo.geo_nsectors;
-  rm->rm_cachesector  = (uint32_t)-1;
+      if (!geo.geo_available)
+        {
+          return -EBUSY;
+        }
 
-  /* Allocate the device cache buffer for normal sector accesses */
+      /* Save that information in the mount structure */
 
-  rm->rm_devbuffer = fs_heap_malloc(rm->rm_hwsectorsize);
-  if (!rm->rm_devbuffer)
-    {
-      return -ENOMEM;
+      rm->rm_hwsectorsize = geo.geo_sectorsize;
+      rm->rm_hwnsectors   = geo.geo_nsectors;
     }
 
   /* Determine if block driver supports the XIP mode of operation */
 
-  if (inode->u.i_bops->ioctl)
+  rm->rm_cachesector  = (uint32_t)-1;
+
+  if (INODE_IS_MTD(inode))
+    {
+      ret = MTD_IOCTL(inode->u.i_mtd, MTDIOC_XIPBASE,
+                      (unsigned long)&rm->rm_xipbase);
+    }
+  else if (inode->u.i_bops->ioctl != NULL)
     {
       ret = inode->u.i_bops->ioctl(inode, BIOC_XIPBASE,
                                    (unsigned long)&rm->rm_xipbase);
-      if (ret >= 0 && rm->rm_xipbase)
-        {
-          /* Yes.. Then we will directly access the media (vs.
-           * copying into an allocated sector buffer.
-           */
-
-          rm->rm_buffer      = rm->rm_xipbase;
-          rm->rm_cachesector = 0;
-          return 0;
-        }
     }
-
-  /* The device cache buffer for normal sector accesses */
-
-  rm->rm_buffer = rm->rm_devbuffer;
-  return 0;
-}
-
-/****************************************************************************
- * Name: romfs_free_sparelist
- *
- * Description:
- *   Free the sparelist
- *
- ****************************************************************************/
-#ifdef CONFIG_FS_ROMFS_WRITEABLE
-void romfs_free_sparelist(FAR struct list_node *list)
-{
-  FAR struct romfs_sparenode_s *node;
-  FAR struct romfs_sparenode_s *tmp;
-
-  list_for_every_entry_safe(list, node, tmp, struct romfs_sparenode_s, node)
+  else
     {
-      list_delete(&node->node);
-      fs_heap_free(node);
+      ret = -ENOTSUP;
     }
+
+  if (ret == OK && rm->rm_xipbase)
+    {
+      /* Yes.. Then we will directly access the media (vs.
+       * copying into an allocated sector buffer.
+       */
+
+      rm->rm_buffer      = rm->rm_xipbase;
+      rm->rm_cachesector = 0;
+      return OK;
+    }
+
+  /* Allocate the device cache buffer for normal sector accesses */
+
+  rm->rm_buffer = (FAR uint8_t *)kmm_malloc(rm->rm_hwsectorsize);
+  if (!rm->rm_buffer)
+    {
+      return -ENOMEM;
+    }
+
+  return OK;
 }
-#endif
 
 /****************************************************************************
  * Name: romfs_fsconfigure
@@ -955,64 +569,41 @@ void romfs_free_sparelist(FAR struct list_node *list)
  *
  ****************************************************************************/
 
-int romfs_fsconfigure(FAR struct romfs_mountpt_s *rm, FAR const void *data)
+int romfs_fsconfigure(struct romfs_mountpt_s *rm)
 {
-  FAR const char *name;
-  int             ret;
-  uint32_t        rootoffset;
+  const char *name;
+  int16_t     ndx;
 
   /* Then get information about the ROMFS filesystem on the devices managed
    * by this block driver. Read sector zero which contains the volume header.
    */
 
-  ret = romfs_devcacheread(rm, 0);
-  if (ret < 0)
+  ndx = romfs_devcacheread(rm, 0);
+  if (ndx < 0)
     {
-      return ret;
+      return ndx;
     }
 
   /* Verify the magic number at that identifies this as a ROMFS filesystem */
 
-  if (memcmp(rm->rm_buffer, ROMFS_VHDR_MAGIC, ROMFS_VHDR_SIZE) != 0)
+  if (memcmp(rm->rm_buffer, ROMFS_VHDR_MAGIC, 8) != 0)
     {
       return -EINVAL;
     }
 
   /* Then extract the values we need from the header and return success */
 
-  rm->rm_volsize = romfs_devread32(rm, ROMFS_VHDR_SIZE);
+  rm->rm_volsize    = romfs_devread32(rm, ROMFS_VHDR_SIZE);
 
   /* The root directory entry begins right after the header */
 
-  name = (FAR const char *)&rm->rm_buffer[ROMFS_VHDR_VOLNAME];
-  rootoffset = ROMFS_ALIGNUP(ROMFS_VHDR_VOLNAME + strlen(name) + 1);
-#ifdef CONFIG_FS_ROMFS_WRITEABLE
-  ret = romfs_init_sparelist(rm, data && strstr(data, "rw"));
-  if (ret < 0)
-    {
-      return ret;
-    }
-#endif
-
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-  ret = romfs_cachenode(rm, 0, rootoffset, RFNEXT_DIRECTORY,
-                        0, "", &rm->rm_root);
-  if (ret < 0)
-    {
-#  ifdef CONFIG_FS_ROMFS_WRITEABLE
-      romfs_free_sparelist(&rm->rm_sparelist);
-#  endif
-      romfs_freenode(rm->rm_root);
-      return ret;
-    }
-#else
-  rm->rm_rootoffset = rootoffset;
-#endif
+  name              = (FAR const char *)&rm->rm_buffer[ROMFS_VHDR_VOLNAME];
+  rm->rm_rootoffset = ROMFS_ALIGNUP(ROMFS_VHDR_VOLNAME + strlen(name) + 1);
 
   /* and return success */
 
-  rm->rm_mounted = true;
-  return 0;
+  rm->rm_mounted    = true;
+  return OK;
 }
 
 /****************************************************************************
@@ -1025,8 +616,7 @@ int romfs_fsconfigure(FAR struct romfs_mountpt_s *rm, FAR const void *data)
  *
  ****************************************************************************/
 
-int romfs_fileconfigure(FAR struct romfs_mountpt_s *rm,
-                        FAR struct romfs_file_s *rf)
+int romfs_fileconfigure(struct romfs_mountpt_s *rm, struct romfs_file_s *rf)
 {
   /* Check if XIP access mode is supported.  If so, then we do not need
    * to allocate anything.
@@ -1036,46 +626,25 @@ int romfs_fileconfigure(FAR struct romfs_mountpt_s *rm,
     {
       /* We'll put a valid address in rf_buffer just in case. */
 
-      rf->rf_cachesector  = 0;
-      rf->rf_buffer       = rm->rm_xipbase;
-      rf->rf_ncachesector = 1;
+      rf->rf_cachesector = 0;
+      rf->rf_buffer      = rm->rm_xipbase;
     }
   else
     {
-      uint32_t startsector;
-      uint32_t endoffset;
-      uint32_t nsectors;
-
-      endoffset = rf->rf_startoffset + rf->rf_size;
-      if (rf->rf_size)
-        {
-          endoffset--;
-        }
-
-      rf->rf_endsector = SEC_NSECTORS(rm, endoffset);
-      startsector = SEC_NSECTORS(rm, rf->rf_startoffset);
-      nsectors = rf->rf_endsector - startsector + 1;
-      if (nsectors > CONFIG_FS_ROMFS_CACHE_FILE_NSECTORS)
-        {
-          nsectors = CONFIG_FS_ROMFS_CACHE_FILE_NSECTORS;
-        }
-
       /* Nothing in the cache buffer */
 
       rf->rf_cachesector = (uint32_t)-1;
-      rf->rf_ncachesector = nsectors;
 
       /* Create a file buffer to support partial sector accesses */
 
-      rf->rf_buffer = fs_heap_malloc(rm->rm_hwsectorsize *
-                      rf->rf_ncachesector);
+      rf->rf_buffer = (FAR uint8_t *)kmm_malloc(rm->rm_hwsectorsize);
       if (!rf->rf_buffer)
         {
           return -ENOMEM;
         }
     }
 
-  return 0;
+  return OK;
 }
 
 /****************************************************************************
@@ -1087,13 +656,13 @@ int romfs_fileconfigure(FAR struct romfs_mountpt_s *rm,
  *
  ****************************************************************************/
 
-int romfs_checkmount(FAR struct romfs_mountpt_s *rm)
+int romfs_checkmount(struct romfs_mountpt_s *rm)
 {
-  FAR struct inode *inode;
+  struct inode *inode;
   struct geometry geo;
   int ret;
 
-  /* If the rm_mounted flag is false, then we have already handled the loss
+  /* If the fs_mounted flag is false, then we have already handled the loss
    * of the mount.
    */
 
@@ -1105,12 +674,18 @@ int romfs_checkmount(FAR struct romfs_mountpt_s *rm)
        */
 
       inode = rm->rm_blkdriver;
-      if (inode->u.i_bops->geometry)
+      if (INODE_IS_MTD(inode))
+        {
+          /* It is impossible to remove MTD device */
+
+          return OK;
+        }
+      else if (inode->u.i_bops->geometry)
         {
           ret = inode->u.i_bops->geometry(inode, &geo);
-          if (ret >= 0 && geo.geo_available && !geo.geo_mediachanged)
+          if (ret == OK && geo.geo_available && !geo.geo_mediachanged)
             {
-              return 0;
+              return OK;
             }
         }
 
@@ -1123,33 +698,6 @@ int romfs_checkmount(FAR struct romfs_mountpt_s *rm)
 }
 
 /****************************************************************************
- * Name: romfs_freenode
- *
- * Description:
- *   free all entry node at once when filesystem is unmounted
- *
- ****************************************************************************/
-
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-void romfs_freenode(FAR struct romfs_nodeinfo_s *nodeinfo)
-{
-  int i;
-
-  if (IS_DIRECTORY(nodeinfo->rn_next))
-    {
-      for (i = 0; i < nodeinfo->rn_count; i++)
-        {
-          romfs_freenode(nodeinfo->rn_child[i]);
-        }
-
-      fs_heap_free(nodeinfo->rn_child);
-    }
-
-  fs_heap_free(nodeinfo);
-}
-#endif
-
-/****************************************************************************
  * Name: romfs_finddirentry
  *
  * Description:
@@ -1158,35 +706,31 @@ void romfs_freenode(FAR struct romfs_nodeinfo_s *nodeinfo)
  *
  ****************************************************************************/
 
-int romfs_finddirentry(FAR struct romfs_mountpt_s *rm,
-                       FAR struct romfs_nodeinfo_s *nodeinfo,
-                       FAR const char *path)
+int romfs_finddirentry(struct romfs_mountpt_s *rm,
+                       struct romfs_dirinfo_s *dirinfo, const char *path)
 {
-  FAR const char *entryname;
-  FAR const char *terminator;
+  const char *entryname;
+  const char *terminator;
   int entrylen;
   int ret;
 
   /* Start with the first element after the root directory */
 
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-  memcpy(nodeinfo, rm->rm_root, sizeof(*nodeinfo));
-#else
-  nodeinfo->rn_offset = rm->rm_rootoffset;
-  nodeinfo->rn_next   = RFNEXT_DIRECTORY;
-  nodeinfo->rn_size   = 0;
-#endif
+  dirinfo->rd_dir.fr_firstoffset = rm->rm_rootoffset;
+  dirinfo->rd_dir.fr_curroffset  = rm->rm_rootoffset;
+  dirinfo->rd_next               = RFNEXT_DIRECTORY;
+  dirinfo->rd_size               = 0;
 
   /* The root directory is a special case */
 
   if (!path || path[0] == '\0')
     {
-      return 0;
+      return OK;
     }
 
   /* Then loop for each directory/file component in the full path */
 
-  entryname  = path;
+  entryname    = path;
   terminator = NULL;
 
   for (; ; )
@@ -1207,11 +751,6 @@ int romfs_finddirentry(FAR struct romfs_mountpt_s *rm,
           entrylen = terminator - entryname;
         }
 
-      if (entrylen == 0)
-        {
-          return 0;
-        }
-
       /* Long path segment names will be truncated to NAME_MAX */
 
       if (entrylen > NAME_MAX)
@@ -1223,7 +762,7 @@ int romfs_finddirentry(FAR struct romfs_mountpt_s *rm,
        * matching name.
        */
 
-      ret = romfs_searchdir(rm, entryname, entrylen, nodeinfo);
+      ret = romfs_searchdir(rm, entryname, entrylen, dirinfo);
       if (ret < 0)
         {
           return ret;
@@ -1235,14 +774,14 @@ int romfs_finddirentry(FAR struct romfs_mountpt_s *rm,
         {
           /* Yes.. return success */
 
-          return 0;
+          return OK;
         }
 
       /* No... If that was not the last path component, then it had
        * better have been a directory
        */
 
-      if (!IS_DIRECTORY(nodeinfo->rn_next))
+      if (!IS_DIRECTORY(dirinfo->rd_next))
         {
           return -ENOTDIR;
         }
@@ -1254,7 +793,7 @@ int romfs_finddirentry(FAR struct romfs_mountpt_s *rm,
       entryname = terminator;
     }
 
-  return -EINVAL; /* Won't get here */
+  return ERROR; /* Won't get here */
 }
 
 /****************************************************************************
@@ -1266,9 +805,9 @@ int romfs_finddirentry(FAR struct romfs_mountpt_s *rm,
  *
  ****************************************************************************/
 
-int romfs_parsedirentry(FAR struct romfs_mountpt_s *rm, uint32_t offset,
-                        FAR uint32_t *poffset, uint32_t *pnext,
-                        FAR uint32_t *pinfo, FAR uint32_t *psize)
+int romfs_parsedirentry(struct romfs_mountpt_s *rm, uint32_t offset,
+                        uint32_t *poffset, uint32_t *pnext, uint32_t *pinfo,
+                        uint32_t *psize)
 {
   uint32_t save;
   uint32_t next;
@@ -1297,24 +836,10 @@ int romfs_parsedirentry(FAR struct romfs_mountpt_s *rm, uint32_t offset,
     {
       return ret;
     }
-  else if (ret > 0)
-    {
-      /* The link was followed */
-
-      ndx = romfs_devcacheread(rm, *poffset);
-      if (ndx < 0)
-        {
-          return ndx;
-        }
-    }
 
   /* Because everything is chunked and aligned to 16-bit boundaries,
    * we know that most the basic node info fits into the sector.  The
    * associated name may not, however.
-   *
-   * NOTE:  Since ROMFS directory entries are aligned to 16-byte boundaries,
-   * we are assured that ndx + ROMFS_FHDR_INFO/SIZE will lie wholly within
-   * the sector buffer.
    */
 
   next   = romfs_devread32(rm, ndx + ROMFS_FHDR_NEXT);
@@ -1322,7 +847,7 @@ int romfs_parsedirentry(FAR struct romfs_mountpt_s *rm, uint32_t offset,
   *pinfo = romfs_devread32(rm, ndx + ROMFS_FHDR_INFO);
   *psize = romfs_devread32(rm, ndx + ROMFS_FHDR_SIZE);
 
-  return 0;
+  return OK;
 }
 
 /****************************************************************************
@@ -1333,20 +858,20 @@ int romfs_parsedirentry(FAR struct romfs_mountpt_s *rm, uint32_t offset,
  *
  ****************************************************************************/
 
-int romfs_parsefilename(FAR struct romfs_mountpt_s *rm, uint32_t offset,
-                        FAR char *pname)
+int romfs_parsefilename(struct romfs_mountpt_s *rm, uint32_t offset,
+                        char *pname)
 {
   int16_t  ndx;
-  uint16_t namelen = 0;
+  uint16_t namelen;
   uint16_t chunklen;
-  bool     done = false;
+  bool     done;
 
   /* Loop until the whole name is obtained or until NAME_MAX characters
    * of the name have been parsed.
    */
 
   offset += ROMFS_FHDR_NAME;
-  while (namelen < NAME_MAX && !done)
+  for (namelen = 0, done = false; namelen < NAME_MAX && !done; )
     {
       /* Read the sector into memory */
 
@@ -1389,7 +914,7 @@ int romfs_parsefilename(FAR struct romfs_mountpt_s *rm, uint32_t offset,
   /* Terminate the name (NAME_MAX+1 chars total) and return success */
 
   pname[namelen] = '\0';
-  return 0;
+  return OK;
 }
 
 /****************************************************************************
@@ -1401,17 +926,19 @@ int romfs_parsefilename(FAR struct romfs_mountpt_s *rm, uint32_t offset,
  *
  ****************************************************************************/
 
-int romfs_datastart(FAR struct romfs_mountpt_s *rm,
-                    FAR struct romfs_nodeinfo_s *nodeinfo,
-                    FAR uint32_t *start)
+int romfs_datastart(struct romfs_mountpt_s *rm, uint32_t offset,
+                    uint32_t *start)
 {
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-  *start = ROMFS_ALIGNUP(nodeinfo->rn_offset +
-                         ROMFS_FHDR_NAME + nodeinfo->rn_namesize + 1);
-  return 0;
-#else
-  uint32_t offset = nodeinfo->rn_offset;
   int16_t ndx;
+  int     ret;
+
+  /* Traverse hardlinks as necessary to get to the real file header */
+
+  ret = romfs_followhardlinks(rm, offset, &offset);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Loop until the header size is obtained. */
 
@@ -1429,7 +956,7 @@ int romfs_datastart(FAR struct romfs_mountpt_s *rm,
       /* Get the offset to the next chunk */
 
       offset += 16;
-      if (offset > rm->rm_volsize)
+      if (offset >= rm->rm_volsize)
         {
           return -EIO;
         }
@@ -1441,56 +968,9 @@ int romfs_datastart(FAR struct romfs_mountpt_s *rm,
           /* Yes.. then the data starts at the next chunk */
 
           *start = offset;
-          return 0;
+          return OK;
         }
     }
 
   return -EINVAL; /* Won't get here */
-#endif
 }
-
-#ifdef CONFIG_FS_ROMFS_WRITEABLE
-
-/****************************************************************************
- * Name: romfs_mkfs
- *
- * Description:
- *   Format the romfs filesystem
- *
- ****************************************************************************/
-
-int romfs_mkfs(FAR struct romfs_mountpt_s *rm)
-{
-  /* Write the magic number at that identifies this as a ROMFS filesystem */
-
-  romfs_devmemcpy(rm, ROMFS_VHDR_ROM1FS, ROMFS_VHDR_MAGIC, ROMFS_VHDR_SIZE);
-
-  /* Init the ROMFS volume size */
-
-  romfs_devwrite32(rm, ROMFS_VHDR_SIZE, 0x60);
-
-  /* Write the volume name */
-
-  romfs_devstrcpy(rm, ROMFS_VHDR_VOLNAME, "romfs");
-
-  /* Write the root node . */
-
-  romfs_devwrite32(rm, 0x20 + ROMFS_FHDR_NEXT, 0x40 | RFNEXT_DIRECTORY);
-  romfs_devwrite32(rm, 0x20 + ROMFS_FHDR_INFO, 0x20);
-  romfs_devwrite32(rm, 0x20 + ROMFS_FHDR_SIZE, 0);
-  romfs_devwrite32(rm, 0x20 + ROMFS_FHDR_CHKSUM, 0);
-  romfs_devstrcpy(rm, 0x20 + ROMFS_FHDR_NAME, ".");
-
-  /* Write the root node .. */
-
-  romfs_devwrite32(rm, 0x40 + ROMFS_FHDR_NEXT, RFNEXT_HARDLINK);
-  romfs_devwrite32(rm, 0x40 + ROMFS_FHDR_INFO, 0x20);
-  romfs_devwrite32(rm, 0x40 + ROMFS_FHDR_SIZE, 0);
-  romfs_devwrite32(rm, 0x40 + ROMFS_FHDR_CHKSUM, 0);
-  romfs_devstrcpy(rm, 0x40 + ROMFS_FHDR_NAME, "..");
-
-  /* Write the buffer to sector zero */
-
-  return romfs_devcachewrite(rm, 0);
-}
-#endif

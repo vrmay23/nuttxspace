@@ -1,9 +1,8 @@
 /****************************************************************************
- * apps/examples/lis3dsh_reader/lis3dsh_reader_main.c
+ * lis3dsh_reader_main.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2017 Florian Olbrich. All rights reserved.
- * SPDX-FileContributor: Florian Olbrich <florian.olbrich@oth-regensburg.de>
+ *   Copyright (C) 2017 Florian Olbrich. All rights reserved.
+ *   Author: Florian Olbrich <florian.olbrich@oth-regensburg.de>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,10 +33,6 @@
  *
  ****************************************************************************/
 
-/****************************************************************************
- * Included Files
- ****************************************************************************/
-
 #include <nuttx/config.h>
 
 #include <sys/ioctl.h>
@@ -47,15 +42,11 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <errno.h>
+
 #include <debug.h>
 #include <time.h>
-#include <unistd.h>
 
 #include <nuttx/sensors/lis3dsh.h>
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
 
 /****************************************************************************
  * lis3dsh_reader_main
@@ -75,7 +66,7 @@ int main(int argc, FAR char *argv[])
 
   for (; ; )
     {
-      fread(&acc_data, 6, 1, acc);
+      fread( &acc_data, 6, 1, acc );
       printf("x: %4d  y: %4d  z: %4d            \r",
              acc_data.x, acc_data.y, acc_data.z);
       usleep(300);

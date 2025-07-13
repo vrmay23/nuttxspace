@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/usrsock/usrsock_accept.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
+ *   Author: Xiang Xiao <xiaoxiang@pinecone.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -40,11 +53,11 @@
  * Private Functions
  ****************************************************************************/
 
-static uint16_t accept_event(FAR struct net_driver_s *dev,
+static uint16_t accept_event(FAR struct net_driver_s *dev, FAR void *pvconn,
                              FAR void *pvpriv, uint16_t flags)
 {
   FAR struct usrsock_data_reqstate_s *pstate = pvpriv;
-  FAR struct usrsock_conn_s *conn = pstate->reqstate.conn;
+  FAR struct usrsock_conn_s *conn = pvconn;
 
   if (flags & USRSOCK_EVENT_ABORT)
     {
@@ -56,9 +69,9 @@ static uint16_t accept_event(FAR struct net_driver_s *dev,
 
       /* Stop further callbacks */
 
-      pstate->reqstate.cb->flags = 0;
-      pstate->reqstate.cb->priv  = NULL;
-      pstate->reqstate.cb->event = NULL;
+      pstate->reqstate.cb->flags   = 0;
+      pstate->reqstate.cb->priv    = NULL;
+      pstate->reqstate.cb->event   = NULL;
 
       /* Wake up the waiting thread */
 
@@ -92,9 +105,9 @@ static uint16_t accept_event(FAR struct net_driver_s *dev,
 
       /* Stop further callbacks */
 
-      pstate->reqstate.cb->flags = 0;
-      pstate->reqstate.cb->priv  = NULL;
-      pstate->reqstate.cb->event = NULL;
+      pstate->reqstate.cb->flags   = 0;
+      pstate->reqstate.cb->priv    = NULL;
+      pstate->reqstate.cb->event   = NULL;
 
       /* Wake up the waiting thread */
 
@@ -108,9 +121,9 @@ static uint16_t accept_event(FAR struct net_driver_s *dev,
 
       /* Stop further callbacks */
 
-      pstate->reqstate.cb->flags = 0;
-      pstate->reqstate.cb->priv  = NULL;
-      pstate->reqstate.cb->event = NULL;
+      pstate->reqstate.cb->flags   = 0;
+      pstate->reqstate.cb->priv    = NULL;
+      pstate->reqstate.cb->event   = NULL;
 
       /* Wake up the waiting thread */
 
@@ -124,9 +137,9 @@ static uint16_t accept_event(FAR struct net_driver_s *dev,
 
       /* Stop further callbacks */
 
-      pstate->reqstate.cb->flags = 0;
-      pstate->reqstate.cb->priv  = NULL;
-      pstate->reqstate.cb->event = NULL;
+      pstate->reqstate.cb->flags   = 0;
+      pstate->reqstate.cb->priv    = NULL;
+      pstate->reqstate.cb->event   = NULL;
 
       /* Wake up the waiting thread */
 
@@ -163,7 +176,7 @@ static int do_accept_request(FAR struct usrsock_conn_s *conn,
   bufs[0].iov_base = &req;
   bufs[0].iov_len = sizeof(req);
 
-  return usrsock_do_request(conn, bufs, nitems(bufs));
+  return usrsockdev_do_request(conn, bufs, ARRAY_SIZE(bufs));
 }
 
 /****************************************************************************
@@ -174,16 +187,16 @@ static int do_accept_request(FAR struct usrsock_conn_s *conn,
  * Name: usrsock_accept
  *
  * Description:
- *   The usrsock_accept function is used with connection-based socket
+ *   The usrsock_sockif_accept function is used with connection-based socket
  *   types (SOCK_STREAM, SOCK_SEQPACKET and SOCK_RDM). It extracts the first
  *   connection request on the queue of pending connections, creates a new
- *   connected socket with mostly the same properties as 'psock', and
+ *   connected socket with mostly the same properties as 'sockfd', and
  *   allocates a new socket descriptor for the socket, which is returned. The
  *   newly created socket is no longer in the listening state. The original
- *   socket 'psock' is unaffected by this call.  Per file descriptor flags
- *   are not inherited across an usrsock_accept.
+ *   socket 'sockfd' is unaffected by this call.  Per file descriptor flags
+ *   are not inherited across an inet_accept.
  *
- *   The 'psock' argument is a socket descriptor that has been created with
+ *   The 'sockfd' argument is a socket descriptor that has been created with
  *   socket(), bound to a local address with bind(), and is listening for
  *   connections after a call to listen().
  *
@@ -193,16 +206,15 @@ static int do_accept_request(FAR struct usrsock_conn_s *conn,
  *   actual length of the address returned.
  *
  *   If no pending connections are present on the queue, and the socket is
- *   not marked as non-blocking, usrsock_accept blocks the caller until a
+ *   not marked as non-blocking, inet_accept blocks the caller until a
  *   connection is present. If the socket is marked non-blocking and no
- *   pending connections are present on the queue, usrsock_accept returns
+ *   pending connections are present on the queue, inet_accept returns
  *   EAGAIN.
  *
  * Parameters:
  *   psock    Reference to the listening socket structure
  *   addr     Receives the address of the connecting client
- *   addrlen  Input: allocated size of 'addr',
- *            Return: returned size of 'addr'
+ *   addrlen  Input: allocated size of 'addr', Return: returned size of 'addr'
  *   newsock  Location to return the accepted socket information.
  *
  * Returned Value:
@@ -215,8 +227,7 @@ static int do_accept_request(FAR struct usrsock_conn_s *conn,
  ****************************************************************************/
 
 int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
-                   FAR socklen_t *addrlen, FAR struct socket *newsock,
-                   int flags)
+                   FAR socklen_t *addrlen, FAR struct socket *newsock)
 {
   FAR struct usrsock_conn_s *conn = psock->s_conn;
   struct usrsock_data_reqstate_s state =
@@ -228,6 +239,8 @@ int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
   socklen_t inaddrlen = 0;
   socklen_t outaddrlen = 0;
   int ret;
+
+  DEBUGASSERT(conn);
 
   if (addrlen)
     {
@@ -305,7 +318,7 @@ int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
 
       if (!(conn->flags & USRSOCK_EVENT_RECVFROM_AVAIL))
         {
-          if (_SS_ISNONBLOCK(conn->sconn.s_flags))
+          if (_SS_ISNONBLOCK(psock->s_flags))
             {
               /* Nothing to receive from daemon side. */
 
@@ -327,9 +340,8 @@ int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
 
           /* Wait for receive-avail (or abort, or timeout, or signal). */
 
-          ret = net_sem_timedwait(&state.reqstate.recvsem,
-                              _SO_TIMEOUT(conn->sconn.s_rcvtimeo));
-          usrsock_teardown_data_request_callback(&state);
+          ret = net_timedwait(&state.reqstate.recvsem,
+                              _SO_TIMEOUT(psock->s_rcvtimeo));
           if (ret < 0)
             {
               if (ret == -ETIMEDOUT)
@@ -344,10 +356,17 @@ int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
                 }
               else
                 {
-                  nerr("net_sem_timedwait errno: %d\n", ret);
-                  DEBUGPANIC();
+                  nerr("net_timedwait errno: %d\n", ret);
+                  DEBUGASSERT(false);
                 }
+            }
 
+          usrsock_teardown_data_request_callback(&state);
+
+          /* Did wait timeout or got signal? */
+
+          if (ret != 0)
+            {
               goto errout_free_conn;
             }
 
@@ -386,7 +405,7 @@ int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
       inbufs[1].iov_base = &newconn->usockid;
       inbufs[1].iov_len = sizeof(newconn->usockid);
 
-      usrsock_setup_datain(conn, inbufs, nitems(inbufs));
+      usrsock_setup_datain(conn, inbufs, ARRAY_SIZE(inbufs));
 
       /* We might start getting events for this socket right after
        * returning to daemon, so setup 'newconn' already here.
@@ -401,7 +420,7 @@ int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
         {
           /* Wait for completion of request. */
 
-          net_sem_wait_uninterruptible(&state.reqstate.recvsem);
+          net_lockedwait_uninterruptible(&state.reqstate.recvsem);
           ret = state.reqstate.result;
 
           DEBUGASSERT(state.valuelen <= inaddrlen);
@@ -410,6 +429,7 @@ int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
           if (ret >= 0)
             {
               newconn->connected = true;
+              newconn->type      = conn->type;
               newconn->crefs     = 1;
 
               newsock->s_type    = psock->s_type;
@@ -422,6 +442,7 @@ int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
                */
 
               outaddrlen = state.valuelen_nontrunc;
+
               ret = OK;
             }
         }

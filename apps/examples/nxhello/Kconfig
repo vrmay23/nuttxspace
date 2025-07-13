@@ -7,7 +7,7 @@ config EXAMPLES_NXHELLO
 	tristate "NX graphics \"Hello, World!\" example"
 	default n
 	depends on NX
-	select BOARDCTL
+	select LIB_BOARDCTL
 	---help---
 		Enable the NX graphics \"Hello, World!\" example
 
@@ -101,5 +101,11 @@ config EXAMPLES_NXHELLO_LISTENERPRIO
 	default 80
 	---help---
 		The priority of the event listener thread. Default 80.
+
+config EXAMPLES_NXHELLO_NOTIFYSIGNO
+	int "Notify Signal Number"
+	default 4
+	---help---
+		The signal number to use with nx_eventnotify().  Default: 4
 
 endif

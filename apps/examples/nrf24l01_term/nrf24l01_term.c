@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/nrf24l01_term/nrf24l01_term.c
+ * examples/nrf24l01_term/nrf24l01_term.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013 Laurent Latil. All rights reserved.
+ *   Author: Laurent Latil <laurent@latil.nom.fr>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +43,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 
-#include <inttypes.h>
+#include <unistd.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -88,10 +101,7 @@ void usage(void);
  * Private Data
  ****************************************************************************/
 
-static const uint8_t defaultaddr[NRF24L01_MAX_ADDR_LEN] =
-{
-  0x01, 0xca, 0xfe, 0x12, 0x34
-};
+static const uint8_t defaultaddr[NRF24L01_MAX_ADDR_LEN] = { 0x01, 0xCA, 0xFE, 0x12, 0x34};
 
 char buff[NRF24L01_MAX_PAYLOAD_LEN + 1] = "";
 
@@ -110,20 +120,18 @@ int wireless_cfg(int fd)
   uint32_t rf = DEFAULT_RADIOFREQ;
   int32_t txpow = DEFAULT_TXPOWER;
   nrf24l01_datarate_t datarate = RATE_1Mbps;
+
   nrf24l01_retrcfg_t retrcfg =
-    {
-      .count = 5,
-      .delay = DELAY_1000us
-    };
+  {
+    .count = 5,
+    .delay = DELAY_1000us
+  };
 
   uint32_t addrwidth = NRF24L01_MAX_ADDR_LEN;
 
   uint8_t pipes_en = (1 << 0);  /* Only pipe #0 is enabled */
   nrf24l01_pipecfg_t pipe0cfg;
-  nrf24l01_pipecfg_t *pipes_cfg[NRF24L01_PIPE_COUNT] =
-    {
-      &pipe0cfg, 0, 0, 0, 0, 0
-    };
+  nrf24l01_pipecfg_t *pipes_cfg[NRF24L01_PIPE_COUNT] = {&pipe0cfg, 0, 0, 0, 0, 0};
 
   nrf24l01_state_t primrxstate;
 
@@ -133,7 +141,7 @@ int wireless_cfg(int fd)
   primrxstate = ST_POWER_DOWN;
 #endif
 
-  /* Define the pipe #0 parameters (AA enabled and dynamic payload length) */
+  /* Define the pipe #0 parameters  (AA enabled, and dynamic payload length) */
 
   pipe0cfg.en_aa = true;
   pipe0cfg.payload_length = NRF24L01_DYN_LENGTH;
@@ -143,24 +151,18 @@ int wireless_cfg(int fd)
 
   ioctl(fd, WLIOC_SETRADIOFREQ, (unsigned long)((uint32_t *)&rf));
   ioctl(fd, WLIOC_SETTXPOWER, (unsigned long)((int32_t *)&txpow));
-  ioctl(fd, NRF24L01IOC_SETDATARATE,
-        (unsigned long)((nrf24l01_datarate_t *)&datarate));
-  ioctl(fd, NRF24L01IOC_SETRETRCFG,
-        (unsigned long)((nrf24l01_retrcfg_t *)&retrcfg));
+  ioctl(fd, NRF24L01IOC_SETDATARATE, (unsigned long)((nrf24l01_datarate_t *)&datarate));
+  ioctl(fd, NRF24L01IOC_SETRETRCFG, (unsigned long)((nrf24l01_retrcfg_t *)&retrcfg));
 
-  ioctl(fd, NRF24L01IOC_SETADDRWIDTH,
-        (unsigned long)((uint32_t *)&addrwidth));
+  ioctl(fd, NRF24L01IOC_SETADDRWIDTH, (unsigned long)((uint32_t*) &addrwidth));
   ioctl(fd, NRF24L01IOC_SETTXADDR, (unsigned long)((uint8_t *)&defaultaddr));
 
-  ioctl(fd, NRF24L01IOC_SETPIPESCFG,
-        (unsigned long)((nrf24l01_pipecfg_t **)&pipes_cfg));
-  ioctl(fd, NRF24L01IOC_SETPIPESENABLED,
-        (unsigned long)((uint8_t *)&pipes_en));
+  ioctl(fd, NRF24L01IOC_SETPIPESCFG, (unsigned long)((nrf24l01_pipecfg_t **)&pipes_cfg));
+  ioctl(fd, NRF24L01IOC_SETPIPESENABLED, (unsigned long)((uint8_t *)&pipes_en));
 
   /* Enable receiver */
 
-  ioctl(fd, NRF24L01IOC_SETSTATE,
-        (unsigned long)((nrf24l01_state_t *)&primrxstate));
+  ioctl(fd, NRF24L01IOC_SETSTATE, (unsigned long)((nrf24l01_state_t *)&primrxstate));
 
   return error;
 }
@@ -193,7 +195,7 @@ int send_pkt(int wl_fd)
   len = strlen(buff);
   if (len > 0 && buff[len - 1] == '\n')
     {
-      len--;
+      len --;
       buff[len] = '\0';
     }
 
@@ -207,10 +209,8 @@ int send_pkt(int wl_fd)
     {
       int retrcount;
 
-      ioctl(wl_fd, NRF24L01IOC_GETLASTXMITCOUNT,
-            (unsigned long)((uint32_t *)&retrcount));
-      printf("Packet sent successfully !  (%d retransmitted packets)\n",
-             retrcount);
+      ioctl(wl_fd, NRF24L01IOC_GETLASTXMITCOUNT, (unsigned long)((uint32_t *)&retrcount));
+      printf("Packet sent successfully !  (%d retransmitted packets)\n", retrcount);
     }
 
   return OK;
@@ -231,20 +231,16 @@ int read_pkt(int wl_fd)
   if (ret == 0)
     {
       /* Should not happen ... */
-
       printf("Packet payload empty !\n");
       return ERROR;
     }
 
-  /* Get the recipient pipe #
-   * (for demo purpose, as here the receiving pipe can only be pipe #0...)
-   */
+  /* Get the recipient pipe #  (for demo purpose, as here the receiving pipe can only be pipe #0...) */
 
-  ioctl(wl_fd, NRF24L01IOC_GETLASTPIPENO,
-        (unsigned long)((uint32_t *)&pipeno));
+  ioctl(wl_fd, NRF24L01IOC_GETLASTPIPENO, (unsigned long)((uint32_t *)&pipeno));
 
   buff[ret] = '\0';   /* end the string */
-  printf("Message received : %s   (on pipe #%" PRId32 ")\n", buff, pipeno);
+  printf("Message received : %s   (on pipe #%d)\n", buff, pipeno);
 
   return 0;
 }
@@ -252,8 +248,7 @@ int read_pkt(int wl_fd)
 void usage(void)
 {
   printf("nRF24L01+ wireless terminal demo.\nUsage:\n");
-  printf("- Type in any message ( <= 32 char length)"
-         " to send it to communication peer.\n");
+  printf("- Type in any message ( <= 32 char length) to send it to communication peer.\n");
   printf("- Ctrl-C to exit.\n\n");
 }
 
@@ -322,12 +317,11 @@ int main(int argc, FAR char *argv[])
                   goto out;
                 }
 #else
-              ret = readline_stream(&buff[1], sizeof(buff) - 1,
-                                    stdin, stdout);
+              ret = readline(&buff[1], sizeof(buff) - 1, stdin, stdout);
 
               /* Readline normally returns the number of characters read,
-               * but will return EOF on end of file or if an error occurs.
-               * Either will cause the session to terminate.
+               * but will return EOF on end of file or if an error occurs.  Either
+               * will cause the session to terminate.
                */
 
               if (ret == EOF)
@@ -336,7 +330,6 @@ int main(int argc, FAR char *argv[])
                   goto out;
                 }
 #endif
-
               /* Send content */
 
               send_pkt(wl_fd);

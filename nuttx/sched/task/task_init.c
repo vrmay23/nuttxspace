@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/task/task_init.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -29,26 +27,21 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <sched.h>
-#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/queue.h>
 #include <nuttx/sched.h>
-#include <nuttx/trace.h>
 
 #include "sched/sched.h"
-#include "environ/environ.h"
 #include "group/group.h"
 #include "task/task.h"
-#include "tls/tls.h"
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: nxtask_init
+ * Name: task_init
  *
  * Description:
  *   This function initializes a Task Control Block (TCB) in preparation for
@@ -58,12 +51,7 @@
  *   Unlike task_create():
  *     1. Allocate the TCB.  The pre-allocated TCB is passed in argv.
  *     2. Allocate the stack.  The pre-allocated stack is passed in argv.
- *     3. Activate the task. This must be done by calling nxtask_activate().
- *
- *   Certain fields of the pre-allocated TCB may be set to change the
- *   nature of the created task.  For example:
- *
- *     - Task type may be set in the TCB flags to create kernel thread
+ *     3. Activate the task. This must be done by calling task_activate().
  *
  * Input Parameters:
  *   tcb        - Address of the new task's TCB
@@ -77,188 +65,79 @@
  *                parameters are required, argv may be NULL.
  *
  * Returned Value:
- *   OK on success; negative error value on failure appropriately.  (See
- *   nxtask_setup_scheduler() for possible failure conditions).  On failure,
- *   the caller is responsible for freeing the stack memory and for calling
- *   nxsched_release_tcb() to free the TCB (which could be in most any
- *   state).
+ *   OK on success; ERROR on failure with errno set appropriately.  (See
+ *   nxtask_schedsetup() for possible failure conditions).  On failure, the
+ *   caller is responsible for freeing the stack memory and for calling
+ *   sched_releasetcb() to free the TCB (which could be in most any state).
  *
  ****************************************************************************/
 
-int nxtask_init(FAR struct task_tcb_s *tcb, const char *name, int priority,
-                FAR void *stack, uint32_t stack_size,
-                main_t entry, FAR char * const argv[],
-                FAR char * const envp[],
-                FAR const posix_spawn_file_actions_t *actions)
+int task_init(FAR struct tcb_s *tcb, const char *name, int priority,
+              FAR uint32_t *stack, uint32_t stack_size,
+              main_t entry, FAR char * const argv[])
 {
-  uint8_t ttype = tcb->cmn.flags & TCB_FLAG_TTYPE_MASK;
+  FAR struct task_tcb_s *ttcb = (FAR struct task_tcb_s *)tcb;
+  int errcode;
   int ret;
 
-  sched_trace_begin();
-
-#ifndef CONFIG_DISABLE_PTHREAD
   /* Only tasks and kernel threads can be initialized in this way */
 
-  DEBUGASSERT(tcb && ttype != TCB_FLAG_TTYPE_PTHREAD);
-#endif
-
-#ifdef CONFIG_ARCH_ADDRENV
-  /* Kernel threads do not own any address environment */
-
-  if (ttype == TCB_FLAG_TTYPE_KERNEL)
-    {
-      tcb->cmn.addrenv_own = NULL;
-    }
+#ifndef CONFIG_DISABLE_PTHREAD
+  DEBUGASSERT(tcb &&
+              (tcb->flags & TCB_FLAG_TTYPE_MASK) != TCB_FLAG_TTYPE_PTHREAD);
 #endif
 
   /* Create a new task group */
 
-  ret = group_initialize(tcb, tcb->cmn.flags);
+  ret = group_allocate(ttcb, tcb->flags);
   if (ret < 0)
     {
-      sched_trace_end();
-      return ret;
-    }
-
-#ifndef CONFIG_DISABLE_PTHREAD
-  /* Initialize the task join */
-
-  nxtask_joininit(&tcb->cmn);
-#endif
-
-#ifndef CONFIG_PTHREAD_MUTEX_UNSAFE
-  spin_lock_init(&tcb->cmn.mutex_lock);
-#endif
-
-  /* Duplicate the parent tasks environment */
-
-  ret = env_dup(tcb->cmn.group, envp);
-  if (ret < 0)
-    {
-      goto errout_with_group;
+      errcode = -ret;
+      goto errout;
     }
 
   /* Associate file descriptors with the new task */
 
-  ret = group_setuptaskfiles(tcb, actions, true);
+  ret = group_setuptaskfiles(ttcb);
   if (ret < 0)
     {
+      errcode = -ret;
       goto errout_with_group;
     }
 
-  /* Set the task name */
+  /* Configure the user provided stack region */
 
-  nxtask_setup_name(tcb, name);
-
-  if (stack)
-    {
-      /* Use pre-allocated stack */
-
-      ret = up_use_stack(&tcb->cmn, stack, stack_size);
-    }
-  else
-    {
-      /* Allocate the stack for the TCB */
-
-      ret = up_create_stack(&tcb->cmn, stack_size, ttype);
-    }
-
-  if (ret < OK)
-    {
-      goto errout_with_group;
-    }
+  up_use_stack(tcb, stack, stack_size);
 
   /* Initialize the task control block */
 
-  ret = nxtask_setup_scheduler(tcb, priority, nxtask_start,
-                               entry, ttype);
+  ret = nxtask_schedsetup(ttcb, priority, nxtask_start, entry,
+                          TCB_FLAG_TTYPE_TASK);
   if (ret < OK)
     {
-      goto errout_with_group;
-    }
-
-  /* Initialize thread local storage */
-
-  ret = tls_init_info(&tcb->cmn);
-  if (ret < OK)
-    {
+      errcode = -ret;
       goto errout_with_group;
     }
 
   /* Setup to pass parameters to the new task */
 
-  ret = nxtask_setup_stackargs(tcb, name, argv);
-  if (ret < OK)
-    {
-      goto errout_with_group;
-    }
+  nxtask_argsetup(ttcb, name, argv);
 
   /* Now we have enough in place that we can join the group */
 
-  group_postinitialize(tcb);
-  sched_trace_end();
-  return ret;
-
-errout_with_group:
-  if (!stack && tcb->cmn.stack_alloc_ptr)
+  ret = group_initialize(ttcb);
+  if (ret < 0)
     {
-#ifdef CONFIG_BUILD_KERNEL
-      /* If the exiting thread is not a kernel thread, then it has an
-       * address environment.  Don't bother to release the stack memory
-       * in this case... There is no point since the memory lies in the
-       * user memory region that will be destroyed anyway (and the
-       * address environment has probably already been destroyed at
-       * this point.. so we would crash if we even tried it).  But if
-       * this is a privileged group, then we still have to release the
-       * memory using the kernel allocator.
-       */
-
-      if (ttype == TCB_FLAG_TTYPE_KERNEL)
-#endif
-        {
-          up_release_stack(&tcb->cmn, ttype);
-        }
+      errcode = -ret;
+      goto errout_with_group;
     }
 
-  nxtask_joindestroy(&tcb->cmn);
+  return OK;
 
-  group_leave(&tcb->cmn);
+errout_with_group:
+  group_leave(tcb);
 
-  sched_trace_end();
-  return ret;
-}
-
-/****************************************************************************
- * Name: nxtask_uninit
- *
- * Description:
- *   Undo all operations on a TCB performed by task_init() and release the
- *   TCB by calling kmm_free().  This is intended primarily to support
- *   error recovery operations after a successful call to task_init()
- *   when a subsequent call to task_activate fails.
- *
- *   Caution:  Freeing of the TCB itself might be an unexpected side-effect.
- *
- * Input Parameters:
- *   tcb - Address of the TCB initialized by task_init()
- *
- * Returned Value:
- *   OK on success; negative error value on failure appropriately.
- *
- ****************************************************************************/
-
-void nxtask_uninit(FAR struct task_tcb_s *tcb)
-{
-  /* The TCB was added to the inactive task list by
-   * nxtask_setup_scheduler().
-   */
-
-  dq_rem((FAR dq_entry_t *)tcb, list_inactivetasks());
-
-  /* Release all resources associated with the TCB... Including the TCB
-   * itself.
-   */
-
-  nxsched_release_tcb((FAR struct tcb_s *)tcb,
-                      tcb->cmn.flags & TCB_FLAG_TTYPE_MASK);
+errout:
+  set_errno(errcode);
+  return ERROR;
 }

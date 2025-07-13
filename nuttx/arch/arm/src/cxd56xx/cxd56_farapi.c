@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_farapi.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,22 +42,20 @@
 #include <nuttx/arch.h>
 #include <nuttx/sched.h>
 #include <nuttx/irq.h>
-#include <nuttx/signal.h>
-#include <nuttx/mutex.h>
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
 #include <arch/chip/pm.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
 #include "chip.h"
 #include "cxd56_icc.h"
 #include "cxd56_config.h"
 #include "cxd56_farapistub.h"
 #include "hardware/cxd5602_backupmem.h"
 
-int fw_pm_wakeupcpu(int cpuid);
+int PM_WakeUpCpu(int cpuid);
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -59,7 +70,7 @@ int fw_pm_wakeupcpu(int cpuid);
 #define CPU_ID (CXD56_CPU_BASE + 0x40)
 
 /****************************************************************************
- * Private Types
+ * Private Type
  ****************************************************************************/
 
 typedef int farapicallback(void *data);
@@ -109,14 +120,14 @@ struct farmsg_s
  * Public Data
  ****************************************************************************/
 
-extern struct modulelist_s _image_modlist_base[];
+extern char Image$$MODLIST$$Base[];
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static sem_t g_farwait = SEM_INITIALIZER(0);
-static mutex_t g_farlock = NXMUTEX_INITIALIZER;
+static sem_t g_farwait;
+static sem_t g_farlock;
 static struct pm_cpu_wakelock_s g_wlock =
 {
   .count = 0,
@@ -126,6 +137,11 @@ static struct pm_cpu_wakelock_s g_wlock =
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+static int farapi_semtake(sem_t *id)
+{
+  return nxsem_wait_uninterruptible(id);
+}
 
 #ifdef CONFIG_CXD56_FARAPI_DEBUG
 static void dump_farapi_message(struct farmsg_s *msg)
@@ -158,7 +174,7 @@ static int cxd56_sendmsg(int cpuid, int protoid, int msgtype, uint16_t pdata,
 
 static int cxd56_farapidonehandler(int cpuid, int protoid,
                                    uint32_t pdata, uint32_t data,
-                                   void *userdata)
+                                   FAR void *userdata)
 {
   /* Receive event flag message as Far API done.
    * We need only far API done event.
@@ -179,36 +195,12 @@ static int cxd56_farapidonehandler(int cpuid, int protoid,
  * Public Functions
  ****************************************************************************/
 
-used_code
+__attribute__((used))
 void farapi_main(int id, void *arg, struct modulelist_s *mlist)
 {
   struct farmsg_s msg;
   struct apimsg_s *api;
   int ret;
-
-#ifdef CONFIG_SMP
-  int cpu = this_cpu();
-  static cpu_set_t cpuset0;
-
-  if (0 != cpu)
-    {
-      /* Save the current cpuset */
-
-      sched_getaffinity(nxsched_gettid(), sizeof(cpu_set_t), &cpuset0);
-
-      /* Assign the current task to cpu0 */
-
-      cpu_set_t cpuset1;
-      CPU_ZERO(&cpuset1);
-      CPU_SET(0, &cpuset1);
-      sched_setaffinity(nxsched_gettid(), sizeof(cpu_set_t), &cpuset1);
-
-      /* NOTE: a workaround to finish rescheduling */
-
-      nxsig_usleep(10 * 1000);
-    }
-#endif
-
 #ifdef CONFIG_CXD56_GNSS_HOT_SLEEP
   uint32_t gnscken;
 
@@ -218,17 +210,17 @@ void farapi_main(int id, void *arg, struct modulelist_s *mlist)
       if (((gnscken & GNSDSP_CKEN_P1) != GNSDSP_CKEN_P1) &&
           ((gnscken & GNSDSP_CKEN_COP) != GNSDSP_CKEN_COP))
         {
-          fw_pm_wakeupcpu(GPS_CPU_ID);
+          PM_WakeUpCpu(GPS_CPU_ID);
         }
     }
 #endif
 
-  nxmutex_lock(&g_farlock);
+  farapi_semtake(&g_farlock);
 
   api = &msg.u.api;
 
   msg.cpuid      = getreg32(CPU_ID);
-  msg.modid      = mlist - _image_modlist_base;
+  msg.modid      = mlist - (struct modulelist_s *)&Image$$MODLIST$$Base;
 
   api->id        = id;
   api->arg       = arg;
@@ -254,7 +246,7 @@ void farapi_main(int id, void *arg, struct modulelist_s *mlist)
 
   /* Wait event flag message as Far API done */
 
-  nxsem_wait_uninterruptible(&g_farwait);
+  farapi_semtake(&g_farwait);
 
   /* Permit hot sleep with Far API done */
 
@@ -263,19 +255,7 @@ void farapi_main(int id, void *arg, struct modulelist_s *mlist)
   dump_farapi_message(&msg);
 
 err:
-  nxmutex_unlock(&g_farlock);
-#ifdef CONFIG_SMP
-  if (0 != cpu)
-    {
-      /* Restore the cpu affinity */
-
-      sched_setaffinity(nxsched_gettid(), sizeof(cpu_set_t), &cpuset0);
-
-      /* NOTE: a workaround to finish rescheduling */
-
-      nxsig_usleep(10 * 1000);
-    }
-#endif
+  nxsem_post(&g_farlock);
 }
 
 void cxd56_farapiinitialize(void)
@@ -283,14 +263,17 @@ void cxd56_farapiinitialize(void)
 #ifdef CONFIG_CXD56_FARAPI_VERSION_CHECK
   if (GET_SYSFW_VERSION_BUILD() < FARAPISTUB_VERSION)
     {
-      _alert("Mismatched version: loader(%" PRId32 ") != Self(%d)\n",
+      _alert("Mismatched version: loader(%d) != Self(%d)\n",
              GET_SYSFW_VERSION_BUILD(), FARAPISTUB_VERSION);
       _alert("Please update loader and gnssfw firmwares!!\n");
 #  ifdef CONFIG_CXD56_FARAPI_VERSION_FAILED_PANIC
       PANIC();
 #  endif
     }
+
 #endif
+  nxsem_init(&g_farlock, 0, 1);
+  nxsem_init(&g_farwait, 0, 0);
 
   cxd56_iccinit(CXD56_PROTO_MBX);
   cxd56_iccinit(CXD56_PROTO_FLG);

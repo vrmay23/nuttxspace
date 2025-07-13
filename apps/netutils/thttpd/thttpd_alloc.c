@@ -1,7 +1,5 @@
 /****************************************************************************
- * apps/netutils/thttpd/thttpd_alloc.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * netutils/thttpd/thttpd_alloc.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -26,10 +24,8 @@
 
 #include <nuttx/config.h>
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -37,6 +33,18 @@
 #include "thttpd_alloc.h"
 
 #ifdef CONFIG_THTTPD
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#ifndef MAX
+#  define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
+
+#ifndef MIN
+#  define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
 
 /****************************************************************************
  * Private Data

@@ -1,3 +1,7 @@
+/Make_bin.dep
+/Make_ubin.dep
+/Make_kbin.dep
 /exec_symtab.c
-/elf_symtab.c
-elf/gnu-elf.ld
+/modlib_symtab.c
+/.depend
+/*.lib

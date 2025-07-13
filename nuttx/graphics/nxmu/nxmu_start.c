@@ -1,22 +1,35 @@
 /****************************************************************************
  * graphics/nxmu/nxmu_start.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013, 2016-2017, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <sched.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -42,10 +54,6 @@
 #include <nuttx/nx/nxmu.h>
 
 #include "nxmu.h"
-
-#ifdef CONFIG_VNCSERVER
-#  include <nuttx/video/vnc.h>
-#endif
 
 /****************************************************************************
  * Private Data
@@ -114,22 +122,6 @@ static int nx_server(int argc, char *argv[])
   dev->setpower(dev, ((3 * CONFIG_LCD_MAXPOWER + 3) / 4));
 
 #else /* CONFIG_NX_LCDDRIVER */
-#  ifdef CONFIG_VNCSERVER
-  /* Initialize the VNC server */
-  int display;
-
-  /* Get display parameters from the command line */
-
-  display = atoi(argv[1]);
-
-  ret = vnc_fb_register(display);
-  if (ret < 0)
-    {
-       gerr("ERROR: vnc_fb_register() failed: %d\n", ret);
-    }
-
-#  else /* CONFIG_VNCSERVER */
-
   /* Initialize the frame buffer device. */
 
   int display;
@@ -154,7 +146,6 @@ static int nx_server(int argc, char *argv[])
       return EXIT_FAILURE;
     }
 
-#  endif /* CONFIG_VNCSERVER */
 #endif /* CONFIG_NX_LCDDRIVER */
 
   /* Then start the server (nx_run does not normally return) */
@@ -205,13 +196,13 @@ int nxmu_start(int display, int plane)
     {
       FAR char display_str[8];
       FAR char plane_str[8];
-      int server;
       FAR char * const argv[3] =
       {
         (FAR char * const)display_str,
         (FAR char * const)plane_str,
         NULL
       };
+      pid_t server;
 
       /* Start the server kernel thread */
 
@@ -224,8 +215,8 @@ int nxmu_start(int display, int plane)
       if (server < 0)
         {
           gerr("ERROR: Failed to create nx_server kernel thread: %d\n",
-               server);
-          return server;
+               (int)server);
+          return (int)server;
         }
 
       g_nxserver_started[display] = true;
@@ -234,7 +225,7 @@ int nxmu_start(int display, int plane)
        * this operation cannot be done from the IDLE thread!
        */
 
-      nxsig_usleep(50 * 1000);
+      nxsig_usleep(50*1000);
     }
 
   return OK;

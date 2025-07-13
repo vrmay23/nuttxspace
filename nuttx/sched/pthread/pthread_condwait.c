@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/pthread/pthread_condwait.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -32,7 +30,6 @@
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/atomic.h>
 #include <nuttx/cancelpt.h>
 
 #include "pthread/pthread.h"
@@ -62,7 +59,7 @@ int pthread_cond_wait(FAR pthread_cond_t *cond, FAR pthread_mutex_t *mutex)
   int status;
   int ret;
 
-  sinfo("cond=%p mutex=%p\n", cond, mutex);
+  sinfo("cond=0x%p mutex=0x%p\n", cond, mutex);
 
   /* pthread_cond_wait() is a cancellation point */
 
@@ -77,28 +74,48 @@ int pthread_cond_wait(FAR pthread_cond_t *cond, FAR pthread_mutex_t *mutex)
 
   /* Make sure that the caller holds the mutex */
 
-  else if (!mutex_is_hold(&mutex->mutex))
+  else if (mutex->pid != (int)getpid())
     {
       ret = EPERM;
     }
   else
     {
-      unsigned int nlocks;
+#ifndef CONFIG_PTHREAD_MUTEX_UNSAFE
+      uint8_t mflags;
+#endif
+#ifdef CONFIG_PTHREAD_MUTEX_TYPES
+      uint8_t type;
+      int16_t nlocks;
+#endif
 
       /* Give up the mutex */
 
       sinfo("Give up mutex / take cond\n");
 
-      atomic_fetch_add(COND_WAIT_COUNT(cond), 1);
-      ret = pthread_mutex_breaklock(mutex, &nlocks);
+      sched_lock();
+      mutex->pid = -1;
+#ifndef CONFIG_PTHREAD_MUTEX_UNSAFE
+      mflags     = mutex->flags;
+#endif
+#ifdef CONFIG_PTHREAD_MUTEX_TYPES
+      type       = mutex->type;
+      nlocks     = mutex->nlocks;
+#endif
+      ret        = pthread_mutex_give(mutex);
 
-      status = -nxsem_wait_uninterruptible(&cond->sem);
+      /* Take the semaphore.  This may be awakened only be a signal (EINTR)
+       * or if the thread is canceled (ECANCELED)
+       */
+
+      status = pthread_sem_take((FAR sem_t *)&cond->sem, NULL, false);
       if (ret == OK)
         {
           /* Report the first failure that occurs */
 
           ret = status;
         }
+
+      sched_unlock();
 
       /* Reacquire the mutex.
        *
@@ -109,12 +126,28 @@ int pthread_cond_wait(FAR pthread_cond_t *cond, FAR pthread_mutex_t *mutex)
 
       sinfo("Reacquire mutex...\n");
 
-      status = pthread_mutex_restorelock(mutex, nlocks);
+      status = pthread_mutex_take(mutex, NULL, false);
       if (ret == OK)
         {
           /* Report the first failure that occurs */
 
           ret = status;
+        }
+
+      /* Did we get the mutex? */
+
+      if (status == OK)
+        {
+          /* Yes.. Then initialize it properly */
+
+          mutex->pid    = getpid();
+#ifndef CONFIG_PTHREAD_MUTEX_UNSAFE
+          mutex->flags  = mflags;
+#endif
+#ifdef CONFIG_PTHREAD_MUTEX_TYPES
+          mutex->type   = type;
+          mutex->nlocks = nlocks;
+#endif
         }
     }
 

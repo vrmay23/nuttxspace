@@ -1,22 +1,38 @@
 /****************************************************************************
  * fs/nxffs/nxffs_initialize.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011, 2013, 2015, 2017-2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References: Linux/Documentation/filesystems/romfs.txt
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,7 +42,6 @@
 
 #include <nuttx/config.h>
 
-#include <stdint.h>
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
@@ -38,7 +53,6 @@
 #include <nuttx/fs/ioctl.h>
 
 #include "nxffs.h"
-#include "fs_heap.h"
 
 /****************************************************************************
  * Private Data
@@ -49,7 +63,7 @@
  * with any compiler.
  */
 
-const struct mountpt_operations g_nxffs_operations =
+const struct mountpt_operations nxffs_operations =
 {
   nxffs_open,        /* open */
   nxffs_close,       /* close */
@@ -57,23 +71,18 @@ const struct mountpt_operations g_nxffs_operations =
   nxffs_write,       /* write */
   NULL,              /* seek -- Use f_pos in struct file */
   nxffs_ioctl,       /* ioctl */
-  NULL,              /* mmap */
+
+  NULL,              /* sync -- No buffered data */
+  nxffs_dup,         /* dup */
+  nxffs_fstat,       /* fstat */
 #ifdef __NO_TRUNCATE_SUPPORT__
   nxffs_truncate,    /* truncate */
 #else
   NULL,              /* truncate */
 #endif
-  NULL,              /* poll */
-  NULL,              /* readv */
-  NULL,              /* writev */
-
-  NULL,              /* sync -- No buffered data */
-  nxffs_dup,         /* dup */
-  nxffs_fstat,       /* fstat */
-  NULL,              /* fchstat */
 
   nxffs_opendir,     /* opendir */
-  nxffs_closedir,    /* closedir */
+  NULL,              /* closedir */
   nxffs_readdir,     /* readdir */
   nxffs_rewinddir,   /* rewinddir */
 
@@ -85,8 +94,7 @@ const struct mountpt_operations g_nxffs_operations =
   NULL,              /* mkdir -- no directories */
   NULL,              /* rmdir -- no directories */
   NULL,              /* rename -- cannot rename in place if name is longer */
-  nxffs_stat,        /* stat */
-  NULL               /* chstat */
+  nxffs_stat         /* stat */
 };
 
 /****************************************************************************
@@ -167,7 +175,7 @@ int nxffs_initialize(FAR struct mtd_dev_s *mtd)
 
   /* Allocate a NXFFS volume structure */
 
-  volume = fs_heap_zalloc(sizeof(struct nxffs_volume_s));
+  volume = (FAR struct nxffs_volume_s *)kmm_zalloc(sizeof(struct nxffs_volume_s));
   if (!volume)
     {
       return -ENOMEM;
@@ -178,7 +186,7 @@ int nxffs_initialize(FAR struct mtd_dev_s *mtd)
 
   volume->mtd    = mtd;
   volume->cblock = (off_t)-1;
-  nxmutex_init(&volume->lock);
+  nxsem_init(&volume->exclsem, 0, 1);
   nxsem_init(&volume->wrsem, 0, 1);
 
   /* Get the volume geometry. (casting to uintptr_t first eliminates
@@ -186,8 +194,7 @@ int nxffs_initialize(FAR struct mtd_dev_s *mtd)
    * from the size of a pointer).
    */
 
-  ret = MTD_IOCTL(mtd, MTDIOC_GEOMETRY,
-                  (unsigned long)((uintptr_t)&volume->geo));
+  ret = MTD_IOCTL(mtd, MTDIOC_GEOMETRY, (unsigned long)((uintptr_t)&volume->geo));
   if (ret < 0)
     {
       ferr("ERROR: MTD ioctl(MTDIOC_GEOMETRY) failed: %d\n", -ret);
@@ -196,7 +203,7 @@ int nxffs_initialize(FAR struct mtd_dev_s *mtd)
 
   /* Allocate one I/O block buffer to general files system access */
 
-  volume->cache = fs_heap_malloc(volume->geo.blocksize);
+  volume->cache = (FAR uint8_t *)kmm_malloc(volume->geo.blocksize);
   if (!volume->cache)
     {
       ferr("ERROR: Failed to allocate an erase block buffer\n");
@@ -204,12 +211,12 @@ int nxffs_initialize(FAR struct mtd_dev_s *mtd)
       goto errout_with_volume;
     }
 
-  /* Pre-allocate one, full, in-memory erase block.  This is needed for
-   * filesystem packing (but is useful in other places as well). This buffer
-   * is not needed often, but is best to have pre-allocated and in-place.
+  /* Pre-allocate one, full, in-memory erase block.  This is needed for filesystem
+   * packing (but is useful in other places as well). This buffer is not needed
+   * often, but is best to have pre-allocated and in-place.
    */
 
-  volume->pack = fs_heap_malloc(volume->geo.erasesize);
+  volume->pack = (FAR uint8_t *)kmm_malloc(volume->geo.erasesize);
   if (!volume->pack)
     {
       ferr("ERROR: Failed to allocate an I/O block buffer\n");
@@ -223,8 +230,7 @@ int nxffs_initialize(FAR struct mtd_dev_s *mtd)
 
   volume->blkper  = volume->geo.erasesize / volume->geo.blocksize;
   volume->nblocks = volume->geo.neraseblocks * volume->blkper;
-  DEBUGASSERT((off_t)volume->blkper * volume->geo.blocksize ==
-              volume->geo.erasesize);
+  DEBUGASSERT((off_t)volume->blkper * volume->geo.blocksize == volume->geo.erasesize);
 
 #ifdef CONFIG_NXFFS_SCAN_VOLUME
   /* Check if there is a valid NXFFS file system on the flash */
@@ -307,14 +313,12 @@ int nxffs_initialize(FAR struct mtd_dev_s *mtd)
   ferr("ERROR: Failed to calculate file system limits: %d\n", -ret);
 
 errout_with_buffer:
-  fs_heap_free(volume->pack);
+  kmm_free(volume->pack);
 errout_with_cache:
-  fs_heap_free(volume->cache);
+  kmm_free(volume->cache);
 errout_with_volume:
-  nxmutex_destroy(&volume->lock);
-  nxsem_destroy(&volume->wrsem);
 #ifndef CONFIG_NXFFS_PREALLOCATED
-  fs_heap_free(volume);
+  kmm_free(volume);
 #endif
   return ret;
 }
@@ -394,7 +398,7 @@ int nxffs_limits(FAR struct nxffs_volume_s *volume)
       /* Save the offset to the first inode */
 
       volume->inoffset = entry.hoffset;
-      finfo("First inode at offset %jd\n", (intmax_t)volume->inoffset);
+      finfo("First inode at offset %d\n", volume->inoffset);
 
       /* Discard this entry and set the next offset. */
 
@@ -414,7 +418,7 @@ int nxffs_limits(FAR struct nxffs_volume_s *volume)
           nxffs_freeentry(&entry);
         }
 
-      finfo("Last inode before offset %jd\n", (intmax_t)offset);
+      finfo("Last inode before offset %d\n", offset);
     }
 
   /* No inodes were found after this offset.  Now search for a block of
@@ -435,26 +439,20 @@ int nxffs_limits(FAR struct nxffs_volume_s *volume)
           if (volume->ioblock + 1 >= volume->nblocks &&
               volume->iooffset + 1 >= volume->geo.blocksize)
             {
-              /* Yes.. the FLASH is full.  Force the offsets to the end of
-               * FLASH
-               */
+              /* Yes.. the FLASH is full.  Force the offsets to the end of FLASH */
 
               volume->froffset = volume->nblocks * volume->geo.blocksize;
-              finfo("Assume no free FLASH, froffset: %jd\n",
-                    (intmax_t)volume->froffset);
+              finfo("Assume no free FLASH, froffset: %d\n", volume->froffset);
               if (noinodes)
                 {
                   volume->inoffset = volume->froffset;
-                  finfo("No inodes, inoffset: %jd\n",
-                        (intmax_t)volume->inoffset);
+                  finfo("No inodes, inoffset: %d\n", volume->inoffset);
                 }
 
               return OK;
             }
 
-          /* No?  Then it is some other failure that we do not know how to
-           * handle
-           */
+          /* No?  Then it is some other failure that we do not know how to handle */
 
           ferr("ERROR: nxffs_getc failed: %d\n", -ch);
           return ch;
@@ -477,13 +475,11 @@ int nxffs_limits(FAR struct nxffs_volume_s *volume)
                */
 
               volume->froffset = offset;
-              finfo("Free FLASH region begins at offset: %jd\n",
-                    (intmax_t)volume->froffset);
+              finfo("Free FLASH region begins at offset: %d\n", volume->froffset);
               if (noinodes)
                 {
                   volume->inoffset = offset;
-                  finfo("First inode at offset %jd\n",
-                        (intmax_t)volume->inoffset);
+                  finfo("First inode at offset %d\n", volume->inoffset);
                 }
 
               return OK;

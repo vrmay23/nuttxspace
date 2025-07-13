@@ -39,7 +39,7 @@ config EXAMPLES_ELF_EXTERN
 		The file system is assumed to reside on some external media
 		such as an SD card or a USB FLASH drive.  In this case, that
 		external file system must be created manually by copying the
-		files in apps/examples/elf/tests/extfs to the volume.
+		files in apps/examples/elf/tests/romfs to the volume.
 
 		The external volume can optionally be mounted by the test if
 		the CONFIG_EXAMPLES_FSMOUNT option is also selected.
@@ -81,10 +81,7 @@ config EXAMPLES_ELF_FSTYPE
 	depends on EXAMPLES_ELF_FSMOUNT
 	---help---
 		The type of the external file system as will be used in the mount()
-		command.  Default: "vfat".
-		If the type of the external file system is set to "romfs" a romfs.img
-		is created in apps/examples/elf/tests/ this can be copied to an
-		internal block device.
+		command.  Default: "vfat"
 
 config EXAMPLES_ELF_DEVPATH
 	string "Block driver device path"
@@ -123,12 +120,22 @@ config EXAMPLES_ELF_LIBC
 		program greatly increasing the total code size.  This option is
 		primarily intended only for testing.
 
-config EXAMPLES_ELF_CXX
-	bool "uClibc++/libcxx is installed"
-	default n
-	depends on UCLIBCXX || LIBCXX
+config EXAMPLES_ELF_CXXINITIALIZE
+	bool "C++ Initialization"
+	default y
+	depends on HAVE_CXX && HAVE_CXXINITIALIZE
 	---help---
-		By default, uClibc++/libcxx is not installed and configured. If the
+		By default, if CONFIG_HAVE_CXX and CONFIG_HAVE_CXXINITIALIZE are
+		defined, then this example will call the NuttX function to
+		initialize static C++ constructors.  This option may be disabled,
+		however, if that static initialization was performed elsewhere.
+
+config EXAMPLES_ELF_UCLIBCXX
+	bool "uClibc++ is installed"
+	default n
+	depends on UCLIBCXX
+	---help---
+		By default, uClibc++ is not installed and configured. If the
 		user installs and configures the C++ standard library, this
 		example will compile the demos using it.
 

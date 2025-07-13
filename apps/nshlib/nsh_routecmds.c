@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/nshlib/nsh_routecmds.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +42,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include <unistd.h>
 
 #include <net/route.h>
 #include <netinet/in.h>
@@ -48,36 +60,36 @@
 
 static int slash_notation(FAR char *arg)
 {
-  FAR char *sptr;
-  FAR char *ptr;
+   FAR char *sptr;
+   FAR char *ptr;
 
-  /* If an address contains a /, then the netmask is imply by the following
-   * numeric value.
-   */
+   /* If an address contains a /, then the netmask is imply by the following
+    * numeric value.
+    */
 
-  sptr = strchr(arg, '/');
-  if (sptr != NULL)
-    {
-      /* Make sure that everything following the slash is a decimal digit. */
+   sptr = strchr(arg, '/');
+   if (sptr != NULL)
+     {
+       /* Make sure that everything following the slash is a decimal digit. */
 
-      ptr = sptr + 1;
-      while (isdigit(*ptr))
-        {
-          ptr++;
-        }
+       ptr = sptr + 1;
+       while (isdigit(*ptr))
+         {
+           ptr++;
+         }
 
-      /* There should be nothing be digits after the slash and up to the
-       * NULL terminator.
-       */
+       /* There should be nothing be digits after the slash and up to the
+        * NULL terminator.
+        */
 
-      if (*ptr == '\0')
-        {
-          *sptr++ = '\0';
-          return atoi(sptr);
-        }
-    }
+       if (*ptr == '\0')
+         {
+           *sptr++ = '\0';
+           return atoi(sptr);
+         }
+     }
 
-  return ERROR;
+   return ERROR;
 }
 
 /****************************************************************************
@@ -92,7 +104,7 @@ static int slash_notation(FAR char *arg)
  ****************************************************************************/
 
 #ifndef CONFIG_NSH_DISABLE_ADDROUTE
-int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   union
   {
@@ -102,7 +114,6 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 #ifdef CONFIG_NET_IPv6
     struct sockaddr_in6 ipv6;
 #endif
-    struct sockaddr_storage ipx;
   } target;
 
   union
@@ -113,7 +124,6 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 #ifdef CONFIG_NET_IPv6
     struct sockaddr_in6 ipv6;
 #endif
-    struct sockaddr_storage ipx;
   } netmask;
 
   union
@@ -124,7 +134,6 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 #ifdef CONFIG_NET_IPv6
   struct sockaddr_in6 ipv6;
 #endif
-  struct sockaddr_storage ipx;
   } router;
 
   union
@@ -142,7 +151,6 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
   int shift;
   int sockfd;
   int ret;
-  FAR char *sptr;
 
   /* First, check if we are setting the default route */
 
@@ -183,30 +191,30 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
         }
 
 #ifdef CONFIG_NET_IPv4
-      if (family == PF_INET)
-        {
-          ret = netlib_set_dripv4addr(argv[3], &inaddr.ipv4);
-          if (ret != 0)
-            {
-              nsh_error(vtbl, g_fmtcmdfailed, argv[0]);
-              goto errout;
-            }
-        }
+        if (family == PF_INET)
+          {
+            ret = netlib_set_dripv4addr(argv[3], &inaddr.ipv4);
+            if (ret != 0)
+              {
+                nsh_error(vtbl, g_fmtcmdfailed, argv[0]);
+                goto errout;
+              }
+          }
 #endif
 
 #ifdef CONFIG_NET_IPv6
-      if (family == PF_INET6)
-        {
-          ret = netlib_set_dripv6addr(argv[3], &inaddr.ipv6);
-          if (ret != 0)
-            {
-              nsh_error(vtbl, g_fmtcmdfailed, argv[0]);
-              goto errout;
-            }
-        }
+        if (family == PF_INET6)
+          {
+            ret = netlib_set_dripv6addr(argv[3], &inaddr.ipv6);
+            if (ret != 0)
+              {
+                nsh_error(vtbl, g_fmtcmdfailed, argv[0]);
+                goto errout;
+              }
+          }
 #endif
 
-      return OK;
+        return OK;
     }
 
   /* Check if slash notation is used with the target address */
@@ -226,17 +234,6 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
     {
       nsh_error(vtbl, g_fmtargrequired, argv[0]);
       goto errout;
-    }
-
-  /* We need to remove the slash notation before passing it to inet_pton */
-
-  if (shift > 0)
-    {
-      sptr = strchr(argv[1], '/');
-      if (sptr != NULL)
-        {
-          *sptr = '\0';
-        }
     }
 
   /* Convert the target IP address string into its binary form */
@@ -262,7 +259,7 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 
   /* We need to have a socket (any socket) in order to perform the ioctl */
 
-  sockfd = socket(NET_SOCK_FAMILY, NET_SOCK_TYPE, NET_SOCK_PROTOCOL);
+  sockfd = socket(family, NETLIB_SOCK_TYPE, 0);
   if (sockfd < 0)
     {
       nsh_error(vtbl, g_fmtcmdfailed, argv[0], "socket", NSH_ERRNO);
@@ -294,7 +291,7 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
     }
 #endif
 
-  /* Convert the netmask IP address string into its binary form */
+   /* Convert the netmask IP address string into its binary form */
 
   if (shift >= 0)
     {
@@ -333,7 +330,7 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
            * /128 -> ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
            */
 
-          memset(&inaddr.ipv6, 0, sizeof(inaddr.ipv6));
+          memset(&inaddr.ipv6, 0, sizeof(struct sockaddr_in6));
           for (i = 0; i < 8 && shift >= 16; i++, shift -= 16)
             {
               inaddr.ipv6.s6_addr16[i] = 0xffff;
@@ -358,7 +355,6 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
             }
         }
 #endif
-
       rtrndx = 2;
     }
   else
@@ -373,7 +369,7 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
         }
 
       rtrndx = 3;
-    }
+  }
 
   /* Format the netmask sockaddr instance */
 
@@ -400,7 +396,7 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
     }
 #endif
 
-  /* Convert the router IP address string into its binary form */
+   /* Convert the router IP address string into its binary form */
 
   ret = inet_pton(family, argv[rtrndx], &inaddr);
   if (ret != 1)
@@ -436,8 +432,10 @@ int cmd_addroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 
   /* Then add the route */
 
-  ret = addroute(sockfd, &target.ipx, &netmask.ipx,
-                 &router.ipx, sizeof(router));
+  ret = addroute(sockfd,
+                 (FAR struct sockaddr_storage *)&target,
+                 (FAR struct sockaddr_storage *)&netmask,
+                 (FAR struct sockaddr_storage *)&router);
   if (ret < 0)
     {
       nsh_error(vtbl, g_fmtcmdfailed, argv[0], "addroute", NSH_ERRNO);
@@ -462,7 +460,7 @@ errout:
  ****************************************************************************/
 
 #ifndef CONFIG_NSH_DISABLE_DELROUTE
-int cmd_delroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_delroute(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   union
   {
@@ -472,7 +470,6 @@ int cmd_delroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 #ifdef CONFIG_NET_IPv6
     struct sockaddr_in6 ipv6;
 #endif
-    struct sockaddr_storage ipx;
   } target;
 
   union
@@ -483,7 +480,6 @@ int cmd_delroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 #ifdef CONFIG_NET_IPv6
     struct sockaddr_in6 ipv6;
 #endif
-    struct sockaddr_storage ipx;
   } netmask;
 
   union
@@ -509,7 +505,7 @@ int cmd_delroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
    * used.
    */
 
-  if (shift > 0 && argc != 2)
+  if (shift > 0 && argc  != 2)
     {
       nsh_error(vtbl, g_fmttoomanyargs, argv[0]);
       goto errout;
@@ -543,7 +539,7 @@ int cmd_delroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 
   /* We need to have a socket (any socket) in order to perform the ioctl */
 
-  sockfd = socket(NET_SOCK_FAMILY, NET_SOCK_TYPE, NET_SOCK_PROTOCOL);
+  sockfd = socket(family, NETLIB_SOCK_TYPE, 0);
   if (sockfd < 0)
     {
       nsh_error(vtbl, g_fmtcmdfailed, argv[0], "socket", NSH_ERRNO);
@@ -575,7 +571,7 @@ int cmd_delroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
     }
 #endif
 
-  /* Convert the netmask IP address string into its binary form */
+   /* Convert the netmask IP address string into its binary form */
 
   if (shift >= 0)
     {
@@ -614,7 +610,7 @@ int cmd_delroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
            * /128 -> ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
            */
 
-          memset(&inaddr.ipv6, 0, sizeof(inaddr.ipv6));
+          memset(&inaddr.ipv6, 0, sizeof(struct sockaddr_in6));
           for (i = 0; i < 8 && shift >= 16; i++, shift -= 16)
             {
               inaddr.ipv6.s6_addr16[i] = 0xffff;
@@ -679,7 +675,9 @@ int cmd_delroute(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 
   /* Then delete the route */
 
-  ret = delroute(sockfd, &target.ipx, &netmask.ipx, sizeof(target));
+  ret = delroute(sockfd,
+                 (FAR struct sockaddr_storage *)&target,
+                 (FAR struct sockaddr_storage *)&netmask);
   if (ret < 0)
     {
       nsh_error(vtbl, g_fmtcmdfailed, argv[0], "delroute", NSH_ERRNO);
@@ -704,7 +702,7 @@ errout:
  ****************************************************************************/
 
 #ifndef CONFIG_NSH_DISABLE_ROUTE
-int cmd_route(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_route(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
 #if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
   bool ipv6 = false;

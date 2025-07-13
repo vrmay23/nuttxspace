@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/gpio/gpio_main.c
+ * examples/gpio/gpio_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,7 +47,6 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <errno.h>
-#include <unistd.h>
 
 #include <nuttx/ioexpander/gpio.h>
 
@@ -44,37 +56,13 @@
 
 static void show_usage(FAR const char *progname)
 {
-  fprintf(stderr, "USAGE: %s [-t <pintype>] [-w <signo>] [-o <value>] "
-          "<driver-path>\n", progname);
+  fprintf(stderr, "USAGE: %s [-w <signo>] [-o <value>] <driver-path>\n", progname);
   fprintf(stderr, "       %s -h\n", progname);
   fprintf(stderr, "Where:\n");
-  fprintf(stderr, "\t<driver-path>: The full path to the GPIO pin "
-          "driver.\n");
-  fprintf(stderr, "\t-t <pintype>:  Change the pin to this pintype "
-          "(0-10):\n");
-  fprintf(stderr, "\t-w <signo>:    Wait for a signal if this is an "
-          "interrupt pin.\n");
-  fprintf(stderr, "\t-o <value>:    Write this value (0 or 1) if this is an "
-          "output pin.\n");
+  fprintf(stderr, "\t<driver-path>: The full path to the GPIO pin driver.\n");
+  fprintf(stderr, "\t-w <signo>: Wait for an signal if this is an interrupt pin.\n");
+  fprintf(stderr, "\t-o <value>:  Write this value (0 or 1) if this is an output pin.\n");
   fprintf(stderr, "\t-h: Print this usage information and exit.\n");
-  fprintf(stderr, "Pintypes:\n");
-  fprintf(stderr, "\t 0: GPIO_INPUT_PIN\n");
-  fprintf(stderr, "\t 1: GPIO_INPUT_PIN_PULLUP\n");
-  fprintf(stderr, "\t 2: GPIO_INPUT_PIN_PULLDOWN\n");
-  fprintf(stderr, "\t 3: GPIO_OUTPUT_PIN\n");
-  fprintf(stderr, "\t 4: GPIO_OUTPUT_PIN_OPENDRAIN\n");
-  fprintf(stderr, "\t 5: GPIO_INTERRUPT_PIN\n");
-  fprintf(stderr, "\t 6: GPIO_INTERRUPT_HIGH_PIN\n");
-  fprintf(stderr, "\t 7: GPIO_INTERRUPT_LOW_PIN\n");
-  fprintf(stderr, "\t 8: GPIO_INTERRUPT_RISING_PIN\n");
-  fprintf(stderr, "\t 9: GPIO_INTERRUPT_FALLING_PIN\n");
-  fprintf(stderr, "\t10: GPIO_INTERRUPT_BOTH_PIN\n");
-  fprintf(stderr, "\t11: GPIO_INTERRUPT_PIN_WAKEUP\n");
-  fprintf(stderr, "\t12: GPIO_INTERRUPT_HIGH_PIN_WAKEUP\n");
-  fprintf(stderr, "\t13: GPIO_INTERRUPT_LOW_PIN_WAKEUP\n");
-  fprintf(stderr, "\t14: GPIO_INTERRUPT_RISING_PIN_WAKEUP\n");
-  fprintf(stderr, "\t15: GPIO_INTERRUPT_FALLING_PIN_WAKEUP\n");
-  fprintf(stderr, "\t16: GPIO_INTERRUPT_BOTH_PIN_WAKEUP\n");
 }
 
 /****************************************************************************
@@ -89,8 +77,6 @@ int main(int argc, FAR char *argv[])
 {
   FAR char *devpath = NULL;
   enum gpio_pintype_e pintype;
-  enum gpio_pintype_e newpintype;
-  bool havenewtype = false;
   bool havesigno = false;
   bool invalue;
   bool outvalue = false;
@@ -116,34 +102,13 @@ int main(int argc, FAR char *argv[])
       return EXIT_FAILURE;
     }
 
-  if (strcmp(argv[ndx], "-t") == 0)
-    {
-      havenewtype = true;
-
-      if (++ndx >= argc)
-        {
-          fprintf(stderr, "ERROR: Missing argument to -t\n");
-          show_usage(argv[0]);
-          return EXIT_FAILURE;
-        }
-
-      newpintype = atoi(argv[ndx]);
-
-      if (++ndx >= argc)
-        {
-          fprintf(stderr, "ERROR: Missing required <driver-path>\n");
-          show_usage(argv[0]);
-          return EXIT_FAILURE;
-        }
-    }
-
-  if (ndx < argc && strcmp(argv[ndx], "-w") == 0)
+  if (strcmp(argv[ndx], "-w") == 0)
     {
       havesigno = true;
 
       if (++ndx >= argc)
         {
-          fprintf(stderr, "ERROR: Missing argument to -w\n");
+          fprintf(stderr, "ERROR: Missing argument to -o\n");
           show_usage(argv[0]);
           return EXIT_FAILURE;
         }
@@ -205,29 +170,13 @@ int main(int argc, FAR char *argv[])
       return EXIT_FAILURE;
     }
 
-  /* Set the new pintype */
-
-  if (havenewtype)
-    {
-      ret = ioctl(fd, GPIOC_SETPINTYPE, (unsigned long) newpintype);
-      if (ret < 0)
-        {
-          int errcode = errno;
-          fprintf(stderr, "ERROR: Failed to set pintype on %s: %d\n",
-                  devpath, errcode);
-          close(fd);
-          return EXIT_FAILURE;
-        }
-    }
-
   /* Get the pin type */
 
   ret = ioctl(fd, GPIOC_PINTYPE, (unsigned long)((uintptr_t)&pintype));
   if (ret < 0)
     {
       int errcode = errno;
-      fprintf(stderr, "ERROR: Failed to read pintype from %s: %d\n", devpath,
-              errcode);
+      fprintf(stderr, "ERROR: Failed to read pintype from %s: %d\n", devpath, errcode);
       close(fd);
       return EXIT_FAILURE;
     }
@@ -238,8 +187,7 @@ int main(int argc, FAR char *argv[])
   if (ret < 0)
     {
       int errcode = errno;
-      fprintf(stderr, "ERROR: Failed to read value from %s: %d\n",
-              devpath, errcode);
+      fprintf(stderr, "ERROR: Failed to read value from %s: %d\n", devpath, errcode);
       close(fd);
       return EXIT_FAILURE;
     }
@@ -250,27 +198,11 @@ int main(int argc, FAR char *argv[])
     {
       case GPIO_INPUT_PIN:
         {
-          printf("  Input pin:     Value=%u\n",
-                 (unsigned int)invalue);
-        }
-        break;
-
-      case GPIO_INPUT_PIN_PULLUP:
-        {
-          printf("  Input pin (pull-up):     Value=%u\n",
-                 (unsigned int)invalue);
-        }
-        break;
-
-      case GPIO_INPUT_PIN_PULLDOWN:
-        {
-          printf("  Input pin (pull-down):     Value=%u\n",
-                 (unsigned int)invalue);
+          printf("  Input pin:     Value=%u\n", (unsigned int)invalue);
         }
         break;
 
       case GPIO_OUTPUT_PIN:
-      case GPIO_OUTPUT_PIN_OPENDRAIN:
         {
           printf("  Output pin:    Value=%u\n", (unsigned int)invalue);
 
@@ -284,22 +216,19 @@ int main(int argc, FAR char *argv[])
               if (ret < 0)
                {
                  int errcode = errno;
-                 fprintf(stderr,
-                         "ERROR: Failed to write value %u from %s: %d\n",
-                         (unsigned int)outvalue, devpath, errcode);
+                 fprintf(stderr, "ERROR: Failed to write value %u from %s: %d\n",
+                         devpath, (unsigned int)outvalue, errcode);
                  close(fd);
                  return EXIT_FAILURE;
                }
 
               /* Re-read the pin value */
 
-              ret = ioctl(fd, GPIOC_READ,
-                          (unsigned long)((uintptr_t)&invalue));
+              ret = ioctl(fd, GPIOC_READ, (unsigned long)((uintptr_t)&invalue));
               if (ret < 0)
                 {
                   int errcode = errno;
-                  fprintf(stderr,
-                          "ERROR: Failed to re-read value from %s: %d\n",
+                  fprintf(stderr, "ERROR: Failed to re-read value from %s: %d\n",
                           devpath, errcode);
                   close(fd);
                   return EXIT_FAILURE;
@@ -311,17 +240,6 @@ int main(int argc, FAR char *argv[])
         break;
 
       case GPIO_INTERRUPT_PIN:
-      case GPIO_INTERRUPT_HIGH_PIN:
-      case GPIO_INTERRUPT_LOW_PIN:
-      case GPIO_INTERRUPT_RISING_PIN:
-      case GPIO_INTERRUPT_FALLING_PIN:
-      case GPIO_INTERRUPT_BOTH_PIN:
-      case GPIO_INTERRUPT_PIN_WAKEUP:
-      case GPIO_INTERRUPT_HIGH_PIN_WAKEUP:
-      case GPIO_INTERRUPT_LOW_PIN_WAKEUP:
-      case GPIO_INTERRUPT_RISING_PIN_WAKEUP:
-      case GPIO_INTERRUPT_FALLING_PIN_WAKEUP:
-      case GPIO_INTERRUPT_BOTH_PIN_WAKEUP:
         {
           printf("  Interrupt pin: Value=%u\n", invalue);
 
@@ -341,8 +259,7 @@ int main(int argc, FAR char *argv[])
                 {
                   int errcode = errno;
 
-                  fprintf(stderr,
-                          "ERROR: Failed to setup for signal from %s: %d\n",
+                  fprintf(stderr, "ERROR: Failed to setup for signal from %s: %d\n",
                           devpath, errcode);
 
                   close(fd);
@@ -371,8 +288,8 @@ int main(int argc, FAR char *argv[])
                     }
                   else
                     {
-                      fprintf(stderr, "ERROR: Failed to wait signal %d "
-                              "from %s: %d\n", signo, devpath, errcode);
+                      fprintf(stderr, "ERROR: Failed to wait signal %d from %s: %d\n",
+                              signo, devpath, errcode);
                       close(fd);
                       return EXIT_FAILURE;
                     }
@@ -380,13 +297,11 @@ int main(int argc, FAR char *argv[])
 
               /* Re-read the pin value */
 
-              ret = ioctl(fd, GPIOC_READ,
-                          (unsigned long)((uintptr_t)&invalue));
+              ret = ioctl(fd, GPIOC_READ, (unsigned long)((uintptr_t)&invalue));
               if (ret < 0)
                 {
                   int errcode = errno;
-                  fprintf(stderr,
-                          "ERROR: Failed to re-read value from %s: %d\n",
+                  fprintf(stderr, "ERROR: Failed to re-read value from %s: %d\n",
                           devpath, errcode);
                   close(fd);
                   return EXIT_FAILURE;

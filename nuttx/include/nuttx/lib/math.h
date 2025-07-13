@@ -1,22 +1,35 @@
 /****************************************************************************
  * include/nuttx/lib/math.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009, 2012, 2014-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/compiler.h>
 
 /* If CONFIG_ARCH_MATH_H is defined, then the top-level Makefile will copy
  * this header file to include/math.h where it will become the system math.h
@@ -65,41 +77,30 @@
  ****************************************************************************/
 
 /****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
+#include <nuttx/config.h>
+#include <nuttx/compiler.h>
+
+/****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
 /* General Constants ********************************************************/
 
-#ifndef _HUGE_ENUF
-#  define _HUGE_ENUF (1e+300)  /* _HUGE_ENUF*_HUGE_ENUF must overflow */
-#endif
+#define INFINITY    (1.0/0.0)
+#define NAN         (0.0/0.0)
+#define HUGE_VAL    INFINITY
 
-#define INFINITY   ((double)(_HUGE_ENUF * _HUGE_ENUF))
-#define NAN        ((double)(INFINITY * 0.0F))
-#define HUGE_VAL   INFINITY
+#define INFINITY_F  (1.0F/0.0F)
+#define NAN_F       (0.0F/0.0F)
 
-#define INFINITY_F ((float)INFINITY)
-#define NAN_F      ((float)(INFINITY * 0.0F))
-#define HUGE_VALF  ((float)INFINITY)
+#define isnan(x)    ((x) != (x))
+#define isinf(x)    (((x) == INFINITY) || ((x) == -INFINITY))
+#define isfinite(x) (!(isinf(x) || isnan(x)))
 
-#define INFINITY_L ((long double)INFINITY)
-#define NAN_L      ((long double)(INFINITY * 0.0F))
-#define HUGE_VALL  ((long double)INFINITY)
-
-#define isnan(x)   ((x) != (x))
-#define isnanf(x)  ((x) != (x))
-#define isnanl(x)  ((x) != (x))
-#define isinf(x)   (((x) == INFINITY) || ((x) == -INFINITY))
-#define isinff(x)  (((x) == INFINITY_F) || ((x) == -INFINITY_F))
-#define isinfl(x)  (((x) == INFINITY_L) || ((x) == -INFINITY_L))
-
-#define finite(x)  (!(isinf(x) || isnan(x)))
-#define finitef(x) (!(isinff(x) || isnanf(x)))
-#define finitel(x) (!(isinfl(x) || isnanl(x)))
-
-#define isfinite(x) \
-  (sizeof(x) == sizeof(float) ? finitef(x) : \
-   sizeof(x) == sizeof(double) ? finite(x) : finitel(x))
+#define isinf_f(x)  (((x) == INFINITY_F) || ((x) == -INFINITY_F))
 
 /* Exponential and Logarithmic constants ************************************/
 
@@ -122,19 +123,6 @@
 
 #define M_PI_F     ((float)M_PI)
 #define M_PI_2_F   ((float)M_PI_2)
-
-/****************************************************************************
- * Type Declarations
- ****************************************************************************/
-
-/* Floating point types */
-
-typedef float        float_t;
-#ifndef CONFIG_HAVE_DOUBLE
-typedef float        double_t;
-#else
-typedef double       double_t;
-#endif
 
 /****************************************************************************
  * Public Function Prototypes
@@ -171,21 +159,21 @@ double      round (double x);
 long double roundl(long double x);
 #endif
 
-long int    lroundf(float x);
+#define lroundf(x) ((long)roundf(x))
 #ifdef CONFIG_HAVE_DOUBLE
-long int    lround(double x);
+#define lround(x)  ((long)round(x))
 #endif
 #ifdef CONFIG_HAVE_LONG_DOUBLE
-long int    lroundl(long double x);
+#define lroundl(x) ((long)roundl(x))
 #endif
 
 #ifdef CONFIG_HAVE_LONG_LONG
-long long int llroundf(float x);
+#define llroundf(x) ((long long)roundf(x))
 #ifdef CONFIG_HAVE_DOUBLE
-long long int llround (double x);
+#define llround(x)  ((long long)round(x))
 #endif
 #ifdef CONFIG_HAVE_LONG_DOUBLE
-long long int llroundl(long double x);
+#define llroundl(x) ((long long)roundl(x))
 #endif
 #endif
 
@@ -197,24 +185,6 @@ double      rint(double x);
 long double rintl(long double x); /* Not implemented */
 #endif
 
-long int    lrintf(float x);
-#ifdef CONFIG_HAVE_DOUBLE
-long int    lrint(double x);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long int    lrintl(long double x);
-#endif
-
-#ifdef CONFIG_HAVE_LONG_LONG
-long long int llrintf(float x);
-#ifdef CONFIG_HAVE_DOUBLE
-long long int llrint(double x);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long long int llrintl(long double x);
-#endif
-#endif
-
 float       fabsf (float x);
 #ifdef CONFIG_HAVE_DOUBLE
 double      fabs  (double x);
@@ -223,12 +193,12 @@ double      fabs  (double x);
 long double fabsl (long double x);
 #endif
 
-float       modff (float x, FAR float *iptr);
+float       modff (float x, float *iptr);
 #ifdef CONFIG_HAVE_DOUBLE
-double      modf  (double x, FAR double *iptr);
+double      modf  (double x, double *iptr);
 #endif
 #ifdef CONFIG_HAVE_LONG_DOUBLE
-long double modfl (long double x, FAR long double *iptr);
+long double modfl (long double x, long double *iptr);
 #endif
 
 float       fmodf (float x, float div);
@@ -250,76 +220,21 @@ long double powl  (long double b, long double e);
 #endif
 
 float       expf  (float x);
-float       exp2f (float x);
-float       expm1f(float x);
+#define expm1f(x) (expf(x) - 1.0)
 #ifdef CONFIG_HAVE_DOUBLE
 double      exp   (double x);
-double      exp2  (double x);
-double      expm1 (double x);
+#define expm1(x) (exp(x) - 1.0)
 #endif
 #ifdef CONFIG_HAVE_LONG_DOUBLE
 long double expl  (long double x);
-long double exp2l (long double x);
-long double expm1l(long double x);
+#define expm1l(x) (expl(x) - 1.0)
 #endif
 
-float       fdimf(float x, float y);
-#ifdef CONFIG_HAVE_DOUBLE
-double      fdim(double x, double y);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double fdiml(long double x, long double y);
-#endif
-
-float       fmaf(float x, float y, float z);
-#ifdef CONFIG_HAVE_DOUBLE
-double      fma(double x, double y, double z);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double fmal(long double x, long double y, long double z);
-#endif
-
-float       fmaxf(float x, float y);
-#ifdef CONFIG_HAVE_DOUBLE
-double      fmax(double x, double y);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double fmaxl(long double x, long double y);
-#endif
-
-float       fminf(float x, float y);
-#ifdef CONFIG_HAVE_DOUBLE
-double      fmin(double x, double y);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double fminl(long double x, long double y);
-#endif
-
-float       hypotf(float x, float y);
-#ifdef CONFIG_HAVE_DOUBLE
-double      hypot(double x, double y);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double hypotl(long double x, long double y);
-#endif
-
-float       lgammaf(float x);
 #ifdef CONFIG_HAVE_DOUBLE
 double      __cos(double x, double y);
 double      __sin(double x, double y, int iy);
 double      gamma(double x);
 double      lgamma(double x);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double lgammal(long double x);
-#endif
-
-float       tgammaf(float x);
-#ifdef CONFIG_HAVE_DOUBLE
-double      tgamma(double x);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double tgammal(long double x);
 #endif
 
 float       logf  (float x);
@@ -338,36 +253,12 @@ double      log10 (double x);
 long double log10l(long double x);
 #endif
 
-float       log1pf(float x);
-#ifdef CONFIG_HAVE_DOUBLE
-double      log1p (double x);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double log1pl(long double x);
-#endif
-
 float       log2f (float x);
 #ifdef CONFIG_HAVE_DOUBLE
 double      log2  (double x);
 #endif
 #ifdef CONFIG_HAVE_LONG_DOUBLE
 long double log2l (long double x);
-#endif
-
-float       logbf (float x);
-#ifdef CONFIG_HAVE_DOUBLE
-double      logb  (double x);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double logbl (long double x);
-#endif
-
-int         ilogbf (float x);
-#ifdef CONFIG_HAVE_DOUBLE
-int         ilogb  (double x);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-int         ilogbl (long double x);
 #endif
 
 float       sqrtf (float x);
@@ -386,23 +277,15 @@ double      ldexp (double x, int n);
 long double ldexpl(long double x, int n);
 #endif
 
-float       frexpf(float x, FAR int *exp);
+float       frexpf(float x, int *exp);
 #ifdef CONFIG_HAVE_DOUBLE
-double      frexp (double x, FAR int *exp);
+double      frexp (double x, int *exp);
 #endif
 #ifdef CONFIG_HAVE_LONG_DOUBLE
-long double frexpl(long double x, FAR int *exp);
+long double frexpl(long double x, int *exp);
 #endif
 
 /* Trigonometric Functions **************************************************/
-
-void        sincosf(float, FAR float *, FAR float *);
-#ifdef CONFIG_HAVE_DOUBLE
-void        sincos(double, FAR double *, FAR double *);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-void        sincosl(long double, FAR long double *, FAR long double *);
-#endif
 
 float       sinf  (float x);
 #ifdef CONFIG_HAVE_DOUBLE
@@ -476,14 +359,6 @@ double      cosh  (double x);
 long double coshl (long double x);
 #endif
 
-float       cbrtf (float x);
-#ifdef CONFIG_HAVE_DOUBLE
-double      cbrt  (double x);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double cbrtl (long double x);
-#endif
-
 float       tanhf (float x);
 #ifdef CONFIG_HAVE_DOUBLE
 double      tanh  (double x);
@@ -517,14 +392,14 @@ long double atanhl (long double x);
 #endif
 
 float       erff (float x);
-float       erfcf(float x);
+#define     erfcf(x) (1 - erff(x))
 #ifdef CONFIG_HAVE_DOUBLE
 double      erf  (double x);
-double      erfc(double x);
+#define     erfc(x) (1 - erf(x))
 #endif
 #ifdef CONFIG_HAVE_LONG_DOUBLE
 long double erfl (long double x);
-long double erfcl(long double x);
+#define     erfcl(x) (1 - erfl(x))
 #endif
 
 float       copysignf (float x, float y);
@@ -543,87 +418,13 @@ double      trunc (double x);
 long double truncl (long double x);
 #endif
 
-float       nanf(FAR const char *tagp);
+#define nanf(x) ((float)(NAN))
 #ifdef CONFIG_HAVE_DOUBLE
-double      nan(FAR const char *tagp);
+#define nan(x) ((double)(NAN))
 #endif
 #ifdef CONFIG_HAVE_LONG_DOUBLE
-long double nanl(FAR const char *tagp);
+#define nanl(x) ((long double)(NAN))
 #endif
-
-float       nearbyintf(float x);
-#ifdef CONFIG_HAVE_DOUBLE
-double      nearbyint(double x);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double nearbyintl(long double x);
-#endif
-
-float       nextafterf(float x, float y);
-#ifdef CONFIG_HAVE_DOUBLE
-double      nextafter(double x, double y);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double nextafterl(long double x, long double y);
-#endif
-
-float       nexttowardf(float x, long double y);
-#ifdef CONFIG_HAVE_DOUBLE
-double      nexttoward(double x, long double y);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double nexttowardl(long double x, long double y);
-#endif
-
-float       remainderf(float x, float y);
-#ifdef CONFIG_HAVE_DOUBLE
-double      remainder(double x, double y);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double remainderl(long double x, long double y);
-#endif
-
-float       remquof(float x, float y, int *quo);
-#ifdef CONFIG_HAVE_DOUBLE
-double      remquo(double x, double y, int *quo);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double remquol(long double x, long double y, int *quo);
-#endif
-
-float       scalblnf(float x, long int n);
-#ifdef CONFIG_HAVE_DOUBLE
-double      scalbln(double x, long int n);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double scalblnl(long double x, long int n);
-#endif
-
-float       scalbnf(float x, int n);
-#ifdef CONFIG_HAVE_DOUBLE
-double      scalbn(double x, int n);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
-long double scalbnl(long double x, int n);
-#endif
-
-#define FP_INFINITE     0
-#define FP_NAN          1
-#define FP_NORMAL       2
-#define FP_SUBNORMAL    3
-#define FP_ZERO         4
-#define fpclassify(x) \
-    __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_NORMAL, FP_SUBNORMAL, \
-                         FP_ZERO, x)
-
-#define isunordered(x, y)    __builtin_isunordered(x, y)
-#define isgreater(x, y)      __builtin_isgreater(x, y)
-#define isgreaterequal(x, y) __builtin_isgreaterequal(x, y)
-#define isless(x, y)         __builtin_isless(x, y)
-#define islessequal(x, y)    __builtin_islessequal(x, y)
-#define islessgreater(x, y)  __builtin_islessgreater(x, y)
-#define isnormal(x)          __builtin_isnormal(x)
-#define signbit(x)           __builtin_signbit(x)
 
 #if defined(__cplusplus)
 }

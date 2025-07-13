@@ -1,9 +1,8 @@
 /****************************************************************************
- * libs/libc/misc/lib_utsname.c
+ * include/sys/utsname.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Stavros Polymenis. All rights reserved.
- * SPDX-FileContributor: Stavros Polymenis <sp@orbitalfox.com>
+ *   Copyright (C) 2015 Stavros Polymenis. All rights reserved.
+ *   Author: Stavros Polymenis <sp@orbitalfox.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,16 +46,18 @@
 #include <nuttx/version.h>
 #include <unistd.h>
 
-/****************************************************************************
- * Private Data
- ****************************************************************************/
+/* In the protected and kernel build modes where kernel and application code
+ * are separated, some of these common system property must reside only in
+ * the kernel.  In that case, uname() can only be called from user space via
+ * a kernel system call.
+ */
 
-#if defined(__DATE__) && defined(__TIME__) && \
-    !defined(CONFIG_LIBC_UNAME_DISABLE_TIMESTAMP)
-static char g_version[] = CONFIG_VERSION_BUILD " " __DATE__ " " __TIME__;
-#else
-static char g_version[] = CONFIG_VERSION_BUILD;
-#endif
+#if (!defined(CONFIG_BUILD_PROTECTED) && !defined(CONFIG_BUILD_KERNEL)) || \
+      defined(__KERNEL__)
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
 
 /****************************************************************************
  * Public Functions
@@ -96,18 +97,32 @@ int uname(FAR struct utsname *name)
 
   /* Copy the strings.  Assure that each is NUL terminated. */
 
-  strlcpy(name->sysname, "NuttX", sizeof(name->sysname));
+  strncpy(name->sysname, "NuttX", SYS_NAMELEN);
 
   /* Get the hostname */
 
-  ret = gethostname(name->nodename, HOST_NAME_MAX);
+  if (-1 == gethostname(name->nodename, HOST_NAME_MAX))
+    {
+      ret = -1;
+    }
+
   name->nodename[HOST_NAME_MAX - 1] = '\0';
 
-  strlcpy(name->release,  CONFIG_VERSION_STRING, sizeof(name->release));
+  strncpy(name->release,  CONFIG_VERSION_STRING, SYS_NAMELEN);
+  name->release[SYS_NAMELEN - 1] = '\0';
 
-  strlcpy(name->version,  g_version, sizeof(name->version));
+#if defined(__DATE__) && defined(__TIME__)
+  snprintf(name->version, VERSION_NAMELEN, "%s %s %s",
+           CONFIG_VERSION_BUILD, __DATE__, __TIME__);
+#else
+  strncpy(name->version,  CONFIG_VERSION_BUILD, VERSION_NAMELEN);
+#endif
+  name->version[VERSION_NAMELEN - 1] = '\0';
 
-  strlcpy(name->machine,  CONFIG_ARCH, sizeof(name->machine));
+  strncpy(name->machine,  CONFIG_ARCH, SYS_NAMELEN);
+  name->machine[SYS_NAMELEN - 1] = '\0';
 
   return ret;
 }
+
+#endif /* (!CONFIG_BUILD_PROTECTED) && !CONFIG_BUILD_KERNEL) || __KERNEL__ */

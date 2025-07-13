@@ -1,7 +1,5 @@
 /****************************************************************************
- * apps/testing/ostest/sigev_thread.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * testing/ostest/sigev_thread.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -24,13 +22,12 @@
  * Included Files
  ****************************************************************************/
 
-#include <assert.h>
-#include <errno.h>
-#include <sched.h>
-#include <semaphore.h>
-#include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <semaphore.h>
+#include <signal.h>
+#include <sched.h>
+#include <errno.h>
 
 #include "ostest.h"
 
@@ -38,8 +35,12 @@
  * Private Definitions
  ****************************************************************************/
 
-#define MY_TIMER_SIGNAL SIGRTMIN
-#define SIGVALUE_INT    42
+#ifndef NULL
+# define NULL (void*)0
+#endif
+
+#define MY_TIMER_SIGNAL 17
+#define SIGVALUE_INT  42
 
 /****************************************************************************
  * Private Data
@@ -90,9 +91,7 @@ void sigev_thread_test(void)
   status = timer_create(CLOCK_REALTIME, &notify, &timerid);
   if (status != OK)
     {
-      printf("sigev_thread_test: "
-             "ERROR timer_create failed, errno=%d\n", errno);
-      ASSERT(false);
+      printf("sigev_thread_test: timer_create failed, errno=%d\n", errno);
       goto errorout;
     }
 
@@ -108,9 +107,7 @@ void sigev_thread_test(void)
   status = timer_settime(timerid, 0, &timer, NULL);
   if (status != OK)
     {
-      printf("sigev_thread_test: "
-             "ERROR timer_settime failed, errno=%d\n", errno);
-      ASSERT(false);
+      printf("sigev_thread_test: timer_settime failed, errno=%d\n", errno);
       goto errorout;
     }
 
@@ -133,7 +130,6 @@ void sigev_thread_test(void)
             {
               printf("sigev_thread_test: ERROR sem_wait failed, errno=%d\n",
                      error);
-              ASSERT(false);
               goto errorout;
             }
         }
@@ -149,7 +145,6 @@ void sigev_thread_test(void)
     {
       printf("sigev_thread_callback: ERROR sival_int=%d expected %d\n",
              g_value_received, SIGVALUE_INT);
-      ASSERT(false);
     }
 
 errorout:
@@ -161,9 +156,7 @@ errorout:
   status = timer_delete(timerid);
   if (status != OK)
     {
-      printf("sigev_thread_test: "
-             "ERROR timer_create failed, errno=%d\n", errno);
-      ASSERT(false);
+      printf("sigev_thread_test: timer_create failed, errno=%d\n", errno);
     }
 
   printf("sigev_thread_test: Done\n");

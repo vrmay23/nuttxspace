@@ -1,9 +1,7 @@
 #!/bin/bash
 
 #****************************************************************************
-# tools/netusb.sh
-#
-# SPDX-License-Identifier: Apache-2.0
+# tools/simhostroute.sh
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with

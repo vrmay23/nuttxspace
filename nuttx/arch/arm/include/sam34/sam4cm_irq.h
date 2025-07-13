@@ -1,39 +1,52 @@
-/****************************************************************************
+/****************************************************************************************
  * arch/arm/include/sam34/sam4cm_irq.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ****************************************************************************************/
 
-/* This file should never be included directly but, rather,
- * only indirectly through nuttx/irq.h
+/* This file should never be included directly but, rather, only indirectly through
+ * nuttx/irq.h
  */
 
 #ifndef __ARCH_ARM_INCLUDE_SAM34_SAM4CM_IRQ_H
 #define __ARCH_ARM_INCLUDE_SAM34_SAM4CM_IRQ_H
 
-/****************************************************************************
+/****************************************************************************************
  * Included Files
- ****************************************************************************/
+ ****************************************************************************************/
 
-/****************************************************************************
- * Pre-processor Prototypes
- ****************************************************************************/
+/****************************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************************/
 
 /* SAM4CM Peripheral Identifiers */
 
@@ -116,7 +129,7 @@
 #define SAM_IRQ_TC5          (SAM_IRQ_EXTINT+SAM_PID_TC5)         /* PID 28: Timer Counter 5 */
 #define SAM_IRQ_ADC          (SAM_IRQ_EXTINT+SAM_PID_ADC)         /* PID 29: Analog To Digital Converter */
 #define SAM_IRQ_ARM          (SAM_IRQ_EXTINT+SAM_PID_ARM)         /* PID 30: FPU signals (only on CM4P1 core): FPIXC, FPOFC, FPUFC, FPIOC, FPDZC, FPIDC, FPIXC */
-#define SAM_IRQ_SMP_CALL0    (SAM_IRQ_EXTINT+SAM_PID_IPC0)        /* PID 31: Interprocessor communication 0 */
+#define SAM_IRQ_IPC0         (SAM_IRQ_EXTINT+SAM_PID_IPC0)        /* PID 31: Interprocessor communication 0 */
 #define SAM_IRQ_SLCDC        (SAM_IRQ_EXTINT+SAM_PID_SLCDC)       /* PID 32: Segment LCD Controller */
 #define SAM_IRQ_TRNG         (SAM_IRQ_EXTINT+SAM_PID_TRNG)        /* PID 33: True Random Generator */
 #define SAM_IRQ_ICM          (SAM_IRQ_EXTINT+SAM_PID_ICM)         /* PID 34: Integrity Check Module */
@@ -124,7 +137,7 @@
 #define SAM_IRQ_AES          (SAM_IRQ_EXTINT+SAM_PID_AES)         /* PID 36: Advanced Enhanced Standard */
 #define SAM_IRQ_PIOC         (SAM_IRQ_EXTINT+SAM_PID_PIOC)        /* PID 37: Parallel I/O Controller C */
 #define SAM_IRQ_UART1        (SAM_IRQ_EXTINT+SAM_PID_UART1)       /* PID 38: Universal Asynchronous Receiver Transmitter 1 */
-#define SAM_IRQ_SMP_CALL1    (SAM_IRQ_EXTINT+SAM_PID_IPC1)        /* PID 39: Interprocessor communication 1 */
+#define SAM_IRQ_IPC1         (SAM_IRQ_EXTINT+SAM_PID_IPC1)        /* PID 39: Interprocessor communication 1 */
 #define SAM_IRQ_RESERVED_40  (SAM_IRQ_EXTINT+SAM_PID_RESERVED_40) /* PID 40: Reserved */
 #define SAM_IRQ_PWM          (SAM_IRQ_EXTINT+SAM_PID_PWM)         /* PID 41: Pulse Width Modulation */
 #define SAM_IRQ_SRAM         (SAM_IRQ_EXTINT+SAM_PID_SRAM)        /* PID 42: SRAM1 (I/D Code bus of CM4P1), SRAM2 (Systembus of CM4P1) */
@@ -257,17 +270,17 @@
 #define NR_IRQS              (SAM_IRQ_EXTINT + SAM_IRQ_NEXTINT + \
                               SAM_NGPIOAIRQS + SAM_NGPIOBIRQS + SAM_NGPIOCIRQS)
 
-/****************************************************************************
+/****************************************************************************************
  * Public Types
- ****************************************************************************/
+ ****************************************************************************************/
 
-/****************************************************************************
+/****************************************************************************************
  * Inline functions
- ****************************************************************************/
+ ****************************************************************************************/
 
-/****************************************************************************
+/****************************************************************************************
  * Public Data
- ****************************************************************************/
+ ****************************************************************************************/
 
 #ifndef __ASSEMBLY__
 #ifdef __cplusplus
@@ -278,9 +291,9 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/****************************************************************************
+/****************************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ****************************************************************************************/
 
 #undef EXTERN
 #ifdef __cplusplus

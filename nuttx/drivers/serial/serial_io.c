@@ -1,22 +1,36 @@
 /****************************************************************************
  * drivers/serial/serial_io.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2011, 2015, 2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,12 +44,11 @@
 #  include <nuttx/irq.h>
 #endif
 
-#include <assert.h>
 #include <sys/types.h>
 #include <stdint.h>
+#include <signal.h>
 #include <debug.h>
 
-#include <nuttx/signal.h>
 #include <nuttx/serial/serial.h>
 
 /****************************************************************************
@@ -68,37 +81,12 @@ void uart_xmitchars(FAR uart_dev_t *dev)
     {
       /* Send the next byte */
 
-      if (dev->ops->sendbuf)
-        {
-          ssize_t sent;
-
-          if (dev->xmit.tail < dev->xmit.head)
-            {
-              sent = dev->xmit.head - dev->xmit.tail;
-            }
-          else
-            {
-              sent = dev->xmit.size - dev->xmit.tail;
-            }
-
-          sent = uart_sendbuf(dev,
-                              &dev->xmit.buffer[dev->xmit.tail],
-                              sent);
-          if (sent > 0)
-            {
-              dev->xmit.tail += sent;
-              nbytes += sent;
-            }
-        }
-      else
-        {
-          uart_send(dev, dev->xmit.buffer[dev->xmit.tail++]);
-          nbytes++;
-        }
+      uart_send(dev, dev->xmit.buffer[dev->xmit.tail]);
+      nbytes++;
 
       /* Increment the tail index */
 
-      if (dev->xmit.tail >= dev->xmit.size)
+      if (++(dev->xmit.tail) >= dev->xmit.size)
         {
           dev->xmit.tail = 0;
         }
@@ -133,7 +121,7 @@ void uart_xmitchars(FAR uart_dev_t *dev)
 }
 
 /****************************************************************************
- * Name: uart_recvchars
+ * Name: uart_receivechars
  *
  * Description:
  *   This function is called from the UART interrupt handler when an
@@ -147,16 +135,26 @@ void uart_recvchars(FAR uart_dev_t *dev)
 {
   FAR struct uart_buffer_s *rxbuf = &dev->recv;
 #ifdef CONFIG_SERIAL_IFLOWCONTROL_WATERMARKS
-  /* Pre-calculate the watermark level that we will need to test against. */
-
-  unsigned int watermark =
-    (CONFIG_SERIAL_IFLOWCONTROL_UPPER_WATERMARK * rxbuf->size) / 100;
+  unsigned int watermark;
 #endif
-#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP) || \
-    defined(CONFIG_TTY_FORCE_PANIC) || defined(CONFIG_TTY_LAUNCH)
+  unsigned int status;
+  int nexthead = rxbuf->head + 1;
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGSTP)
   int signo = 0;
 #endif
   uint16_t nbytes = 0;
+
+  if (nexthead >= rxbuf->size)
+    {
+      nexthead = 0;
+    }
+
+#ifdef CONFIG_SERIAL_IFLOWCONTROL_WATERMARKS
+  /* Pre-calculate the watermark level that we will need to test against. */
+
+  watermark = (CONFIG_SERIAL_IFLOWCONTROL_UPPER_WATERMARK * rxbuf->size) /
+              100;
+#endif
 
   /* Loop putting characters into the receive buffer until there are no
    * further characters to available.
@@ -164,11 +162,10 @@ void uart_recvchars(FAR uart_dev_t *dev)
 
   while (uart_rxavailable(dev))
     {
-      int nexthead = rxbuf->head + 1 < rxbuf->size ? rxbuf->head + 1 : 0;
       bool is_full = (nexthead == rxbuf->tail);
-      FAR char *pbuf;
       char ch;
 
+#ifdef CONFIG_SERIAL_IFLOWCONTROL
 #ifdef CONFIG_SERIAL_IFLOWCONTROL_WATERMARKS
       unsigned int nbuffered;
 
@@ -187,8 +184,8 @@ void uart_recvchars(FAR uart_dev_t *dev)
 
       if (nbuffered >= watermark)
         {
-          /* Let the lower level driver know that the watermark level has
-           * been crossed.  It will probably activate RX flow control.
+          /* Let the lower level driver know that the watermark level has been
+           * crossed.  It will probably activate RX flow control.
            */
 
           if (uart_rxflowcontrol(dev, nbuffered, true))
@@ -198,10 +195,9 @@ void uart_recvchars(FAR uart_dev_t *dev)
               break;
             }
         }
-#elif defined(CONFIG_SERIAL_IFLOWCONTROL)
-      /* Check if RX buffer is full and allow serial low-level driver to
-       * pause processing. This allows proper utilization of hardware flow
-       * control.
+#else
+      /* Check if RX buffer is full and allow serial low-level driver to pause
+       * processing. This allows proper utilization of hardware flow control.
        */
 
       if (is_full)
@@ -214,104 +210,88 @@ void uart_recvchars(FAR uart_dev_t *dev)
             }
         }
 #endif
+#endif
 
       /* Get this next character from the hardware */
 
-      if (!is_full && dev->ops->recvbuf)
+      ch = uart_receive(dev, &status);
+
+#ifdef CONFIG_TTY_SIGINT
+      /* Is this the special character that will generate the SIGINT signal? */
+
+      if (dev->pid >= 0 && ch == CONFIG_TTY_SIGINT_CHAR)
         {
-          ssize_t ret;
+          /* Yes.. note that the kill is needed and do not put the character
+           * into the Rx buffer.  It should not be read as normal data.
+           */
 
-          if (rxbuf->tail > rxbuf->head)
-            {
-              nbytes = rxbuf->tail - rxbuf->head - 1;
-            }
-          else if (rxbuf->tail)
-            {
-              nbytes = rxbuf->size - rxbuf->head;
-            }
-          else
-            {
-              nbytes = rxbuf->size - rxbuf->head - 1;
-            }
+          signo = SIGINT;
+        }
+      else
+#endif
+#ifdef CONFIG_TTY_SIGSTP
+      /* Is this the special character that will generate the SIGSTP signal? */
 
-          pbuf = &rxbuf->buffer[rxbuf->head];
-          ret = uart_recvbuf(dev, pbuf, nbytes);
-          if (ret <= 0)
-            {
-              continue;
-            }
+      if (dev->pid >= 0 && ch == CONFIG_TTY_SIGSTP_CHAR)
+        {
+#ifdef CONFIG_TTY_SIGINT
+          /* Give precedence to SIGINT */
 
-          nbytes = ret;
-          rxbuf->head += nbytes;
-          if (rxbuf->head >= rxbuf->size)
+          if (signo == 0)
+#endif
             {
-              rxbuf->head = 0;
+              /* Note that the kill is needed and do not put the character
+               * into the Rx buffer.  It should not be read as normal data.
+               */
+
+              signo = SIGSTP;
             }
         }
       else
+#endif
+
+      /* If the RX buffer becomes full, then the serial data is discarded.
+       * This is necessary because on most serial hardware, you must read
+       * the data in order to clear the RX interrupt. An option on some
+       * hardware might be to simply disable RX interrupts until the RX
+       * buffer becomes non-FULL.  However, that would probably just cause
+       * the overrun to occur in hardware (unless it has some large internal
+       * buffering).
+       */
+
+      if (!is_full)
         {
-          unsigned int status;
+          /* Add the character to the buffer */
 
-          ch = uart_receive(dev, &status);
-          pbuf = &ch;
-          nbytes = 1;
+          rxbuf->buffer[rxbuf->head] = ch;
+          nbytes++;
 
-          /* If the RX buffer becomes full, then the serial data is
-           * discarded. This is necessary because on most serial hardware,
-           * you must read the data in order to clear the RX interrupt.
-           * An option on some hardware might be to simply disable RX
-           * interrupts until the RX buffer becomes non-FULL. However, that
-           * would probably just cause the overrun to occur in hardware
-           * (unless it has some large internal buffering).
-           */
+          /* Increment the head index */
 
-          if (!is_full)
+          rxbuf->head = nexthead;
+          if (++nexthead >= rxbuf->size)
             {
-              /* Add the character to the buffer */
-
-              rxbuf->buffer[rxbuf->head] = ch;
-
-              /* Increment the head index */
-
-              rxbuf->head = nexthead;
+               nexthead = 0;
             }
         }
-
-#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP) || \
-    defined(CONFIG_TTY_FORCE_PANIC) || defined(CONFIG_TTY_LAUNCH)
-      signo = uart_check_special(dev, pbuf, nbytes);
-#endif
     }
 
   /* If any bytes were added to the buffer, inform any waiters there is new
    * incoming data available.
    */
 
-  if (rxbuf->head >= rxbuf->tail)
-    {
-      nbytes = rxbuf->head - rxbuf->tail;
-    }
-  else
-    {
-      nbytes = rxbuf->size - rxbuf->tail + rxbuf->head;
-    }
-
-#ifdef CONFIG_SERIAL_TERMIOS
-  if (nbytes >= dev->minrecv)
-#else
   if (nbytes)
-#endif
     {
       uart_datareceived(dev);
     }
 
-#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP) || \
-    defined(CONFIG_TTY_FORCE_PANIC) || defined(CONFIG_TTY_LAUNCH)
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGSTP)
   /* Send the signal if necessary */
 
   if (signo != 0)
     {
-      nxsig_tgkill(-1, dev->pid, signo);
+      kill(dev->pid, signo);
+      uart_reset_sem(dev);
     }
 #endif
 }

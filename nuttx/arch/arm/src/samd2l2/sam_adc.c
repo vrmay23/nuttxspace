@@ -1,24 +1,38 @@
-/****************************************************************************
- * arch/arm/src/samd2l2/sam_adc.c
+/*****************************************************************************
+ * arch/arm/include/samd2l2/sam_adc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Alexander Vasiliev<alexvasiljev@gmail.com>
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -39,12 +53,11 @@
 #include <nuttx/signal.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/analog/adc.h>
-#include <nuttx/analog/ioctl.h>
 #include <nuttx/kmalloc.h>
 
 #include <arch/chip/sam_adc.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "sam_adc.h"
 #include "sam_pinmap.h"
 #include "sam_gclk.h"
@@ -71,13 +84,13 @@
 
 /* ADC methods */
 
-static int  sam_adc_bind(struct adc_dev_s *dev,
-                         const struct adc_callback_s *callback);
-static void sam_adc_reset(struct adc_dev_s *dev);
-static int  sam_adc_setup(struct adc_dev_s *dev);
-static void sam_adc_shutdown(struct adc_dev_s *dev);
-static void sam_adc_rxint(struct adc_dev_s *dev, bool enable);
-static int  sam_adc_ioctl(struct adc_dev_s *dev, int cmd,
+static int  sam_adc_bind(FAR struct adc_dev_s *dev,
+                         FAR const struct adc_callback_s *callback);
+static void sam_adc_reset(FAR struct adc_dev_s *dev);
+static int  sam_adc_setup(FAR struct adc_dev_s *dev);
+static void sam_adc_shutdown(FAR struct adc_dev_s *dev);
+static void sam_adc_rxint(FAR struct adc_dev_s *dev, bool enable);
+static int  sam_adc_ioctl(FAR struct adc_dev_s *dev, int cmd,
                           unsigned long arg);
 
 /****************************************************************************
@@ -86,16 +99,16 @@ static int  sam_adc_ioctl(struct adc_dev_s *dev, int cmd,
 
 struct sam_adc_priv
 {
-  int                    genclk;             /* clock generator */
+  int                    genclk;       /* clock generator */
   const struct adc_callback_s *adc_callback; /* callback for upper driver */
-  int                    cur_channel;        /* current channel in progress */
-  int                    num_channels;       /* number of channels */
-  int                   *channels;           /* channels to process */
-  uint8_t                ref;                /* reference selection */
-  uint32_t               neg;                /* negative input selection */
-  uint8_t                samplen;            /* sampling time length */
-  uint32_t               prescaler;          /* prescaler configuration */
-  uint8_t                averaging;          /* number of samples to be collected */
+  int                    cur_channel;  /* current channel in progress */
+  int                    num_channels; /* number of channels */
+  int                   *channels;     /* channels to process */
+  uint8_t                ref;          /* reference selection */
+  uint32_t               neg;          /* negative input selection */
+  uint8_t                samplen;      /* sampling time length */
+  uint32_t               prescaler;    /* prescaler configuration */
+  uint8_t                averaging;    /* number of samples to be collected */
 };
 
 /****************************************************************************
@@ -114,16 +127,16 @@ static const struct adc_ops_s sam_adc_ops =
 
 static struct adc_dev_s g_sam_adc_dev;
 
-/****************************************************************************
+/*******************************************************************************
  * Private Functions
- ****************************************************************************/
+ *******************************************************************************/
 
 static void sam_adc_synchronization(void)
 {
   while ((getreg8(SAM_ADC_STATUS) & ADC_STATUS_SYNCBUSY) != 0);
 }
 
-static int sam_adc_interrupt(int irq, void *context, void *arg)
+static int sam_adc_interrupt(int irq, FAR void *context, FAR void *arg)
 {
   uint32_t result;
   struct adc_dev_s    *dev = (struct adc_dev_s *)arg;
@@ -134,8 +147,7 @@ static int sam_adc_interrupt(int irq, void *context, void *arg)
 
   ainfo("ADC Result = %d:\n", result);
 
-  priv->adc_callback->au_receive(dev, priv->channels[priv->cur_channel],
-                                 result);
+  priv->adc_callback->au_receive(dev, priv->channels[priv->cur_channel], result);
 
   putreg8(ADC_INT_RESRDY, SAM_ADC_INTFLAG);
 
@@ -204,12 +216,12 @@ static int sam_adc_calibrate(struct adc_dev_s *dev)
   return 0;
 }
 
-/* Bind the upper-half driver callbacks to the lower-half implementation.
- * This must be called early in order to receive ADC event notifications.
+/* Bind the upper-half driver callbacks to the lower-half implementation.  This
+ * must be called early in order to receive ADC event notifications.
  */
 
-static int sam_adc_bind(struct adc_dev_s *dev,
-                        const struct adc_callback_s *callback)
+static int sam_adc_bind(FAR struct adc_dev_s *dev,
+                        FAR const struct adc_callback_s *callback)
 {
   struct sam_adc_priv *priv = (struct sam_adc_priv *)dev->ad_priv;
   priv->adc_callback = callback;
@@ -231,7 +243,7 @@ static int sam_adc_bind(struct adc_dev_s *dev,
  *
  ****************************************************************************/
 
-static void sam_adc_reset(struct adc_dev_s *dev)
+static void sam_adc_reset(FAR struct adc_dev_s *dev)
 {
   /* Disable ADC */
 
@@ -266,7 +278,7 @@ static void sam_adc_reset(struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static int sam_adc_setup(struct adc_dev_s *dev)
+static int sam_adc_setup(FAR struct adc_dev_s *dev)
 {
   uint8_t regval;
   struct sam_adc_priv *priv = (struct sam_adc_priv *)dev->ad_priv;
@@ -321,7 +333,7 @@ static int sam_adc_setup(struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static void sam_adc_shutdown(struct adc_dev_s *dev)
+static void sam_adc_shutdown(FAR struct adc_dev_s *dev)
 {
   /* Disable ADC */
 
@@ -344,7 +356,7 @@ static void sam_adc_shutdown(struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static void sam_adc_rxint(struct adc_dev_s *dev, bool enable)
+static void sam_adc_rxint(FAR struct adc_dev_s *dev, bool enable)
 {
   struct sam_adc_priv *priv = (struct sam_adc_priv *)dev->ad_priv;
 
@@ -382,66 +394,49 @@ static void sam_adc_rxint(struct adc_dev_s *dev, bool enable)
  *
  ****************************************************************************/
 
-static int sam_adc_ioctl(struct adc_dev_s *dev,
-                         int cmd, unsigned long arg)
+static int sam_adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg)
 {
   int ret = 0;
   struct sam_adc_priv    *priv = (struct sam_adc_priv *)dev->ad_priv;
   struct sam_adc_param_s *params = (struct sam_adc_param_s *)arg;
 
   switch (cmd)
-    {
-      case SAMD_ADC_IOCTL_START:
+  {
+    case SAMD_ADC_IOCTL_START:
+      sam_adc_setup(dev);
+      sam_adc_rxint(dev, true);
+      break;
+
+    case SAMD_ADC_IOCTL_STOP:
+      sam_adc_rxint(dev, false);
+      sam_adc_shutdown(dev);
+      break;
+
+    case SAMD_ADC_IOCTL_SET_PARAMS:
+      if ((getreg8(SAM_ADC_CTRLA) & ADC_CTRLA_ENABLE) != 0)
         {
-          sam_adc_setup(dev);
-          sam_adc_rxint(dev, true);
+          ret = -EBUSY;
           break;
         }
 
-      case SAMD_ADC_IOCTL_STOP:
-        {
-          sam_adc_rxint(dev, false);
-          sam_adc_shutdown(dev);
-          break;
-        }
+      priv->averaging = params->averaging;
+      priv->prescaler = params->prescaler;
+      priv->samplen = params->samplen;
+      break;
 
-      case SAMD_ADC_IOCTL_SET_PARAMS:
-        {
-          if ((getreg8(SAM_ADC_CTRLA) & ADC_CTRLA_ENABLE) != 0)
-            {
-              ret = -EBUSY;
-              break;
-            }
-
-          priv->averaging = params->averaging;
-          priv->prescaler = params->prescaler;
-          priv->samplen = params->samplen;
-          break;
-        }
-
-      case SAMD_ADC_IOCTL_GET_PARAMS:
-        {
-          params->averaging = priv->averaging;
-          params->prescaler = priv->prescaler;
-          params->samplen = priv->samplen;
-          break;
-        }
-
-      case ANIOC_GET_NCHANNELS:
-        {
-          /* Return the number of configured channels */
-
-          ret = priv->num_channels;
-        }
-        break;
-    }
+    case SAMD_ADC_IOCTL_GET_PARAMS:
+      params->averaging = priv->averaging;
+      params->prescaler = priv->prescaler;
+      params->samplen = priv->samplen;
+      break;
+  }
 
   return ret;
 }
 
-/****************************************************************************
+/*******************************************************************************
  * Public Functions
- ****************************************************************************/
+ *******************************************************************************/
 
 /****************************************************************************
  * Name: sam_adcinitialize
@@ -471,7 +466,7 @@ struct adc_dev_s *sam_adcinitialize(int genclk)
   g_sam_adc_dev.ad_ops = &sam_adc_ops;
 
   priv->num_channels = BOARD_ADC_NUM_CHANNELS;
-  priv->channels = kmm_malloc(priv->num_channels * sizeof(int));
+  priv->channels = (int *)kmm_malloc(priv->num_channels * sizeof(int));
 
 #if BOARD_ADC_REF == ADC_REFCTRL_REFSEL_VREFA
   sam_configport(PORT_ADC_VREFA);

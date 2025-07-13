@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/stm32/stm32f429i-disco/src/stm32_lcd.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2015 Marco Krahl. All rights reserved.
+ *   Author: Marco Krahl <ocram.lhark@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -37,7 +50,7 @@
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "stm32f429i-disco.h"
 #include "stm32_ltdc.h"
 
@@ -46,9 +59,9 @@
  ****************************************************************************/
 
 #ifdef CONFIG_STM32F429I_DISCO_ILI9341_LCDDEVICE
-#  define ILI9341_LCD_DEVICE CONFIG_STM32F429I_DISCO_ILI9341_LCDDEVICE
+# define ILI9341_LCD_DEVICE CONFIG_STM32F429I_DISCO_ILI9341_LCDDEVICE
 #else
-#  define ILI9341_LCD_DEVICE 0
+# define ILI9341_LCD_DEVICE  0
 #endif
 
 #ifdef CONFIG_STM32F429I_DISCO_ILI9341_FBIFACE
@@ -81,7 +94,10 @@
  * ByPass_Mode: 1 (Memory)
  */
 
-#define STM32_ILI9341_IFMODE_PARAM    (ILI9341_INTERFACE_CONTROL_DPL |   \
+#define STM32_ILI9341_IFMODE_PARAM    ((!ILI9341_INTERFACE_CONTROL_EPL) | \
+                                      ILI9341_INTERFACE_CONTROL_DPL | \
+                                      (!ILI9341_INTERFACE_CONTROL_HSPL) | \
+                                      (!ILI9341_INTERFACE_CONTROL_VSPL) | \
                                       ILI9341_INTERFACE_CONTROL_RCM(2) | \
                                       ILI9341_INTERFACE_CONTROL_BPASS)
 
@@ -95,7 +111,11 @@
  * WEMODE:  1   Reset column and page if data transfer exceeds
  */
 
-#define STM32_ILI9341_IFCTL_PARAM1    (ILI9341_INTERFACE_CONTROL_WEMODE)
+#define STM32_ILI9341_IFCTL_PARAM1    (ILI9341_INTERFACE_CONTROL_WEMODE | \
+                                      !ILI9341_INTERFACE_CONTROL_BGREOR | \
+                                      !ILI9341_INTERFACE_CONTROL_MVEOR | \
+                                      !ILI9341_INTERFACE_CONTROL_MXEOR | \
+                                      !ILI9341_INTERFACE_CONTROL_MYEOR)
 
 /* Parameter 2: 0x0000
  *
@@ -114,12 +134,15 @@
  * RIM:     0   18-bit 1 transfer/pixel RGB interface mode
  *
  */
-#define STM32_ILI9341_IFCTL_PARAM3    (ILI9341_INTERFACE_CONTROL_RM | \
-                                      ILI9341_INTERFACE_CONTROL_DM(1))
+#define STM32_ILI9341_IFCTL_PARAM3    ((!ILI9341_INTERFACE_CONTROL_RIM) | \
+                                      ILI9341_INTERFACE_CONTROL_RM | \
+                                      ILI9341_INTERFACE_CONTROL_DM(1) | \
+                                      (!ILI9341_INTERFACE_CONTROL_ENDIAN))
 
 /* Memory access control (MADCTL) */
 
-/* Landscape:   00100000 / 00101000 / h28
+/*
+ * Landscape:   00100000 / 00101000 / h28
  *
  * MY:          0
  * MX:          0
@@ -233,18 +256,19 @@
                                         ILI9341_MADCTL_RPORTRAIT_BGR | \
                                         ILI9341_MADCTL_RPORTRAIT_MH)
 
+
 /* Set the display orientation */
 
 #if defined(CONFIG_STM32F429I_DISCO_ILI9341_FBIFACE_LANDSCAPE)
-#  define STM32_ILI9341_MADCTL_PARAM  ILI9341_MADCTL_LANDSCAPE_PARAM1
+# define STM32_ILI9341_MADCTL_PARAM  ILI9341_MADCTL_LANDSCAPE_PARAM1
 # warning "ILI9341 doesn't support full landscape with RGB interface"
 #elif defined(CONFIG_STM32F429I_DISCO_ILI9341_FBIFACE_PORTRAIT)
-#  define STM32_ILI9341_MADCTL_PARAM  ILI9341_MADCTL_PORTRAIT_PARAM1
+# define STM32_ILI9341_MADCTL_PARAM  ILI9341_MADCTL_PORTRAIT_PARAM1
 #elif defined(CONFIG_STM32F429I_DISCO_ILI9341_FBIFACE_RLANDSCAPE)
-#  define STM32_ILI9341_MADCTL_PARAM  ILI9341_MADCTL_RLANDSCAPE_PARAM1
+# define STM32_ILI9341_MADCTL_PARAM  ILI9341_MADCTL_RLANDSCAPE_PARAM1
 # warning "ILI9341 doesn't support full landscape with RGB interface"
 #elif defined(CONFIG_STM32F429I_DISCO_ILI9341_FBIFACE_RPORTRAIT)
-#  define STM32_ILI9341_MADCTL_PARAM  ILI9341_MADCTL_RPORTRAIT_PARAM1
+# define STM32_ILI9341_MADCTL_PARAM  ILI9341_MADCTL_RPORTRAIT_PARAM1
 #else
 # error "display orientation not defined"
 #endif
@@ -258,11 +282,11 @@
  ****************************************************************************/
 
 #ifdef CONFIG_STM32F429I_DISCO_ILI9341_LCDIFACE
-struct lcd_dev_s *g_lcd = NULL;
+FAR struct lcd_dev_s *g_lcd = NULL;
 #endif
 
 #ifdef CONFIG_STM32F429I_DISCO_ILI9341_FBIFACE
-struct ili9341_lcd_s *g_ltdc = NULL;
+FAR struct ili9341_lcd_s *g_ltdc = NULL;
 #endif
 
 /****************************************************************************
@@ -280,7 +304,7 @@ struct ili9341_lcd_s *g_ltdc = NULL;
 
 static int stm32_ili9341_initialize(void)
 {
-  struct ili9341_lcd_s *lcd = g_ltdc;
+  FAR struct ili9341_lcd_s *lcd = g_ltdc;
 
   lcd = stm32_ili93414ws_initialize();
 
@@ -411,6 +435,7 @@ void board_lcd_uninitialize(void)
   g_lcd = NULL;
 }
 
+
 /****************************************************************************
  * Name: board_lcd_getdev
  *
@@ -426,7 +451,7 @@ void board_lcd_uninitialize(void)
  *
  ****************************************************************************/
 
-struct lcd_dev_s *board_lcd_getdev(int lcddev)
+FAR struct lcd_dev_s *board_lcd_getdev(int lcddev)
 {
   if (lcddev == ILI9341_LCD_DEVICE)
     {
@@ -460,7 +485,7 @@ int board_lcd_initialize(void)
     {
       /* Initialize the sub driver structure */
 
-      struct ili9341_lcd_s *dev = stm32_ili93414ws_initialize();
+      FAR struct ili9341_lcd_s *dev = stm32_ili93414ws_initialize();
 
       /* Initialize public lcd driver structure */
 
@@ -535,8 +560,7 @@ int up_fbinitialize(int display)
  *
  * Description:
  *   Return a a reference to the framebuffer object for the specified video
- *   plane of the specified plane.
- *   Many OSDs support multiple planes of video.
+ *   plane of the specified plane.  Many OSDs support multiple planes of video.
  *
  * Input Parameters:
  *   display - In the case of hardware with multiple displays, this
@@ -549,7 +573,7 @@ int up_fbinitialize(int display)
  *
  ****************************************************************************/
 
-struct fb_vtable_s *up_fbgetvplane(int display, int vplane)
+FAR struct fb_vtable_s *up_fbgetvplane(int display, int vplane)
 {
   return stm32_ltdcgetvplane(vplane);
 }

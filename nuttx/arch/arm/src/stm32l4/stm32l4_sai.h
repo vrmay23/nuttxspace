@@ -1,9 +1,8 @@
-/****************************************************************************
+/******************************************************************************
  * arch/arm/src/stm32l4/stm32l4_sai.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2016 Motorola Mobility LLC. All rights reserved.
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (c) 2016 Motorola Mobility, LLC. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,14 +31,14 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_STM32L4_STM32L4_SAI_H
 #define __ARCH_ARM_SRC_STM32L4_STM32L4_SAI_H
 
-/****************************************************************************
+/******************************************************************************
  * Included Files
- ****************************************************************************/
+ ******************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -48,18 +47,18 @@
 
 #include <nuttx/audio/i2s.h>
 
-/****************************************************************************
+/******************************************************************************
  * Pre-processor definitions
- ****************************************************************************/
+ ******************************************************************************/
 
 #define SAI1_BLOCK_A     0
 #define SAI1_BLOCK_B     1
 #define SAI2_BLOCK_A     2
 #define SAI2_BLOCK_B     3
 
-/****************************************************************************
+/******************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ******************************************************************************/
 
 #ifndef __ASSEMBLY__
 #ifdef __cplusplus

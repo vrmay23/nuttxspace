@@ -1,11 +1,9 @@
 /****************************************************************************
  * arch/arm/src/stm32f7/stm32_sai.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2016 Motorola Mobility LLC. All rights reserved.
- * SPDX-FileCopyrightText: 2013-2014 Gregory Nutt. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2013-2014, 2019 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (c) 2016 Motorola Mobility, LLC. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,30 +41,28 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
 #include <assert.h>
+#include <queue.h>
 #include <debug.h>
 
 #include <arch/board/board.h>
 
 #include <nuttx/wdog.h>
 #include <nuttx/irq.h>
-#include <nuttx/queue.h>
 #include <nuttx/wqueue.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/audio/audio.h>
 #include <nuttx/audio/i2s.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "stm32_dma.h"
 #include "stm32_gpio.h"
 #include "stm32_sai.h"
-#include "stm32_pwr.h"
 
 #ifdef CONFIG_STM32F7_SAI
 
@@ -150,19 +146,41 @@
 #  define SAI_RXDMA16_CONFIG   (DMA_SCR_PFCTRL | DMA_SCR_DIR_P2M|DMA_SCR_MINC | \
                                   DMA_SCR_PSIZE_16BITS | DMA_SCR_MSIZE_16BITS | \
                                   DMA_SCR_PBURST_INCR4 | DMA_SCR_MBURST_INCR4)
+
 #  define SAI_RXDMA32_CONFIG   (DMA_SCR_PFCTRL | DMA_SCR_DIR_P2M|DMA_SCR_MINC | \
                                   DMA_SCR_PSIZE_32BITS | DMA_SCR_MSIZE_32BITS | \
                                   DMA_SCR_PBURST_INCR4 | DMA_SCR_MBURST_INCR4)
-
-#  define SAI_TXDMA8_CONFIG    (DMA_SCR_DIR_M2P | DMA_SCR_MINC | \
-                                  DMA_SCR_PSIZE_8BITS | DMA_SCR_MSIZE_8BITS | \
-                                  DMA_SCR_PBURST_INCR4 | DMA_SCR_MBURST_INCR4)
-#  define SAI_TXDMA16_CONFIG   (DMA_SCR_DIR_M2P | DMA_SCR_MINC | \
-                                  DMA_SCR_PSIZE_16BITS | DMA_SCR_MSIZE_16BITS | \
-                                  DMA_SCR_PBURST_INCR4 | DMA_SCR_MBURST_INCR4)
-#  define SAI_TXDMA32_CONFIG   (DMA_SCR_DIR_M2P | DMA_SCR_MINC | \
+#  define SAI_TXDMA8_CONFIG   (DMA_SCR_PFCTRL | DMA_SCR_DIR_M2P | DMA_SCR_MINC | \
                                   DMA_SCR_PSIZE_32BITS | DMA_SCR_MSIZE_32BITS | \
                                   DMA_SCR_PBURST_INCR4 | DMA_SCR_MBURST_INCR4)
+#  define SAI_TXDMA16_CONFIG   (DMA_SCR_PFCTRL | DMA_SCR_DIR_M2P | DMA_SCR_MINC | \
+                                  DMA_SCR_PSIZE_32BITS | DMA_SCR_MSIZE_32BITS | \
+                                  DMA_SCR_PBURST_INCR4 | DMA_SCR_MBURST_INCR4)
+
+#  define SAI_TXDMA32_CONFIG   (DMA_SCR_PFCTRL | DMA_SCR_DIR_M2P | DMA_SCR_MINC | \
+                                  DMA_SCR_PSIZE_32BITS | DMA_SCR_MSIZE_32BITS | \
+                                  DMA_SCR_PBURST_INCR4 | DMA_SCR_MBURST_INCR4)
+
+#endif
+
+#ifdef DMAMAP_SAI1
+
+/* SAI DMA Channel/Stream selection.  There
+ * are multiple DMA stream options that must be dis-ambiguated in the board.h
+ * file.
+ */
+
+#  define SAI1_DMACHAN          DMAMAP_SAI1
+#endif
+
+#ifdef DMAMAP_SAI2
+
+/* SAI DMA Channel/Stream selection.  There
+ * are multiple DMA stream options that must be dis-ambiguated in the board.h
+ * file.
+ */
+
+#  define SAI2_DMACHAN          DMAMAP_SAI2
 #endif
 
 /****************************************************************************
@@ -186,12 +204,8 @@ struct sai_buffer_s
 struct stm32f7_sai_s
 {
   struct i2s_dev_s dev;        /* Externally visible I2S interface */
-
-  /* Callback for changes in sample rate */
-
-  stm32_sai_sampleratecb_t sampleratecb;
   uintptr_t base;              /* SAI block register base address */
-  mutex_t lock;                /* Assures mutually exclusive access to SAI */
+  sem_t exclsem;               /* Assures mutually exclusive access to SAI */
   uint32_t frequency;          /* SAI clock frequency */
   uint32_t syncen;             /* Synchronization setting */
 #ifdef CONFIG_STM32F7_SAI_DMA
@@ -203,7 +217,7 @@ struct stm32f7_sai_s
   uint32_t samplerate;         /* Data sample rate */
   uint8_t rxenab:1;            /* True: RX transfers enabled */
   uint8_t txenab:1;            /* True: TX transfers enabled */
-  struct wdog_s dog;           /* Watchdog that handles timeouts */
+  WDOG_ID dog;                 /* Watchdog that handles timeouts */
   sq_queue_t pend;             /* A queue of pending transfers */
   sq_queue_t act;              /* A queue of active transfers */
   sq_queue_t done;             /* A queue of completed transfers */
@@ -222,9 +236,19 @@ struct stm32f7_sai_s
 
 #ifdef CONFIG_DEBUG_I2S_INFO
 static void     sai_dump_regs(struct stm32f7_sai_s *priv, const char *msg);
+static void     rcc_dump_regs(const char *msg);
 #else
 #  define       sai_dump_regs(s,m)
+#  define       rcc_dump_regs(m)
 #endif
+
+/* Semaphore helpers */
+
+static void     sai_exclsem_take(struct stm32f7_sai_s *priv);
+#define         sai_exclsem_give(priv) nxsem_post(&priv->exclsem)
+
+static void     sai_bufsem_take(struct stm32f7_sai_s *priv);
+#define         sai_bufsem_give(priv) nxsem_post(&priv->bufsem)
 
 /* Buffer container helpers */
 
@@ -279,7 +303,6 @@ static struct stm32f7_sai_s g_sai1a_priv =
 {
   .dev.ops     = &g_i2sops,
   .base        = STM32F7_SAI1_A_BASE,
-  .lock        = NXMUTEX_INITIALIZER,
   .frequency   = STM32F7_SAI1_FREQUENCY,
 #ifdef CONFIG_STM32F7_SAI1_A_SYNC_WITH_B
   .syncen      = SAI_CR1_SYNCEN_INTERNAL,
@@ -291,7 +314,6 @@ static struct stm32f7_sai_s g_sai1a_priv =
 #endif
   .datalen     = CONFIG_STM32F7_SAI_DEFAULT_DATALEN,
   .samplerate  = CONFIG_STM32F7_SAI_DEFAULT_SAMPLERATE,
-  .bufsem      = SEM_INITIALIZER(CONFIG_STM32F7_SAI_MAXINFLIGHT),
 };
 #endif
 
@@ -300,7 +322,6 @@ static struct stm32f7_sai_s g_sai1b_priv =
 {
   .dev.ops     = &g_i2sops,
   .base        = STM32F7_SAI1_B_BASE,
-  .lock        = NXMUTEX_INITIALIZER,
   .frequency   = STM32F7_SAI1_FREQUENCY,
 #ifdef CONFIG_STM32F7_SAI1_B_SYNC_WITH_A
   .syncen      = SAI_CR1_SYNCEN_INTERNAL,
@@ -312,7 +333,6 @@ static struct stm32f7_sai_s g_sai1b_priv =
 #endif
   .datalen     = CONFIG_STM32F7_SAI_DEFAULT_DATALEN,
   .samplerate  = CONFIG_STM32F7_SAI_DEFAULT_SAMPLERATE,
-  .bufsem      = SEM_INITIALIZER(CONFIG_STM32F7_SAI_MAXINFLIGHT),
 };
 #endif
 
@@ -323,7 +343,6 @@ static struct stm32f7_sai_s g_sai2a_priv =
 {
   .dev.ops     = &g_i2sops,
   .base        = STM32F7_SAI2_A_BASE,
-  .lock        = NXMUTEX_INITIALIZER,
   .frequency   = STM32F7_SAI2_FREQUENCY,
 #ifdef CONFIG_STM32F7_SAI2_A_SYNC_WITH_B
   .syncen      = SAI_CR1_SYNCEN_INTERNAL,
@@ -335,7 +354,6 @@ static struct stm32f7_sai_s g_sai2a_priv =
 #endif
   .datalen     = CONFIG_STM32F7_SAI_DEFAULT_DATALEN,
   .samplerate  = CONFIG_STM32F7_SAI_DEFAULT_SAMPLERATE,
-  .bufsem      = SEM_INITIALIZER(CONFIG_STM32F7_SAI_MAXINFLIGHT),
 };
 #endif
 
@@ -344,7 +362,6 @@ static struct stm32f7_sai_s g_sai2b_priv =
 {
   .dev.ops     = &g_i2sops,
   .base        = STM32F7_SAI2_B_BASE,
-  .lock        = NXMUTEX_INITIALIZER,
   .frequency   = STM32F7_SAI2_FREQUENCY,
 #ifdef CONFIG_STM32F7_SAI2_B_SYNC_WITH_A
   .syncen      = SAI_CR1_SYNCEN_INTERNAL,
@@ -356,7 +373,6 @@ static struct stm32f7_sai_s g_sai2b_priv =
 #endif
   .datalen     = CONFIG_STM32F7_SAI_DEFAULT_DATALEN,
   .samplerate  = CONFIG_STM32F7_SAI_DEFAULT_SAMPLERATE,
-  .bufsem      = SEM_INITIALIZER(CONFIG_STM32F7_SAI_MAXINFLIGHT),
 };
 #endif
 
@@ -622,8 +638,8 @@ static void sai_dump_regs(struct stm32f7_sai_s *priv, const char *msg)
 
   uint32_t cpl = cr2 & SAI_CR2_CPL;
   i2sinfo("\t\tCR2: CPL[13] = %s\n",
-          cpl ? "1's complement representation"
-              : "2's complement representation");
+          cpl ? "1's complement represention"
+              : "2's complement represention");
   uint32_t comp = (cr2 & SAI_CR2_COMP_MASK) >> SAI_CR2_COMP_SHIFT;
   const char *comp_string[] =
   { "No companding algorithm",
@@ -689,6 +705,82 @@ static void sai_dump_regs(struct stm32f7_sai_s *priv, const char *msg)
 #endif
 
 /****************************************************************************
+ * Name: rcc_dump_regs
+ *
+ * Description:
+ *   Dump the contents of all rcc block registers
+ *
+ * Input Parameters:
+ *   msg - Message to print before the register data
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_DEBUG_I2S_INFO
+static void rcc_dump_regs(const char *msg)
+{
+  if (msg)
+    {
+      i2sinfo("%s\n", msg);
+    }
+
+#if 0
+  /* RCC_PLLSAICFGR */
+
+  uint32_t pll_sai_cfgr = getreg32(STM32_RCC_PLLSAICFGR);
+  i2sinfo("PLLSAICFGR = %08x\n", pll_sai_cfgr);
+
+  uint32_t pllsain = (pll_sai_cfgr & RCC_PLLSAICFGR_PLLSAIN_MASK) >>
+                      RCC_PLLSAICFGR_PLLSAIN_SHIFT;
+  i2sinfo("\t\tPLLSAICFGR PLLSAIN[14:6] = %d\n", pllsain);
+  uint32_t pllsaip = (pll_sai_cfgr & RCC_PLLSAICFGR_PLLSAIP_MASK) >>
+                      RCC_PLLSAICFGR_PLLSAIP_SHIFT;
+  i2sinfo("\t\tPLLSAICFGR PLLSAIP[17:16] = %d\n", pllsaip);
+  uint32_t pllsaiq = (pll_sai_cfgr & RCC_PLLSAICFGR_PLLSAIQ_MASK) >>
+                      RCC_PLLSAICFGQ_PLLSAIP_SHIFT;
+  i2sinfo("\t\tPLLSAICFGR PLLSAIQ[27:24] = %d\n", pllsaiq);
+
+  uint32_t pllsair = (pll_sai_cfgr & RCC_PLLSAICFGR_PLLSAIR_MASK) >>
+                      RCC_PLLSAICFGR_PLLSAIP_SHIFT;
+  i2sinfo("\t\tPLLSAICFGR PLLSAIR[30:28] = %d\n", pllsair);
+#endif
+}
+#endif
+
+/****************************************************************************
+ * Name: sai_exclsem_take
+ *
+ * Description:
+ *   Take the exclusive access semaphore handling any exceptional conditions
+ *
+ * Input Parameters:
+ *   priv - A reference to the SAI peripheral state
+ *
+ * Returned Value:
+ *  None
+ *
+ ****************************************************************************/
+
+static void sai_exclsem_take(struct stm32f7_sai_s *priv)
+{
+  int ret;
+
+  /* Wait until we successfully get the semaphore.  EINTR is the only
+   * expected 'failure' (meaning that the wait for the semaphore was
+   * interrupted by a signal).
+   */
+
+  do
+    {
+      ret = nxsem_wait(&priv->exclsem);
+      DEBUGASSERT(ret == 0 || ret == -EINTR);
+    }
+  while (ret == -EINTR);
+}
+
+/****************************************************************************
  * Name: sai_mckdivider
  *
  * Description:
@@ -740,7 +832,8 @@ static void sai_mckdivider(struct stm32f7_sai_s *priv)
  *   The watchdog timeout without completion of the transfer.
  *
  * Input Parameters:
- *   arg    - The argument
+ *   argc   - The number of arguments (should be 1)
+ *   arg    - The argument (state structure reference cast to uint32_t)
  *
  * Returned Value:
  *   None
@@ -750,7 +843,7 @@ static void sai_mckdivider(struct stm32f7_sai_s *priv)
  *
  ****************************************************************************/
 
-static void sai_timeout(wdparm_t arg)
+static void sai_timeout(int argc, uint32_t arg, ...)
 {
   struct stm32f7_sai_s *priv = (struct stm32f7_sai_s *)arg;
   DEBUGASSERT(priv != NULL);
@@ -895,8 +988,8 @@ static int sai_dma_setup(struct stm32f7_sai_s *priv)
 
   if (bfcontainer->timeout > 0)
     {
-      ret = wd_start(&priv->dog, bfcontainer->timeout,
-                     sai_timeout, (wdparm_t)priv);
+      ret = wd_start(priv->dog, bfcontainer->timeout, sai_timeout,
+                     1, (uint32_t)priv);
 
       /* Check if we have successfully started the watchdog timer.  Note
        * that we do nothing in the case of failure to start the timer.  We
@@ -1077,7 +1170,7 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
 
   /* Cancel the watchdog timeout */
 
-  wd_cancel(&priv->dog);
+  wd_cancel(priv->dog);
 
   /* Then schedule completion of the transfer to occur on the worker thread */
 
@@ -1105,17 +1198,6 @@ static uint32_t sai_samplerate(struct i2s_dev_s *dev, uint32_t rate)
   struct stm32f7_sai_s *priv = (struct stm32f7_sai_s *)dev;
 
   DEBUGASSERT(priv && rate > 0);
-
-  /* Call callback to change system clock (needed for STM32F746 Disco) */
-
-  if (priv->sampleratecb != NULL)
-    {
-      priv->frequency = priv->sampleratecb(dev, rate);
-    }
-  else
-    {
-      i2sinfo("No Sample Rate CB set!\n");
-    }
 
   /* Save the new sample rate and update the divider */
 
@@ -1220,7 +1302,7 @@ static int sai_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
   int ret;
 
   DEBUGASSERT(priv && apb);
-  i2sinfo("apb=%p nbytes=%d arg=%p timeout=%" PRId32 "\n",
+  i2sinfo("apb=%p nbytes=%d arg=%p timeout=%d\n",
           apb, apb->nbytes - apb->curbyte, arg, timeout);
 
   /* Allocate a buffer container in advance */
@@ -1230,7 +1312,7 @@ static int sai_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
   /* Get exclusive access to the SAI driver data */
 
-  nxmutex_lock(&priv->lock);
+  sai_exclsem_take(priv);
 
   /* Verify not already TX'ing */
 
@@ -1238,7 +1320,7 @@ static int sai_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
     {
       i2serr("ERROR: SAI has no receiver\n");
       ret = -EAGAIN;
-      goto errout_with_lock;
+      goto errout_with_exclsem;
     }
 
   mode = priv->syncen ? SAI_CR1_MODE_SLAVE_RX : SAI_CR1_MODE_MASTER_RX;
@@ -1271,11 +1353,11 @@ static int sai_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 #endif
   DEBUGASSERT(ret == OK);
   leave_critical_section(flags);
-  nxmutex_unlock(&priv->lock);
+  sai_exclsem_give(priv);
   return OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_exclsem:
+  sai_exclsem_give(priv);
   sai_buf_free(priv, bfcontainer);
   return ret;
 }
@@ -1320,7 +1402,7 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
   int ret;
 
   DEBUGASSERT(priv && apb);
-  i2sinfo("apb=%p nbytes=%d arg=%p timeout=%" PRId32 "\n",
+  i2sinfo("apb=%p nbytes=%d arg=%p timeout=%d\n",
           apb, apb->nbytes - apb->curbyte, arg, timeout);
 
   /* Allocate a buffer container in advance */
@@ -1330,7 +1412,7 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
   /* Get exclusive access to the SAI driver data */
 
-  nxmutex_lock(&priv->lock);
+  sai_exclsem_take(priv);
 
   /* Verify not already RX'ing */
 
@@ -1338,7 +1420,7 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
     {
       i2serr("ERROR: SAI has no transmitter\n");
       ret = -EAGAIN;
-      goto errout_with_lock;
+      goto errout_with_exclsem;
     }
 
   mode = priv->syncen ? SAI_CR1_MODE_SLAVE_TX : SAI_CR1_MODE_MASTER_TX;
@@ -1371,13 +1453,44 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 #endif
   DEBUGASSERT(ret == OK);
   leave_critical_section(flags);
-  nxmutex_unlock(&priv->lock);
+  sai_exclsem_give(priv);
   return OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_exclsem:
+  sai_exclsem_give(priv);
   sai_buf_free(priv, bfcontainer);
   return ret;
+}
+
+/****************************************************************************
+ * Name: sai_bufsem_take
+ *
+ * Description:
+ *   Take the buffer semaphore handling any exceptional conditions
+ *
+ * Input Parameters:
+ *   priv - A reference to the SAI peripheral state
+ *
+ * Returned Value:
+ *  None
+ *
+ ****************************************************************************/
+
+static void sai_bufsem_take(struct stm32f7_sai_s *priv)
+{
+  int ret;
+
+  /* Wait until we successfully get the semaphore.  EINTR is the only
+   * expected 'failure' (meaning that the wait for the semaphore was
+   * interrupted by a signal).
+   */
+
+  do
+    {
+      ret = nxsem_wait(&priv->bufsem);
+      DEBUGASSERT(ret == 0 || ret == -EINTR);
+    }
+  while (ret == -EINTR);
 }
 
 /****************************************************************************
@@ -1409,7 +1522,7 @@ static struct sai_buffer_s *sai_buf_allocate(struct stm32f7_sai_s *priv)
    * have at least one free buffer container.
    */
 
-  nxsem_wait_uninterruptible(&priv->bufsem);
+  sai_bufsem_take(priv);
 
   /* Get the buffer from the head of the free list */
 
@@ -1456,7 +1569,7 @@ static void sai_buf_free(struct stm32f7_sai_s *priv,
 
   /* Wake up any threads waiting for a buffer container */
 
-  nxsem_post(&priv->bufsem);
+  sai_bufsem_give(priv);
 }
 
 /****************************************************************************
@@ -1483,6 +1596,8 @@ static void sai_buf_initialize(struct stm32f7_sai_s *priv)
   int i;
 
   priv->freelist = NULL;
+  nxsem_init(&priv->bufsem, 0, CONFIG_STM32F7_SAI_MAXINFLIGHT);
+
   for (i = 0; i < CONFIG_STM32F7_SAI_MAXINFLIGHT; i++)
     {
       sai_buf_free(priv, &priv->containers[i]);
@@ -1506,6 +1621,13 @@ static void sai_buf_initialize(struct stm32f7_sai_s *priv)
 static void sai_portinitialize(struct stm32f7_sai_s *priv)
 {
   sai_dump_regs(priv, "Before initialization");
+
+  nxsem_init(&priv->exclsem, 0, 1);
+
+  /* Create a watchdog timer to catch transfer timeouts */
+
+  priv->dog = wd_create();
+  DEBUGASSERT(priv->dog);
 
   /* Initialize buffering */
 
@@ -1569,8 +1691,7 @@ static void sai_portinitialize(struct stm32f7_sai_s *priv)
  *
  ****************************************************************************/
 
-struct i2s_dev_s *stm32_sai_initialize(int intf,
-                                       stm32_sai_sampleratecb_t sampleratecb)
+struct i2s_dev_s *stm32_sai_initialize(int intf)
 {
   struct stm32f7_sai_s *priv;
   irqstate_t flags;
@@ -1584,7 +1705,6 @@ struct i2s_dev_s *stm32_sai_initialize(int intf,
         {
           i2sinfo("SAI1 Block A Selected\n");
           priv = &g_sai1a_priv;
-          priv->sampleratecb = sampleratecb;
 
           stm32_configgpio(GPIO_SAI1_SD_A);
 #  ifndef CONFIG_STM32F7_SAI1_A_SYNC_WITH_B
@@ -1601,7 +1721,6 @@ struct i2s_dev_s *stm32_sai_initialize(int intf,
         {
           i2sinfo("SAI1 Block B Selected\n");
           priv = &g_sai1b_priv;
-          priv->sampleratecb = sampleratecb;
 
           stm32_configgpio(GPIO_SAI1_SD_B);
 #  ifndef CONFIG_STM32F7_SAI1_B_SYNC_WITH_A
@@ -1618,7 +1737,6 @@ struct i2s_dev_s *stm32_sai_initialize(int intf,
         {
           i2sinfo("SAI2 Block A Selected\n");
           priv = &g_sai2a_priv;
-          priv->sampleratecb = sampleratecb;
 
           stm32_configgpio(GPIO_SAI2_SD_A);
 #  ifndef CONFIG_STM32F7_SAI2_A_SYNC_WITH_B
@@ -1635,7 +1753,6 @@ struct i2s_dev_s *stm32_sai_initialize(int intf,
         {
           i2sinfo("SAI2 Block B Selected\n");
           priv = &g_sai2b_priv;
-          priv->sampleratecb = sampleratecb;
 
           stm32_configgpio(GPIO_SAI2_SD_B);
 #  ifndef CONFIG_STM32F7_SAI2_B_SYNC_WITH_A

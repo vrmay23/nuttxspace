@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/socket/listen.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 201-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,8 +43,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
-
-#include <nuttx/fs/fs.h>
 
 #include "socket/socket.h"
 
@@ -84,24 +95,16 @@ int psock_listen(FAR struct socket *psock, int backlog)
 
   /* Let the address family's listen() method handle the operation */
 
-  DEBUGASSERT(psock->s_sockif != NULL);
-  if (psock->s_sockif->si_listen == NULL)
-    {
-      return -EOPNOTSUPP;
-    }
-
+  DEBUGASSERT(psock->s_sockif != NULL && psock->s_sockif->si_listen != NULL);
   ret = psock->s_sockif->si_listen(psock, backlog);
-  if (ret >= 0)
-    {
-      FAR struct socket_conn_s *conn = psock->s_conn;
-      conn->s_flags |= _SF_LISTENING;
-    }
-  else
+  if (ret < 0)
     {
       nerr("ERROR: si_listen failed: %d\n", ret);
+      return ret;
     }
 
-  return ret;
+  psock->s_flags |= _SF_LISTENING;
+  return OK;
 }
 
 /****************************************************************************
@@ -109,10 +112,10 @@ int psock_listen(FAR struct socket *psock, int backlog)
  *
  * Description:
  *   To accept connections, a socket is first created with socket(), a
- *   willingness to accept incoming connections and a queue limit for
- *   incoming connections are specified with listen(), and then the
- *   connections are accepted with accept(). The listen() call applies only
- *   to sockets of type SOCK_STREAM or SOCK_SEQPACKET.
+ *   willingness to accept incoming connections and a queue limit for incoming
+ *   connections are specified with listen(), and then the connections are
+ *   accepted with accept(). The listen() call applies only to sockets of
+ *   type SOCK_STREAM or SOCK_SEQPACKET.
  *
  * Input Parameters:
  *   sockfd   Socket descriptor of the bound socket
@@ -139,29 +142,42 @@ int psock_listen(FAR struct socket *psock, int backlog)
 
 int listen(int sockfd, int backlog)
 {
-  FAR struct socket *psock;
-  FAR struct file *filep;
+  FAR struct socket *psock = sockfd_socket(sockfd);
+  int errcode;
   int ret;
 
-  /* Get the underlying socket structure */
+  /* Verify that the sockfd corresponds to valid, allocated socket */
 
-  ret = sockfd_socket(sockfd, &filep, &psock);
+  if (psock == NULL || psock->s_crefs <= 0)
+    {
+      /* It is not a valid socket description.  Distinguish between the
+       * cases where sockfd is a just invalid and when it is a valid file
+       * descriptor used in the wrong context.
+       */
+
+      if ((unsigned int)sockfd < CONFIG_NFILE_DESCRIPTORS)
+        {
+          errcode = ENOTSOCK;
+        }
+      else
+        {
+          errcode = EBADF;
+        }
+
+      _SO_SETERRNO(psock, errcode);
+      return ERROR;
+    }
 
   /* The let psock_listen to the work. If psock_listen() fails, it will have
    * set the errno variable.
    */
 
-  if (ret == OK)
-    {
-      ret = psock_listen(psock, backlog);
-      file_put(filep);
-    }
-
+  ret = psock_listen(psock, backlog);
   if (ret < 0)
     {
-      set_errno(-ret);
-      ret = ERROR;
+      _SO_SETERRNO(psock, -ret);
+      return ERROR;
     }
 
-  return ret;
+  return OK;
 }

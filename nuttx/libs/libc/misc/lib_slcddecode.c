@@ -1,22 +1,36 @@
 /****************************************************************************
- * libs/libc/misc/lib_slcddecode.c
+ * libs/libc/msic/lib_slcddecode.c
+ * Decoding side of the SLCD CODEC
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -39,7 +53,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Indices, counts, helper macros *******************************************/
+/* Indices, counts, helper macros ******************************************/
 
 #define NDX_ESC        0
 #define NDX_BRACKET    1
@@ -89,7 +103,7 @@ static uint8_t slcd_nibble(uint8_t ascii)
     }
   else
     {
-      return ascii - 'a' + 10;
+      return ascii - 'a';
     }
 }
 
@@ -120,11 +134,11 @@ static enum slcdret_e slcd_reget(FAR struct slcdstate_s *state,
   *pch = state->buf[state->ndx];
   *parg = 0;
 
-  /* Bump up the indices and return false (meaning a normal character) */
+   /* Bump up the indices and return false (meaning a normal character) */
 
-  state->ndx++;
-  state->nch--;
-  return SLCDRET_CHAR;
+   state->ndx++;
+   state->nch--;
+   return SLCDRET_CHAR;
 }
 
 /****************************************************************************
@@ -159,6 +173,7 @@ static enum slcdret_e slcd_reget(FAR struct slcdstate_s *state,
 enum slcdret_e slcd_decode(FAR struct lib_instream_s *stream,
                            FAR struct slcdstate_s *state, FAR uint8_t *pch,
                            FAR uint8_t *parg)
+
 {
   enum slcdcode_e code;
   uint8_t count;
@@ -179,8 +194,8 @@ enum slcdret_e slcd_decode(FAR struct lib_instream_s *stream,
 
   /* No, ungotten characters.  Get the next character from the buffer. */
 
-  ch = lib_stream_getc(stream);
-  if (lib_stream_eof(ch))
+  ch = stream->get(stream);
+  if (ch == EOF)
     {
       /* End of file/stream (or perhaps an I/O error) */
 
@@ -203,8 +218,8 @@ enum slcdret_e slcd_decode(FAR struct lib_instream_s *stream,
 
   /* Get the next character from the buffer */
 
-  ch = lib_stream_getc(stream);
-  if (lib_stream_eof(ch))
+  ch = stream->get(stream);
+  if (ch == EOF)
     {
       /* End of file/stream.  Return the escape character now.  We will
        * return the EOF indication next time.
@@ -232,8 +247,8 @@ enum slcdret_e slcd_decode(FAR struct lib_instream_s *stream,
 
   /* Get the next character from the buffer */
 
-  ch = lib_stream_getc(stream);
-  if (lib_stream_eof(ch))
+  ch = stream->get(stream);
+  if (ch == EOF)
     {
       /* End of file/stream.  Return the ESC now; return the following
        * characters later.
@@ -242,7 +257,7 @@ enum slcdret_e slcd_decode(FAR struct lib_instream_s *stream,
       return slcd_reget(state, pch, parg);
     }
 
-  /* If the next character is a hexadecimal value (with lower case
+  /* If the next character is a hexidecimal value (with lower case
    * alphabetic characters), then we are parsing a 5-byte sequence.
    */
 
@@ -273,15 +288,15 @@ enum slcdret_e slcd_decode(FAR struct lib_instream_s *stream,
     }
   else
     {
-      /* Save the first character of the two byte hexadecimal number */
+      /* Save the first character of the two byte hexidecimal number */
 
       state->buf[NDX_COUNTH] = (uint8_t)ch;
       state->nch = NCH_COUNTH;
 
       /* Get the next character from the buffer */
 
-      ch = lib_stream_getc(stream);
-      if (lib_stream_eof(ch))
+      ch = stream->get(stream);
+      if (ch == EOF)
         {
           /* End of file/stream.  Return the ESC now; return the following
            * characters later.
@@ -290,7 +305,7 @@ enum slcdret_e slcd_decode(FAR struct lib_instream_s *stream,
           return slcd_reget(state, pch, parg);
         }
 
-      /* We expect the next character to be the second byte of hexadecimal
+      /* We expect the next character to be the second byte of hexidecimal
        * count value.
        */
 
@@ -306,15 +321,15 @@ enum slcdret_e slcd_decode(FAR struct lib_instream_s *stream,
           return slcd_reget(state, pch, parg);
         }
 
-      /* Save the second character of the two byte hexadecimal number */
+      /* Save the second character of the two byte hexidecimal number */
 
       state->buf[NDX_COUNTL] = (uint8_t)ch;
       state->nch = NCH_COUNTL;
 
       /* Get the next character from the buffer */
 
-      ch = lib_stream_getc(stream);
-      if (lib_stream_eof(ch))
+      ch = stream->get(stream);
+      if (ch == EOF)
         {
           /* End of file/stream.  Return the ESC now; return the following
            * characters later.

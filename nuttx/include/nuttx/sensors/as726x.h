@@ -1,10 +1,9 @@
 /****************************************************************************
- * include/nuttx/sensors/as726x.h
+ * include/nuttx/input/as726x.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Fabian Justi. All rights reserved.
- * SPDX-FileContributor: Fabian Justi <Fabian.Justi@gmx.de> and
- * SPDX-FileContributor: Andreas Kurz <andreas.kurz@methodpark.de>
+ *   Copyright (C) 2019 Fabian Justi. All rights reserved.
+ *   Author: Fabian Justi <Fabian.Justi@gmx.de> and
+ *           Andreas Kurz <andreas.kurz@methodpark.de>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -67,12 +66,12 @@
 
 /* Register addresses */
 
-#define AS726X_DEVICE_TYPE      0x00
-#define AS726X_HW_VERSION       0x01
-#define AS726X_CONTROL_SETUP    0x04
-#define AS726X_INT_T            0x05
-#define AS726X_DEVICE_TEMP      0x06
-#define AS726X_LED_CONTROL      0x07
+#define AS726x_DEVICE_TYPE      0x00
+#define AS726x_HW_VERSION       0x01
+#define AS726x_CONTROL_SETUP    0x04
+#define AS726x_INT_T            0x05
+#define AS726x_DEVICE_TEMP      0x06
+#define AS726x_LED_CONTROL      0x07
 
 #define AS72XX_SLAVE_STATUS_REG 0x00
 #define AS72XX_SLAVE_WRITE_REG  0x01

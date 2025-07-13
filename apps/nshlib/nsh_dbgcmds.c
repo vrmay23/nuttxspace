@@ -1,22 +1,36 @@
 /****************************************************************************
- * apps/nshlib/nsh_dbgcmds.c
+ * apps/nshlib/dbg_dbgcmds.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2011-2012, 2015, 2017-2018 Gregory Nutt. All
+ *     rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,12 +43,10 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <unistd.h>
 
 #include "nsh.h"
 #include "nsh_console.h"
@@ -75,8 +87,6 @@ struct dbgmem_s
 static int mem_parse(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv,
                      FAR struct dbgmem_s *mem)
 {
-  UNUSED(vtbl);
-
   FAR char *pcvalue = strchr(argv[1], '=');
   unsigned long lvalue = 0;
 
@@ -172,7 +182,7 @@ int cmd_mb(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 
           /* Make sure we end it with a newline */
 
-          nsh_output(vtbl, "\n");
+          nsh_output(vtbl, "\n", *ptr);
         }
     }
 
@@ -228,7 +238,7 @@ int cmd_mh(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 
           /* Make sure we end it with a newline */
 
-          nsh_output(vtbl, "\n");
+          nsh_output(vtbl, "\n", *ptr);
         }
     }
 
@@ -258,7 +268,7 @@ int cmd_mw(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
         {
           /* Print the value at the address */
 
-          nsh_output(vtbl, "  %p = 0x%08" PRIx32, ptr, *ptr);
+          nsh_output(vtbl, "  %p = 0x%08x", ptr, *ptr);
 
           /* Are we supposed to write a value to this address? */
 
@@ -270,12 +280,12 @@ int cmd_mw(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
                */
 
               *ptr = mem.dm_value;
-              nsh_output(vtbl, " -> 0x%08" PRIx32, *ptr);
+              nsh_output(vtbl, " -> 0x%08x", *ptr);
             }
 
           /* Make sure we end it with a newline */
 
-          nsh_output(vtbl, "\n");
+          nsh_output(vtbl, "\n", *ptr);
         }
     }
 
@@ -291,7 +301,6 @@ void nsh_dumpbuffer(FAR struct nsh_vtbl_s *vtbl, FAR const char *msg,
                     FAR const uint8_t *buffer, ssize_t nbytes)
 {
   char line[128];
-  size_t size;
   int ch;
   int i;
   int j;
@@ -299,22 +308,18 @@ void nsh_dumpbuffer(FAR struct nsh_vtbl_s *vtbl, FAR const char *msg,
   nsh_output(vtbl, "%s:\n", msg);
   for (i = 0; i < nbytes; i += 16)
     {
-      snprintf(line, sizeof(line), "%04x: ", i);
-      size = strlen(line);
+      sprintf(line, "%04x: ", i);
 
       for (j = 0; j < 16; j++)
         {
           if (i + j < nbytes)
             {
-              snprintf(&line[size], sizeof(line) - size,
-                       "%02x ", buffer[i + j]);
+              sprintf(&line[strlen(line)], "%02x ", buffer[i + j]);
             }
           else
             {
-              strlcpy(&line[size], "   ", sizeof(line) - size);
+              strcpy(&line[strlen(line)], "   ");
             }
-
-          size += strlen(&line[size]);
         }
 
       for (j = 0; j < 16; j++)
@@ -322,9 +327,8 @@ void nsh_dumpbuffer(FAR struct nsh_vtbl_s *vtbl, FAR const char *msg,
           if (i + j < nbytes)
             {
               ch = buffer[i + j];
-              snprintf(&line[size], sizeof(line) - size,
-                       "%c", ch >= 0x20 && ch <= 0x7e ? ch : '.');
-              size += strlen(&line[size]);
+              sprintf(&line[strlen(line)], "%c",
+                      ch >= 0x20 && ch <= 0x7e ? ch : '.');
             }
         }
 
@@ -339,8 +343,6 @@ void nsh_dumpbuffer(FAR struct nsh_vtbl_s *vtbl, FAR const char *msg,
 #ifndef CONFIG_NSH_DISABLE_XD
 int cmd_xd(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
-  UNUSED(argc);
-
   FAR char *addr;
   FAR char *endptr;
   int       nbytes;
@@ -421,8 +423,9 @@ int cmd_hexdump(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 
       if (nbytesread < 0)
         {
+          int errval = errno;
           nsh_error(vtbl, g_fmtcmdfailed, "hexdump", "read",
-                     NSH_ERRNO_OF(errno));
+                     NSH_ERRNO_OF(errval));
           ret = ERROR;
           break;
         }
@@ -442,8 +445,7 @@ int cmd_hexdump(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
                       dumpbytes = count;
                     }
 
-                  snprintf(msg, sizeof(msg), "%s at %08jx", argv[1],
-                           (uintmax_t)skip);
+                  snprintf(msg, sizeof(msg), "%s at %08x", argv[1], skip);
                   nsh_dumpbuffer(vtbl, msg,
                                  &buffer[nbytesread - (position - skip)],
                                  dumpbytes);
@@ -471,8 +473,7 @@ int cmd_hexdump(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
             }
 #endif
 
-          snprintf(msg, sizeof(msg), "%s at %08jx", argv[1],
-                   (uintmax_t)position);
+          snprintf(msg, sizeof(msg), "%s at %08x", argv[1], position);
           nsh_dumpbuffer(vtbl, msg, buffer, nbytesread);
           position += nbytesread;
 
@@ -506,8 +507,6 @@ int cmd_hexdump(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 #ifdef HAVE_IRQINFO
 int cmd_irqinfo(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
-  UNUSED(argc);
-
   return nsh_catfile(vtbl, argv[0], CONFIG_NSH_PROC_MOUNTPOINT "/irqs");
 }
 #endif

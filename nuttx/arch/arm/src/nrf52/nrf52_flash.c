@@ -1,38 +1,41 @@
 /****************************************************************************
  * arch/arm/src/nrf52/nrf52_flash.c
+ * Standard Flash access functions needed by the flash mtd driver.
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2018 Zglue Inc. All rights reserved.
- * SPDX-FileCopyrightText: 2012 - 2018, Nordic Semiconductor ASA
- * SPDX-FileContributor: Levin Li <zhiqiang@zglue.com>
- * SPDX-FileContributor: Alan Carvalho de Assis <acassis@gmail.com>
+ *   Copyright (C) 2018 Zglue Inc. All rights reserved.
+ *   Author: Levin Li <zhiqiang@zglue.com>
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ *
+ * Ported from the Nordic SDK, this is the original license:
+ *
+ * Copyright (c) 2012 - 2018, Nordic Semiconductor ASA
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * modification, are permitted provided that the following conditions are met:
  *
- * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
  * 3. Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
+ *    contributors may be used to endorse or promote products derived from this
+ *    software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -43,12 +46,14 @@
 #include <nuttx/config.h>
 #include <nuttx/arch.h>
 #include <errno.h>
-#include <debug.h>
 
+#include <nuttx/config.h>
 #include <nuttx/progmem.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+
+#include "up_arch.h"
+
 #include "hardware/nrf52_ficr.h"
 #include "hardware/nrf52_nvmc.h"
 #include "nrf52_nvmc.h"
@@ -57,13 +62,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef CONFIG_ALLOW_BSD_COMPONENTS
-#  error "This file requires Kconfig ALLOW_BSD_COMPONENTS"
-#endif
-
 #define NRF52_FLASH_PAGE_SIZE  (4*1024)
-
-#define NRF52_FLASH_ERASEDVAL  (0xffu)
 
 /****************************************************************************
  * Public Functions
@@ -215,7 +214,7 @@ ssize_t up_progmem_eraseblock(size_t block)
 
   if (block >= up_progmem_neraseblocks())
     {
-      _err("Wrong block number %d.\n", block);
+      _err("Wrong Page number %d.\n", page);
       return -EFAULT;
     }
 
@@ -271,7 +270,7 @@ ssize_t up_progmem_ispageerased(size_t page)
   for (addr = up_progmem_getaddress(page), count = up_progmem_pagesize(page);
        count; count--, addr++)
     {
-      if (getreg8(addr) != NRF52_FLASH_ERASEDVAL)
+      if (getreg8(addr) != 0xff)
         {
           bwritten++;
         }
@@ -343,17 +342,4 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
     }
 
   return written;
-}
-
-/****************************************************************************
- * Name: up_progmem_erasestate
- *
- * Description:
- *   Return value of erase state.
- *
- ****************************************************************************/
-
-uint8_t up_progmem_erasestate(void)
-{
-  return NRF52_FLASH_ERASEDVAL;
 }

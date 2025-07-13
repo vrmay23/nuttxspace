@@ -1,8 +1,6 @@
 /****************************************************************************
  * boards/arm/sama5/sama5d2-xult/include/board_498mhz.h
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -57,7 +55,7 @@
 
 /* PLLA configuration.
  *
- *   Multiplier = 43+1: PLLACK = 44 * 12MHz = 498MHz
+ *   Multipler = 43+1: PLLACK = 44 * 12MHz = 498MHz
  */
 
 #define BOARD_CKGR_PLLAR_COUNT     (63 << PMC_CKGR_PLLAR_COUNT_SHIFT)
@@ -99,7 +97,7 @@
 
 #define BOARD_ADC_PRESCAL          (7)
 #define BOARD_TSD_STARTUP          (40)        /* 40 nanoseconds */
-#define BOARD_TSD_TRACKTIM         (2000)      /* Min 1us at 8MHz */
+#define BOARD_TSD_TRACKTIM         (2000)      /* Min 1�s at 8MHz */
 #define BOARD_TSD_DEBOUNCE         (10000000)  /* 10 milliseconds (units nanoseconds) */
 
 /* Resulting frequencies */
@@ -108,7 +106,7 @@
 #define BOARD_PLLA_FREQUENCY       (996000000) /* PLLACK:  83 * 12Mhz / 1 */
 #define BOARD_PCK_FREQUENCY        (498000000) /* CPU:     PLLACK / 2 / 1  */
 #define BOARD_MCK_FREQUENCY        (166000000) /* MCK:     PLLACK / 1 / 1 / 3 */
-#define BOARD_ADCCLK_FREQUENCY     (83000000)  /* ADCCLK:  MCK / ((7+1)*2) */
+#define BOARD_ADCCLK_FREQUENCY     (83000000)   /* ADCCLK:  MCK / ((7+1)*2) */
 
 /* Clocking to certain peripherals may be MCK/2.
  *
@@ -163,15 +161,11 @@
  * Where CLKDIV has a range of 0-255.
  */
 
-/* MCK = 132MHz, CLKDIV = 164,
- * MCI_SPEED = 132MHz / (2*164 + 0 + 2) = 400 KHz
- */
+/* MCK = 132MHz, CLKDIV = 164, MCI_SPEED = 132MHz / (2*164 + 0 + 2) = 400 KHz */
 
 #define HSMCI_INIT_CLKDIV          (164 << HSMCI_MR_CLKDIV_SHIFT)
 
-/* MCK = 132MHz, CLKDIV = 2 w/CLOCKODD,
- * MCI_SPEED = 132MHz /(2*2 + 1 + 2) = 18.9 MHz
- */
+/* MCK = 132MHz, CLKDIV = 2 w/CLOCKODD, MCI_SPEED = 132MHz /(2*2 + 1 + 2) = 18.9 MHz */
 
 #define HSMCI_MMCXFR_CLKDIV        ((2 << HSMCI_MR_CLKDIV_SHIFT) | HSMCI_MR_CLKODD)
 

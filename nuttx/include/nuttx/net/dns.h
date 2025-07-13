@@ -1,11 +1,15 @@
 /****************************************************************************
  * include/nuttx/net/dns.h
+ * DNS resolver code header file.
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2007-2009, 2011-2012, 2014-2015, 2018 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2002-2003, Adam Dunkels. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: Adam Dunkels <adam@dunkels.com>
+ *   Copyright (C) 2007-2009, 2011-2012, 2014-2015, 2018 Gregory Nutt. All
+ *     rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Inspired by/based on uIP logic by Adam Dunkels:
+ *
+ *   Copyright (c) 2002-2003, Adam Dunkels. All rights reserved.
+ *   Author Adam Dunkels <adam@dunkels.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -132,9 +136,9 @@
  * Public Type Definitions
  ****************************************************************************/
 
-/* The DNS message header */
+ /* The DNS message header */
 
-begin_packed_struct struct dns_header_s
+struct dns_header_s
 {
   uint16_t id;
   uint8_t  flags1;
@@ -143,15 +147,15 @@ begin_packed_struct struct dns_header_s
   uint16_t numanswers;
   uint16_t numauthrr;
   uint16_t numextrarr;
-} end_packed_struct;
+};
 
 /* The DNS question message structure */
 
-begin_packed_struct struct dns_question_s
+struct dns_question_s
 {
   uint16_t type;
   uint16_t class;
-} end_packed_struct;
+};
 
 /* The DNS answer message structure */
 
@@ -204,20 +208,20 @@ extern "C"
 int dns_add_nameserver(FAR const struct sockaddr *addr, socklen_t addrlen);
 
 /****************************************************************************
- * Name: dns_default_nameserver
+ * Name: dns_del_nameserver
  *
  * Description:
- *   Reset the resolver to use only the default DNS server, if any.
+ *   Remove a DNS server so it is no longer available for further use.
  *
  ****************************************************************************/
-
-int dns_default_nameserver(void);
+/* REVISIT: Not implemented */
 
 /****************************************************************************
  * Name: dns_foreach_nameserver
  *
  * Description:
- *   Traverse each nameserver entry and perform the provided callback.
+ *   Traverse each nameserver entry in the resolv.conf file and perform the
+ *   the provided callback.
  *
  ****************************************************************************/
 
@@ -242,16 +246,6 @@ int dns_register_notify(dns_callback_t callback, FAR void *arg);
  ****************************************************************************/
 
 int dns_unregister_notify(dns_callback_t callback, FAR void *arg);
-
-/****************************************************************************
- * Name: dns_set_queryfamily
- *
- * Description:
- *   Configure the address family to be used for queries.
- *
- ****************************************************************************/
-
-int dns_set_queryfamily(sa_family_t family);
 
 #undef EXTERN
 #if defined(__cplusplus)

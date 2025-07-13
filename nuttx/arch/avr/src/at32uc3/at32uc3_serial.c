@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/avr/src/at32uc3/at32uc3_serial.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2010, 2012, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -44,7 +56,8 @@
 #include "at32uc3_config.h"
 #include "chip.h"
 #include "at32uc3_usart.h"
-#include "avr_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
 #include "at32uc3.h"
 
 /****************************************************************************
@@ -148,7 +161,7 @@ static int  up_attach(struct uart_dev_s *dev);
 static void up_detach(struct uart_dev_s *dev);
 static int  up_interrupt(int irq, void *context, void *arg);
 static int  up_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  up_receive(struct uart_dev_s *dev, unsigned int *status);
+static int  up_receive(struct uart_dev_s *dev, uint32_t *status);
 static void up_rxint(struct uart_dev_s *dev, bool enable);
 static bool up_rxavailable(struct uart_dev_s *dev);
 static void up_send(struct uart_dev_s *dev, int ch);
@@ -247,7 +260,7 @@ static uart_dev_t g_usart1port =
   {
     .size   = CONFIG_USART1_TXBUFSIZE,
     .buffer = g_usart1txbuffer,
-  },
+   },
   .ops      = &g_uart_ops,
   .priv     = &g_usart1priv,
 };
@@ -277,7 +290,7 @@ static uart_dev_t g_usart2port =
   {
     .size   = CONFIG_USART2_TXBUFSIZE,
     .buffer = g_usart2txbuffer,
-  },
+   },
   .ops      = &g_uart_ops,
   .priv     = &g_usart2priv,
 };
@@ -300,8 +313,7 @@ static inline uint32_t up_serialin(struct up_dev_s *priv, int offset)
  * Name: up_serialout
  ****************************************************************************/
 
-static inline void up_serialout(struct up_dev_s *priv, int offset,
-                                uint32_t value)
+static inline void up_serialout(struct up_dev_s *priv, int offset, uint32_t value)
 {
   putreg32(value, priv->usartbase + offset);
 }
@@ -378,15 +390,14 @@ static void up_shutdown(struct uart_dev_s *dev)
  * Name: up_attach
  *
  * Description:
- *   Configure the USART to operation in interrupt driven mode.  This method
- *   is called when the serial port is opened.  Normally, this is just after
+ *   Configure the USART to operation in interrupt driven mode.  This method is
+ *   called when the serial port is opened.  Normally, this is just after the
  *   the setup() method is called, however, the serial console may operate in
  *   a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless
- *   the hardware supports multiple levels of interrupt enabling).  The RX
- *   and TX interrupts are not enabled until the txint() and rxint() methods
- *   are called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless the
+ *   hardware supports multiple levels of interrupt enabling).  The RX and TX
+ *   interrupts are not enabled until the txint() and rxint() methods are called.
  *
  ****************************************************************************/
 
@@ -404,8 +415,8 @@ static int up_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach USART interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The
- *   exception is the serial console which is never shutdown.
+ *   closed normally just before the shutdown method is called.  The exception
+ *   is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -421,9 +432,9 @@ static void up_detach(struct uart_dev_s *dev)
  *
  * Description:
  *   This is the USART interrupt handler.  It will be invoked when an
- *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
- *   uart_recvchars to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'arg' to the
+ *   interrupt received on the 'irq'  It should call uart_transmitchars or
+ *   uart_receivechar to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'irq' number into the
  *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
@@ -493,6 +504,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
   struct up_dev_s   *priv;
   int                ret = OK;
 
+  DEBUGASSERT(filep, filep->f_inode);
   inode = filep->f_inode;
   dev   = inode->i_private;
 
@@ -525,7 +537,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int up_receive(struct uart_dev_s *dev, unsigned int *status)
+static int up_receive(struct uart_dev_s *dev, uint32_t *status)
 {
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
   uint32_t rhr;
@@ -542,7 +554,6 @@ static int up_receive(struct uart_dev_s *dev, unsigned int *status)
     {
       *status = priv->csr;
     }
-
   priv->csr = 0;
 
   /* Then return the actual received byte */
@@ -564,18 +575,18 @@ static void up_rxint(struct uart_dev_s *dev, bool enable)
 
   if (enable)
     {
-      /* Receive an interrupt when there is anything in the Rx data register
-       * (or an Rx timeout occurs).
+      /* Receive an interrupt when their is anything in the Rx data register (or an Rx
+       * timeout occurs).
        */
 
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
 #  ifdef CONFIG_USART_ERRINTS
-      up_serialout(priv, AVR32_USART_IER_OFFSET,
-                   USART_INT_RXRDY | USART_INT_TIMEOUT | USART_INT_OVRE |
-                   USART_INT_FRAME | USART_INT_PARE);
+        up_serialout(priv, AVR32_USART_IER_OFFSET,
+                     USART_INT_RXRDY | USART_INT_TIMEOUT | USART_INT_OVRE |
+                     USART_INT_FRAME | USART_INT_PARE);
 #  else
-      up_serialout(priv, AVR32_USART_IER_OFFSET,
-                   USART_INT_RXRDY | USART_INT_TIMEOUT);
+        up_serialout(priv, AVR32_USART_IER_OFFSET,
+                     USART_INT_RXRDY | USART_INT_TIMEOUT);
 #  endif
 #endif
     }
@@ -591,7 +602,7 @@ static void up_rxint(struct uart_dev_s *dev, bool enable)
  * Name: up_rxavailable
  *
  * Description:
- *   Return true if the receive register is not empty.
+ *   Return true if the receive register is not empty
  *
  ****************************************************************************/
 
@@ -638,7 +649,7 @@ static void up_txint(struct uart_dev_s *dev, bool enable)
   flags = enter_critical_section();
   if (enable)
     {
-      /* Set to receive an interrupt when the TX data register is empty. */
+      /* Set to receive an interrupt when the TX data register is empty */
 
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
        up_serialout(priv, AVR32_USART_IER_OFFSET, USART_INT_TXRDY);
@@ -652,11 +663,10 @@ static void up_txint(struct uart_dev_s *dev, bool enable)
     }
   else
     {
-      /* Disable the TX interrupt. */
+      /* Disable the TX interrupt */
 
        up_serialout(priv, AVR32_USART_IDR_OFFSET, USART_INT_TXRDY);
     }
-
   leave_critical_section(flags);
 }
 
@@ -688,18 +698,18 @@ static bool up_txready(struct uart_dev_s *dev)
 #ifdef USE_EARLYSERIALINIT
 
 /****************************************************************************
- * Name: avr_earlyserialinit
+ * Name: up_earlyserialinit
  *
  * Description:
  *   Performs the low level USART initialization early in debug so that the
- *   serial console will be available during boot up.  This must be called
- *   before avr_serialinit.  NOTE:  This function depends on GPIO pin
- *   configuration performed in up_consoleinit() and main clock
- *   initialization performed in up_clkinitialize().
+ *   serial console will be available during bootup.  This must be called
+ *   before up_serialinit.  NOTE:  This function depends on GPIO pin
+ *   configuration performed in up_consoleinit() and main clock iniialization
+ *   performed in up_clkinitialize().
  *
  ****************************************************************************/
 
-void avr_earlyserialinit(void)
+void up_earlyserialinit(void)
 {
   /* Disable all USARTS */
 
@@ -721,15 +731,15 @@ void avr_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: avr_serialinit
+ * Name: up_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
- *   that avr_earlyserialinit was called previously.
+ *   that up_earlyserialinit was called previously.
  *
  ****************************************************************************/
 
-void avr_serialinit(void)
+void up_serialinit(void)
 {
   /* Register the console */
 
@@ -756,16 +766,27 @@ void avr_serialinit(void)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   struct up_dev_s *priv = (struct up_dev_s *)CONSOLE_DEV.priv;
   uint32_t imr;
 
   up_disableusartint(priv, &imr);
-  avr_lowputc(ch);
+
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
   up_restoreusartint(priv, imr);
 #endif
+  return ch;
 }
 
 #else /* USE_SERIALDRIVER */
@@ -778,11 +799,21 @@ void up_putc(int ch)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
-  avr_lowputc(ch);
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
 #endif
+  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */

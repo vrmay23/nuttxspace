@@ -1,7 +1,6 @@
 /****************************************************************************
  * drivers/usbdev/usbmsc_scsi.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * Mass storage class device.  Bulk-only with SCSI subclass.
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -19,8 +18,6 @@
  * under the License.
  *
  ****************************************************************************/
-
-/* Mass storage class device.  Bulk-only with SCSI subclass. */
 
 /* References:
  *   "Universal Serial Bus Mass Storage Class, Specification Overview,"
@@ -51,14 +48,13 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
+#include <queue.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/kthread.h>
 #include <nuttx/arch.h>
-#include <nuttx/queue.h>
 #include <nuttx/signal.h>
 #include <nuttx/scsi.h>
 #include <nuttx/usb/storage.h>
@@ -106,50 +102,49 @@
 /* Debug ********************************************************************/
 
 #if defined(CONFIG_DEBUG_INFO) && defined (CONFIG_DEBUG_USB)
-static void     usbmsc_dumpdata(FAR const char *msg, const uint8_t *buf,
-                                int buflen);
+static void     usbmsc_dumpdata(const char *msg, const uint8_t *buf,
+                  int buflen);
 #else
 #  define usbmsc_dumpdata(msg, buf, len)
 #endif
 
 /* Utility Support Functions ************************************************/
 
-static uint16_t usbmsc_getbe16(FAR uint8_t *buf);
-static uint32_t usbmsc_getbe32(FAR uint8_t *buf);
-static void     usbmsc_putbe16(FAR uint8_t * buf, uint16_t val);
-static void     usbmsc_putbe24(FAR uint8_t *buf, uint32_t val);
-static void     usbmsc_putbe32(FAR uint8_t *buf, uint32_t val);
+static uint16_t usbmsc_getbe16(uint8_t *buf);
+static uint32_t usbmsc_getbe32(uint8_t *buf);
+static void     usbmsc_putbe16(uint8_t * buf, uint16_t val);
+static void     usbmsc_putbe24(uint8_t *buf, uint32_t val);
+static void     usbmsc_putbe32(uint8_t *buf, uint32_t val);
 #if 0 /* not used */
-static uint16_t usbmsc_getle16(FAR uint8_t *buf);
+static uint16_t usbmsc_getle16(uint8_t *buf);
 #endif
-static uint32_t usbmsc_getle32(FAR uint8_t *buf);
+static uint32_t usbmsc_getle32(uint8_t *buf);
 #if 0 /* not used */
-static void     usbmsc_putle16(FAR uint8_t * buf, uint16_t val);
+static void     usbmsc_putle16(uint8_t * buf, uint16_t val);
 #endif
-static void     usbmsc_putle32(FAR uint8_t *buf, uint32_t val);
+static void     usbmsc_putle32(uint8_t *buf, uint32_t val);
 
 /* SCSI Command Processing **************************************************/
 
 static inline int usbmsc_cmdtestunitready(FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdrequestsense(FAR struct usbmsc_dev_s *priv,
-                                         FAR uint8_t *buf);
+                FAR uint8_t *buf);
 static inline int usbmsc_cmdread6(FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdwrite6(FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdinquiry(FAR struct usbmsc_dev_s *priv,
-                                    FAR uint8_t *buf);
+                FAR uint8_t *buf);
 static inline int usbmsc_cmdmodeselect6(FAR struct usbmsc_dev_s *priv);
-static int        usbmsc_modepage(FAR struct usbmsc_dev_s *priv,
-                                  FAR uint8_t *buf, uint8_t pcpgcode,
-                                  FAR int *mdlen);
+static int    usbmsc_modepage(FAR struct usbmsc_dev_s *priv,
+                FAR uint8_t *buf, uint8_t pcpgcode, int *mdlen);
 static inline int usbmsc_cmdmodesense6(FAR struct usbmsc_dev_s *priv,
-                                       FAR uint8_t *buf);
+                FAR uint8_t *buf);
 static inline int usbmsc_cmdstartstopunit(FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdpreventmediumremoval(
                 FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdreadformatcapacity(FAR struct usbmsc_dev_s *priv,
-                                               FAR uint8_t *buf);
+                FAR uint8_t *buf);
 static inline int usbmsc_cmdreadcapacity10(FAR struct usbmsc_dev_s *priv,
-                                           FAR uint8_t *buf);
+                FAR uint8_t *buf);
 static inline int usbmsc_cmdread10(FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdwrite10(FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdverify10(FAR struct usbmsc_dev_s *priv);
@@ -157,26 +152,24 @@ static inline int usbmsc_cmdsynchronizecache10(
                 FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdmodeselect10(FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdmodesense10(FAR struct usbmsc_dev_s *priv,
-                                        FAR uint8_t *buf);
+                FAR uint8_t *buf);
 static inline int usbmsc_cmdread12(FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_cmdwrite12(FAR struct usbmsc_dev_s *priv);
 static inline int usbmsc_setupcmd(FAR struct usbmsc_dev_s *priv,
-                                  uint8_t cdblen, uint8_t flags);
+                uint8_t cdblen, uint8_t flags);
 
 /* SCSI Worker Thread *******************************************************/
 
-static int usbmsc_idlestate(FAR struct usbmsc_dev_s *priv);
-static int usbmsc_cmdparsestate(FAR struct usbmsc_dev_s *priv);
-static int usbmsc_cmdreadstate(FAR struct usbmsc_dev_s *priv);
-static int usbmsc_cmdwritestate(FAR struct usbmsc_dev_s *priv);
-static int usbmsc_cmdfinishstate(FAR struct usbmsc_dev_s *priv);
-static int usbmsc_cmdstatusstate(FAR struct usbmsc_dev_s *priv);
+static int    usbmsc_idlestate(FAR struct usbmsc_dev_s *priv);
+static int    usbmsc_cmdparsestate(FAR struct usbmsc_dev_s *priv);
+static int    usbmsc_cmdreadstate(FAR struct usbmsc_dev_s *priv);
+static int    usbmsc_cmdwritestate(FAR struct usbmsc_dev_s *priv);
+static int    usbmsc_cmdfinishstate(FAR struct usbmsc_dev_s *priv);
+static int    usbmsc_cmdstatusstate(FAR struct usbmsc_dev_s *priv);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-static FAR const char *g_productrevision = "0101";
 
 /****************************************************************************
  * Private Functions
@@ -191,8 +184,7 @@ static FAR const char *g_productrevision = "0101";
  ****************************************************************************/
 
 #if defined(CONFIG_DEBUG_INFO) && defined (CONFIG_DEBUG_USB)
-static void usbmsc_dumpdata(FAR const char *msg, FAR const uint8_t *buf,
-                            int buflen)
+static void usbmsc_dumpdata(const char *msg, const uint8_t *buf, int buflen)
 {
   int i;
 
@@ -218,7 +210,7 @@ static void usbmsc_dumpdata(FAR const char *msg, FAR const uint8_t *buf,
  *
  ****************************************************************************/
 
-static uint16_t usbmsc_getbe16(FAR uint8_t *buf)
+static uint16_t usbmsc_getbe16(uint8_t *buf)
 {
   return ((uint16_t)buf[0] << 8) | ((uint16_t)buf[1]);
 }
@@ -231,7 +223,7 @@ static uint16_t usbmsc_getbe16(FAR uint8_t *buf)
  *
  ****************************************************************************/
 
-static uint32_t usbmsc_getbe32(FAR uint8_t *buf)
+static uint32_t usbmsc_getbe32(uint8_t *buf)
 {
   return ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16) |
          ((uint32_t)buf[2] << 8) | ((uint32_t)buf[3]);
@@ -246,7 +238,7 @@ static uint32_t usbmsc_getbe32(FAR uint8_t *buf)
  *
  ****************************************************************************/
 
-static void usbmsc_putbe16(FAR uint8_t * buf, uint16_t val)
+static void usbmsc_putbe16(uint8_t * buf, uint16_t val)
 {
   buf[0] = val >> 8;
   buf[1] = val;
@@ -261,7 +253,7 @@ static void usbmsc_putbe16(FAR uint8_t * buf, uint16_t val)
  *
  ****************************************************************************/
 
-static void usbmsc_putbe24(FAR uint8_t *buf, uint32_t val)
+static void usbmsc_putbe24(uint8_t *buf, uint32_t val)
 {
   buf[0] = val >> 16;
   buf[1] = val >> 8;
@@ -277,7 +269,7 @@ static void usbmsc_putbe24(FAR uint8_t *buf, uint32_t val)
  *
  ****************************************************************************/
 
-static void usbmsc_putbe32(FAR uint8_t *buf, uint32_t val)
+static void usbmsc_putbe32(uint8_t *buf, uint32_t val)
 {
   buf[0] = val >> 24;
   buf[1] = val >> 16;
@@ -294,7 +286,7 @@ static void usbmsc_putbe32(FAR uint8_t *buf, uint32_t val)
  ****************************************************************************/
 
 #if 0 /* not used */
-static uint16_t usbmsc_getle16(FAR uint8_t *buf)
+static uint16_t usbmsc_getle16(uint8_t *buf)
 {
   return ((uint16_t)buf[1] << 8) | ((uint16_t)buf[0]);
 }
@@ -308,7 +300,7 @@ static uint16_t usbmsc_getle16(FAR uint8_t *buf)
  *
  ****************************************************************************/
 
-static uint32_t usbmsc_getle32(FAR uint8_t *buf)
+static uint32_t usbmsc_getle32(uint8_t *buf)
 {
   return ((uint32_t)buf[3] << 24) | ((uint32_t)buf[2] << 16) |
          ((uint32_t)buf[1] << 8) | ((uint32_t)buf[0]);
@@ -324,7 +316,7 @@ static uint32_t usbmsc_getle32(FAR uint8_t *buf)
  ****************************************************************************/
 
 #if 0 /* not used */
-static void usbmsc_putle16(FAR uint8_t *buf, uint16_t val)
+static void usbmsc_putle16(uint8_t * buf, uint16_t val)
 {
   buf[0] = val;
   buf[1] = val >> 8;
@@ -340,7 +332,7 @@ static void usbmsc_putle16(FAR uint8_t *buf, uint16_t val)
  *
  ****************************************************************************/
 
-static void usbmsc_putle32(FAR uint8_t *buf, uint32_t val)
+static void usbmsc_putle32(uint8_t *buf, uint32_t val)
 {
   buf[0] = val;
   buf[1] = val >> 8;
@@ -368,11 +360,11 @@ static int usbmsc_scsi_wait(FAR struct usbmsc_dev_s *priv)
 
   /* We must hold the SCSI lock to call this function */
 
-  DEBUGASSERT(nxmutex_is_locked(&priv->thlock));
+  DEBUGASSERT(priv->thlock.semcount < 1);
 
   /* A flag is used to prevent driving up the semaphore count.  This function
    * is called (primarily) from the SCSI work thread so we must disable
-   * interrupts momentarily to assure that test of the flag and the wait for
+   * interrupts momentarily to assure that test of the flag and the wait fo
    * the semaphore count are atomic.  Interrupts will, of course, be re-
    * enabled while we wait for the event.
    */
@@ -382,7 +374,7 @@ static int usbmsc_scsi_wait(FAR struct usbmsc_dev_s *priv)
 
   /* Relinquish our lock on the SCSI state data */
 
-  nxmutex_unlock(&priv->thlock);
+  usbmsc_scsi_unlock(priv);
 
   /* Now wait for a SCSI event to be signaled */
 
@@ -394,7 +386,7 @@ static int usbmsc_scsi_wait(FAR struct usbmsc_dev_s *priv)
 
   /* Re-acquire our lock on the SCSI state data */
 
-  ret2 = nxmutex_lock(&priv->thlock);
+  ret2 = usbmsc_scsi_lock(priv);
   leave_critical_section(flags);
   return ret >= 0 ? ret2 : ret;
 }
@@ -428,14 +420,14 @@ static inline int usbmsc_cmdrequestsense(FAR struct usbmsc_dev_s *priv,
                                          FAR uint8_t *buf)
 {
   FAR struct scsicmd_requestsense_s *request =
-      (FAR struct scsicmd_requestsense_s *)priv->cdb;
+             (FAR struct scsicmd_requestsense_s *)priv->cdb;
   FAR struct scsiresp_fixedsensedata_s *response =
-      (FAR struct scsiresp_fixedsensedata_s *)buf;
+             (FAR struct scsiresp_fixedsensedata_s *)buf;
   FAR struct usbmsc_lun_s *lun;
   uint32_t sd;
   uint32_t sdinfo;
   uint8_t  cdblen;
-  int ret;
+  int      ret;
 
   /* Extract the host allocation length */
 
@@ -450,7 +442,7 @@ static inline int usbmsc_cmdrequestsense(FAR struct usbmsc_dev_s *priv,
     {
       /* Try MS-Windows REQUEST SENSE with cbw->cdblen == 12 */
 
-      cdblen = SCSICMD_REQUESTSENSE_MSSIZEOF;
+      cdblen  = SCSICMD_REQUESTSENSE_MSSIZEOF;
     }
 
   ret = usbmsc_setupcmd(priv, cdblen,
@@ -525,9 +517,7 @@ static inline int usbmsc_cmdread6(FAR struct usbmsc_dev_s *priv)
     {
       lun = priv->lun;
 
-      /* Get the Logical Block Address (LBA) from cdb[] as the starting
-       * sector
-       */
+      /* Get the Logical Block Address (LBA) from cdb[] as the starting sector */
 
       priv->sector =
         (uint32_t)(read6->mslba & SCSICMD_READ6_MSLBAMASK) << 16 |
@@ -591,9 +581,7 @@ static inline int usbmsc_cmdwrite6(FAR struct usbmsc_dev_s *priv)
     {
       lun = priv->lun;
 
-      /* Get the Logical Block Address (LBA) from cdb[] as the starting
-       * sector
-       */
+      /* Get the Logical Block Address (LBA) from cdb[] as the starting sector */
 
       priv->sector =
         (uint32_t)(write6->mslba & SCSICMD_WRITE6_MSLBAMASK) << 16 |
@@ -669,14 +657,12 @@ static inline int usbmsc_cmdinquiry(FAR struct usbmsc_dev_s *priv,
           response->qualtype = SCSIRESP_INQUIRYPQ_NOTCAPABLE |
                                SCSIRESP_INQUIRYPD_UNKNOWN;
         }
-#ifndef CONFIG_USBMSC_NOT_STALL_BULKEP
       else if ((inquiry->flags != 0) || (inquiry->pagecode != 0))
         {
           usbtrace(TRACE_CLSERROR(USBMSC_TRACEERR_INQUIRYFLAGS), 0);
           priv->lun->sd = SCSI_KCQIR_INVALIDFIELDINCBA;
           ret = -EINVAL;
         }
-#endif
       else
         {
           memset(response, 0, SCSIRESP_INQUIRY_SIZEOF);
@@ -709,13 +695,13 @@ static inline int usbmsc_cmdinquiry(FAR struct usbmsc_dev_s *priv,
 
           memcpy(response->productid, g_mscproductstr, len);
 
-          len = strlen(g_productrevision);
+          len = strlen(g_mscserialstr);
           if (len > 4)
             {
               len = 4;
             }
 
-          memcpy(response->revision, g_productrevision, len);
+          memcpy(response->revision, g_mscserialstr, len);
         }
     }
 
@@ -733,7 +719,7 @@ static inline int usbmsc_cmdinquiry(FAR struct usbmsc_dev_s *priv,
 static inline int usbmsc_cmdmodeselect6(FAR struct usbmsc_dev_s *priv)
 {
   FAR struct scsicmd_modeselect6_s *modeselect =
-      (FAR struct scsicmd_modeselect6_s *)priv->cdb;
+             (FAR struct scsicmd_modeselect6_s *)priv->cdb;
 
   priv->u.alloclen = modeselect->plen;
   usbmsc_setupcmd(priv, SCSICMD_MODESELECT6_SIZEOF,
@@ -754,10 +740,10 @@ static inline int usbmsc_cmdmodeselect6(FAR struct usbmsc_dev_s *priv)
  ****************************************************************************/
 
 static int usbmsc_modepage(FAR struct usbmsc_dev_s *priv, FAR uint8_t *buf,
-                           uint8_t pcpgcode, FAR int *mdlen)
+                           uint8_t pcpgcode, int *mdlen)
 {
   FAR struct scsiresp_cachingmodepage_s *cmp =
-      (FAR struct scsiresp_cachingmodepage_s *)buf;
+             (FAR struct scsiresp_cachingmodepage_s *)buf;
 
   /* Saving parms not supported */
 
@@ -827,12 +813,10 @@ static int inline usbmsc_cmdmodesense6(FAR struct usbmsc_dev_s *priv,
                                        FAR uint8_t *buf)
 {
   FAR struct scsicmd_modesense6_s *modesense =
-      (FAR struct scsicmd_modesense6_s *)priv->cdb;
+             (FAR struct scsicmd_modesense6_s *)priv->cdb;
   FAR struct scsiresp_modeparameterhdr6_s *mph =
-      (FAR struct scsiresp_modeparameterhdr6_s *)buf;
-#ifndef CONFIG_USBMSC_NOT_STALL_BULKEP
+             (FAR struct scsiresp_modeparameterhdr6_s *)buf;
   int mdlen;
-#endif
   int ret;
 
   priv->u.alloclen = modesense->alloclen;
@@ -840,11 +824,6 @@ static int inline usbmsc_cmdmodesense6(FAR struct usbmsc_dev_s *priv,
                         USBMSC_FLAGS_DIRDEVICE2HOST);
   if (ret == OK)
     {
-#ifdef CONFIG_USBMSC_NOT_STALL_BULKEP
-      priv->residue = priv->cbwlen = priv->nreqbytes =
-        SCSIRESP_MODEPARAMETERHDR6_SIZEOF;
-#endif
-
       if ((modesense->flags & ~SCSICMD_MODESENSE6_DBD) != 0 ||
            modesense->subpgcode != 0)
         {
@@ -866,7 +845,6 @@ static int inline usbmsc_cmdmodesense6(FAR struct usbmsc_dev_s *priv,
             (priv->lun->readonly ? SCSIRESP_MODEPARMHDR_DAPARM_WP : 0x00);
           mph->bdlen = 0; /* Block descriptor length */
 
-#ifndef CONFIG_USBMSC_NOT_STALL_BULKEP
           /* There are no block descriptors, only the following mode page: */
 
           ret = usbmsc_modepage(priv,
@@ -874,16 +852,13 @@ static int inline usbmsc_cmdmodesense6(FAR struct usbmsc_dev_s *priv,
                                 modesense->pcpgcode, &mdlen);
           if (ret == OK)
             {
-              /* Store the mode data length and return the total message
-               * size
-               */
+              /* Store the mode data length and return the total message size */
 
               mph->mdlen      =
                 mdlen + SCSIRESP_MODEPARAMETERHDR6_SIZEOF - 1;
               priv->nreqbytes =
                 mdlen + SCSIRESP_MODEPARAMETERHDR6_SIZEOF;
             }
-#endif
         }
     }
 
@@ -934,7 +909,7 @@ static inline int
 {
 #ifdef CONFIG_USBMSC_REMOVABLE
   FAR struct scsicmd_preventmediumremoval_s *pmr =
-      (FAR struct scsicmd_preventmediumremoval_s *)priv->cdb;
+             (FAR struct scsicmd_preventmediumremoval_s *)priv->cdb;
 #endif
   FAR struct usbmsc_lun_s *lun;
   int ret;
@@ -979,7 +954,7 @@ static inline int usbmsc_cmdreadformatcapacity(FAR struct usbmsc_dev_s *priv,
                                                FAR uint8_t *buf)
 {
   FAR struct scsicmd_readformatcapcacities_s *rfc =
-      (FAR struct scsicmd_readformatcapcacities_s *)priv->cdb;
+             (FAR struct scsicmd_readformatcapcacities_s *)priv->cdb;
   FAR struct scsiresp_readformatcapacities_s *hdr;
   FAR struct usbmsc_lun_s *lun;
   int ret;
@@ -1018,9 +993,9 @@ static int inline usbmsc_cmdreadcapacity10(FAR struct usbmsc_dev_s *priv,
                                            FAR uint8_t *buf)
 {
   FAR struct scsicmd_readcapacity10_s *rcc =
-      (FAR struct scsicmd_readcapacity10_s *)priv->cdb;
+             (FAR struct scsicmd_readcapacity10_s *)priv->cdb;
   FAR struct scsiresp_readcapacity10_s *rcr =
-      (FAR struct scsiresp_readcapacity10_s *)buf;
+             (FAR struct scsiresp_readcapacity10_s *)buf;
   FAR struct usbmsc_lun_s *lun;
   uint32_t lba;
   int ret;
@@ -1063,8 +1038,7 @@ static int inline usbmsc_cmdreadcapacity10(FAR struct usbmsc_dev_s *priv,
 
 static inline int usbmsc_cmdread10(FAR struct usbmsc_dev_s *priv)
 {
-  FAR struct scsicmd_read10_s *read10 =
-      (FAR struct scsicmd_read10_s *)priv->cdb;
+  struct scsicmd_read10_s *read10 = (struct scsicmd_read10_s *)priv->cdb;
   FAR struct usbmsc_lun_s *lun;
   int ret;
 
@@ -1075,9 +1049,7 @@ static inline int usbmsc_cmdread10(FAR struct usbmsc_dev_s *priv)
     {
       lun = priv->lun;
 
-      /* Get the Logical Block Address (LBA) from cdb[] as the starting
-       * sector
-       */
+      /* Get the Logical Block Address (LBA) from cdb[] as the starting sector */
 
       priv->sector = usbmsc_getbe32(read10->lba);
 
@@ -1132,8 +1104,7 @@ static inline int usbmsc_cmdread10(FAR struct usbmsc_dev_s *priv)
 
 static inline int usbmsc_cmdwrite10(FAR struct usbmsc_dev_s *priv)
 {
-  FAR struct scsicmd_write10_s *write10 =
-      (FAR struct scsicmd_write10_s *)priv->cdb;
+  struct scsicmd_write10_s *write10 = (struct scsicmd_write10_s *)priv->cdb;
   FAR struct usbmsc_lun_s *lun;
   int ret;
 
@@ -1144,9 +1115,7 @@ static inline int usbmsc_cmdwrite10(FAR struct usbmsc_dev_s *priv)
     {
       lun = priv->lun;
 
-      /* Get the Logical Block Address (LBA) from cdb[] as the starting
-       * sector
-       */
+      /* Get the Logical Block Address (LBA) from cdb[] as the starting sector */
 
       priv->sector = usbmsc_getbe32(write10->lba);
 
@@ -1214,12 +1183,12 @@ static inline int usbmsc_cmdverify10(FAR struct usbmsc_dev_s *priv)
   FAR struct scsicmd_verify10_s *verf =
     (FAR struct scsicmd_verify10_s *)priv->cdb;
   FAR struct usbmsc_lun_s *lun;
-  uint32_t lba;
-  uint16_t blocks;
-  size_t sector;
+  uint32_t  lba;
+  uint16_t  blocks;
+  size_t  sector;
   ssize_t nread;
-  int ret;
-  int i;
+  int     ret;
+  int     i;
 
   priv->u.alloclen = 0;
   ret = usbmsc_setupcmd(priv, SCSICMD_VERIFY10_SIZEOF, USBMSC_FLAGS_DIRNONE);
@@ -1301,9 +1270,7 @@ static inline int usbmsc_cmdsynchronizecache10(FAR struct usbmsc_dev_s *priv)
 
   priv->u.alloclen = 0;
 
-  /* Verify that we have the LUN structure and the block driver has been
-   * bound
-   */
+  /* Verify that we have the LUN structure and the block driver has been bound */
 
   if (!priv->lun->inode)
     {
@@ -1331,7 +1298,7 @@ static inline int usbmsc_cmdsynchronizecache10(FAR struct usbmsc_dev_s *priv)
 static inline int usbmsc_cmdmodeselect10(FAR struct usbmsc_dev_s *priv)
 {
   FAR struct scsicmd_modeselect10_s *modeselect =
-      (FAR struct scsicmd_modeselect10_s *)priv->cdb;
+             (FAR struct scsicmd_modeselect10_s *)priv->cdb;
 
   priv->u.alloclen = usbmsc_getbe16(modeselect->parmlen);
   usbmsc_setupcmd(priv, SCSICMD_MODESELECT10_SIZEOF,
@@ -1355,9 +1322,9 @@ static int inline usbmsc_cmdmodesense10(FAR struct usbmsc_dev_s *priv,
                                         FAR uint8_t *buf)
 {
   FAR struct scsicmd_modesense10_s *modesense =
-      (FAR struct scsicmd_modesense10_s *)priv->cdb;
+             (FAR struct scsicmd_modesense10_s *)priv->cdb;
   FAR struct scsiresp_modeparameterhdr10_s *mph =
-      (FAR struct scsiresp_modeparameterhdr10_s *)buf;
+             (FAR struct scsiresp_modeparameterhdr10_s *)buf;
   int mdlen;
   int ret;
 
@@ -1393,9 +1360,7 @@ static int inline usbmsc_cmdmodesense10(FAR struct usbmsc_dev_s *priv,
                                 modesense->pcpgcode, &mdlen);
           if (ret == OK)
             {
-              /* Store the mode data length and return the total message
-               * size
-               */
+              /* Store the mode data length and return the total message size */
 
               usbmsc_putbe16(mph->mdlen, mdlen - 2);
               priv->nreqbytes = mdlen + SCSIRESP_MODEPARAMETERHDR10_SIZEOF;
@@ -1416,8 +1381,7 @@ static int inline usbmsc_cmdmodesense10(FAR struct usbmsc_dev_s *priv,
 
 static inline int usbmsc_cmdread12(FAR struct usbmsc_dev_s *priv)
 {
-  FAR struct scsicmd_read12_s *read12 =
-      (FAR struct scsicmd_read12_s *)priv->cdb;
+  struct scsicmd_read12_s *read12 = (struct scsicmd_read12_s *)priv->cdb;
   FAR struct usbmsc_lun_s *lun;
   int ret;
 
@@ -1428,9 +1392,7 @@ static inline int usbmsc_cmdread12(FAR struct usbmsc_dev_s *priv)
     {
       lun = priv->lun;
 
-      /* Get the Logical Block Address (LBA) from cdb[] as the starting
-       * sector
-       */
+      /* Get the Logical Block Address (LBA) from cdb[] as the starting sector */
 
       priv->sector = usbmsc_getbe32(read12->lba);
 
@@ -1485,8 +1447,7 @@ static inline int usbmsc_cmdread12(FAR struct usbmsc_dev_s *priv)
 
 static inline int usbmsc_cmdwrite12(FAR struct usbmsc_dev_s *priv)
 {
-  FAR struct scsicmd_write12_s *write12 =
-      (FAR struct scsicmd_write12_s *)priv->cdb;
+  struct scsicmd_write12_s *write12 = (struct scsicmd_write12_s *)priv->cdb;
   FAR struct usbmsc_lun_s *lun;
   int ret;
 
@@ -1497,9 +1458,7 @@ static inline int usbmsc_cmdwrite12(FAR struct usbmsc_dev_s *priv)
     {
       lun = priv->lun;
 
-      /* Get the Logical Block Address (LBA) from cdb[] as the starting
-       * sector
-       */
+      /* Get the Logical Block Address (LBA) from cdb[] as the starting sector */
 
       priv->sector = usbmsc_getbe32(write12->lba);
 
@@ -1614,9 +1573,7 @@ static int inline usbmsc_setupcmd(FAR struct usbmsc_dev_s *priv,
     }
   else if (lun)
     {
-      /* Block transfer: Calculate the total size of all sectors to be
-       * transferred
-       */
+      /* Block transfer: Calculate the total size of all sectors to be transferred */
 
       datlen = priv->u.alloclen * lun->sectorsize;
     }
@@ -1933,7 +1890,7 @@ static int usbmsc_cmdparsestate(FAR struct usbmsc_dev_s *priv)
 
   /* Get exclusive access to the block driver */
 
-  ret = nxmutex_lock(&priv->thlock);
+  ret = usbmsc_scsi_lock(priv);
   if (ret < 0)
     {
       return ret;
@@ -2037,7 +1994,7 @@ static int usbmsc_cmdparsestate(FAR struct usbmsc_dev_s *priv)
      * case SCSI_CMD_WRITEANDVERIFY:           0x2e Optional
      */
 
-    case SCSI_CMD_VERIFY10:                 /* 0x2f Opt, except Windows */
+    case SCSI_CMD_VERIFY10:                 /* 0x2f Opt, excpt Windows */
       ret = usbmsc_cmdverify10(priv);
       break;
 
@@ -2140,7 +2097,7 @@ static int usbmsc_cmdparsestate(FAR struct usbmsc_dev_s *priv)
       break;
     }
 
-  nxmutex_unlock(&priv->thlock);
+  usbmsc_scsi_unlock(priv);
 
   /* Is a response required?  (Not for read6/10/12 and write6/10/12). */
 
@@ -2243,8 +2200,8 @@ static int usbmsc_cmdreadstate(FAR struct usbmsc_dev_s *priv)
   FAR struct usbdev_req_s *req;
   irqstate_t flags;
   ssize_t nread;
-  FAR uint8_t *src;
-  FAR uint8_t *dest;
+  uint8_t *src;
+  uint8_t *dest;
   int nbytes;
   int ret;
 
@@ -2309,9 +2266,7 @@ static int usbmsc_cmdreadstate(FAR struct usbmsc_dev_s *priv)
       nbytes = MIN(priv->epbulkin->maxpacket - priv->nreqbytes,
                    priv->nsectbytes);
 
-      /* Copy the data from the sector buffer to the USB request and update
-       * counts
-       */
+      /* Copy the data from the sector buffer to the USB request and update counts */
 
       memcpy(dest, src, nbytes);
       priv->nreqbytes  += nbytes;
@@ -2399,8 +2354,8 @@ static int usbmsc_cmdwritestate(FAR struct usbmsc_dev_s *priv)
   FAR struct usbdev_req_s *req;
   ssize_t nwritten;
   uint16_t xfrd;
-  FAR uint8_t *src;
-  FAR uint8_t *dest;
+  uint8_t *src;
+  uint8_t *dest;
   int nbytes;
   int ret;
 
@@ -2445,67 +2400,22 @@ static int usbmsc_cmdwritestate(FAR struct usbmsc_dev_s *priv)
 
       while (priv->nreqbytes > 0 && priv->u.xfrlen > 0)
         {
-          /* Copy the data received in the read request into the sector I/O
-           * buffer
-           */
+          /* Copy the data received in the read request into the sector I/O buffer */
 
           src  = &req->buf[xfrd - priv->nreqbytes];
           dest = &priv->iobuffer[priv->nsectbytes];
 
-#ifdef CONFIG_USBMSC_WRMULTIPLE
-          /* nbytes may end up being zero, after which the loop no longer
-           * proceeds but will be stuck forever.  Make sure nbytes isn't
-           * zero.
-           */
-
-          if (lun->sectorsize > priv->nsectbytes)
-            {
-              nbytes = MIN(lun->sectorsize - priv->nsectbytes,
-                           priv->nreqbytes);
-            }
-          else
-            {
-              nbytes = priv->nreqbytes;
-            }
-#else
           nbytes = MIN(lun->sectorsize - priv->nsectbytes, priv->nreqbytes);
-#endif
-          /* Copy the data from the sector buffer to the USB request and
-           * update counts
-           */
+
+          /* Copy the data from the sector buffer to the USB request and update counts */
 
           memcpy(dest, src, nbytes);
           priv->nsectbytes += nbytes;
           priv->nreqbytes  -= nbytes;
 
-#ifdef CONFIG_USBMSC_WRMULTIPLE
-          uint32_t nrbufs = MIN(priv->u.xfrlen, CONFIG_USBMSC_NWRREQS);
-
           /* Is the I/O buffer full? */
 
-          if ((priv->nsectbytes >= lun->sectorsize * priv->u.xfrlen) ||
-              (priv->nsectbytes >= lun->sectorsize * CONFIG_USBMSC_NWRREQS))
-            {
-              /* Yes.. Write next sectors */
-
-              nwritten = USBMSC_DRVR_WRITE(lun, priv->iobuffer,
-                                           priv->sector, nrbufs);
-              if (nwritten < 0)
-                {
-                  usbtrace(TRACE_CLSERROR(USBMSC_TRACEERR_CMDWRITEWRITEFAIL),
-                           -nwritten);
-                  lun->sd     = SCSI_KCQME_WRITEFAULTAUTOREALLOCFAILED;
-                  lun->sdinfo = priv->sector;
-                  goto errout;
-                }
-
-              priv->nsectbytes = 0;
-              priv->residue   -= lun->sectorsize * nrbufs;
-              priv->u.xfrlen  -= nrbufs;
-              priv->sector    += nrbufs;
-            }
-#else
-          if ((priv->nsectbytes >= lun->sectorsize))
+          if (priv->nsectbytes >= lun->sectorsize)
             {
               /* Yes.. Write the next sector */
 
@@ -2525,7 +2435,6 @@ static int usbmsc_cmdwritestate(FAR struct usbmsc_dev_s *priv)
               priv->u.xfrlen--;
               priv->sector++;
             }
-#endif
         }
 
       /* In either case, we are finished with this read request and can
@@ -2647,7 +2556,6 @@ static int usbmsc_cmdfinishstate(FAR struct usbmsc_dev_s *priv)
 
           if (priv->residue > 0)
             {
-#ifndef CONFIG_USBMSC_NOT_STALL_BULKEP
               usbtrace(TRACE_CLSERROR(USBMSC_TRACEERR_CMDFINISHRESIDUE),
                        (uint16_t)priv->residue);
 
@@ -2665,9 +2573,6 @@ static int usbmsc_cmdfinishstate(FAR struct usbmsc_dev_s *priv)
               nxsig_usleep (100000);
 #else
               EP_STALL(priv->epbulkin);
-#endif
-#else
-              priv->residue = 0;
 #endif
             }
         }
@@ -2834,7 +2739,7 @@ static int usbmsc_cmdstatusstate(FAR struct usbmsc_dev_s *priv)
  *
  ****************************************************************************/
 
-int usbmsc_scsi_main(int argc, FAR char *argv[])
+int usbmsc_scsi_main(int argc, char *argv[])
 {
   FAR struct usbmsc_dev_s *priv;
   irqstate_t flags;
@@ -2853,7 +2758,7 @@ int usbmsc_scsi_main(int argc, FAR char *argv[])
 
   /* Get exclusive access to SCSI state data */
 
-  ret = nxmutex_lock(&priv->thlock);
+  ret = usbmsc_scsi_lock(priv);
   if (ret < 0)
     {
       return EXIT_FAILURE;
@@ -2875,7 +2780,7 @@ int usbmsc_scsi_main(int argc, FAR char *argv[])
         {
           /* The thread has been canceled */
 
-          nxmutex_unlock(&priv->thlock);
+          usbmsc_scsi_unlock(priv);
           return EXIT_FAILURE;
         }
     }
@@ -2887,7 +2792,7 @@ int usbmsc_scsi_main(int argc, FAR char *argv[])
   priv->thstate    = USBMSC_STATE_IDLE;
   eventset         = priv->theventset;
   priv->theventset = USBMSC_EVENT_NOEVENTS;
-  nxmutex_unlock(&priv->thlock);
+  usbmsc_scsi_unlock(priv);
 
   /* Then loop until we are asked to terminate */
 
@@ -2899,7 +2804,7 @@ int usbmsc_scsi_main(int argc, FAR char *argv[])
        * handling.
        */
 
-      ret = nxmutex_lock(&priv->thlock);
+      ret = usbmsc_scsi_lock(priv);
       if (ret < 0)
         {
           return EXIT_FAILURE;
@@ -2914,7 +2819,7 @@ int usbmsc_scsi_main(int argc, FAR char *argv[])
               /* The thread has been canceled */
 
               leave_critical_section(flags);
-              nxmutex_unlock(&priv->thlock);
+              usbmsc_scsi_unlock(priv);
               return EXIT_FAILURE;
             }
         }
@@ -2926,7 +2831,7 @@ int usbmsc_scsi_main(int argc, FAR char *argv[])
 
       eventset         = priv->theventset;
       priv->theventset = USBMSC_EVENT_NOEVENTS;
-      nxmutex_unlock(&priv->thlock);
+      usbmsc_scsi_unlock(priv);
 
       /* Were we awakened by some event that requires immediate action?
        *
@@ -2963,9 +2868,7 @@ int usbmsc_scsi_main(int argc, FAR char *argv[])
               usbmsc_setconfig(priv, priv->thvalue);
             }
 
-          /* These events required that we send a deferred EP0 setup
-           * response
-           */
+          /* These events required that we send a deferred EP0 setup response */
 
           if ((eventset & (USBMSC_EVENT_RESET | USBMSC_EVENT_CFGCHANGE |
                            USBMSC_EVENT_IFCHANGE)) != 0)
@@ -2973,9 +2876,7 @@ int usbmsc_scsi_main(int argc, FAR char *argv[])
               usbmsc_deferredresponse(priv, false);
             }
 
-          /* For all of these events... terminate any transactions in
-           * progress
-           */
+          /* For all of these events... terminate any transactions in progress */
 
           priv->thstate = USBMSC_STATE_IDLE;
         }
@@ -3070,4 +2971,17 @@ void usbmsc_scsi_signal(FAR struct usbmsc_dev_s *priv)
     }
 
   leave_critical_section(flags);
+}
+
+/****************************************************************************
+ * Name: usbmsc_scsi_lock
+ *
+ * Description:
+ *   Get exclusive access to SCSI state data.
+ *
+ ****************************************************************************/
+
+int usbmsc_scsi_lock(FAR struct usbmsc_dev_s *priv)
+{
+  return nxsem_wait_uninterruptible(&priv->thlock);
 }

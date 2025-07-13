@@ -1,53 +1,61 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/a1x/hardware/a10_piocfg.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_A1X_HARDWARE_A10_PIOCFG_H
 #define __ARCH_ARM_SRC_A1X_HARDWARE_A10_PIOCFG_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/a1x_memorymap.h"
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
-
-/* PIO pin definitions ******************************************************/
-
+ ************************************************************************************/
+/* PIO pin definitions *************************************************************/
 /* Alternate Pin Functions.
  *
- * Alternative pin selections are provided with a numeric suffix like _1, _2,
- * etc. Drivers, however, will use the pin selection without the numeric
- * suffix.
- * Additional definitions are required in the board.h file.
- */
+ * Alternative pin selections are provided with a numeric suffix like _1, _2, etc.
+ * Drivers, however, will use the pin selection without the numeric suffix.
+ * Additional definitions are required in the board.h file.  */
 
-/* WARNING!!! WARNING!!! WARNING!!! WARNING!!! WARNING!!! WARNING!!!
- * Additional effort is required to select specific PIO options
- * (such as pull-up or-down).
- * Just the basics are defined for most pins in this file at the present
+/* WARNING!!! WARNING!!! WARNING!!! WARNING!!! WARNING!!! WARNING!!! WARNING!!!
+ * Additional effort is required to select specific PIO options (such as pull-up or
+ * -down).  Just the basics are defined for most pins in this file at the present
  * time.
  */
 
@@ -99,68 +107,68 @@
 
 /* Camera Sensor Interface (CSI) */
 
-#define PIO_CSI0_CK       (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN1)
-#define PIO_CSI0_D0       (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN4)
-#define PIO_CSI0_D1       (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN5)
-#define PIO_CSI0_D2       (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN6)
-#define PIO_CSI0_D3       (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN7)
-#define PIO_CSI0_D4       (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN8)
-#define PIO_CSI0_D5       (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN9)
-#define PIO_CSI0_D6       (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN10)
-#define PIO_CSI0_D7       (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN11)
-#define PIO_CSI0_D8       (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN4)
-#define PIO_CSI0_D9       (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN5)
-#define PIO_CSI0_D10      (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN6)
-#define PIO_CSI0_D11      (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN7)
-#define PIO_CSI0_D12      (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN8)
-#define PIO_CSI0_D13      (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN9)
-#define PIO_CSI0_D14      (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN10)
-#define PIO_CSI0_D15      (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN11)
-#define PIO_CSI0_HSYNC    (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN2)
-#define PIO_CSI0_PCK      (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN0)
-#define PIO_CSI0_VSYNC    (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN3)
+#define PIO_CSI0_CK     (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN1)
+#define PIO_CSI0_D0     (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN4)
+#define PIO_CSI0_D1     (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN5)
+#define PIO_CSI0_D2     (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN6)
+#define PIO_CSI0_D3     (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN7)
+#define PIO_CSI0_D4     (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN8)
+#define PIO_CSI0_D5     (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN9)
+#define PIO_CSI0_D6     (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN10)
+#define PIO_CSI0_D7     (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN11)
+#define PIO_CSI0_D8     (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN4)
+#define PIO_CSI0_D9     (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN5)
+#define PIO_CSI0_D10    (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN6)
+#define PIO_CSI0_D11    (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN7)
+#define PIO_CSI0_D12    (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN8)
+#define PIO_CSI0_D13    (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN9)
+#define PIO_CSI0_D14    (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN10)
+#define PIO_CSI0_D15    (PIO_PERIPH5 | PIO_PORT_PIOG | PIO_PIN11)
+#define PIO_CSI0_HSYNC  (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN2)
+#define PIO_CSI0_PCK    (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN0)
+#define PIO_CSI0_VSYNC  (PIO_PERIPH3 | PIO_PORT_PIOE | PIO_PIN3)
 
-#define PIO_CSI1_CK       (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN1)
-#define PIO_CSI1_D0_1     (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN4)
-#define PIO_CSI1_D0_2     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN0)
-#define PIO_CSI1_D1_1     (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN5)
-#define PIO_CSI1_D1_2     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN1)
-#define PIO_CSI1_D2_1     (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN6)
-#define PIO_CSI1_D2_2     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN2)
-#define PIO_CSI1_D3_1     (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN7)
-#define PIO_CSI1_D3_2     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN3)
-#define PIO_CSI1_D4_1     (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN8)
-#define PIO_CSI1_D4_2     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN4)
-#define PIO_CSI1_D5_1     (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN9)
-#define PIO_CSI1_D5_2     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN5)
-#define PIO_CSI1_D6_1     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN6)
-#define PIO_CSI1_D6_2     (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN10)
-#define PIO_CSI1_D7_1     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN7)
-#define PIO_CSI1_D7_2     (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN11)
-#define PIO_CSI1_D8       (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN8)
-#define PIO_CSI1_D9       (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN9)
-#define PIO_CSI1_D10      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN10)
-#define PIO_CSI1_D11      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN11)
-#define PIO_CSI1_D12      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN12)
-#define PIO_CSI1_D13      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN13)
-#define PIO_CSI1_D14      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN14)
-#define PIO_CSI1_D15      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN15)
-#define PIO_CSI1_D16      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN16)
-#define PIO_CSI1_D17      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN17)
-#define PIO_CSI1_D18      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN18)
-#define PIO_CSI1_D19      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN19)
-#define PIO_CSI1_D20      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN20)
-#define PIO_CSI1_D21      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN21)
-#define PIO_CSI1_D22      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN22)
-#define PIO_CSI1_D23      (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN23)
-#define PIO_CSI1_FIELD    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN25)
-#define PIO_CSI1_HSYNC_1  (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN2)
-#define PIO_CSI1_HSYNC_2  (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN26)
-#define PIO_CSI1_MCLK     (PIO_PERIPH3 | PIO_PORT_PIOD | PIO_PIN20)
-#define PIO_CSI1_PCK      (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN0)
-#define PIO_CSI1_PCLK     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN24)
-#define PIO_CSI1_VSYNC_1  (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN3)
-#define PIO_CSI1_VSYNC_2  (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN27)
+#define PIO_CSI1_CK     (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN1)
+#define PIO_CSI1_D0_1   (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN4)
+#define PIO_CSI1_D0_2   (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN0)
+#define PIO_CSI1_D1_1   (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN5)
+#define PIO_CSI1_D1_2   (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN1)
+#define PIO_CSI1_D2_1   (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN6)
+#define PIO_CSI1_D2_2   (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN2)
+#define PIO_CSI1_D3_1   (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN7)
+#define PIO_CSI1_D3_2   (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN3)
+#define PIO_CSI1_D4_1   (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN8)
+#define PIO_CSI1_D4_2   (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN4)
+#define PIO_CSI1_D5_1   (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN9)
+#define PIO_CSI1_D5_2   (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN5)
+#define PIO_CSI1_D6_1   (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN6)
+#define PIO_CSI1_D6_2   (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN10)
+#define PIO_CSI1_D7_1   (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN7)
+#define PIO_CSI1_D7_2   (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN11)
+#define PIO_CSI1_D8     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN8)
+#define PIO_CSI1_D9     (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN9)
+#define PIO_CSI1_D10    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN10)
+#define PIO_CSI1_D11    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN11)
+#define PIO_CSI1_D12    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN12)
+#define PIO_CSI1_D13    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN13)
+#define PIO_CSI1_D14    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN14)
+#define PIO_CSI1_D15    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN15)
+#define PIO_CSI1_D16    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN16)
+#define PIO_CSI1_D17    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN17)
+#define PIO_CSI1_D18    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN18)
+#define PIO_CSI1_D19    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN19)
+#define PIO_CSI1_D20    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN20)
+#define PIO_CSI1_D21    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN21)
+#define PIO_CSI1_D22    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN22)
+#define PIO_CSI1_D23    (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN23)
+#define PIO_CSI1_FIELD  (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN25)
+#define PIO_CSI1_HSYNC  (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN2)
+#define PIO_CSI1_HSYNC  (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN26)
+#define PIO_CSI1_MCLK   (PIO_PERIPH3 | PIO_PORT_PIOD | PIO_PIN20)
+#define PIO_CSI1_PCK    (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN0)
+#define PIO_CSI1_PCLK   (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN24)
+#define PIO_CSI1_VSYNC  (PIO_PERIPH3 | PIO_PORT_PIOG | PIO_PIN3)
+#define PIO_CSI1_VSYNC  (PIO_PERIPH7 | PIO_PORT_PIOH | PIO_PIN27)
 
 /* Ethernet MAC */
 
@@ -416,10 +424,10 @@
 #define PIO_SDC0_D2     (PIO_PERIPH2 | PIO_PORT_PIOF | PIO_PIN5)
 #define PIO_SDC0_D3     (PIO_PERIPH2 | PIO_PORT_PIOF | PIO_PIN4)
 
-#define PIO_SDC1_CLK_1  (PIO_PERIPH4 | PIO_PORT_PIOG | PIO_PIN1)
-#define PIO_SDC1_CLK_2  (PIO_PERIPH5 | PIO_PORT_PIOH | PIO_PIN23)
-#define PIO_SDC1_CMD_1  (PIO_PERIPH4 | PIO_PORT_PIOG | PIO_PIN0)
-#define PIO_SDC1_CMD_2  (PIO_PERIPH5 | PIO_PORT_PIOH | PIO_PIN22)
+#define PIO_SDC1_CLK    (PIO_PERIPH4 | PIO_PORT_PIOG | PIO_PIN1)
+#define PIO_SDC1_CLK    (PIO_PERIPH5 | PIO_PORT_PIOH | PIO_PIN23)
+#define PIO_SDC1_CMD    (PIO_PERIPH4 | PIO_PORT_PIOG | PIO_PIN0)
+#define PIO_SDC1_CMD    (PIO_PERIPH5 | PIO_PORT_PIOH | PIO_PIN22)
 #define PIO_SDC1_D0_1   (PIO_PERIPH4 | PIO_PORT_PIOG | PIO_PIN2)
 #define PIO_SDC1_D0_2   (PIO_PERIPH5 | PIO_PORT_PIOH | PIO_PIN24)
 #define PIO_SDC1_D1_1   (PIO_PERIPH4 | PIO_PORT_PIOG | PIO_PIN3)

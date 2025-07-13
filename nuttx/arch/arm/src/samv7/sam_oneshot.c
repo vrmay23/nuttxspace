@@ -1,10 +1,19 @@
 /****************************************************************************
  * arch/arm/src/samv7/sam_oneshot.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2011 Atmel Corporation
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * References:
+ *
+ *   SAMV71 Series Data Sheet
+ *   NuttX SAMA5 one-shot timer driver
+ *   Atmel NoOS sample code.
+ *
+ * The Atmel sample code has a BSD compatible license that requires this
+ * copyright notice:
+ *
+ *   Copyright (c) 2011, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,13 +43,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
-/* References:
- *
- *   SAMV71 Series Data Sheet
- *   NuttX SAMA5 one-shot timer driver
- *   Atmel NoOS sample code.
- */
 
 /****************************************************************************
  * Included Files
@@ -98,7 +100,7 @@ static void sam_oneshot_handler(TC_HANDLE tch, void *arg, uint32_t sr)
    * Disable the TC now and disable any further interrupts.
    */
 
-  sam_tc_detach(oneshot->tch);
+  sam_tc_attach(oneshot->tch, NULL, NULL, 0);
   sam_tc_stop(oneshot->tch);
 
   /* The timer is no longer running */
@@ -155,7 +157,7 @@ int sam_oneshot_initialize(struct sam_oneshot_s *oneshot, int chan,
 
   /* Get the TC frequency the corresponds to the requested resolution */
 
-  frequency = USEC_PER_SEC / resolution;
+  frequency = USEC_PER_SEC / (uint32_t)resolution;
 
   /* The pre-calculate values to use when we start the timer */
 
@@ -243,8 +245,7 @@ int sam_oneshot_initialize(struct sam_oneshot_s *oneshot, int chan,
 int sam_oneshot_max_delay(struct sam_oneshot_s *oneshot, uint64_t *usec)
 {
   DEBUGASSERT(oneshot != NULL && usec != NULL);
-  *usec = (0xffffull * USEC_PER_SEC) /
-          (uint64_t)sam_tc_divfreq(oneshot->tch);
+  *usec = (0xffffull * USEC_PER_SEC) / (uint64_t)sam_tc_divfreq(oneshot->tch);
   return OK;
 }
 
@@ -278,8 +279,7 @@ int sam_oneshot_start(struct sam_oneshot_s *oneshot,
   irqstate_t flags;
 
   tmrinfo("handler=%p arg=%p, ts=(%lu, %lu)\n",
-          handler, arg, (unsigned long)ts->tv_sec,
-          (unsigned long)ts->tv_nsec);
+          handler, arg, (unsigned long)ts->tv_sec, (unsigned long)ts->tv_nsec);
   DEBUGASSERT(oneshot && handler && ts);
 
   /* Was the oneshot already running? */
@@ -300,8 +300,7 @@ int sam_oneshot_start(struct sam_oneshot_s *oneshot,
 
   /* Express the delay in microseconds */
 
-  usec = (uint64_t)ts->tv_sec * USEC_PER_SEC +
-         (uint64_t)(ts->tv_nsec / NSEC_PER_USEC);
+  usec = (uint64_t)ts->tv_sec * USEC_PER_SEC + (uint64_t)(ts->tv_nsec / NSEC_PER_USEC);
 
   /* Get the timer counter frequency and determine the number of counts
    * needed to achieve the requested delay.
@@ -318,13 +317,14 @@ int sam_oneshot_start(struct sam_oneshot_s *oneshot,
 
   /* Set up to receive the callback when the interrupt occurs */
 
-  sam_tc_attach(oneshot->tch, sam_oneshot_handler, oneshot, TC_INT_CPCS);
+  sam_tc_attach(oneshot->tch, sam_oneshot_handler, oneshot,
+                TC_INT_CPCS);
 
   /* Set RC so that an event will be triggered when TC_CV register counts
    * up to RC.
    */
 
-  sam_tc_setregister(oneshot->tch, TC_REGC, regval);
+  sam_tc_setregister(oneshot->tch, TC_REGC, (uint32_t)regval);
 
   /* Start the counter */
 
@@ -396,8 +396,8 @@ int sam_oneshot_cancel(struct sam_oneshot_s *oneshot,
   uint64_t usec;
   uint64_t sec;
   uint64_t nsec;
-  uint16_t count;
-  uint16_t rc;
+  uint32_t count;
+  uint32_t rc;
 
   /* Was the timer running? */
 
@@ -447,7 +447,7 @@ int sam_oneshot_cancel(struct sam_oneshot_s *oneshot,
 
   /* Now we can disable the interrupt and stop the timer. */
 
-  sam_tc_detach(oneshot->tch);
+  sam_tc_attach(oneshot->tch, NULL, NULL, 0);
   sam_tc_stop(oneshot->tch);
 
   oneshot->running = false;

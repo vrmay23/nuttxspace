@@ -1,22 +1,36 @@
 /****************************************************************************
  * fs/vfs/fs_fcntl.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009, 2012-2014, 2016-2017 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,23 +44,38 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <assert.h>
-#include <sys/ioctl.h>
 
 #include <nuttx/sched.h>
 #include <nuttx/cancelpt.h>
 #include <nuttx/fs/fs.h>
+#include <nuttx/net/net.h>
 
 #include "inode/inode.h"
 
 /****************************************************************************
- * Private Functions
+ * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
  * Name: file_vfcntl
+ *
+ * Description:
+ *   Similar to the standard vfcntl function except that is accepts a struct
+ *   struct file instance instead of a file descriptor.
+ *
+ * Input Parameters:
+ *   filep - Instance for struct file for the opened file.
+ *   cmd   - Identifies the operation to be performed.
+ *   ap    - Variable argument following the command.
+ *
+ * Returned Value:
+ *   The nature of the return value depends on the command.  Non-negative
+ *   values indicate success.  Failures are reported as negated errno
+ *   values.
+ *
  ****************************************************************************/
 
-static int file_vfcntl(FAR struct file *filep, int cmd, va_list ap)
+int file_vfcntl(FAR struct file *filep, int cmd, va_list ap)
 {
   int ret = -EINVAL;
 
@@ -65,19 +94,55 @@ static int file_vfcntl(FAR struct file *filep, int cmd, va_list ap)
          * or equal to the third argument, arg, taken as an integer of type
          * int. The new file descriptor shall refer to the same open file
          * description as the original file descriptor, and shall share any
-         * locks.  The FD_CLOEXEC flag associated  with the new file
-         * descriptor shall be cleared to keep the file open across calls to
-         * one of the exec functions.
+         * locks.  The FD_CLOEXEC flag associated  with the new file descriptor
+         * shall be cleared to keep the file open across calls to one of the
+         * exec functions.
          */
 
         {
-          ret = file_dup(filep, va_arg(ap, int), 0);
+          /* Does not set the errno variable in the event of a failure */
+
+          ret = file_dup(filep, va_arg(ap, int));
         }
         break;
 
-      case F_DUPFD_CLOEXEC:
+      case F_GETFD:
+        /* Get the file descriptor flags defined in <fcntl.h> that are associated
+         * with the file descriptor fd.  File descriptor flags are associated
+         * with a single file descriptor and do not affect other file descriptors
+         * that refer to the same file.
+         */
+
         {
-          ret = file_dup(filep, va_arg(ap, int), O_CLOEXEC);
+          ret = filep->f_oflags & O_CLOEXEC ? FD_CLOEXEC : 0;
+        }
+        break;
+
+      case F_SETFD:
+        /* Set the file descriptor flags defined in <fcntl.h>, that are
+         * associated with fd, to the third argument, arg, taken as type int.
+         * If the FD_CLOEXEC flag in the third argument is 0, the file shall
+         * remain open across the exec functions; otherwise, the file shall
+         * be closed upon successful execution of one of the exec functions.
+         */
+
+        {
+          int oflags = va_arg(ap, int);
+
+          if (oflags & ~FD_CLOEXEC)
+            {
+              ret = -ENOSYS;
+              break;
+            }
+
+          if (oflags & FD_CLOEXEC)
+            {
+              filep->f_oflags |= O_CLOEXEC;
+            }
+          else
+            {
+              filep->f_oflags &= ~O_CLOEXEC;
+            }
         }
         break;
 
@@ -108,20 +173,11 @@ static int file_vfcntl(FAR struct file *filep, int cmd, va_list ap)
 
         {
           int oflags = va_arg(ap, int);
-          int nonblock = !!(oflags & O_NONBLOCK);
 
-          ret = file_ioctl(filep, FIONBIO, &nonblock);
-          if (ret == OK)
-            {
-              oflags          &=  (FFCNTL & ~O_NONBLOCK);
-              filep->f_oflags &= ~(FFCNTL & ~O_NONBLOCK);
-              filep->f_oflags |=  oflags;
-
-              if ((filep->f_oflags & O_APPEND) != 0)
-                {
-                  ret = file_seek(filep, 0, SEEK_END);
-                }
-            }
+          oflags          &=  FFCNTL;
+          filep->f_oflags &= ~FFCNTL;
+          filep->f_oflags |=  oflags;
+          ret              =  OK;
         }
         break;
 
@@ -155,12 +211,6 @@ static int file_vfcntl(FAR struct file *filep, int cmd, va_list ap)
          * for the lock type which shall be set to F_UNLCK.
          */
 
-        {
-          ret = file_ioctl(filep, FIOC_GETLK,
-                           va_arg(ap, FAR struct flock *));
-        }
-
-        break;
       case F_SETLK:
         /* Set or clear a file segment lock according to the lock
          * description pointed to by the third argument, arg, taken as a
@@ -172,12 +222,6 @@ static int file_vfcntl(FAR struct file *filep, int cmd, va_list ap)
          * shall return immediately with a return value of -1.
          */
 
-        {
-          ret = file_ioctl(filep, FIOC_SETLK,
-                           va_arg(ap, FAR struct flock *));
-        }
-
-        break;
       case F_SETLKW:
         /* This command shall be equivalent to F_SETLK except that if a
          * shared or exclusive lock is blocked by other locks, the thread
@@ -188,51 +232,15 @@ static int file_vfcntl(FAR struct file *filep, int cmd, va_list ap)
          * the lock operation shall not be done.
          */
 
-        {
-          ret = file_ioctl(filep, FIOC_SETLKW,
-                           va_arg(ap, FAR struct flock *));
-        }
-
+        ret = -ENOSYS; /* Not implemented */
         break;
-      case F_GETPATH:
-        /* Get the path of the file descriptor. The argument must be a buffer
-         * of size PATH_MAX or greater.
-         */
 
-        {
-          ret = file_ioctl(filep, FIOC_FILEPATH, va_arg(ap, FAR char *));
-        }
-
-        break;
-      case F_SETPIPE_SZ:
-        /* Modify the capacity of the pipe to arg bytes, but not larger than
-         * CONFIG_DEV_PIPE_MAXSIZE.
-         */
-
-        {
-          ret = file_ioctl(filep, PIPEIOC_SETSIZE, va_arg(ap, int));
-        }
-
-        break;
-      case F_GETPIPE_SZ:
-
-        /* Return the capacity of the pipe */
-
-        {
-          ret = file_ioctl(filep, PIPEIOC_GETSIZE);
-        }
-
-        break;
       default:
         break;
     }
 
   return ret;
 }
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
 
 /****************************************************************************
  * Name: file_fcntl
@@ -293,6 +301,7 @@ int file_fcntl(FAR struct file *filep, int cmd, ...)
 
 int fcntl(int fd, int cmd, ...)
 {
+  FAR struct file *filep;
   va_list ap;
   int ret;
 
@@ -304,77 +313,54 @@ int fcntl(int fd, int cmd, ...)
 
   va_start(ap, cmd);
 
-  switch (cmd)
+  /* Did we get a valid file descriptor? */
+
+  if ((unsigned int)fd < CONFIG_NFILE_DESCRIPTORS)
     {
-      case F_GETFD:
-        /* Get the file descriptor flags defined in <fcntl.h> that are
-         * associated with the file descriptor fd.  File descriptor flags are
-         * associated with a single file descriptor and do not affect other
-         * file descriptors that refer to the same file.
-         */
+      /* Get the file structure corresponding to the file descriptor. */
 
+      ret = fs_getfilep(fd, &filep);
+      if (ret >= 0)
         {
-          int flags;
+          DEBUGASSERT(filep != NULL);
 
-          ret = ioctl(fd, FIOGCLEX, &flags);
-          if (ret >= 0)
-            {
-              ret = flags;
-            }
+          /* Let file_vfcntl() do the real work.  The errno is not set on
+           * failures.
+           */
+
+          ret = file_vfcntl(filep, cmd, ap);
         }
-        break;
+    }
+  else
+    {
+      /* No... check for operations on a socket descriptor */
 
-      case F_SETFD:
-        /* Set the file descriptor flags defined in <fcntl.h>, that are
-         * associated with fd, to the third argument, arg, taken as type int.
-         * If the FD_CLOEXEC flag in the third argument is 0, the file shall
-         * remain open across the exec functions; otherwise, the file shall
-         * be closed upon successful execution of one of the exec functions.
-         */
-
+#ifdef CONFIG_NET
+      if ((unsigned int)fd < (CONFIG_NFILE_DESCRIPTORS + CONFIG_NSOCKET_DESCRIPTORS))
         {
-          int oflags = va_arg(ap, int);
+          /* Yes.. defer socket descriptor operations to net_vfcntl(). The
+           * errno is not set on failures.
+           */
 
-          if (oflags & ~FD_CLOEXEC)
-            {
-              set_errno(ENOSYS);
-              ret = ERROR;
-              break;
-            }
-
-          if (oflags & FD_CLOEXEC)
-            {
-              ret = ioctl(fd, FIOCLEX, NULL);
-            }
-          else
-            {
-              ret = ioctl(fd, FIONCLEX, NULL);
-            }
+          ret = net_vfcntl(fd, cmd, ap);
         }
-        break;
-
-      default:
+      else
+#endif
         {
-          FAR struct file *filep;
+          /* No.. this descriptor number is out of range */
 
-          ret = file_get(fd, &filep);
-          if (ret >= 0)
-            {
-              ret = file_vfcntl(filep, cmd, ap);
-              file_put(filep);
-            }
-
-          if (ret < 0)
-            {
-              set_errno(-ret);
-              ret = ERROR;
-            }
+          ret = -EBADF;
         }
-        break;
     }
 
   va_end(ap);
-  leave_cancellation_point();
 
+  if (ret < 0)
+    {
+      set_errno(-ret);
+      ret = ERROR;
+    }
+
+  leave_cancellation_point();
   return ret;
 }

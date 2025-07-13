@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/syslog/syslog_channel.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,29 +42,14 @@
 #include <sys/types.h>
 #include <assert.h>
 #include <errno.h>
-#include <semaphore.h>
 
 #include <nuttx/syslog/syslog.h>
-#include <nuttx/compiler.h>
-#include <nuttx/init.h>
 
 #ifdef CONFIG_RAMLOG_SYSLOG
 #  include <nuttx/syslog/ramlog.h>
-#endif
-
-#ifdef CONFIG_SYSLOG_RPMSG
+#elif defined(CONFIG_SYSLOG_RPMSG)
 #  include <nuttx/syslog/syslog_rpmsg.h>
-#endif
-
-#ifdef CONFIG_SYSLOG_RTT
-#  include <nuttx/segger/rtt.h>
-#endif
-
-#ifdef CONFIG_SYSLOG_CDCACM
-#  include <nuttx/usb/cdcacm.h>
-#endif
-
-#ifdef CONFIG_ARCH_LOWPUTC
+#elif defined(CONFIG_ARCH_LOWPUTC)
 #  include <nuttx/arch.h>
 #endif
 
@@ -61,295 +59,82 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-#ifdef CONFIG_SYSLOG_DEFAULT
-static int syslog_default_putc(FAR syslog_channel_t *channel,
-                               int ch);
-static ssize_t syslog_default_write(FAR syslog_channel_t *channel,
-                                    FAR const char *buffer, size_t buflen);
-#endif
-
-#ifdef CONFIG_SYSLOG_CDCACM
-static int syslog_cdcacm_putc(FAR struct syslog_channel_s *channel,
-                              int ch);
-static ssize_t syslog_cdcacm_write(FAR struct syslog_channel_s *channel,
-                                   FAR const char *buffer, size_t buflen);
+#if defined(CONFIG_ARCH_LOWPUTC)
+#  define HAVE_LOWPUTC
+#elif !defined(CONFIG_RAMLOG_SYSLOG) && !defined(CONFIG_SYSLOG_RPMSG)
+#  define NEED_LOWPUTC
 #endif
 
 /****************************************************************************
- * Private Data
+ * Private Function Prototypes
  ****************************************************************************/
 
-#ifdef CONFIG_RAMLOG_SYSLOG
-static const struct syslog_channel_ops_s g_ramlog_channel_ops =
+#ifdef NEED_LOWPUTC
+static int syslog_default_putc(int ch);
+#endif
+static int syslog_default_flush(void);
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+#if defined(CONFIG_RAMLOG_SYSLOG)
+static const struct syslog_channel_s g_default_channel =
 {
   ramlog_putc,
   ramlog_putc,
-  NULL,
-  ramlog_write,
-  ramlog_write
+  syslog_default_flush
 };
-
-static syslog_channel_t g_ramlog_channel =
-{
-  &g_ramlog_channel_ops
-#  ifdef CONFIG_SYSLOG_IOCTL
-  , "ram"
-#  endif
-#  ifdef CONFIG_SYSLOG_CRLF
-  , SYSLOG_CHANNEL_DISABLE_CRLF
-#  endif
-};
-#endif
-
-#ifdef CONFIG_SYSLOG_RPMSG
-static const struct syslog_channel_ops_s g_rpmsg_channel_ops =
+#elif defined(CONFIG_SYSLOG_RPMSG)
+static const struct syslog_channel_s g_default_channel =
 {
   syslog_rpmsg_putc,
   syslog_rpmsg_putc,
-  syslog_rpmsg_flush,
-  syslog_rpmsg_write,
-  syslog_rpmsg_write
+  syslog_default_flush
 };
-
-static syslog_channel_t g_rpmsg_channel =
+#elif defined(HAVE_LOWPUTC)
+static const struct syslog_channel_s g_default_channel =
 {
-  &g_rpmsg_channel_ops
-#  ifdef CONFIG_SYSLOG_IOCTL
-  , "rpmsg"
-#  endif
-#  ifdef CONFIG_SYSLOG_CRLF
-  , SYSLOG_CHANNEL_DISABLE_CRLF
-#  endif
+  up_putc,
+  up_putc,
+  syslog_default_flush
 };
-#endif
-
-#ifdef CONFIG_SYSLOG_RTT
-static const struct syslog_channel_ops_s g_rtt_channel_ops =
-{
-  syslog_rtt_putc,
-  syslog_rtt_putc,
-  NULL,
-  syslog_rtt_write,
-  syslog_rtt_write
-};
-
-static syslog_channel_t g_rtt_channel =
-{
-  &g_rtt_channel_ops
-#  ifdef CONFIG_SYSLOG_IOCTL
-  , "rtt"
-#  endif
-#  ifdef CONFIG_SYSLOG_CRLF
-  , SYSLOG_CHANNEL_DISABLE_CRLF
-#  endif
-};
-#endif
-
-#ifdef CONFIG_SYSLOG_CDCACM
-static const struct syslog_channel_ops_s g_cdcacm_channel_ops =
-{
-  syslog_cdcacm_putc,
-  syslog_cdcacm_putc,
-  NULL,
-  syslog_cdcacm_write,
-  syslog_cdcacm_write
-};
-
-static struct syslog_channel_s g_cdcacm_channel =
-{
-  &g_cdcacm_channel_ops
-#  ifdef CONFIG_SYSLOG_IOCTL
-  , "cdcacm"
-#  endif
-};
-#endif
-
-#ifdef CONFIG_SYSLOG_DEFAULT
-static const struct syslog_channel_ops_s g_default_channel_ops =
+#else
+static const struct syslog_channel_s g_default_channel =
 {
   syslog_default_putc,
   syslog_default_putc,
-  NULL,
-  syslog_default_write
+  syslog_default_flush
 };
-
-static syslog_channel_t g_default_channel =
-{
-  &g_default_channel_ops
-#  ifdef CONFIG_SYSLOG_IOCTL
-  , "default"
-#  endif
-};
-#endif
-
-/* This is a simply sanity check to avoid we have more elements than the
- * `g_syslog_channel` array can hold
- */
-
-#ifdef CONFIG_SYSLOG_DEFAULT
-#  define SYSLOG_DEFAULT_AVAILABLE 1
-#else
-#  define SYSLOG_DEFAULT_AVAILABLE 0
-#endif
-
-#ifdef CONFIG_RAMLOG_SYSLOG
-#  define RAMLOG_SYSLOG_AVAILABLE 1
-#else
-#  define RAMLOG_SYSLOG_AVAILABLE 0
-#endif
-
-#ifdef CONFIG_SYSLOG_RPMSG
-#  define SYSLOG_RPMSG_AVAILABLE 1
-#else
-#  define SYSLOG_RPMSG_AVAILABLE 0
-#endif
-
-#ifdef CONFIG_SYSLOG_RTT
-#  define SYSLOG_RTT_AVAILABLE 1
-#else
-#  define SYSLOG_RTT_AVAILABLE 0
-#endif
-
-#define SYSLOG_NCHANNELS (SYSLOG_DEFAULT_AVAILABLE + \
-                          RAMLOG_SYSLOG_AVAILABLE + \
-                          SYSLOG_RPMSG_AVAILABLE + \
-                          SYSLOG_RTT_AVAILABLE)
-
-#if SYSLOG_NCHANNELS > CONFIG_SYSLOG_MAX_CHANNELS
-#  error "Maximum channel number exceeds."
 #endif
 
 /* This is the current syslog channel in use */
 
-FAR syslog_channel_t *
-#ifndef CONFIG_SYSLOG_REGISTER
-const
-#endif
-g_syslog_channel[CONFIG_SYSLOG_MAX_CHANNELS] =
-{
-#ifdef CONFIG_SYSLOG_DEFAULT
-  &g_default_channel,
-#endif
-#ifdef CONFIG_RAMLOG_SYSLOG
-  &g_ramlog_channel,
-#endif
-#ifdef CONFIG_SYSLOG_RPMSG
-  &g_rpmsg_channel,
-#endif
-#ifdef CONFIG_SYSLOG_RTT
-  &g_rtt_channel,
-#endif
-#ifdef CONFIG_SYSLOG_CDCACM
-  &g_cdcacm_channel
-#endif
-};
+FAR const struct syslog_channel_s *g_syslog_channel = &g_default_channel;
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-#if defined(CONFIG_SYSLOG_DEFAULT) && defined(CONFIG_ARCH_LOWPUTC)
-
 /****************************************************************************
- * Name: csection_available
+ * Name: syslog_default_putc and syslog_default_flush
  *
  * Description:
- *   Return true if the critical section is available.
+ *   Dummy, no-nothing channel interface methods
  *
  ****************************************************************************/
 
-static bool csection_available(void)
+#ifdef NEED_LOWPUTC
+static int syslog_default_putc(int ch)
 {
-  /* Degrade the critical section in a few cases:
-   *
-   * a) early in the boot, where tasks are not available
-   *
-   * b) after a panic, where taking a lock can make the situation worse
-   */
-
-  return OSINIT_TASK_READY() && g_nx_initstate != OSINIT_PANIC;
-}
-
-#endif /* defined(CONFIG_SYSLOG_DEFAULT) && defined(CONFIG_ARCH_LOWPUTC) */
-
-/****************************************************************************
- * Name: syslog_default_putc
- *
- * Description:
- *   If the arch supports a low-level putc function, output will be
- *   redirected there. Else acts as a dummy, no-nothing channel.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_SYSLOG_DEFAULT
-static int syslog_default_putc(FAR syslog_channel_t *channel, int ch)
-{
-#  ifdef CONFIG_ARCH_LOWPUTC
-  if (csection_available())
-    {
-      /* See https://github.com/apache/nuttx/issues/14662
-       * about what this critical section is for.
-       */
-
-      irqstate_t flags = enter_critical_section();
-      up_putc(ch);
-      leave_critical_section(flags);
-    }
-  else
-    {
-      up_putc(ch);
-    }
-#  endif
-
-  UNUSED(channel);
   return ch;
-}
-
-static ssize_t syslog_default_write(FAR syslog_channel_t *channel,
-                                    FAR const char *buffer, size_t buflen)
-{
-#  ifdef CONFIG_ARCH_LOWPUTC
-  if (csection_available())
-    {
-      /* See https://github.com/apache/nuttx/issues/14662
-       * about what this critical section is for.
-       */
-
-      irqstate_t flags = enter_critical_section();
-      up_nputs(buffer, buflen);
-      leave_critical_section(flags);
-    }
-  else
-    {
-      up_nputs(buffer, buflen);
-    }
-#  endif
-
-  UNUSED(channel);
-  return buflen;
 }
 #endif
 
-#ifdef CONFIG_SYSLOG_CDCACM
-static int syslog_cdcacm_putc(FAR struct syslog_channel_s *channel, int ch)
+static int syslog_default_flush(void)
 {
-  char tmp;
-
-  tmp = ch;
-  cdcacm_write(&tmp, 1);
-
-  UNUSED(channel);
-  return ch;
+  return OK;
 }
-
-static ssize_t syslog_cdcacm_write(FAR struct syslog_channel_s *channel,
-                                   FAR const char *buffer, size_t buflen)
-{
-  UNUSED(channel);
-
-  return cdcacm_write(buffer, buflen);
-}
-#endif
 
 /****************************************************************************
  * Public Functions
@@ -371,100 +156,18 @@ static ssize_t syslog_cdcacm_write(FAR struct syslog_channel_s *channel,
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SYSLOG_REGISTER
-int syslog_channel_register(FAR syslog_channel_t *channel)
+int syslog_channel(FAR const struct syslog_channel_s *channel)
 {
   DEBUGASSERT(channel != NULL);
 
   if (channel != NULL)
     {
-#if CONFIG_SYSLOG_MAX_CHANNELS == 1
-      g_syslog_channel[0] = channel;
+      DEBUGASSERT(channel->sc_putc != NULL && channel->sc_force != NULL &&
+                  channel->sc_flush != NULL);
+
+      g_syslog_channel = channel;
       return OK;
-#else
-      int i;
-
-      for (i = 0; i < CONFIG_SYSLOG_MAX_CHANNELS; i++)
-        {
-          if (g_syslog_channel[i] == NULL)
-            {
-#  ifdef CONFIG_SYSLOG_IOCTL
-              if (channel->sc_name[0] == '\0')
-                {
-                  snprintf(channel->sc_name, sizeof(channel->sc_name),
-                           "channel-%p", channel->sc_ops);
-                }
-#  endif
-
-              g_syslog_channel[i] = channel;
-              return OK;
-            }
-          else if (g_syslog_channel[i] == channel)
-            {
-              return OK;
-            }
-        }
-#endif
     }
 
   return -EINVAL;
 }
-
-/****************************************************************************
- * Name: syslog_channel_unregister
- *
- * Description:
- *   Removes an already configured SYSLOG channel from the list of used
- *   channels.
- *
- * Input Parameters:
- *   channel - Provides the interface to the channel to be removed.
- *
- * Returned Value:
- *   Zero (OK) is returned on success.  A negated errno value is returned
- *   on any failure.
- *
- ****************************************************************************/
-
-int syslog_channel_unregister(FAR syslog_channel_t *channel)
-{
-  int i;
-
-  DEBUGASSERT(channel != NULL);
-
-  if (channel != NULL)
-    {
-      for (i = 0; i < CONFIG_SYSLOG_MAX_CHANNELS; i++)
-        {
-          if (g_syslog_channel[i] == channel)
-            {
-              /* Get the rest of the channels one position back
-               * to ensure that there are no holes in the list.
-               */
-
-              while (i < (CONFIG_SYSLOG_MAX_CHANNELS - 1) &&
-                     g_syslog_channel[i + 1] != NULL)
-                {
-                  g_syslog_channel[i] = g_syslog_channel[i + 1];
-                  i++;
-                }
-
-              g_syslog_channel[i] = NULL;
-
-              /* The channel is now removed from the list and its driver
-               * can be safely uninitialized.
-               */
-
-              if (channel->sc_ops->sc_close)
-                {
-                  channel->sc_ops->sc_close(channel);
-                }
-
-              return OK;
-            }
-        }
-    }
-
-  return -EINVAL;
-}
-#endif

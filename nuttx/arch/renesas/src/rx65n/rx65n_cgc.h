@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/renesas/src/rx65n/rx65n_cgc.h
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -20,8 +18,8 @@
  *
  ****************************************************************************/
 
-#ifndef __ARCH_RENESAS_SRC_RX65N_RX65N_CGC_H
-#define __ARCH_RENESAS_SRC_RX65N_RX65N_CGC_H
+#ifndef __ARCH_RENESAS_SRC_RX65N_CGC_H
+#define __ARCH_RENESAS_SRC_RX65N_CGC_H
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -78,8 +76,6 @@
 #define _00040000_CGC_BCLK_DIV_16           (0x00040000ul) /* x1/16 */
 #define _00050000_CGC_BCLK_DIV_32           (0x00050000ul) /* x1/32 */
 #define _00060000_CGC_BCLK_DIV_64           (0x00060000ul) /* x1/64 */
-
-#define _00C00000_CGC_PSTOP0_PSTOP1         (0x00c00000)
 
 /* System Clock (ICLK) */
 
@@ -264,8 +260,6 @@
 #define _0E_CGC_PRIORITY_LEVEL14            (0x0eu) /* Level 14 */
 #define _0F_CGC_PRIORITY_LEVEL15            (0x0fu) /* Level 15 (highest) */
 
-#define _0001_CGC_LOCO_STOP                 (0x1)
-
 /* Main clock oscillator wait time */
 
 #define _5C_CGC_MOSCWTCR_VALUE              (0x5cu)
@@ -283,4 +277,4 @@
 
 void r_cgc_create(void);
 
-#endif /* __ARCH_RENESAS_SRC_RX65N_RX65N_CGC_H */
+#endif

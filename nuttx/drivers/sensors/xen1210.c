@@ -1,26 +1,39 @@
 /****************************************************************************
  * drivers/sensors/xen1210.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Alan Carvalho de Assis. All rights reserved.
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * This driver is used to interface with Sensixs XEN1210 3D-board.
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
-/* This driver is used to interface with Sensixs XEN1210 3D-board. */
 
 /****************************************************************************
  * Included Files
@@ -29,10 +42,8 @@
 #include <nuttx/config.h>
 
 #include <unistd.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
-#include <inttypes.h>
 #include <stdio.h>
 
 #include <nuttx/kmalloc.h>
@@ -50,6 +61,8 @@
 
 /* Character driver methods */
 
+static int     xen1210_open(FAR struct file *filep);
+static int     xen1210_close(FAR struct file *filep);
 static ssize_t xen1210_read(FAR struct file *filep, FAR char *buffer,
                             size_t len);
 
@@ -61,9 +74,16 @@ static ssize_t xen1210_read(FAR struct file *filep, FAR char *buffer,
 
 static const struct file_operations g_xen1210fops =
 {
-  NULL,            /* open */
-  NULL,            /* close */
+  xen1210_open,    /* open */
+  xen1210_close,   /* close */
   xen1210_read,    /* read */
+  NULL,            /* write */
+  NULL,            /* seek */
+  NULL,            /* ioctl */
+  NULL             /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL           /* unlink */
+#endif
 };
 
 /****************************************************************************
@@ -88,6 +108,32 @@ static inline void xen1210_configspi(FAR struct spi_dev_s *spi)
 }
 
 /****************************************************************************
+ * Name: xen1210_open
+ *
+ * Description:
+ *   Standard character driver open method.
+ *
+ ****************************************************************************/
+
+static int xen1210_open(FAR struct file *filep)
+{
+  return OK;
+}
+
+/****************************************************************************
+ * Name: xen1210_close
+ *
+ * Description:
+ *   Standard character driver close method.
+ *
+ ****************************************************************************/
+
+static int xen1210_close(FAR struct file *filep)
+{
+  return OK;
+}
+
+/****************************************************************************
  * Name: xen1210_read
  *
  * Description:
@@ -103,10 +149,11 @@ static ssize_t xen1210_read(FAR struct file *filep, FAR char *buffer,
   int                       ret;
 
   sninfo("len=%d\n", len);
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct xen1210_dev_s *)inode->i_private;
 
   /* Verify that the caller has provided a buffer large enough to receive
    * the magnetometer data.
@@ -124,7 +171,7 @@ static ssize_t xen1210_read(FAR struct file *filep, FAR char *buffer,
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nxsem_wait(&priv->exclsem);
   if (ret < 0)
     {
       /* This should only happen if the wait was canceled by an signal */
@@ -133,15 +180,15 @@ static ssize_t xen1210_read(FAR struct file *filep, FAR char *buffer,
       return ret;
     }
 
-  sninfo("X = 0x%06" PRIX32 "\n", priv->sample.data_x);
-  sninfo("Y = 0x%06" PRIX32 "\n", priv->sample.data_y);
-  sninfo("Z = 0x%06" PRIX32 "\n", priv->sample.data_z);
+  sninfo("X = 0x%06X\n", priv->sample.data_x);
+  sninfo("Y = 0x%06X\n", priv->sample.data_y);
+  sninfo("Z = 0x%06X\n", priv->sample.data_z);
 
   /* Return read sample */
 
-  buffer = (FAR char *)&priv->sample;
+  buffer = (FAR char *) &priv->sample;
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->exclsem);
   return sizeof(struct xen1210_sample_s);
 }
 
@@ -242,8 +289,7 @@ XEN1210_HANDLE xen1210_instantiate(FAR struct spi_dev_s *dev,
 
   /* Allocate the XEN1210 driver instance */
 
-  priv = (FAR struct xen1210_dev_s *)
-         kmm_zalloc(sizeof(struct xen1210_dev_s));
+  priv = (FAR struct xen1210_dev_s *)kmm_zalloc(sizeof(struct xen1210_dev_s));
   if (!priv)
     {
       snerr("ERROR: Failed to allocate the device structure!\n");
@@ -252,7 +298,7 @@ XEN1210_HANDLE xen1210_instantiate(FAR struct spi_dev_s *dev,
 
   /* Initialize the device state structure */
 
-  nxmutex_init(&priv->lock);
+  nxsem_init(&priv->exclsem, 0, 1);
   priv->config = config;
 
   priv->spi = dev;
@@ -326,7 +372,7 @@ int xen1210_register(XEN1210_HANDLE handle, int minor)
 
   /* Get exclusive access to the device structure */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nxsem_wait(&priv->exclsem);
   if (ret < 0)
     {
       snerr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -335,19 +381,19 @@ int xen1210_register(XEN1210_HANDLE handle, int minor)
 
   /* Register the character driver */
 
-  snprintf(devname, sizeof(devname), DEV_FORMAT, minor);
-  ret = register_driver(devname, &g_xen1210fops, 0444, priv);
+  snprintf(devname, DEV_NAMELEN, DEV_FORMAT, minor);
+  ret = register_driver(devname, &g_xen1210fops, 0666, priv);
   if (ret < 0)
     {
       snerr("ERROR: Failed to register driver %s: %d\n", devname, ret);
-      nxmutex_unlock(&priv->lock);
+      nxsem_post(&priv->exclsem);
       return ret;
     }
 
   /* Indicate that the accelerometer was successfully initialized */
 
   priv->status |= XEN1210_STAT_INITIALIZED;  /* Accelerometer is initialized */
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->exclsem);
   return ret;
 }
 

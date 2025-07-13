@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/usrsock/usrsock_connect.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *  Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
+ *  Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -45,40 +58,44 @@
  * Private Functions
  ****************************************************************************/
 
-static uint16_t connect_event(FAR struct net_driver_s *dev,
+static uint16_t connect_event(FAR struct net_driver_s *dev, FAR void *pvconn,
                               FAR void *pvpriv, uint16_t flags)
 {
   FAR struct usrsock_reqstate_s *pstate = pvpriv;
-  FAR struct usrsock_conn_s *conn = pstate->conn;
+  FAR struct usrsock_conn_s *conn = pvconn;
 
   if (flags & USRSOCK_EVENT_ABORT)
     {
       ninfo("socket aborted.\n");
 
       pstate->result = -ECONNABORTED;
-    }
-  else if (flags & USRSOCK_EVENT_REMOTE_CLOSED)
-    {
-      ninfo("remote closed.\n");
 
-      pstate->result = -ECONNREFUSED;
+      /* Stop further callbacks */
+
+      pstate->cb->flags   = 0;
+      pstate->cb->priv    = NULL;
+      pstate->cb->event   = NULL;
+
+      /* Wake up the waiting thread */
+
+      nxsem_post(&pstate->recvsem);
     }
-  else
+  else if (flags & USRSOCK_EVENT_REQ_COMPLETE)
     {
       ninfo("request completed.\n");
 
       pstate->result = conn->resp.result;
+
+      /* Stop further callbacks */
+
+      pstate->cb->flags   = 0;
+      pstate->cb->priv    = NULL;
+      pstate->cb->event   = NULL;
+
+      /* Wake up the waiting thread */
+
+      nxsem_post(&pstate->recvsem);
     }
-
-  /* Stop further callbacks */
-
-  pstate->cb->flags = 0;
-  pstate->cb->priv  = NULL;
-  pstate->cb->event = NULL;
-
-  /* Wake up the waiting thread */
-
-  nxsem_post(&pstate->recvsem);
 
   return flags;
 }
@@ -96,7 +113,6 @@ static int do_connect_request(FAR struct usrsock_conn_s *conn,
   };
 
   struct iovec bufs[2];
-  int ret;
 
   if (addrlen > UINT16_MAX)
     {
@@ -114,13 +130,7 @@ static int do_connect_request(FAR struct usrsock_conn_s *conn,
   bufs[1].iov_base = (FAR void *)addr;
   bufs[1].iov_len = addrlen;
 
-  ret = usrsock_do_request(conn, bufs, nitems(bufs));
-  if (ret == -ENETDOWN)
-    {
-      ret = -ECONNABORTED;
-    }
-
-  return ret;
+  return usrsockdev_do_request(conn, bufs, ARRAY_SIZE(bufs));
 }
 
 /****************************************************************************
@@ -134,8 +144,7 @@ static int do_connect_request(FAR struct usrsock_conn_s *conn,
  *   Perform a usrsock connection
  *
  * Input Parameters:
- *   psock - A reference to the socket structure of the socket to be
- *           connected
+ *   psock - A reference to the socket structure of the socket to be connected
  *   addr    The address of the remote server to connect to
  *   addrlen Length of address buffer
  *
@@ -156,6 +165,8 @@ int usrsock_connect(FAR struct socket *psock,
 
   int ret;
 
+  DEBUGASSERT(conn);
+
   net_lock();
 
   if (conn->state == USRSOCK_CONN_STATE_UNINITIALIZED ||
@@ -172,7 +183,7 @@ int usrsock_connect(FAR struct socket *psock,
     }
 
   if (conn->connected &&
-      (psock->s_type == SOCK_STREAM || psock->s_type == SOCK_SEQPACKET))
+      (conn->type == SOCK_STREAM || conn->type == SOCK_SEQPACKET))
     {
       /* Already connected. */
 
@@ -195,9 +206,7 @@ int usrsock_connect(FAR struct socket *psock,
 
   ret = usrsock_setup_request_callback(conn, &state, connect_event,
                                        USRSOCK_EVENT_ABORT |
-                                       USRSOCK_EVENT_REMOTE_CLOSED |
-                                       USRSOCK_EVENT_REQ_COMPLETE |
-                                       USRSOCK_EVENT_SENDTO_READY);
+                                       USRSOCK_EVENT_REQ_COMPLETE);
   if (ret < 0)
     {
       nwarn("usrsock_setup_request_callback failed: %d\n", ret);
@@ -219,11 +228,11 @@ int usrsock_connect(FAR struct socket *psock,
 
   /* Do not block on waiting for request completion if nonblocking socket. */
 
-  if (!conn->resp.inprogress || !_SS_ISNONBLOCK(conn->sconn.s_flags))
+  if (!conn->resp.inprogress || !_SS_ISNONBLOCK(psock->s_flags))
     {
       /* Wait for completion of request (or signal). */
 
-      ret = net_sem_wait(&state.recvsem);
+      ret = net_lockedwait(&state.recvsem);
       if (ret < 0)
         {
           /* Wait interrupted, exit early. */

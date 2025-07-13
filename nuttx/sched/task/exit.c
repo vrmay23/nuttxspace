@@ -1,22 +1,36 @@
 /****************************************************************************
- * sched/task/exit.c
+ * sched/exit.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2008, 2011-2012, 2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +45,6 @@
 #include <debug.h>
 #include <errno.h>
 
-#include <nuttx/irq.h>
 #include <nuttx/fs/fs.h>
 
 #include "task/task.h"
@@ -43,17 +56,20 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: _exit
+ * Name: exit
  *
  * Description:
- *   This function causes the currently executing task to cease
- *   to exist.  This is a special case of task_delete() where the task to
- *   be deleted is the currently executing task.  It is more complex because
- *   a context switch must be perform to the next ready to run task.
+ *   The exit() function causes normal process termination and the value of
+ *   status & 0377 to be returned to the parent.
+ *
+ *   All functions registered with atexit() and on_exit() are called, in the
+ *   reverse order of their registration.
+ *
+ *   All open streams are flushed and closed.
  *
  ****************************************************************************/
 
-void _exit(int status)
+void exit(int status)
 {
   FAR struct tcb_s *tcb = this_task();
 
@@ -61,40 +77,25 @@ void _exit(int status)
 
   status &= 0xff;
 
-#ifdef HAVE_GROUP_MEMBERS
+#ifdef CONFIG_SCHED_EXIT_KILL_CHILDREN
   /* Kill all of the children of the group, preserving only this thread.
    * exit() is normally called from the main thread of the task.  pthreads
    * exit through a different mechanism.
    */
 
-  if ((tcb->flags & TCB_FLAG_TTYPE_MASK) != TCB_FLAG_TTYPE_KERNEL)
-    {
-      group_kill_children(tcb);
-    }
-
+  group_killchildren((FAR struct task_tcb_s *)tcb);
 #endif
 
-  /* Make sure that we are in a critical section with local interrupts.
-   * The IRQ state will be restored when the next task is started.
-   */
-
-  enter_critical_section();
-
   /* Perform common task termination logic.  This will get called again later
-   * through logic kicked off by up_exit().
-   *
-   * REVISIT: Tt should not be necessary to call this here, but releasing the
-   * task group (especially the group file list) requires that it is done
-   * here.
-   *
-   * The reason? up_exit removes the current process from the ready-to-run
-   * list and trying to execute code that depends on this_task() crashes at
-   * once, or does something very naughty.
+   * through logic kicked off by _exit().  However, we need to call it before
+   * calling _exit() in order to handle atexit() and on_exit() callbacks and
+   * so that we can flush buffered I/O (both of which may required
+   * suspending).
    */
 
-  tcb->flags |= TCB_FLAG_EXIT_PROCESSING;
+  nxtask_exithook(tcb, status, false);
 
-  nxtask_exithook(tcb, status);
+  /* Then "really" exit.  Only the lower 8 bits of the exit status are used. */
 
-  up_exit(status);
+  _exit(status);
 }

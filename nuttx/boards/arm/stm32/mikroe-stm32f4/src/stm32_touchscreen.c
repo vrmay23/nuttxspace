@@ -1,22 +1,37 @@
 /****************************************************************************
  * boards/arm/stm32/mikroe-stm32f4/src/stm32_touchscreen.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012-2013, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Modified:  May, 2013 by Ken Pettit to adapt for Mikroe-STM32M4 board
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +44,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
-#include <poll.h>
 #include <sched.h>
 #include <assert.h>
 #include <errno.h>
@@ -41,11 +55,12 @@
 #include <nuttx/wqueue.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/input/touchscreen.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 
 #include <arch/board/board.h>
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "stm32_adc.h"
 #include "stm32_gpio.h"
 #include "mikroe-stm32f4.h"
@@ -55,11 +70,8 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-/* Configuration ************************************************************/
-
-/* Reference counting is partially implemented, but not needed in the current
- * design.
+/* Configuration ********************************************************************/
+/* Reference counting is partially implemented, but not needed in the current design.
  */
 
 #define CONFIG_TOUCHSCREEN_REFCNT
@@ -67,9 +79,8 @@
 
 #undef CONFIG_TOUCHSCREEN_RESAMPLE
 
-/* TP uses ADC Channel #2 in a dedicated mode.  Ensure ADC2 not selected for
- * general use via the menuconfig
- */
+/* TP uses ADC Channel #2 in a dedicated mode.  Ensure ADC2 not selected for general
+ * use via the menuconfig */
 
 #ifndef CONFIG_STM32_ADC2
 #  error   Touchpanel Input (CONFIG_INPUT=y) requires enablinga ADC2 (CONFIG_STM32_ADC2=y)
@@ -85,8 +96,8 @@
  *   Touchscreen data comes in a a very high rate.  New touch positions
  *   will only be reported when the X or Y data changes by these thresholds.
  *   This trades reduces data rate for some loss in dragging accuracy.  The
- *   touchscreen is configure for 12-bit values so the raw ranges are 0-4096.
- *   So for example, if your display is 320x240, then THRESHX=3 and THRESHY=4
+ *   touchscreen is configure for 12-bit values so the raw ranges are 0-4096. So
+ *   for example, if your display is 320x240, then THRESHX=3 and THRESHY=4
  *   would correspond to one pixel.  Default: 4
  */
 
@@ -102,22 +113,17 @@
 #  define CONFIG_TOUCHSCREEN_AVG_SAMPLES 2
 #endif
 
-#ifndef CONFIG_TOUCHSCREEN_NPOLLWAITERS
-#  define CONFIG_TOUCHSCREEN_NPOLLWAITERS 2
-#endif
-
-/* Driver support ***********************************************************/
-
-/* This format is used to construct the /dev/input[n] device driver path.  It
- * is defined here so that it will be used consistently in all places.
+/* Driver support *******************************************************************/
+/* This format is used to construct the /dev/input[n] device driver path.  It is
+ * defined here so that it will be used consistently in all places.
  */
 
 #define DEV_FORMAT   "/dev/input%d"
 #define DEV_NAMELEN  16
 
-/* Mikroe-STM32M4 Touchscreen Hardware Definitions **************************
+/* Mikroe-STM32M4 Touchscreen Hardware Definitions *********************************
  * PIN CONFIGURATIONS      SIGNAL NAME          ON-BOARD CONNECTIONS
- * --- ---------------------------------- -------------------- --------------
+ * --- ---------------------------------- -------------------- ------------------------
  *  35 PB0                 LCD-YD               YD Analog input
  *  36 PB1                 LCD-XL               XL Analog input
  *  95 PB8                 DRIVEA               Drives XR, XL and YU
@@ -140,7 +146,7 @@
 #define TC_ADC_BASE           STM32_ADC2_BASE      /* ADC Channel base for TP */
 #define ADC_CR1_ALLINTS       (ADC_CR1_AWDIE | ADC_CR1_EOCIE | ADC_CR1_JEOCIE)
 
-/* Conversions are performed as 10-bit samples represented as 16-bit */
+/* Conversions are performed as 10-bit samples represented as 16-bit unsigned integers: */
 
 #define MAX_ADC               (4096)
 
@@ -149,8 +155,7 @@
 #define UPPER_THRESHOLD       (MAX_ADC-1)
 #define LOWER_THRESHOLD       (362)
 
-/* Delays *******************************************************************/
-
+/* Delays ***************************************************************************/
 /* All values will be increased by one system timer tick (probably 10MS). */
 
 #define TC_PENUP_POLL_TICKS   MSEC2TICK(70)  /* IDLE polling rate: 70 MSec */
@@ -163,7 +168,6 @@
 /****************************************************************************
  * Private Types
  ****************************************************************************/
-
 /* This enumeration describes the state of touchscreen state machine */
 
 enum tc_state_e
@@ -174,7 +178,7 @@ enum tc_state_e
   TC_DEBOUNCE,                         /* Allowing a debounce time for the first sample */
   TC_RESAMPLE,                         /* Restart sampling on a bad measurement */
   TC_YSAMPLE,                          /* Allowing time for the Y sampling */
-  TC_XSETTLE,                          /* Allowing time for the X to settle after changing DRIVE */
+  TC_XSETTLE,                          /* Allowing time for the X to settle after changing DRIVE*/
   TC_XSAMPLE,                          /* Allowing time for the X sampling */
   TC_XRESAMPLE,                        /* Allow time to resample X */
   TC_PENDOWN,                          /* Conversion is complete -- pen down */
@@ -217,7 +221,7 @@ struct tc_dev_s
   uint16_t newy;                       /* New, un-thresholded Y value */
   uint8_t sampcount;                   /* Count of samples for average so far */
   uint8_t resamplecount;               /* Countdown to PENUP */
-  mutex_t devlock;                     /* Manages exclusive access to this structure */
+  sem_t devsem;                        /* Manages exclusive access to this structure */
   sem_t waitsem;                       /* Used to wait for the availability of data */
   struct tc_sample_s sample;           /* Last sampled touch point data */
   struct work_s work;                  /* Supports the state machine delayed processing */
@@ -241,20 +245,20 @@ static void tc_y_sample(void);
 static void tc_x_sample(void);
 static inline bool tc_valid_sample(uint16_t sample);
 
-static void tc_notify(struct tc_dev_s *priv);
-static int tc_sample(struct tc_dev_s *priv,
-                     struct tc_sample_s *sample);
-static int tc_waitsample(struct tc_dev_s *priv,
-                         struct tc_sample_s *sample);
-static void tc_worker(void *arg);
+static void tc_notify(FAR struct tc_dev_s *priv);
+static int tc_sample(FAR struct tc_dev_s *priv,
+                     FAR struct tc_sample_s *sample);
+static int tc_waitsample(FAR struct tc_dev_s *priv,
+                         FAR struct tc_sample_s *sample);
+static void tc_worker(FAR void *arg);
 
 /* Character driver methods */
 
-static int tc_open(struct file *filep);
-static int tc_close(struct file *filep);
-static ssize_t tc_read(struct file *filep, char *buffer, size_t len);
-static int tc_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int tc_poll(struct file *filep, struct pollfd *fds, bool setup);
+static int tc_open(FAR struct file *filep);
+static int tc_close(FAR struct file *filep);
+static ssize_t tc_read(FAR struct file *filep, FAR char *buffer, size_t len);
+static int tc_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
+static int tc_poll(FAR struct file *filep, struct pollfd *fds, bool setup);
 
 /****************************************************************************
  * Private Data
@@ -262,16 +266,14 @@ static int tc_poll(struct file *filep, struct pollfd *fds, bool setup);
 
 /* This the vtable that supports the character driver interface */
 
-static const struct file_operations g_tc_fops =
+static const struct file_operations tc_fops =
 {
   tc_open,    /* open */
   tc_close,   /* close */
   tc_read,    /* read */
-  NULL,       /* write */
-  NULL,       /* seek */
+  0,          /* write */
+  0,          /* seek */
   tc_ioctl,   /* ioctl */
-  NULL,       /* mmap */
-  NULL,       /* truncate */
   tc_poll     /* poll */
 };
 
@@ -287,7 +289,6 @@ static bool g_touchinitdone = false;
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
 /****************************************************************************
  * Name: tc_adc_getreg
  *
@@ -329,9 +330,8 @@ static inline void tc_adc_putreg(int offset, uint32_t value)
  * Name: tc_adc_init
  *
  * Description:
- *   Initialize ADC Channel #2 for use with the touch panel.  The touch panel
- *   uses Channels 8 and 9 (PB0 and PB1) to read the X and Y axis touch
- *   positions.
+ *   Initialize ADC Channel #2 for use with the touch panel.  The touch panel uses
+ *   Channels 8 and 9 (PB0 and PB1) to read the X and Y axis touch positions.
  *
  ****************************************************************************/
 
@@ -395,7 +395,7 @@ static void tc_adc_init(void)
 
   /* Enable interrupt flags */
 
-  /* regval |= ADC_CR1_ALLINTS; */
+  //regval |= ADC_CR1_ALLINTS;
 
   /* Disable Overrun interrupt */
 
@@ -412,8 +412,7 @@ static void tc_adc_init(void)
   regval  = tc_adc_getreg(STM32_ADC_CR2_OFFSET);
 
   /* Clear CONT, continuous mode disable.  We will perform single
-   * sampling on one channel at a time.
-   */
+   * sampling on one channel at a time. */
 
   regval &= ~ADC_CR2_CONT;
 
@@ -442,11 +441,9 @@ static void tc_adc_init(void)
   /* ADC CCR configuration */
 
   regval  = getreg32(STM32_ADC_CCR);
-  regval &= ~(ADC_CCR_MULTI_MASK | ADC_CCR_DELAY_MASK | ADC_CCR_DDS |
-              ADC_CCR_DMA_MASK | ADC_CCR_ADCPRE_MASK | ADC_CCR_VBATEN |
-              ADC_CCR_TSVREFE);
-  regval |=  (ADC_CCR_MULTI_NONE | ADC_CCR_DMA_DISABLED |
-              ADC_CCR_ADCPRE_DIV2);
+  regval &= ~(ADC_CCR_MULTI_MASK | ADC_CCR_DELAY_MASK | ADC_CCR_DDS | ADC_CCR_DMA_MASK |
+              ADC_CCR_ADCPRE_MASK | ADC_CCR_VBATE | ADC_CCR_TSVREFE);
+  regval |=  (ADC_CCR_MULTI_NONE | ADC_CCR_DMA_DISABLED | ADC_CCR_ADCPRE_DIV2);
   putreg32(regval, STM32_ADC_CCR);
 
   /* Set ADON to wake up the ADC from Power Down state. */
@@ -464,8 +461,8 @@ static void tc_adc_init(void)
  * Name: tc_adc_start_sample
  *
  * Description:
- *   Perform A/D sampling.    Time must be allowed between the start of
- *   sampling and conversion (approx. 100Ms).
+ *   Perform A/D sampling.    Time must be allowed between the start of sampling
+ *   and conversion (approx. 100Ms).
  *
  ****************************************************************************/
 
@@ -496,8 +493,8 @@ static void tc_adc_start_sample(int channel)
  * Name: tc_adc_read_sample
  *
  * Description:
- *   Begin A/D conversion.  Time must be allowed between the start of
- *   sampling and conversion (approx. 100Ms).
+ *   Begin A/D conversion.  Time must be allowed between the start of sampling
+ *   and conversion (approx. 100Ms).
  *
  * Assumptions:
  * 1) All output pins configured as outputs:
@@ -523,7 +520,7 @@ static uint16_t tc_adc_read_sample(void)
   /* Read the sample */
 
   retval = tc_adc_getreg(STM32_ADC_DR_OFFSET);
-  retval &= ADC_DR_RDATA_MASK;
+  retval &= ADC_DR_DATA_MASK;
 
   if (count > 0)
     {
@@ -576,8 +573,10 @@ static inline bool tc_valid_sample(uint16_t sample)
  * Name: tc_notify
  ****************************************************************************/
 
-static void tc_notify(struct tc_dev_s *priv)
+static void tc_notify(FAR struct tc_dev_s *priv)
 {
+  int i;
+
   /* If no threads have the driver open, then just dump the state */
 
 #ifdef CONFIG_TOUCHSCREEN_REFCNT
@@ -590,25 +589,34 @@ static void tc_notify(struct tc_dev_s *priv)
     }
 #endif
 
-  /* If there are threads waiting on poll() for touchscreen data to become
-   * available, then wake them up now.  NOTE: we wake up all waiting threads
-   * because we do not know that they are going to do.  If they all try to
-   * read the data, then some make end up blocking after all.
-   */
-
-  poll_notify(priv->fds, CONFIG_TOUCHSCREEN_NPOLLWAITERS, POLLIN);
-
   /* If there are threads waiting for read data, then signal one of them
    * that the read data is available.
    */
 
   if (priv->nwaiters > 0)
     {
-      /* After posting this semaphore, we need to exit because the
-       * touchscreen is no longer available.
+      /* After posting this semaphore, we need to exit because the touchscreen
+       * is no longer available.
        */
 
       nxsem_post(&priv->waitsem);
+    }
+
+  /* If there are threads waiting on poll() for touchscreen data to become available,
+   * then wake them up now.  NOTE: we wake up all waiting threads because we
+   * do not know that they are going to do.  If they all try to read the data,
+   * then some make end up blocking after all.
+   */
+
+  for (i = 0; i < CONFIG_TOUCHSCREEN_NPOLLWAITERS; i++)
+    {
+      struct pollfd *fds = priv->fds[i];
+      if (fds)
+        {
+          fds->revents |= POLLIN;
+          iinfo("Report events: %02x\n", fds->revents);
+          nxsem_post(fds->sem);
+        }
     }
 }
 
@@ -619,8 +627,8 @@ static void tc_notify(struct tc_dev_s *priv)
  *
  ****************************************************************************/
 
-static int tc_sample(struct tc_dev_s *priv,
-                          struct tc_sample_s *sample)
+static int tc_sample(FAR struct tc_dev_s *priv,
+                          FAR struct tc_sample_s *sample)
 {
   int ret = -EAGAIN;
 
@@ -632,7 +640,7 @@ static int tc_sample(struct tc_dev_s *priv,
        * sampled data.
        */
 
-      memcpy(sample, &priv->sample, sizeof(struct tc_sample_s));
+      memcpy(sample, &priv->sample, sizeof(struct tc_sample_s ));
 
       /* Now manage state transitions */
 
@@ -664,25 +672,23 @@ static int tc_sample(struct tc_dev_s *priv,
  * Name: tc_waitsample
  ****************************************************************************/
 
-static int tc_waitsample(struct tc_dev_s *priv,
-                              struct tc_sample_s *sample)
+static int tc_waitsample(FAR struct tc_dev_s *priv,
+                              FAR struct tc_sample_s *sample)
 {
   int ret;
-  irqstate_t flags;
 
-  /* Interrupts must be disabled when this is called to (1) prevent posting
-   * of semaphores from interrupt handlers, and (2) to prevent sampled data
-   * from changing until it has been reported.
+  /* Pre-emption must be disabled when this is called to prevent sampled
+   * data from changing until it has been reported.
    */
 
-  flags = enter_critical_section();
+  sched_lock();
 
-  /* Now release the mutex that manages mutually exclusive access to
+  /* Now release the semaphore that manages mutually exclusive access to
    * the device structure.  This may cause other tasks to become ready to
    * run, but they cannot run yet because pre-emption is disabled.
    */
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
 
   /* Try to get the a sample... if we cannot, then wait on the semaphore
    * that is posted when new sample data is available.
@@ -698,24 +704,25 @@ static int tc_waitsample(struct tc_dev_s *priv,
 
       if (ret < 0)
         {
-          goto errout;
+         goto errout;
         }
     }
 
   /* Re-acquire the semaphore that manages mutually exclusive access to
-   * the device structure.  We may have to wait here.  But we have our
-   * sample. Interrupts and pre-emption will be re-enabled while we wait.
+   * the device structure.  We may have to wait here.  But we have our sample.
+   * Interrupts and pre-emption will be re-enabled while we wait.
    */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
 
 errout:
-  /* Then re-enable interrupts.  We might get interrupt here and there
-   * could be a new sample.  But no new threads will run because we still
-   * have pre-emption disabled.
+  /* Restore pre-emption.  We might get suspended here but that is okay
+   * because we already have our sample.  Note:  this means that if there
+   * were two threads reading from the touchscreen for some reason, the data
+   * might be read out of order.
    */
 
-  leave_critical_section(flags);
+  sched_unlock();
   return ret;
 }
 
@@ -723,14 +730,15 @@ errout:
  * Name: tc_worker
  ****************************************************************************/
 
-static void tc_worker(void *arg)
+static void tc_worker(FAR void *arg)
 {
-  struct tc_dev_s *priv = (struct tc_dev_s *)arg;
+  FAR struct tc_dev_s *priv = (FAR struct tc_dev_s *)arg;
   uint32_t delay = TC_PENUP_POLL_TICKS;
   uint16_t value;
   uint16_t newx = 0;
   int16_t xdiff;
   int16_t ydiff;
+  int ret;
 
   DEBUGASSERT(priv != NULL);
 
@@ -744,12 +752,12 @@ static void tc_worker(void *arg)
       {
         /* Select DRIVE for Y sampling */
 
-        /* Configure XL, XR with drive voltages and disable YU drive.  Note
-         * that this is configuring the DRIVEA and DRIVEB outputs to enable
-         * the on-board transistor drive logic to energize the touch panel.
+        /* Configure XL, XR with drive voltages and disable YU drive.  Note that
+         * this is configuring the DRIVEA and DRIVEB outputs to enable the on-board
+         * transistor drive logic to energize the touch panel.
          */
 
-        *((uint32_t *)LCD_TP_PORT_SETRESET) = LCD_SAMPY_BITS;
+        *((uint32_t *) LCD_TP_PORT_SETRESET) = LCD_SAMPY_BITS;
 
         /* Allow time for the Y DRIVE to settle */
 
@@ -810,12 +818,12 @@ static void tc_worker(void *arg)
       {
         /* Select DRIVE for Y sampling */
 
-        /* Configure XL, XR with drive voltages and disable YU drive.  Note
-         * that this is configuring the DRIVEA and DRIVEB outputs to enable
-         * the on-board transistor drive logic to energize the touch panel.
+        /* Configure XL, XR with drive voltages and disable YU drive.  Note that
+         * this is configuring the DRIVEA and DRIVEB outputs to enable the on-board
+         * transistor drive logic to energize the touch panel.
          */
 
-        *((uint32_t *)LCD_TP_PORT_SETRESET) = LCD_SAMPY_BITS;
+        *((uint32_t *) LCD_TP_PORT_SETRESET) = LCD_SAMPY_BITS;
 
         /* Allow time for the Y DRIVE to settle */
 
@@ -847,9 +855,9 @@ static void tc_worker(void *arg)
 
         value = tc_adc_read_sample();
 
-        /* A converted value at the minimum would mean that we lost the
-         * contact before all of the conversions were completed.  At
-         * converted value at the maximum value is probably bad too.
+        /* A converted value at the minimum would mean that we lost the contact
+         * before all of the conversions were completed.  At converted value at
+         * the maximum value is probably bad too.
          */
 
         if (!tc_valid_sample(value))
@@ -877,13 +885,12 @@ static void tc_worker(void *arg)
             priv->sampcount = 0;
             iinfo("Y=%d\n", priv->newy);
 
-            /* Configure YU and YD with drive voltages and disable XR drive.
-             * Note that this is configuring the DRIVEA and DRIVEB outputs
-             * to enable the on-board transistor drive logic to energize the
-             * touch panel.
+            /* Configure YU and YD with drive voltages and disable XR drive.  Note that
+             * this is configuring the DRIVEA and DRIVEB outputs to enable the on-board
+             * transistor drive logic to energize the touch panel.
              */
 
-            *((uint32_t *)LCD_TP_PORT_SETRESET) = LCD_SAMPX_BITS;
+            *((uint32_t *) LCD_TP_PORT_SETRESET) = LCD_SAMPX_BITS;
 
             /* Allow time for the X sampling */
 
@@ -925,9 +932,9 @@ static void tc_worker(void *arg)
 
         value = tc_adc_read_sample();
 
-        /* A converted value at the minimum would mean that we lost the
-         * contact before all of the conversions were completed.  At
-         * converted value at the maximum value is probably bad too.
+        /* A converted value at the minimum would mean that we lost the contact
+         * before all of the conversions were completed.  At converted value at
+         * the maximum value is probably bad too.
          */
 
         if (!tc_valid_sample(value))
@@ -945,6 +952,7 @@ static void tc_worker(void *arg)
           {
             /* Calculate the X axis position */
 
+            //value = MAX_ADC - value;
             priv->value += value;
             if (++priv->sampcount < CONFIG_TOUCHSCREEN_AVG_SAMPLES)
               {
@@ -972,8 +980,8 @@ static void tc_worker(void *arg)
 
   if (priv->state == TC_PENUP)
     {
-      /* Ignore if the pen was already down (CONTACT_NONE == pen up and
-       * already reported.  CONTACT_UP == pen up, but not reported)
+      /* Ignore if the pen was already down (CONTACT_NONE == pen up and already
+       * reported.  CONTACT_UP == pen up, but not reported)
        */
 
       if (priv->sample.contact != CONTACT_NONE &&
@@ -1009,16 +1017,15 @@ static void tc_worker(void *arg)
 
   else if (priv->state == TC_PENDOWN)
     {
-      /* It is a pen down event.  If the last loss-of-contact event has not
-       * been processed yet, then we have to ignore the pen down event (or
-       * else it will look like a drag event)
+      /* It is a pen down event.  If the last loss-of-contact event has not been
+       * processed yet, then we have to ignore the pen down event (or else it will
+       * look like a drag event)
        */
 
       if (priv->sample.contact != CONTACT_UP)
         {
-          /* Perform a thresholding operation so that the results will be
-           * more stable. If the difference from the last sample is small,
-           * then ignore the event.
+          /* Perform a thresholding operation so that the results will be more stable.
+           * If the difference from the last sample is small, then ignore the event.
            */
 
           xdiff = (int16_t)priv->sample.x - (int16_t)newx;
@@ -1036,9 +1043,7 @@ static void tc_worker(void *arg)
           if (xdiff >= CONFIG_TOUCHSCREEN_THRESHX ||
               ydiff >= CONFIG_TOUCHSCREEN_THRESHY)
             {
-              /* There is some change above the threshold...
-               * Report the change.
-               */
+              /* There is some change above the threshold... Report the change. */
 
 #ifdef CONFIG_LCD_LANDSCAPE
               priv->sample.x     = MAX_ADC - priv->newy;
@@ -1049,10 +1054,9 @@ static void tc_worker(void *arg)
 #endif
               priv->sample.valid = true;
 
-              /* If this is the first (acknowledged) penddown report, then
-               * report this as the 1st contact. If contact == CONTACT_DOWN,
-               * it will be set to set to CONTACT_MOVE after the contact is
-               * first sampled.
+              /* If this is the first (acknowledged) penddown report, then report
+               * this as the first contact.  If contact == CONTACT_DOWN, it will be
+               * set to set to CONTACT_MOVE after the contact is first sampled.
                */
 
               if (priv->sample.contact != CONTACT_MOVE)
@@ -1083,29 +1087,31 @@ static void tc_worker(void *arg)
 
   /* Set up the next sample event */
 
-  work_queue(HPWORK, &priv->work, tc_worker, priv, delay);
+  ret = work_queue(HPWORK, &priv->work, tc_worker, priv, delay);
+  DEBUGASSERT(ret == 0);
 }
 
 /****************************************************************************
  * Name: tc_open
  ****************************************************************************/
 
-static int tc_open(struct file *filep)
+static int tc_open(FAR struct file *filep)
 {
 #ifdef CONFIG_TOUCHSCREEN_REFCNT
-  struct inode    *inode;
-  struct tc_dev_s *priv;
-  uint8_t          tmp;
-  int              ret;
+  FAR struct inode         *inode;
+  FAR struct tc_dev_s *priv;
+  uint8_t                   tmp;
+  int                       ret;
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct tc_dev_s *)inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -1119,7 +1125,7 @@ static int tc_open(struct file *filep)
       /* More than 255 opens; uint8_t overflows to zero */
 
       ret = -EMFILE;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* When the reference increments to 1, this is the first open event
@@ -1130,8 +1136,8 @@ static int tc_open(struct file *filep)
 
   priv->crefs = tmp;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->devlock);
+errout_with_sem:
+  nxsem_post(&priv->devsem);
   return ret;
 #else
   return OK;
@@ -1142,21 +1148,22 @@ errout_with_lock:
  * Name: tc_close
  ****************************************************************************/
 
-static int tc_close(struct file *filep)
+static int tc_close(FAR struct file *filep)
 {
 #ifdef CONFIG_TOUCHSCREEN_REFCNT
-  struct inode    *inode;
-  struct tc_dev_s *priv;
-  int              ret;
+  FAR struct inode         *inode;
+  FAR struct tc_dev_s *priv;
+  int                       ret;
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct tc_dev_s *)inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -1172,7 +1179,7 @@ static int tc_close(struct file *filep)
       priv->crefs--;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
 #endif
   return OK;
 }
@@ -1181,18 +1188,19 @@ static int tc_close(struct file *filep)
  * Name: tc_read
  ****************************************************************************/
 
-static ssize_t tc_read(struct file *filep, char *buffer, size_t len)
+static ssize_t tc_read(FAR struct file *filep, FAR char *buffer, size_t len)
 {
-  struct inode          *inode;
-  struct tc_dev_s       *priv;
-  struct touch_sample_s *report;
+  FAR struct inode          *inode;
+  FAR struct tc_dev_s  *priv;
+  FAR struct touch_sample_s *report;
   struct tc_sample_s    sample;
-  int                   ret;
+  int                        ret;
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct tc_dev_s *)inode->i_private;
 
   /* Verify that the caller has provided a buffer large enough to receive
    * the touch data.
@@ -1209,7 +1217,7 @@ static ssize_t tc_read(struct file *filep, char *buffer, size_t len)
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -1229,7 +1237,7 @@ static ssize_t tc_read(struct file *filep, char *buffer, size_t len)
         {
           ret = -EAGAIN;
           goto errout;
-        }
+       }
 
       /* Wait for sample data */
 
@@ -1246,7 +1254,7 @@ static ssize_t tc_read(struct file *filep, char *buffer, size_t len)
    * to the caller.
    */
 
-  report = (struct touch_sample_s *)buffer;
+  report = (FAR struct touch_sample_s *)buffer;
   memset(report, 0, SIZEOF_TOUCH_SAMPLE_S(1));
   report->npoints            = 1;
   report->point[0].id        = sample.id;
@@ -1257,8 +1265,8 @@ static ssize_t tc_read(struct file *filep, char *buffer, size_t len)
 
   if (sample.contact == CONTACT_UP)
     {
-      /* Pen is now up.  Is the positional data valid?  This is important to
-       * know because the release will be sent to the window based on its
+       /* Pen is now up.  Is the positional data valid?  This is important to
+        * know because the release will be sent to the window based on its
        * last positional data.
        */
 
@@ -1278,22 +1286,20 @@ static ssize_t tc_read(struct file *filep, char *buffer, size_t len)
         {
           /* First contact */
 
-          report->point[0].flags  = TOUCH_DOWN | TOUCH_ID_VALID |
-                                    TOUCH_POS_VALID;
+          report->point[0].flags  = TOUCH_DOWN | TOUCH_ID_VALID | TOUCH_POS_VALID;
         }
       else /* if (sample->contact == CONTACT_MOVE) */
         {
           /* Movement of the same contact */
 
-          report->point[0].flags  = TOUCH_MOVE | TOUCH_ID_VALID |
-                                    TOUCH_POS_VALID;
+          report->point[0].flags  = TOUCH_MOVE | TOUCH_ID_VALID | TOUCH_POS_VALID;
         }
     }
 
   ret = SIZEOF_TOUCH_SAMPLE_S(1);
 
 errout:
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -1301,25 +1307,26 @@ errout:
  * Name: tc_ioctl
  ****************************************************************************/
 
-static int tc_ioctl(struct file *filep, int cmd, unsigned long arg)
+static int tc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
 #if 1
   iinfo("cmd: %d arg: %ld\n", cmd, arg);
   return -ENOTTY; /* None yet supported */
 #else
-  struct inode *inode;
-  struct tc_dev_s *priv;
+  FAR struct inode *inode;
+  FAR struct tc_dev_s *priv;
   int ret;
 
   iinfo("cmd: %d arg: %ld\n", cmd, arg);
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct tc_dev_s *)inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -1336,7 +1343,7 @@ static int tc_ioctl(struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 #endif
 }
@@ -1345,23 +1352,24 @@ static int tc_ioctl(struct file *filep, int cmd, unsigned long arg)
  * Name: tc_poll
  ****************************************************************************/
 
-static int tc_poll(struct file *filep, struct pollfd *fds, bool setup)
+static int tc_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                        bool setup)
 {
-  struct inode    *inode;
-  struct tc_dev_s *priv;
-  int              ret;
-  int              i;
+  FAR struct inode         *inode;
+  FAR struct tc_dev_s *priv;
+  int                       ret;
+  int                       i;
 
   iinfo("setup: %d\n", (int)setup);
-  DEBUGASSERT(fds);
+  DEBUGASSERT(filep && fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct tc_dev_s *)inode->i_private;
 
   /* Are we setting up the poll?  Or tearing it down? */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -1373,8 +1381,7 @@ static int tc_poll(struct file *filep, struct pollfd *fds, bool setup)
 
       if ((fds->events & POLLIN) == 0)
         {
-          ierr("ERROR: Missing POLLIN: revents: %08" PRIx32 "\n",
-               fds->revents);
+          ierr("ERROR: Missing POLLIN: revents: %08x\n", fds->revents);
           ret = -EDEADLK;
           goto errout;
         }
@@ -1400,8 +1407,8 @@ static int tc_poll(struct file *filep, struct pollfd *fds, bool setup)
       if (i >= CONFIG_TOUCHSCREEN_NPOLLWAITERS)
         {
           ierr("ERROR: No available slot found: %d\n", i);
-          fds->priv = NULL;
-          ret       = -EBUSY;
+          fds->priv    = NULL;
+          ret          = -EBUSY;
           goto errout;
         }
 
@@ -1409,7 +1416,7 @@ static int tc_poll(struct file *filep, struct pollfd *fds, bool setup)
 
       if (priv->penchange)
         {
-          poll_notify(&fds, 1, POLLIN);
+          tc_notify(priv);
         }
     }
   else if (fds->priv)
@@ -1421,12 +1428,12 @@ static int tc_poll(struct file *filep, struct pollfd *fds, bool setup)
 
       /* Remove all memory of the poll setup */
 
-      *slot     = NULL;
-      fds->priv = NULL;
+      *slot                = NULL;
+      fds->priv            = NULL;
     }
 
 errout:
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -1453,7 +1460,7 @@ errout:
 
 int stm32_tsc_setup(int minor)
 {
-  struct tc_dev_s *priv;
+  FAR struct tc_dev_s *priv;
   char devname[DEV_NAMELEN];
 #ifdef CONFIG_TOUCHSCREEN_MULTIPLE
   irqstate_t flags;
@@ -1489,7 +1496,7 @@ int stm32_tsc_setup(int minor)
 #ifndef CONFIG_TOUCHSCREEN_MULTIPLE
   priv = &g_touchscreen;
 #else
-  priv = kmm_malloc(sizeof(struct tc_dev_s));
+  priv = (FAR struct tc_dev_s *)kmm_malloc(sizeof(struct tc_dev_s));
   if (!priv)
     {
       ierr("ERROR: kmm_malloc(%d) failed\n", sizeof(struct tc_dev_s));
@@ -1500,15 +1507,15 @@ int stm32_tsc_setup(int minor)
   /* Initialize the touchscreen device driver instance */
 
   memset(priv, 0, sizeof(struct tc_dev_s));
-  nxmutex_init(&priv->devlock);     /* Initialize device structure mutex */
+  nxsem_init(&priv->devsem,  0, 1); /* Initialize device structure semaphore */
   nxsem_init(&priv->waitsem, 0, 0); /* Initialize pen event wait semaphore */
 
   /* Register the device as an input device */
 
-  snprintf(devname, sizeof(devname), DEV_FORMAT, minor);
+  snprintf(devname, DEV_NAMELEN, DEV_FORMAT, minor);
   iinfo("Registering %s\n", devname);
 
-  ret = register_driver(devname, &g_tc_fops, 0666, priv);
+  ret = register_driver(devname, &tc_fops, 0666, priv);
   if (ret < 0)
     {
       ierr("ERROR: register_driver() failed: %d\n", ret);
@@ -1536,8 +1543,7 @@ int stm32_tsc_setup(int minor)
   return OK;
 
 errout_with_priv:
-  nxmutex_destroy(&priv->devlock);
-  nxsem_destroy(&priv->waitsem);
+  nxsem_destroy(&priv->devsem);
 #ifdef CONFIG_TOUCHSCREEN_MULTIPLE
   kmm_free(priv);
 #endif

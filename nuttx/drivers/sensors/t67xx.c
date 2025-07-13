@@ -1,22 +1,36 @@
 /****************************************************************************
  * drivers/sensors/t67xx.c
+ * Character driver for the Telaire T67xx carbon dioxide sensors
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Haltian Ltd. All rights reserved.
+ *   Author: Juha Niskanen <juha.niskanen@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,13 +40,11 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <string.h>
 #include <time.h>
 
-#include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
@@ -112,7 +124,7 @@ struct t67xx_dev_s
   FAR struct i2c_master_s *i2c;  /* I2C interface */
   uint8_t addr;                  /* I2C address */
   struct timespec boot_time;     /* When sensor was booted */
-  mutex_t devlock;
+  sem_t devsem;
 };
 
 /****************************************************************************
@@ -139,6 +151,10 @@ static int t67xx_reset(FAR struct t67xx_dev_s *priv);
 
 /* Character driver methods */
 
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+static int     t67xx_open(FAR struct file *filep);
+static int     t67xx_close(FAR struct file *filep);
+#endif
 static ssize_t t67xx_read(FAR struct file *filep, FAR char *buffer,
                           size_t buflen);
 static ssize_t t67xx_write(FAR struct file *filep, FAR const char *buffer,
@@ -152,12 +168,21 @@ static int     t67xx_ioctl(FAR struct file *filep, int cmd,
 
 static const struct file_operations g_t67xxfops =
 {
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  t67xx_open,     /* open */
+  t67xx_close,    /* close */
+#else
   NULL,           /* open */
   NULL,           /* close */
+#endif
   t67xx_read,     /* read */
   t67xx_write,    /* write */
   NULL,           /* seek */
   t67xx_ioctl,    /* ioctl */
+  NULL            /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL          /* unlink */
+#endif
 };
 
 /****************************************************************************
@@ -418,7 +443,7 @@ static int t67xx_read_gas_ppm(FAR struct t67xx_dev_s *priv,
   struct timespec ts;
   int ret;
 
-  clock_systime_timespec(&ts);
+  clock_gettime(CLOCK_REALTIME, &ts);
 
   if (!has_time_passed(ts, priv->boot_time, T67XX_UPTIME_MINIMAL_SEC))
     {
@@ -552,10 +577,48 @@ static int t67xx_reset(FAR struct t67xx_dev_s *priv)
 
   /* Sensor uptime starting again from zero. */
 
-  clock_systime_timespec(&priv->boot_time);
+  clock_gettime(CLOCK_REALTIME, &priv->boot_time);
 
   return ret;
 }
+
+/****************************************************************************
+ * Name: t67xx_open
+ *
+ * Description:
+ *   This function is called whenever the T67XX device is opened.
+ *
+ ****************************************************************************/
+
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+static int t67xx_open(FAR struct file *filep)
+{
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct t67xx_dev_s *priv = inode->i_private;
+
+  UNUSED(priv);
+  return OK;
+}
+#endif
+
+/****************************************************************************
+ * Name: t67xx_close
+ *
+ * Description:
+ *   This routine is called when the T67XX device is closed.
+ *
+ ****************************************************************************/
+
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+static int t67xx_close(FAR struct file *filep)
+{
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct t67xx_dev_s *priv = inode->i_private;
+
+  UNUSED(priv);
+  return OK;
+}
+#endif
 
 /****************************************************************************
  * Name: t67xx_read
@@ -573,7 +636,7 @@ static ssize_t t67xx_read(FAR struct file *filep, FAR char *buffer,
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -598,7 +661,7 @@ static ssize_t t67xx_read(FAR struct file *filep, FAR char *buffer,
       if (ret < 0)
         {
           snerr("ERROR: t67xx_read_gas_ppm failed: %d\n", ret);
-          nxmutex_unlock(&priv->devlock);
+          nxsem_post(&priv->devsem);
           return (ssize_t)ret;
         }
 
@@ -607,7 +670,7 @@ static ssize_t t67xx_read(FAR struct file *filep, FAR char *buffer,
       *ptr++ = gas_ppm;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return nsamples * sizeof(struct t67xx_value_s);
 }
 
@@ -633,7 +696,7 @@ static int t67xx_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -674,7 +737,7 @@ static int t67xx_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -710,7 +773,7 @@ int t67xx_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   /* Initialize the t67xx device structure. */
 
-  priv = kmm_malloc(sizeof(struct t67xx_dev_s));
+  priv = (FAR struct t67xx_dev_s *)kmm_malloc(sizeof(struct t67xx_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");
@@ -720,9 +783,9 @@ int t67xx_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   priv->i2c  = i2c;
   priv->addr = addr;
 
-  nxmutex_init(&priv->devlock);
+  nxsem_init(&priv->devsem, 0, 1);
 
-  clock_systime_timespec(&priv->boot_time);
+  clock_gettime(CLOCK_REALTIME, &priv->boot_time);
 
   /* Register the character driver. */
 
@@ -737,7 +800,6 @@ int t67xx_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   return ret;
 
 errout:
-  nxmutex_destroy(&priv->devlock);
   kmm_free(priv);
   return ret;
 }

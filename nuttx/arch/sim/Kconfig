@@ -13,8 +13,6 @@ choice
 config HOST_X86_64
 	bool "x86_64"
 	select ARCH_HAVE_STACKCHECK
-	select LIBC_ARCH_ELF_64BIT if LIBC_ARCH_ELF && !SIM_M32
-	select ARCH_HAVE_MATH_H
 
 config HOST_X86
 	bool "x86"
@@ -24,29 +22,11 @@ config HOST_ARM
 	bool "arm"
 	select ARCH_HAVE_STACKCHECK
 
-config HOST_ARM64
-	bool "arm64"
-	select ARCH_HAVE_STACKCHECK
-
 endchoice # Host CPU Type
 
 config ARCH_CHIP
 	string
 	default "sim"
-
-choice
-	prompt "Toolchain Selection"
-	default SIM_TOOLCHAIN_GCC
-
-config SIM_TOOLCHAIN_GCC
-	bool "Generic GNU toolchain"
-	select ARCH_TOOLCHAIN_GCC
-
-config SIM_TOOLCHAIN_CLANG
-	bool "LLVM Clang toolchain"
-	select ARCH_TOOLCHAIN_CLANG
-
-endchoice
 
 config SIM_M32
 	bool "Build 32-bit simulation on 64-bit machine"
@@ -77,36 +57,6 @@ config SIM_CYGWIN_DECORATED
 		run:  It will crash early, probably in some function due to the failure to
 		allocate memory.
 
-config SIM_ASAN
-	bool "Address Sanitizer"
-	default n
-	depends on !MM_KASAN && MM_CUSTOMIZE_MANAGER && FRAME_POINTER
-	---help---
-		AddressSanitizer (ASan) is a fast compiler-based tool for detecting memory
-		bugs in native code.
-
-config SIM_UBSAN
-	bool "Undefined Behaviour Sanitizer"
-	default n
-	depends on !MM_UBSAN && FRAME_POINTER
-	---help---
-		Compile-time instrumentation is used to detect various undefined behaviours
-		at runtime.
-
-config SIM_UBSAN_DUMMY
-	bool "Bypass Undefined Behaviour Sanitizer"
-	default n
-	depends on SIM_UBSAN
-	---help---
-		Keep SIM_UBSAN compile time but disable runtime actions.
-
-config SIM_PROFILE
-	bool "Enable gprof"
-	depends on PROFILE_NONE
-	default n
-	---help---
-		Enable support gprof profiling tool.
-
 choice
 	prompt "X64_64 ABI"
 	default SIM_X8664_SYSTEMV if HOST_LINUX
@@ -117,11 +67,11 @@ config SIM_X8664_SYSTEMV
 	bool "System V AMD64 ABI"
 	---help---
 		The calling convention of the System V AMD64 ABI is followed on Solaris,
-		Linux, FreeBSD, macOS, and other UNIX-like or POSIX-compliant operating
+		Linux, FreeBSD, Mac OS X, and other UNIX-like or POSIX-compliant operating
 		systems. The first six integer or pointer arguments are passed in registers
 		RDI, RSI, RDX, RCX, R8, and R9, while XMM0, XMM1, XMM2, XMM3, XMM4, XMM5,
 		XMM6 and XMM7 are used for floating point arguments. For system calls, R10
-		is used instead of RCX.  As in the Microsoft x64 calling convention,
+		is used instead of RCX.   As in the Microsoft x64 calling convention,
 		additional arguments are passed on the stack and the return value is stored
 		in RAX.
 
@@ -146,110 +96,29 @@ config SIM_X8664_MICROSOFT
 
 endchoice
 
-choice
-	prompt "Simulation at a fixed cadence in near real-time"
-	default SIM_WALLTIME_SLEEP
-
-config SIM_WALLTIME_SLEEP
-	bool "Execution the simulation in near real-time using host sleep"
+config SIM_WALLTIME
+	bool "Execution simulation in near real-time"
+	default n
 	---help---
-		NOTE: This configuration setting will cause the sim target's IDLE loop to delay
+		NOTE:  In order to facility fast testing, the sim target's IDLE loop, by default,
+		calls the system timer "interrupt handler" as fast as possible.  As a result, there
+		really are no noticeable delays when a task sleeps.  However, the task really does
+		sleep -- but the time scale is wrong.  If you want behavior that is closer to
+		normal timing, then you can define SIM_WALLTIME=y in your configuration
+		file.  This configuration setting will cause the sim target's IDLE loop to delay
 		on each call so that the system "timer interrupt" is called at a rate approximately
 		correct for the system timer tick rate.  With this definition in the configuration,
 		sleep() behavior is more or less normal.
 
-config SIM_WALLTIME_SIGNAL
-	bool "Execute the simulation using a host timer"
-	---help---
-		Run the NuttX simulation using a host timer that delivers periodic SIGALRM
-		events at a tick rate specified by CONFIG_USEC_PER_TICK. Enabling this option
-		will generate the timer 'tick' events from the host timer at a fixed rate.
-		The simulated 'tick' events from Idle task are no longer sent.
-
-endchoice
-
-config SIM_LOOPTASK_PRIORITY
-	int "looptask priority"
-	default SCHED_HPWORKPRIORITY if SCHED_HPWORK
-	default 255 if !SCHED_HPWORK
-	---help---
-		Looptask priority
-
-config SIM_LOOPTASK_INTERVAL
-	int "looptask interval in us"
-	default 10000
-	---help---
-		Looptask sleep time
-
-config SIM_STACKSIZE_ADJUSTMENT
-	int "The adjustment of stack size for sim"
-	default 65536
-	---help---
-		The adjustment of stack size for sim. When the task is created,
-		the stack size is increased by this amount.
-
-config SIM_HOSTFS
-	bool "Simulated HostFS"
-	depends on FS_HOSTFS
-	---help---
-		Access host filesystem through HostFS.
-
-config SIM_IMAGEPATH_AS_CWD
-	bool "Simulator switch working directory"
-	default n
-	---help---
-		If this option is enabled, the working path of nuttx will be modified
-		to the folder where the nuttx file is located.
-		It affects the file access of hostfs, which will start looking for
-		files based on the nuttx image folder.
-		Otherwise the default $CWD will be used as the starting path for the search.
-		Absolute paths are never affected.
-
-choice
-	prompt "Simulated Network Interface"
-	default SIM_NETDEV
-	depends on NET
-	optional
-
 config SIM_NETDEV
 	bool "Simulated Network Device"
+	default y
+	depends on NET_ETHERNET
 	select ARCH_HAVE_NETDEV_STATISTICS
 	select SCHED_LPWORK
-	select NET_ETHERNET
+	select SIM_WALLTIME
 	---help---
 		Build in support for a simulated network device.
-
-config SIM_NETUSRSOCK
-	bool "Simulated Network Device with Native Stack via usrsock"
-	select NET_USRSOCK
-	---help---
-		Built-in support for a simulated network device using native stack via usrsock
-
-endchoice
-
-config SIM_CANDEV
-	bool "Simulated CAN Device"
-	depends on HOST_LINUX
-	default n
-	---help---
-		Build in support for a simulated CAN device.
-
-if SIM_CANDEV
-
-config SIM_CANDEV_CHAR
-	bool "Simulated CAN Device as CAN character driver"
-	default n
-	depends on CAN
-	select ARCH_HAVE_CAN_ERRORS
-
-config SIM_CANDEV_SOCK
-	bool "Simulated CAN Device as SocketCAN"
-	default n
-	depends on NET_CAN
-	select NET_CAN_HAVE_ERRORS
-	select NET_CAN_HAVE_CANFD
-
-endif # SIM_CANDEV
 
 if SIM_NETDEV
 
@@ -271,35 +140,6 @@ config SIM_NETDEV_VPNKIT
 
 endchoice
 
-config SIM_NETDEV_MTU
-	int "The MTU of Simulated Network Device"
-	default 1500
-	range 1280 65535 if NET_IPv6
-	range 576 65535 if !NET_IPv6
-	---help---
-		The MTU of the network devices.
-
-config SIM_NETDEV_NUMBER
-	int "Number of Simulated Network Device"
-	default 1
-	range 1 8
-	depends on SIM_NETDEV
-	---help---
-		The number of simulated network devices.
-
-		Note that only one network device will be brought up by netinit automatically,
-		others will be kept in DOWN state by default.
-
-config SIM_WIFIDEV_NUMBER
-	int "Number of Simulated WiFi Device"
-	default 0
-	range 0 SIM_NETDEV_NUMBER
-	depends on SIM_NETDEV && DRIVERS_IEEE80211 && NETDEV_WIRELESS_HANDLER
-	---help---
-		The number of simulated wifi network devices.
-
-		Note that only one network device will be brought up by netinit automatically,
-		others will be kept in DOWN state by default.
 endif
 
 config SIM_NETDEV_VPNKIT_PATH
@@ -341,119 +181,40 @@ config SIM_NET_BRIDGE_DEVICE
 
 endif
 
-config SIM_SOUND
-	bool "Simulated sound support"
-	depends on AUDIO
+config SIM_RPTUN_MASTER
+	bool "Remote Processor Tunneling Role"
+	depends on RPTUN
+
+config SIM_LCDDRIVER
+	bool "Build a simulated LCD driver"
 	default y
-
-if SIM_SOUND
-
-choice
-	prompt "Simulated sound Type"
-	default SIM_SOUND_ALSA
-
-config SIM_SOUND_ALSA
-	bool "alsa support on sim"
-	depends on HOST_LINUX
-	depends on AUDIOUTILS_LIBMAD
-	depends on AUDIOUTILS_LAME
-
-endchoice
-
-endif
-
-config SIM_OFFLOAD_NUM_BUFFERS
-	int "Number of offload buffers for audio processing"
-	default 2
+	depends on NX && NX_LCDDRIVER
 	---help---
-		Specifies the number of offload buffers to allocate for audio processing.
-		If Driver Specified buffer sizes is enabled (below), then the
-		low-level drivers will have the opportunity to override this
-		value.
+		Build a simulated LCD driver"
 
-config SIM_OFFLOAD_BUFFER_NUMBYTES
-	int "Size of each offload buffer for audio processing"
-	default 32767
-	---help---
-		Specifies the allocation size for each offload buffer
-		If Driver Specified buffer sizes is enabled (below), then the
-		low-level drivers will have the opportunity to override this
-		value.
-
-config SIM_CAMERA
-	bool "Simulated camera support"
-	depends on VIDEO
-	default y
-
-if SIM_CAMERA
-
-choice
-	prompt "Simulated camera device type"
-	default SIM_CAMERA_V4L2
-
-config SIM_CAMERA_V4L2
-	bool "V4L2 camera support on sim"
-	depends on HOST_LINUX
-
-endchoice
-
-config HOST_CAMERA_DEV_PATH
-	string "Host camera device path"
-	default "/dev/video0"
-
-config SIM_CAMERA_DEV_PATH
-	string "NuttX video device path"
-	default "/dev/video"
-
-endif
-
-menu "Simulated v4l2m2m support"
-
-config SIM_VIDEO_DECODER
-	bool "Video decoder support on sim"
-	depends on VIDEO
-	depends on VIDEOUTILS_OPENH264
+config SIM_FRAMEBUFFER
+	bool "Build a simulated frame buffer driver"
 	default n
+	depends on !NX_LCDDRIVER
 	---help---
-		v4l2m2m simlator decoder, dependent on videoutils_openh264.
+		Build a simulated frame buffer driver"
 
-config SIM_VIDEO_DECODER_DEV_PATH
-	string "Video decoder device path"
-	depends on SIM_VIDEO_DECODER
-	default "/dev/video1"
-
-config SIM_VIDEO_ENCODER
-	bool "Video encoder support on sim"
-	depends on VIDEO
-	depends on VIDEOUTILS_LIBX264
-	default n
-	---help---
-		v4l2m2m simlator encoder, dependent on videoutils_libx264.
-
-config SIM_VIDEO_ENCODER_DEV_PATH
-	string "Video encoder device path"
-	depends on SIM_VIDEO_ENCODER
-	default "/dev/video2"
-
-endmenu
-
-menu "Simulated Graphics/Input"
+if SIM_FRAMEBUFFER
 
 config SIM_X11FB
-	bool "X11 graphics/input"
+	bool "Use X11 window"
 	default n
 	select SCHED_LPWORK
+	select SIM_WALLTIME
 	---help---
-		Use X11 to provide graphics and input emulation to interact with host.
+		Use an X11 graphics window to simulate the graphics device"
 
-if SIM_X11FB
 config SIM_X11NOSHM
 	bool "Don't use shared memory with X11"
 	default n
+	depends on SIM_X11FB
 	---help---
-		Don't use shared memory with the X11 graphics device emulation.
-
-menu "Window Configuration"
+		Don't use shared memory with the X11 graphics device emulation."
 
 config SIM_FBHEIGHT
 	int "Display height"
@@ -463,419 +224,254 @@ config SIM_FBHEIGHT
 
 config SIM_FBWIDTH
 	int "Display width"
-	default 320
+	default 320 if SIM_LCDDRIVER
+	default 480 if SIM_FRAMEBUFFER
 	---help---
-		Simulated width of the display.  Default: 320
+		Simulated width of the display.  Default: 320 or 480
 
 config SIM_FBBPP
 	int "Pixel depth in bits"
-	default 32
+	default 8
 	---help---
 		Pixel depth in bits.  Valid choices are 4, 8, 16, 24, or 32.
 		If you use the X11 display emulation, the selected BPP must match the BPP
-		of your graphics hardware (probably 32 bits).  Default: 32
+		of your graphics hardware (probably 32 bits).  Default: 8
 
-config SIM_FRAMEBUFFER_COUNT
-	int "Framebuffer count"
-	depends on SIM_FRAMEBUFFER
-	default 2
-	---help---
-		Framebuffer count.
-		Simulated framebuffer count.  Default: 2
+endif # SIM_FRAMEBUFFER
 
-config SIM_FB_INTERVAL_LINE
-	int "The line between non-consecutive framebuffers"
-	depends on SIM_FRAMEBUFFER && SIM_FRAMEBUFFER_COUNT > 1
-	default 0
-	---help---
-		When SIM_FB_INTERVAL_LINE = 0, the framebuffers are consecutive.
-		When SIM_FB_INTERVAL_LINE > 0, the first buffer is not consecutive with
-		the second buffer, and the interval between discontinuous buffers is
-		SIM_FB_INTERVAL_LINE * stride.  Default: 0
-
-endmenu
-
+if SIM_X11FB && INPUT
 choice
-	prompt "Graphics Device"
-	default SIM_FRAMEBUFFER
-	---help---
-		Choose which kind of graphics device to emulate
-
-config SIM_LCDDRIVER
-	bool "LCD device"
-	depends on LCD
-	---help---
-		Emulate an LCD driver
-
-config SIM_FRAMEBUFFER
-	bool "Framebuffer"
-	depends on VIDEO_FB
-	---help---
-		Emulate a framebuffer
-
-endchoice
-
-endif # SIM_X11FB
-
-if INPUT
-choice
-	prompt "Input Device"
+	prompt "X11 Simulated Input Device"
 	default SIM_NOINPUT
 
 config SIM_TOUCHSCREEN
 	bool "X11 mouse-based touchscreen emulation"
-	select INPUT_TOUCHSCREEN
-	depends on SIM_X11FB
 	---help---
 		Support an X11 mouse-based touchscreen emulation.  Also needs INPUT=y
 
 config SIM_AJOYSTICK
 	bool "X11 mouse-based analog joystick emulation"
-	depends on SIM_X11FB
 	---help---
 		Support an X11 mouse-based analog joystick emulation.  Also needs INPUT=y
-
-config SIM_BUTTONS
-	bool "X11 mouse-based button emulation"
-	depends on SIM_X11FB
-	---help---
-		Support an X11 mouse-based button emulation
-		(left-click mapped to button press). Also needs INPUT=y
 
 config SIM_NOINPUT
 	bool "No input device"
 
-endchoice # Input Device
+endchoice # X11 Simulated Input Device
+endif # SIM_X11FB && INPUT
 
-config SIM_KEYBOARD
-	bool "X11 keyboard"
-	select INPUT_KEYBOARD
-	depends on SIM_X11FB
+config SIM_TCNWAITERS
+	bool "Maximum number poll() waiters"
+	default 4
+	depends on SIM_TOUCHSCREEN
 	---help---
-		Support an X11 mouse-based keyboard emulation.  Also needs INPUT=y
+		The maximum number of threads that can be waiting on poll() for a
+		touchscreen event. Default: 4
 
-config SIM_KEYBOARD_BUFFSIZE
-	int "sim keyboard buffer size"
-	default 64
-	depends on SIM_KEYBOARD
-	---help---
-		Emulator keyboard buffer size
-
-endif # if INPUT
-
-endmenu
-
-config SIM_HCISOCKET
-	bool "Attach Host Bluetooth"
-	default false
-	depends on HOST_LINUX && (UART_BTH4 || UART_BTH5 || WIRELESS_BLUETOOTH)
-	---help---
-		Attached the local bluetooth device to the simulation
-		target via HCI_CHANNEL_USER. This gives NuttX full
-		control of the device, but is abstracted from the
-		physical interface which is still handled by Linux.
-
-config SIM_HCISOCKET_DEVID
-	int "Bluetooth Device ID"
-	default 0
-	depends on SIM_HCISOCKET
-	---help---
-		Attached the local bluetooth device use specific
-		Bluetooth HCI number id.
-
-config SIM_I2CBUS
-	bool "Simulated I2C Bus"
+config SIM_IOEXPANDER
+	bool "Simulated I/O Expander"
 	default n
-	select I2C
+	depends on IOEXPANDER
+	select IOEXPANDER_INT_ENABLE
 	---help---
-		Build in support for simulated i2c bus
+		Build a simple, simulated I/O Expander chip simulation (for testing
+		purposes only).
 
-if SIM_I2CBUS
+if SIM_IOEXPANDER
+
+config SIM_INT_NCALLBACKS
+	int "Max number of interrupt callbacks"
+	default 4
+	---help---
+		This is the maximum number of interrupt callbacks supported
+
+config SIM_INT_POLLDELAY
+	int "Interrupt poll delay (used)"
+	default 500000
+	---help---
+		This microsecond delay defines the polling rate for missed interrupts.
+
+endif # SIM_IOEXPANDER
+
+config SIM_SPIFLASH
+	bool "Simulated SPI FLASH with SMARTFS"
+	default n
+	select FS_SMARTFS
+	select MTD_SMART
+	---help---
+		Adds a simulated SPI FLASH that responds to standard M25 style
+		commands on the SPI bus.
 
 choice
-	prompt "Simulated I2C Bus Type"
-	default SIM_I2CBUS_LINUX
+	prompt "Simulated SPI FLASH Size"
+	default SIM_SPIFLASH_1M
+	depends on SIM_SPIFLASH
 
-config SIM_I2CBUS_LINUX
-	bool "Linux I2C Bus Character Dev"
-	depends on HOST_LINUX
-	---help---
-		Attach a Linux I2C bus via the character device
-		interface. This should be used with caution as it
-		could interfere with devices internal to the system.
-		It is recommended to use this with a USB<>I2C device
-		like the MCP2221 and set udev rules so that only
-		the bus provided by this device can be controlled
-		by the user running the simulator.
-		https://www.kernel.org/doc/html/latest/i2c/dev-interface.html
+config SIM_SPIFLASH_1M
+	bool "1 MBit (128K Byte)"
+
+config SIM_SPIFLASH_8M
+	bool "8 MBit (1M Byte)"
+
+config SIM_SPIFLASH_32M
+	bool "32 MBit (4M Byte)"
+
+config SIM_SPIFLASH_64M
+	bool "64 MBit (8M Byte)"
+
+config SIM_SPIFLASH_128M
+	bool "128 MBit (16M Byte)"
 
 endchoice
 
-config SIM_I2CBUS_ID
-	int "I2C host bus ID to attach to simulator"
-	default 0
-	depends on SIM_I2CBUS
+config SIM_SPIFLASH_SECTORSIZE
+	int "FLASH Sector Erase Size"
+	default 65536
+	depends on SIM_SPIFLASH
 	---help---
-		This is the bus identifier that should be used by the host implementation to
-		attach to the simulator driver.
+		Sets the large sector erase size that the part simulates.
+		This driver simulates SPI devices that have both a large
+		sector erase as well as a "sub-sector" (per the datasheet)
+		erase size (typically 4K bytes).
 
-endif
-
-config SIM_SPI
-	bool "Simulated SPI port"
-	default n
-	select SPI
+config SIM_SPIFLASH_SUBSECTORSIZE
+	int "FLASH Sub-Sector Erase Size"
+	default 4096
+	depends on SIM_SPIFLASH
 	---help---
-		Build in support for simulated spi port
+		Sets the smaller sub-sector erase size supported by the
+		FLASH emulation
 
-if SIM_SPI
-
-choice
-	prompt "Simulated SPI Type"
-	default SIM_SPI_LINUX
-
-config SIM_SPI_LINUX
-	bool "Linux SPI Character Dev"
-	depends on HOST_LINUX
+config SIM_SPIFLASH_M25P
+	bool "Enable M25Pxx FLASH"
+	depends on MTD_M25P
 	---help---
-		Attach a Linux SPI port via the character device
-		interface. To achieve a SPI port on Linux host, it is
-		recommended to use a USB<>SPI device such as CH341A/B.
+		Enables simulation of an M25P type FLASH
 
-endchoice
-
-config SIM_SPIDEV_NAME
-	string "the name of SPI host dev to attach to simulator"
-	default "/dev/spidev0.0"
-	depends on SIM_SPI
+config SIM_SPIFLASH_SST26
+	bool "Enable SST26 FLASH"
+	depends on MTD_SST26
 	---help---
-		This is the name of the SPI device on the host implementation to
-		attach to the simulator driver.
+		Enables simulation of an SST26 type FLASH
 
-endif
-
-menu "Simulated UART"
-
-config SIM_UART_DMA
-	bool "SIM UART use DMA mode"
-	default y
-	select SERIAL_TXDMA
-	select SERIAL_RXDMA
+config SIM_SPIFLASH_W25
+	bool "Enable W25 FLASH"
+	depends on MTD_W25
 	---help---
-		console use DMA mode or single char mode
+		Enables simulation of a W25 type FLASH
 
-config SIM_UART_NUMBER
-	int "Number of simulated UART ports"
-	default 0
-	range 0 4
+config SIM_SPIFLASH_CUSTOM
+	bool "Enable Emulation of a Custom Manufacturer / ID FLASH"
+	depends on SIM_SPIFLASH
 	---help---
-		Under simulation, a NuttX port can be bound to a serial
-		port on the host machine. This way NuttX can access the
-		host's hardware directly.
+		Enables simulation of FLASH with a custom Manufacturer, ID and Capacity
 
-		There are two possibilities regarding the host's port:
-		it can be either a physical one, or a simulated one.
+config SIM_SPIFLASH_MANUFACTURER
+	hex "Hex ID of the FLASH manufacturer code"
+	default 0x20
+	depends on SIM_SPIFLASH_CUSTOM
+	---help---
+		Allows the simulated FLASH Manufacturer ID to be set.
 
-		In case of a physical port, NuttX will be able to open
-		this port and communicate with any actual hardware that
-		it is connected to. This is useful for testing code that
-		uses external hardware (e.g. sensors or other boards).
-		In order for this to work, NuttX port name must be set to
-		the same name that the host is using for this port (e.g.
-		/dev/ttyUSB0).
+config SIM_SPIFLASH_MEMORY_TYPE
+	hex "Hex ID of the FLASH Memory Type code"
+	default 0x20
+	depends on SIM_SPIFLASH_CUSTOM
+	---help---
+		Allows the simulated FLASH Memory Type code to be set.
 
-		Alternatively, a "simulated" host port may be used to.
-		This is useful if you need to also simulate the external
-		hardware, or to have NuttX communicate with any other
-		software in your system.
-		You can create a "simulated" port in your host,
-		by running:
+config SIM_SPIFLASH_CAPACITY
+	hex "Hex ID of the FLASH capacity code"
+	default 0x14
+	depends on SIM_SPIFLASH_CUSTOM
+	---help---
+		Allows the simulated FLASH Memory Capacity code to be set.
 
-			socat PTY,link=/dev/ttySIM0 PTY,link=/dev/ttyNX0
-			stty -F /dev/ttySIM0 raw
-			stty -F /dev/ttyNX0 raw
-
-		This will create two new ports on your system.
-		NuttX will use the ttySIM0 port, and another software
-		may open and use the ttyNX0 port.
-		Anything sent to the one of these ports will be relayed
-		automatically to the other, and vice-versa.
-
-config SIM_UART_BUFFER_SIZE
-	int "UART buffer size"
+config SIM_SPIFLASH_PAGESIZE
+	int "FLASH Write / Program Page Size"
 	default 256
-	depends on SIM_UART_NUMBER >= 1
+	depends on SIM_SPIFLASH
 	---help---
-		The size of the transmit and receive buffers of the
-		simulated UART ports.
+		Sets the size of a page program operation.  The page size
+		represents the maximum number of bytes that can be sent
+		for a program operation.  If more bytes than this are
+		sent on a single Page Program, then the address will
+		"wrap" causing the initial data sent to be overwritten.
+		This is consistent with standard SPI FLASH operation.
 
-		Note that all ports will have the same buffer size.
-
-config SIM_UART0_NAME
-	string "UART port 0 name"
-	default "/dev/ttySIM0"
-	depends on SIM_UART_NUMBER >= 1
-	---help---
-		This is the name of the simulated UART port.
-		The port will be mounted in NuttX under this name.
-
-		A UART port must also exist on the host system
-		with the exact same name specified here.
-
-config SIM_UART1_NAME
-	string "UART port 1 name"
-	default "/dev/ttySIM1"
-	depends on SIM_UART_NUMBER >= 2
-	---help---
-		This is the name of the simulated UART port.
-		The port will be mounted in NuttX under this name.
-
-		A UART port must also exist on the host system
-		with the exact same name specified here.
-
-config SIM_UART2_NAME
-	string "UART port 2 name"
-	default "/dev/ttySIM2"
-	depends on SIM_UART_NUMBER >= 3
-	---help---
-		This is the name of the simulated UART port.
-		The port will be mounted in NuttX under this name.
-
-		A UART port must also exist on the host system
-		with the exact same name specified here.
-
-config SIM_UART3_NAME
-	string "UART port 3 name"
-	default "/dev/ttySIM3"
-	depends on SIM_UART_NUMBER >= 4
-	---help---
-		This is the name of the simulated UART port.
-		The port will be mounted in NuttX under this name.
-
-		A UART port must also exist on the host system
-		with the exact same name specified here.
-
-config SIM_RAM_UART
-	bool "SIM RAM UART Device"
-	depends on RAM_UART
+config SIM_QSPIFLASH
+	bool "Simulated QSPI FLASH with SMARTFS"
 	default n
+	select FS_SMARTFS
+	select MTD_SMART
 	---help---
-		SIM RAM UART. It emulates a UART device but using a RAM memory
-		instead a physical peripheral.
+		Adds a simulated QSPI FLASH that responds to N25QXXX style
+		commands on the QSPI bus.
 
-if SIM_RAM_UART
-config SIM_RAM_UART0
-	bool "SIM RAM UART Device 0"
-	default n
+choice
+	prompt "Simulated QSPI FLASH Size"
+	default SIM_QSPIFLASH_1M
+	depends on SIM_QSPIFLASH
+
+config SIM_QSPIFLASH_1M
+	bool "1 MBit (128K Byte)"
+
+config SIM_QSPIFLASH_8M
+	bool "8 MBit (1M Byte)"
+
+config SIM_QSPIFLASH_32M
+	bool "32 MBit (4M Byte)"
+
+config SIM_QSPIFLASH_64M
+	bool "64 MBit (8M Byte)"
+
+config SIM_QSPIFLASH_128M
+	bool "128 MBit (16M Byte)"
+
+endchoice
+
+config SIM_QSPIFLASH_MANUFACTURER
+	hex "Hex ID of the FLASH manufacturer code"
+	default 0x20
+	depends on SIM_QSPIFLASH
 	---help---
-		sim ram uart device 0
+		Allows the simulated FLASH Manufacturer ID to be set.
 
-config SIM_RAM_UART0_SLAVE
-	bool "SIM_RAM_UART0 is slave"
-	depends on SIM_RAM_UART0
-	default n
+config SIM_QSPIFLASH_MEMORY_TYPE
+	hex "Hex ID of the FLASH Memory Type code"
+	default 0xba
+	depends on SIM_QSPIFLASH
 	---help---
-		The sim ram uart0 is slave
+		Allows the simulated FLASH Memory Type code to be set.
 
-config SIM_RAM_UART1
-	bool "SIM RAM UART Device 1"
-	default n
+config SIM_QSPIFLASH_SECTORSIZE
+	int "FLASH Sector Erase Size"
+	default 65536
+	depends on SIM_QSPIFLASH
 	---help---
-		sim ram uart device 1
+		Sets the large sector erase size that the part simulates.
+		This driver simulates QSPI devices that have both a large
+		sector erase as well as a "sub-sector" (per the datasheet)
+		erase size (typically 4K bytes).
 
-config SIM_RAM_UART1_SLAVE
-	bool "SIM_RAM_UART1 is slave"
-	depends on SIM_RAM_UART1
-	default n
+config SIM_QSPIFLASH_SUBSECTORSIZE
+	int "FLASH Sub-Sector Erase Size"
+	default 4096
+	depends on SIM_QSPIFLASH
 	---help---
-		The sim ram uart1 is slave
+		Sets the smaller sub-sector erase size supported by the
+		FLASH emulation
 
-config SIM_RAM_UART2
-	bool "SIM RAM UART Device 2"
-	default n
+config SIM_QSPIFLASH_PAGESIZE
+	int "FLASH Write / Program Page Size"
+	default 256
+	depends on SIM_QSPIFLASH
 	---help---
-		sim ram uart device 2
-
-config SIM_RAM_UART2_SLAVE
-	bool "SIM_RAM_UART2 is slave"
-	depends on SIM_RAM_UART2
-	default n
-	---help---
-		The sim ram uart2 is slave
-endif
-
-endmenu
-
-config SIM_USB_DEV
-	bool "Linux USB Device"
-	select USBDEV
-	---help---
-		Build in support for simulated usb device
-
-if SIM_USB_DEV
-
-config SIM_USB_RAW_GADGET
-	bool "Simulated USB Raw Gadget Dev"
-	default n
-	depends on HOST_LINUX
-	---help---
-		Use USB Raw Gadget and Dummy HCD/UDC to set up virtual
-		USB Device and Host controller that connected to each
-		other inside the kernel.
-
-		Get Raw Gadget:
-		Get Raw Gadget code at https://github.com/xairy/raw-gadget.
-
-		Make Raw Gadget:
-		Run make in the raw_gadget and dummy_hcd directory. If raw_gadget
-		build fail, you need to check which register interface meets your
-		kernel version, usb_gadget_probe_driver or usb_gadget_register_driver.
-
-		Install Raw Gadget:
-		Run ./insmod.sh in the raw_gadget and dummy_hcd directory.
-
-endif
-
-config SIM_USB_HOST
-	bool "Linux USB Host"
-	select USBHOST
-	select USBHOST_HAVE_ASYNCH
-	select USBHOST_ASYNCH
-	---help---
-		Build in support for simulated usb host
-
-if SIM_USB_HOST
-
-config SIM_LIBUSB
-	bool "Simulated USB Host use libusb"
-	default n
-	depends on HOST_LINUX
-	---help---
-		Use libusb to set up virtual USB Host controller.
-
-config SIM_USB_VID
-	hex "Simulated USB Dev VID"
-	default 0x18d1
-
-config SIM_USB_PID
-	hex "Simulated USB Dev PID"
-	default 0x4e11
-
-config SIM_USB_STACKSIZE
-	int "Simulated USB waiter stack size"
-	default 1024
-
-config SIM_USB_PRIO
-	int "Simulated USB waiter task priority"
-	default 100
-
-endif
-
-config SIM_CUSTOM_DATA_SECTION
-	string "Custom data section name for Simulator"
-	default ""
-	---help---
-		Custom data section name for Simulator to allow
-		developer to define special data sections.
+		Sets the size of a page program operation.  The page size
+		represents the maximum number of bytes that can be sent
+		for a program operation.  If more bytes than this are
+		sent on a single Page Program, then the address will
+		"wrap" causing the initial data sent to be overwritten.
+		This is consistent with standard SPI FLASH operation.
 
 endif # ARCH_SIM

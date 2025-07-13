@@ -1,27 +1,41 @@
 /****************************************************************************
  * net/socket/socket.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2011-2014, 2017, 2019 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-#ifndef __NET_SOCKET_SOCKET_H
-#define __NET_SOCKET_SOCKET_H
+#ifndef _NET_SOCKET_SOCKET_H
+#define _NET_SOCKET_SOCKET_H
 
 /****************************************************************************
  * Included Files
@@ -34,7 +48,6 @@
 #include <stdint.h>
 #include <time.h>
 
-#include <nuttx/fs/fs.h>
 #include <nuttx/clock.h>
 #include <nuttx/net/net.h>
 
@@ -64,12 +77,10 @@
 #define _SO_SNDLOWAT     _SO_BIT(SO_SNDLOWAT)
 #define _SO_SNDTIMEO     _SO_BIT(SO_SNDTIMEO)
 #define _SO_TYPE         _SO_BIT(SO_TYPE)
-#define _SO_TIMESTAMP    _SO_BIT(SO_TIMESTAMP)
-#define _SO_BINDTODEVICE _SO_BIT(SO_BINDTODEVICE)
 
 /* This is the largest option value.  REVISIT: belongs in sys/socket.h */
 
-#define _SO_MAXOPT       (18)
+#define _SO_MAXOPT       (15)
 
 /* Macros to set, test, clear options */
 
@@ -97,30 +108,18 @@
 /* Macro to set socket errors */
 
 #ifdef CONFIG_NET_SOCKOPTS
-#  define _SO_CONN_SETERRNO(c,e) \
-    do \
-      { \
-        if ((c) != NULL) \
-          { \
-            FAR struct socket_conn_s *_conn = \
-              (FAR struct socket_conn_s *)(c); \
-            _conn->s_error = (int16_t)e; \
-          } \
-      } \
-    while (0)
-
 #  define _SO_SETERRNO(s,e) \
     do \
       { \
         if (s != NULL) \
           { \
-            _SO_CONN_SETERRNO((s)->s_conn, e); \
+            s->s_error = (int16_t)e; \
           } \
+        set_errno(e); \
       } \
     while (0)
 #else
-#  define _SO_CONN_SETERRNO(c,e)
-#  define _SO_SETERRNO(s,e)
+#  define _SO_SETERRNO(s,e) set_errno(e)
 #endif /* CONFIG_NET_SOCKOPTS */
 
 /****************************************************************************
@@ -139,6 +138,55 @@ extern "C"
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: sockfd_allocate
+ *
+ * Description:
+ *   Allocate a socket descriptor
+ *
+ * Input Parameters:
+ *   Lowest socket descriptor index to be used.
+ *
+ * Returned Value:
+ *   On success, a socket descriptor >= minsd is returned.  A negated errno
+ *   value is returned on failure.
+ *
+ ****************************************************************************/
+
+int sockfd_allocate(int minsd);
+
+/****************************************************************************
+ * Name: psock_release
+ *
+ * Description:
+ *   Free a socket.
+ *
+ * Input Parameters:
+ *   psock - A reference to the socket instance to be freed.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void psock_release(FAR struct socket *psock);
+
+/****************************************************************************
+ * Name: sockfd_release
+ *
+ * Description:
+ *   Free the socket by its socket descriptor.
+ *
+ * Input Parameters:
+ *   sockfd - Socket descriptor identifies the socket to be released.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void sockfd_release(int sockfd);
 
 /****************************************************************************
  * Name: net_sockif
@@ -182,10 +230,5 @@ net_sockif(sa_family_t family, int type, int protocol);
 int net_timeo(clock_t start_time, socktimeo_t timeo);
 #endif
 
-#undef EXTERN
-#if defined(__cplusplus)
-}
-#endif
-
 #endif /* CONFIG_NET */
-#endif /* __NET_SOCKET_SOCKET_H */
+#endif /* _NET_SOCKET_SOCKET_H */

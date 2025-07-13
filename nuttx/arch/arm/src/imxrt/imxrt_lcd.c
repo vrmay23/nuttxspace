@@ -1,10 +1,9 @@
 /****************************************************************************
  * arch/arm/src/imxrt/imxrt_lcd.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2017, NXP Semiconductors, Inc.
- * SPDX-FileContributor: Johannes Schock (Port)
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2017, NXP Semiconductors, Inc.
+ *   Author: Johannes Schock (Port)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,13 +45,12 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/video/fb.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 
 #include <nuttx/board.h>
 
@@ -94,20 +92,20 @@
  * configuration of each color plane.
  */
 
-static int imxrt_getvideoinfo(struct fb_vtable_s *vtable,
-             struct fb_videoinfo_s *vinfo);
-static int imxrt_getplaneinfo(struct fb_vtable_s *vtable, int planeno,
-             struct fb_planeinfo_s *pinfo);
+static int imxrt_getvideoinfo(FAR struct fb_vtable_s *vtable,
+             FAR struct fb_videoinfo_s *vinfo);
+static int imxrt_getplaneinfo(FAR struct fb_vtable_s *vtable, int planeno,
+             FAR struct fb_planeinfo_s *pinfo);
 
 /* The following is provided only if the video hardware supports RGB color
  * mapping
  */
 
 #ifdef CONFIG_FB_CMAP
-static int imxrt_getcmap(struct fb_vtable_s *vtable,
-                         struct fb_cmap_s *cmap);
-static int imxrt_putcmap(struct fb_vtable_s *vtable,
-                         const struct fb_cmap_s *cmap);
+static int imxrt_getcmap(FAR struct fb_vtable_s *vtable,
+             FAR struct fb_cmap_s *cmap);
+static int imxrt_putcmap(FAR struct fb_vtable_s *vtable,
+             FAR const struct fb_cmap_s *cmap);
 #endif
 
 #ifdef CONFIG_FB_HWCURSOR
@@ -132,7 +130,7 @@ static const struct fb_videoinfo_s g_videoinfo =
 
 static const struct fb_planeinfo_s g_planeinfo =
 {
-  .fbmem    = (void *)CONFIG_IMXRT_LCD_VRAMBASE,
+  .fbmem    = (FAR void *)CONFIG_IMXRT_LCD_VRAMBASE,
   .fblen    = IMXRT_FBSIZE,
   .stride   = IMXRT_STRIDE,
   .display  = 0,
@@ -141,12 +139,12 @@ static const struct fb_planeinfo_s g_planeinfo =
 
 struct pixel_format_reg
 {
-    uint32_t reg_ctrl;  /* Value of register CTRL. */
-    uint32_t reg_ctrl1; /* Value of register CTRL1. */
+    uint32_t regCtrl;  /* Value of register CTRL. */
+    uint32_t regCtrl1; /* Value of register CTRL1. */
 };
 
 #if defined (CONFIG_IMXRT_LCD_INPUT_BPP8) || defined (CONFIG_IMXRT_LCD_INPUT_BPP8_LUT)
-  static const struct pixel_format_reg pixel_format =
+  static const struct pixel_format_reg pixelFormat =
   {
     /* Register CTRL. */
 
@@ -154,14 +152,14 @@ struct pixel_format_reg
 
     /* Register CTRL1. */
 
-    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x0fu)
+    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x0fU)
   };
-  const uint32_t data_bus = LCDIF_CTRL_LCD_DATABUS_WIDTH(1);
+  const uint32_t dataBus = LCDIF_CTRL_LCD_DATABUS_WIDTH(1);
 
 #else
 
 #  if defined (CONFIG_IMXRT_LCD_INPUT_BPP15)
-  static const struct pixel_format_reg pixel_format =
+  static const struct pixel_format_reg pixelFormat =
   {
     /* Register CTRL. */
 
@@ -169,10 +167,10 @@ struct pixel_format_reg
 
     /* Register CTRL1. */
 
-    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x0fu)
+    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x0fU)
   };
 #  elif defined (CONFIG_IMXRT_LCD_INPUT_BPP16)
-  static const struct pixel_format_reg pixel_format =
+  static const struct pixel_format_reg pixelFormat =
   {
     /* Register CTRL. */
 
@@ -180,10 +178,10 @@ struct pixel_format_reg
 
     /* Register CTRL1. */
 
-    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x0fu)
+    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x0fU)
   };
 #  elif defined (CONFIG_IMXRT_LCD_INPUT_BPP24)
-  static const struct pixel_format_reg pixel_format =
+  static const struct pixel_format_reg pixelFormat =
   {
     /* Register CTRL. 24-bit. */
 
@@ -191,10 +189,10 @@ struct pixel_format_reg
 
     /* Register CTRL1. */
 
-    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x0fu)
+    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x0fU)
   };
 #  elif defined (CONFIG_IMXRT_LCD_INPUT_BPP32)
-  static const struct pixel_format_reg pixel_format =
+  static const struct pixel_format_reg pixelFormat =
   {
     /* Register CTRL. 24-bit. */
 
@@ -202,18 +200,18 @@ struct pixel_format_reg
 
     /* Register CTRL1. */
 
-    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x07u)
+    LCDIF_CTRL1_BYTE_PACKING_FORMAT(0x07U)
   };
 #  endif
 
 #  if defined (CONFIG_IMXRT_LCD_OUTPUT_8)
-  const uint32_t data_bus = LCDIF_CTRL_LCD_DATABUS_WIDTH(1);
+  const uint32_t dataBus = LCDIF_CTRL_LCD_DATABUS_WIDTH(1);
 #  elif defined (CONFIG_IMXRT_LCD_OUTPUT_16)
-  const uint32_t data_bus = LCDIF_CTRL_LCD_DATABUS_WIDTH(0);
+  const uint32_t dataBus = LCDIF_CTRL_LCD_DATABUS_WIDTH(0);
 #  elif defined (CONFIG_IMXRT_LCD_OUTPUT_18)
-  const uint32_t data_bus = LCDIF_CTRL_LCD_DATABUS_WIDTH(2);
+  const uint32_t dataBus = LCDIF_CTRL_LCD_DATABUS_WIDTH(2);
 #  elif defined (CONFIG_IMXRT_LCD_OUTPUT_24)
-  const uint32_t data_bus = LCDIF_CTRL_LCD_DATABUS_WIDTH(3);
+  const uint32_t dataBus = LCDIF_CTRL_LCD_DATABUS_WIDTH(3);
 #  endif
 
 #endif
@@ -240,8 +238,8 @@ struct fb_vtable_s g_fbobject =
  * Name: imxrt_getvideoinfo
  ****************************************************************************/
 
-static int imxrt_getvideoinfo(struct fb_vtable_s *vtable,
-                              struct fb_videoinfo_s *vinfo)
+static int imxrt_getvideoinfo(FAR struct fb_vtable_s *vtable,
+                              FAR struct fb_videoinfo_s *vinfo)
 {
   lcdinfo("vtable=%p vinfo=%p\n", vtable, vinfo);
   if (vtable && vinfo)
@@ -258,8 +256,8 @@ static int imxrt_getvideoinfo(struct fb_vtable_s *vtable,
  * Name: imxrt_getplaneinfo
  ****************************************************************************/
 
-static int imxrt_getplaneinfo(struct fb_vtable_s *vtable, int planeno,
-                              struct fb_planeinfo_s *pinfo)
+static int imxrt_getplaneinfo(FAR struct fb_vtable_s *vtable, int planeno,
+                              FAR struct fb_planeinfo_s *pinfo)
 {
   lcdinfo("vtable=%p planeno=%d pinfo=%p\n", vtable, planeno, pinfo);
   if (vtable && planeno == 0 && pinfo)
@@ -277,8 +275,8 @@ static int imxrt_getplaneinfo(struct fb_vtable_s *vtable, int planeno,
  ****************************************************************************/
 
 #ifdef CONFIG_FB_CMAP
-static int imxrt_getcmap(struct fb_vtable_s *vtable,
-                         struct fb_cmap_s *cmap)
+static int imxrt_getcmap(FAR struct fb_vtable_s *vtable,
+                         FAR struct fb_cmap_s *cmap)
 {
   uint32_t n;
   uint32_t reg;
@@ -325,8 +323,8 @@ static int imxrt_getcmap(struct fb_vtable_s *vtable,
  ****************************************************************************/
 
 #ifdef CONFIG_FB_CMAP
-static int imxrt_putcmap(struct fb_vtable_s *vtable,
-                         const struct fb_cmap_s *cmap)
+static int imxrt_putcmap(FAR struct fb_vtable_s *vtable,
+    FAR const struct fb_cmap_s *cmap)
 {
   uint32_t n;
 
@@ -346,6 +344,7 @@ static int imxrt_putcmap(struct fb_vtable_s *vtable,
 
   for (n = 0; n < cmap->len; n++)
     {
+
 #if defined (CONFIG_IMXRT_LCD_OUTPUT_24)
       putreg32((uint32_t)0xff000000             |
                ((uint32_t)cmap->red[n]   << 16) |
@@ -436,6 +435,7 @@ static void imxrt_lcdreset(void)
 
 int up_fbinitialize(int display)
 {
+
 #if defined (CONFIG_IMXRT_LCD_INPUT_BPP8_LUT) || defined (CONFIG_IMXRT_LCD_INPUT_BPP8)
   uint32_t n;
 #endif
@@ -513,12 +513,12 @@ int up_fbinitialize(int display)
 
   lcdinfo("Configuring the LCD controller\n");
 
-  putreg32(pixel_format.reg_ctrl | data_bus |
+  putreg32(pixelFormat.regCtrl | dataBus |
       LCDIF_CTRL_DOTCLK_MODE_MASK |
       LCDIF_CTRL_BYPASS_COUNT_MASK |
       LCDIF_CTRL_MASTER_MASK, IMXRT_LCDIF_CTRL);
 
-  putreg32(pixel_format.reg_ctrl1, IMXRT_LCDIF_CTRL1);
+  putreg32(pixelFormat.regCtrl1, IMXRT_LCDIF_CTRL1);
 
   putreg32((CONFIG_IMXRT_LCD_VHEIGHT << LCDIF_TRANSFER_COUNT_V_COUNT_SHIFT) |
       (CONFIG_IMXRT_LCD_HWIDTH << LCDIF_TRANSFER_COUNT_H_COUNT_SHIFT),
@@ -535,8 +535,7 @@ int up_fbinitialize(int display)
       CONFIG_IMXRT_LCD_VFRONTPORCH + CONFIG_IMXRT_LCD_VBACKPORCH,
       IMXRT_LCDIF_VDCTRL1);
 
-  putreg32((CONFIG_IMXRT_LCD_HPULSE <<
-            LCDIF_VDCTRL2_HSYNC_PULSE_WIDTH_SHIFT) |
+  putreg32((CONFIG_IMXRT_LCD_HPULSE << LCDIF_VDCTRL2_HSYNC_PULSE_WIDTH_SHIFT) |
       ((CONFIG_IMXRT_LCD_HFRONTPORCH + CONFIG_IMXRT_LCD_HBACKPORCH +
         CONFIG_IMXRT_LCD_HWIDTH + CONFIG_IMXRT_LCD_HPULSE)
           << LCDIF_VDCTRL2_HSYNC_PERIOD_SHIFT),
@@ -549,8 +548,7 @@ int up_fbinitialize(int display)
       IMXRT_LCDIF_VDCTRL3);
 
   putreg32(LCDIF_VDCTRL4_SYNC_SIGNALS_ON_MASK |
-      (CONFIG_IMXRT_LCD_HWIDTH <<
-       LCDIF_VDCTRL4_DOTCLK_H_VALID_DATA_CNT_SHIFT),
+      (CONFIG_IMXRT_LCD_HWIDTH << LCDIF_VDCTRL4_DOTCLK_H_VALID_DATA_CNT_SHIFT),
       IMXRT_LCDIF_VDCTRL4);
 
 #ifdef CONFIG_IMXRT_LCD_BGR
@@ -638,7 +636,7 @@ int up_fbinitialize(int display)
  *
  ****************************************************************************/
 
-struct fb_vtable_s *up_fbgetvplane(int display, int vplane)
+FAR struct fb_vtable_s *up_fbgetvplane(int display, int vplane)
 {
   lcdinfo("vplane: %d\n", vplane);
   if (vplane == 0)
@@ -687,6 +685,7 @@ void up_fbuninitialize(int display)
   imxrt_clockoff_lcdif_pix();
 
   imxrt_clockoff_lcd();
+
 }
 
 /****************************************************************************
@@ -726,8 +725,8 @@ void imxrt_lcdclear(nxgl_mxpixel_t color)
 #elif IMXRT_BPP > 8
   uint16_t *dest = (uint16_t *)CONFIG_IMXRT_LCD_VRAMBASE;
 
-  lcdinfo("Clearing display: color=%04jx VRAM=%08x size=%d\n",
-          (uintmax_t)color, CONFIG_IMXRT_LCD_VRAMBASE,
+  lcdinfo("Clearing display: color=%04x VRAM=%08x size=%d\n",
+          color, CONFIG_IMXRT_LCD_VRAMBASE,
           size * sizeof(uint16_t));
 #else
   uint8_t *dest = (uint8_t *)CONFIG_IMXRT_LCD_VRAMBASE;

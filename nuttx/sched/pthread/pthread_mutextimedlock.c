@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/pthread/pthread_mutextimedlock.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2017, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -80,26 +93,28 @@
 int pthread_mutex_timedlock(FAR pthread_mutex_t *mutex,
                             FAR const struct timespec *abs_timeout)
 {
+  int mypid = (int)getpid();
   int ret = EINVAL;
 
-  sinfo("mutex=%p\n", mutex);
+  sinfo("mutex=0x%p\n", mutex);
   DEBUGASSERT(mutex != NULL);
 
   if (mutex != NULL)
     {
-#ifndef CONFIG_PTHREAD_MUTEX_UNSAFE
-      pid_t pid = mutex_get_holder(&mutex->mutex);
-#endif
+      /* Make sure the semaphore is stable while we make the following
+       * checks.  This all needs to be one atomic action.
+       */
+
+      sched_lock();
 
 #ifdef CONFIG_PTHREAD_MUTEX_TYPES
       /* All mutex types except for NORMAL (and DEFAULT) will return
-       * an error if the caller does not hold the mutex.
+       * and an error  error if the caller does not hold the mutex.
        */
 
-      if (mutex->type != PTHREAD_MUTEX_NORMAL &&
-          mutex_is_hold(&mutex->mutex))
+      if (mutex->type != PTHREAD_MUTEX_NORMAL && mutex->pid == mypid)
         {
-          /* Yes... Is this a recursive mutex? */
+          /* Yes.. Is this a recursive mutex? */
 
           if (mutex->type == PTHREAD_MUTEX_RECURSIVE)
             {
@@ -107,7 +122,15 @@ int pthread_mutex_timedlock(FAR pthread_mutex_t *mutex,
                * success.
                */
 
-              ret = pthread_mutex_take(mutex, abs_timeout);
+              if (mutex->nlocks < INT16_MAX)
+                {
+                  mutex->nlocks++;
+                  ret = OK;
+                }
+              else
+                {
+                  ret = EOVERFLOW;
+                }
             }
           else
             {
@@ -116,9 +139,9 @@ int pthread_mutex_timedlock(FAR pthread_mutex_t *mutex,
                *
                * NOTE: This is the correct behavior for a 'robust', NORMAL
                * mutex.  Compliant behavior for non-robust mutex should not
-               * include these checks.  In that case, the deadlock condition
-               * should not be detected and the thread should be permitted
-               * to deadlock.
+               * include these checks.  In that case, it the deadlock
+               * condition should not be detected and the thread should be
+               * permitted to deadlock.
                */
 
               serr("ERROR: Returning EDEADLK\n");
@@ -132,39 +155,39 @@ int pthread_mutex_timedlock(FAR pthread_mutex_t *mutex,
       /* The calling thread does not hold the semaphore.  The correct
        * behavior for the 'robust' mutex is to verify that the holder of the
        * mutex is still valid.  This is protection from the case
-       * where the holder of the mutex has exited without unlocking it.
+       * where the holder of the mutex has exitted without unlocking it.
        */
 
 #ifdef CONFIG_PTHREAD_MUTEX_BOTH
 #ifdef CONFIG_PTHREAD_MUTEX_TYPES
       /* Include check if this is a NORMAL mutex and that it is robust */
 
-      if (pid > 0 &&
+      if (mutex->pid > 0 &&
           ((mutex->flags & _PTHREAD_MFLAGS_ROBUST) != 0 ||
            mutex->type != PTHREAD_MUTEX_NORMAL) &&
-          nxsched_get_tcb(pid) == NULL)
+          sched_gettcb(mutex->pid) == NULL)
 
 #else /* CONFIG_PTHREAD_MUTEX_TYPES */
       /* This can only be a NORMAL mutex.  Include check if it is robust */
 
-      if (pid > 0 &&
+      if (mutex->pid > 0 &&
           (mutex->flags & _PTHREAD_MFLAGS_ROBUST) != 0 &&
-          nxsched_get_tcb(pid) == NULL)
+          sched_gettcb(mutex->pid) == NULL)
 
 #endif /* CONFIG_PTHREAD_MUTEX_TYPES */
 #else /* CONFIG_PTHREAD_MUTEX_ROBUST */
       /* This mutex is always robust, whatever type it is. */
 
-      if (pid > 0 && nxsched_get_tcb(pid) == NULL)
+      if (mutex->pid > 0 && sched_gettcb(mutex->pid) == NULL)
 #endif
         {
-          DEBUGASSERT(pid != 0); /* < 0: available, >0 owned, ==0 error */
+          DEBUGASSERT(mutex->pid != 0); /* < 0: available, >0 owned, ==0 error */
           DEBUGASSERT((mutex->flags & _PTHREAD_MFLAGS_INCONSISTENT) != 0);
 
           /* A thread holds the mutex, but there is no such thread.  POSIX
            * requires that the 'robust' mutex return EOWNERDEAD in this
            * case.  It is then the caller's responsibility to call
-           * pthread_mutex_consistent() to fix the mutex.
+           * pthread_mutx_consistent() to fix the mutex.
            */
 
           mutex->flags |= _PTHREAD_MFLAGS_INCONSISTENT;
@@ -179,8 +202,22 @@ int pthread_mutex_timedlock(FAR pthread_mutex_t *mutex,
            * or default mutex.
            */
 
-          ret = pthread_mutex_take(mutex, abs_timeout);
+          ret = pthread_mutex_take(mutex, abs_timeout, true);
+
+          /* If we successfully obtained the semaphore, then indicate
+           * that we own it.
+           */
+
+          if (ret == OK)
+            {
+              mutex->pid    = mypid;
+#ifdef CONFIG_PTHREAD_MUTEX_TYPES
+              mutex->nlocks = 1;
+#endif
+            }
         }
+
+      sched_unlock();
     }
 
   sinfo("Returning %d\n", ret);

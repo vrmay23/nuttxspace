@@ -1,11 +1,10 @@
 /****************************************************************************
- * libs/libc/unistd/lib_sethostname.c
+ * libs/libc/unistd/lib_gethostname.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Stavros Polymenis. All rights reserved.
- * SPDX-FileCopyrightText: 2015, 2016 Gregory Nutt. All rights reserved.
- * SPDX-FileContributor: Stavros Polymenis <sp@orbitalfox.com>
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2015 Stavros Polymenis. All rights reserved.
+ *   Copyright (C) 2015, 2016 Gregory Nutt. All rights reserved.
+ *   Author: Stavros Polymenis <sp@orbitalfox.com>
+ *           Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,7 +42,6 @@
 #include <nuttx/config.h>
 
 #include <string.h>
-#include <sys/param.h>
 #include <unistd.h>
 
 #include <nuttx/irq.h>
@@ -54,11 +52,24 @@
  * function only be called from user space is only via a kernel system call.
  */
 
-#if defined(CONFIG_BUILD_FLAT) || defined(__KERNEL__)
+#if (!defined(CONFIG_BUILD_PROTECTED) && !defined(CONFIG_BUILD_KERNEL)) || \
+      defined(__KERNEL__)
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#ifndef MIN
+#  define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#  define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -95,21 +106,22 @@ extern char g_hostname[HOST_NAME_MAX + 1];
  *
  ****************************************************************************/
 
-int sethostname(FAR const char *name, size_t namelen)
+int sethostname(FAR const char *name, size_t size)
 {
   irqstate_t flags;
 
   /* Save the new host name, truncating to HOST_NAME_MAX if necessary.  This
-   * internal copy is always NUL terminated. The hostname is global resource.
+   * internal copy is always NUL terminated.  The hostname is global resource.
    * There is a microscopic possibility that it could be accessed while we
    * are setting it.
    */
 
   flags = enter_critical_section();
-  strlcpy(g_hostname, name, sizeof(g_hostname));
+  strncpy(g_hostname, name, MIN(HOST_NAME_MAX, size));
+  g_hostname[HOST_NAME_MAX] = '\0';
   leave_critical_section(flags);
 
   return 0;
 }
 
-#endif /* CONFIG_BUILD_FLAT || __KERNEL__ */
+#endif /* (!CONFIG_BUILD_PROTECTED && !CONFIG_BUILD_KERNEL) || __KERNEL__ */

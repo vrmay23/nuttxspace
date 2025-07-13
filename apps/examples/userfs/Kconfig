@@ -5,7 +5,6 @@
 
 config EXAMPLES_USERFS
 	tristate "UserFS test"
-	depends on FS_USERFS
 	default n
 	---help---
 		Enables a simple test of the UserFS

@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/lsm330spi_test/lsm330spi_test_main.c
+ * examples/lsm330spi_test/lsm330spi_test_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 RAF Research. All rights reserved.
+ *   Author: Bob Feretich <bob.feretich@rafresearch/com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,12 +42,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
-#include <sys/param.h>
+#include <nuttx/fs/fs.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <errno.h>
 #include <nuttx/spi/spi.h>
+#undef __KERNEL__
 #include <arch/board/board.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/sensors/lsm330.h>
@@ -43,6 +57,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+#define ARRAYSIZE(x)  (sizeof((x)) / sizeof((x)[0]))
 #define PASSED        0
 
 #define SUB_PROMPT    "stst >"
@@ -152,12 +167,10 @@ int lsm330acl_test(int is_interactive, char *path)
   {
     int16_t d[3];
   };
-
   unsigned char tstchars[] =
   {
     0x5e, 0xc5, 0x00
   };
-
   char bfr[32] __attribute__((aligned(2)));
   FAR struct XYZ *pxyz = (struct XYZ *)(&bfr[2]); /* Padding and Status byte 1st */
   int rc = PASSED;
@@ -174,8 +187,7 @@ int lsm330acl_test(int is_interactive, char *path)
     }
   else if (errno == EROFS)
     {
-      printf(CRED "ERROR: Accelerometer mounted as Read Only."
-             CRESET "\n", path, errno);
+      printf(CRED "ERROR: Accelerometer mounted as Read Only." CRESET "\n", path, errno);
       rc = RC_OPENRONLYA;
     }
 
@@ -190,27 +202,27 @@ int lsm330acl_test(int is_interactive, char *path)
       if (ret < 0)
         {
           errcode = errno;
-          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d"
-                 CRESET "\n", LSM330_GYRO_IDREG, path, errcode);
+          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d" CRESET "\n",
+                 LSM330_GYRO_IDREG, path, errcode);
           rc = RC_SEEKFAILA;
           goto error_exit;
         }
 
-      memset(bfr, 0xaa, sizeof(bfr));
+      memset(bfr, 0xAA, sizeof(bfr));
       ret = read(fd, bfr, 1);   /* read the sensor id */
       if (ret < 0)
         {
           errcode = errno;
-          printf(CRED "ERROR: Failed to read sensor ID from %s: %d"
-                 CRESET "\n", path, errcode);
+          printf(CRED "ERROR: Failed to read sensor ID from %s: %d" CRESET "\n",
+                 path, errcode);
           rc = RC_READFAILA;
           goto error_exit;
         }
 
       if (bfr[0] != LSM330_ACL_IDREG_VALUE)
         {
-          printf(CRED "ERROR: Sensor ID is 0x%02X, expected 0x%02X."
-                 CRESET "\n", bfr[0], LSM330_ACL_IDREG_VALUE);
+          printf(CRED "ERROR: Sensor ID is 0x%02X, expected 0x%02X." CRESET "\n",
+                 bfr[0], LSM330_ACL_IDREG_VALUE);
           if (rc == 0)
             {
               rc = RC_IDFAILA;
@@ -241,6 +253,7 @@ int lsm330acl_test(int is_interactive, char *path)
 
   do
     {
+
       /* write and read a scratch register */
 
       printf("Writing and reading a scratch register...\n");
@@ -248,8 +261,8 @@ int lsm330acl_test(int is_interactive, char *path)
       if (ret < 0)
         {
           errcode = errno;
-          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d"
-                 CRESET "\n", LSM330_ACL_SCRATCH, path, errcode);
+          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d" CRESET "\n",
+                 LSM330_ACL_SCRATCH, path, errcode);
           rc = RC_SEEK2FAILA;
           goto error_exit;
         }
@@ -257,33 +270,33 @@ int lsm330acl_test(int is_interactive, char *path)
       rc_step = PASSED;
       for (i = 0; i < sizeof(tstchars); i++)
         {
-          memset(bfr, 0xaa, sizeof(bfr));
+          memset(bfr, 0xAA, sizeof(bfr));
           bfr[0] = (char)tstchars[i];
           ret = write(fd, bfr, 1);  /* write the scratch register */
           if (ret < 0 && rc != RC_OPENRONLYA)
             {
               errcode = errno;
-              printf(CRED "ERROR: Write operation failed to %s: %d"
-                     CRESET "\n", path, errcode);
+              printf(CRED "ERROR: Write operation failed to %s: %d" CRESET "\n",
+                     path, errcode);
               rc = RC_WRITEFAILA;
               goto error_exit;
             }
 
-          memset(bfr, 0xaa, sizeof(bfr));
+          memset(bfr, 0xAA, sizeof(bfr));
           ret = read(fd, bfr, 1);   /* read the scratch register */
           if (ret < 0)
             {
               errcode = errno;
-              printf(CRED "ERROR: Read operation failed from %s: %d"
-                     CRESET "\n", path, errcode);
+              printf(CRED "ERROR: Read operation failed from %s: %d" CRESET "\n",
+                     path, errcode);
               rc = RC_READ2FAILA;
               goto error_exit;
             }
 
           if (bfr[0] != (char)tstchars[i])
             {
-              printf(CRED "ERROR: Wrote 0x%02X, read back 0x%02X."
-                     CRESET "\n", tstchars[i], bfr[0]);
+              printf(CRED "ERROR: Wrote 0x%02X, read back 0x%02X." CRESET "\n",
+                     tstchars[i], bfr[0]);
               rc_step = RC_WRMFAILA;
               if (rc == 0)
                 {
@@ -324,13 +337,13 @@ int lsm330acl_test(int is_interactive, char *path)
       if (ret < 0)
         {
           errcode = errno;
-          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d"
-                 CRESET "\n", LSM330_ACL_STATUS, path, errcode);
+          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d" CRESET "\n",
+                 LSM330_ACL_STATUS, path, errcode);
           rc = RC_SEEK3FAILA;
           goto error_exit;
         }
 
-      memset(bfr, 0xaa, sizeof(bfr));
+      memset(bfr, 0xAA, sizeof(bfr));
       ret = read(fd, &bfr[1], 7);   /* read live accelerometer data */
       if (ret < 0)
         {
@@ -361,8 +374,7 @@ quick_exit:
   close(fd);
   if (rc == PASSED)
     {
-      printf(CGREEN "LSM330 accelerometer diagnostic completed successfully."
-             CRESET "\n");
+      printf(CGREEN "LSM330 accelerometer diagnostic completed successfully." CRESET "\n");
     }
 
   return rc;
@@ -388,12 +400,10 @@ int lsm330gyro_test(int is_interactive, FAR char *path)
   {
     int16_t d[3];
   };
-
   unsigned char tstchars[] =
   {
     0x5e, 0xc5, 0x00
   };
-
   char bfr[32] __attribute__((aligned(2)));
   FAR struct XYZ *pxyz = (struct XYZ *)(&bfr[2]); /* Temp and Status byte 1st */
   int rc = PASSED;
@@ -426,27 +436,27 @@ int lsm330gyro_test(int is_interactive, FAR char *path)
       if (ret < 0)
         {
           errcode = errno;
-          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d"
-                 CRESET "\n", LSM330_GYRO_IDREG, path, errcode);
+          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d" CRESET "\n",
+                 LSM330_GYRO_IDREG, path, errcode);
           rc = RC_SEEKFAILG;
           goto error_exit;
         }
 
-      memset(bfr, 0xaa, sizeof(bfr));
+      memset(bfr, 0xAA, sizeof(bfr));
       ret = read(fd, bfr, 1);   /* read the sensor id */
       if (ret < 0)
         {
           errcode = errno;
-          printf(CRED "ERROR: Failed to read sensor ID from %s: %d"
-                 CRESET "\n", path, errcode);
+          printf(CRED "ERROR: Failed to read sensor ID from %s: %d" CRESET "\n",
+                 path, errcode);
           rc = RC_READFAILG;
           goto error_exit;
         }
 
       if (bfr[0] != LSM330_GYRO_IDREG_VALUE)
         {
-          printf(CRED "ERROR: Sensor ID is 0x%02X, expected 0x%02X."
-                 CRESET "\n", bfr[0], LSM330_GYRO_IDREG_VALUE);
+          printf(CRED "ERROR: Sensor ID is 0x%02X, expected 0x%02X." CRESET "\n",
+                 bfr[0], LSM330_GYRO_IDREG_VALUE);
           if (rc == 0)
             {
               rc = RC_IDFAILG;
@@ -462,16 +472,16 @@ int lsm330gyro_test(int is_interactive, FAR char *path)
           printf("Sensor ID 0x%02X is correct!\n", bfr[0]);
         }
 
-      if (is_interactive)
-        {
-          ch1 = subtest_prompt("Press 'l' to repeat or enter to continue.\n"
-                               SUB_PROMPT);
-        }
+        if (is_interactive)
+          {
+            ch1 = subtest_prompt("Press 'l' to repeat or enter to continue.\n"
+                                 SUB_PROMPT);
+          }
 
-      if (ch1 == 'x')
-        {
-          goto quick_exit;
-        }
+        if (ch1 == 'x')
+          {
+            goto quick_exit;
+          }
     }
   while (ch1 == 'l');
 
@@ -484,8 +494,8 @@ int lsm330gyro_test(int is_interactive, FAR char *path)
       if (ret < 0)
         {
           errcode = errno;
-          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d"
-                 CRESET "\n", LSM330_GYRO_SCRATCH, path, errcode);
+          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d" CRESET "\n",
+                 LSM330_GYRO_SCRATCH, path, errcode);
           rc = RC_SEEK2FAILG;
           goto error_exit;
         }
@@ -499,8 +509,8 @@ int lsm330gyro_test(int is_interactive, FAR char *path)
           if (ret < 0 && rc != RC_OPENRONLYG)
             {
               errcode = errno;
-              printf(CRED "ERROR: Write operation failed to %s: %d"
-                     CRESET "\n", path, errcode);
+              printf(CRED "ERROR: Write operation failed to %s: %d" CRESET "\n",
+                     path, errcode);
               rc = RC_WRITEFAILG;
               goto error_exit;
             }
@@ -510,16 +520,16 @@ int lsm330gyro_test(int is_interactive, FAR char *path)
           if (ret < 0)
             {
               errcode = errno;
-              printf(CRED "ERROR: Read operation failed from %s: %d"
-                     CRESET "\n", path, errcode);
+              printf(CRED "ERROR: Read operation failed from %s: %d" CRESET "\n",
+                     path, errcode);
               rc = RC_READ2FAILG;
               goto error_exit;
             }
 
           if (bfr[0] != (char)tstchars[i])
             {
-              printf(CRED "ERROR: Wrote 0x%02X, read back 0x%02X."
-                     CRESET "\n", tstchars[i], bfr[0]);
+              printf(CRED "ERROR: Wrote 0x%02X, read back 0x%02X." CRESET "\n",
+                     tstchars[i], bfr[0]);
               rc_step = RC_WRMFAILG;
               if (rc == 0)
                 {
@@ -560,8 +570,8 @@ int lsm330gyro_test(int is_interactive, FAR char *path)
       if (ret < 0)
         {
           errcode = errno;
-          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d"
-                 CRESET "\n", LSM330_GYRO_OUT_TEMP, path, errcode);
+          printf(CRED "ERROR: Failed to seek to reg 0x%02X in  %s: %d" CRESET "\n",
+                 LSM330_GYRO_OUT_TEMP, path, errcode);
           rc = RC_SEEK3FAILG;
           goto error_exit;
         }
@@ -578,7 +588,7 @@ int lsm330gyro_test(int is_interactive, FAR char *path)
         }
 
       printf("LSM330 GYRO = (%6d, %6d, %6d), Temp=%d, Stat=0x%02X\n",
-             pxyz->d[0], pxyz->d[1], pxyz->d[2], bfr[0] & 0xff, bfr[1]);
+             pxyz->d[0], pxyz->d[1], pxyz->d[2], bfr[0]&0x0FF, bfr[1]);
 
       if (is_interactive)
         {
@@ -598,8 +608,7 @@ quick_exit:
   close(fd);
   if (rc == PASSED)
     {
-      printf(CGREEN "LSM330 gyroscope diagnostic completed successfully."
-             CRESET "\n");
+      printf(CGREEN "LSM330 gyroscope diagnostic completed successfully." CRESET "\n");
     }
 
   return rc;
@@ -626,29 +635,29 @@ int main(int argc, FAR char *argv[])
 
   /* The two arrays below must be synchronized */
 
-  test_ptr_t test_ptr_array[] =
-    {
-      lsm330acl_test,   /* LSM330 accelerometer tests */
-      lsm330gyro_test,  /* LSM330 gyroscope tests */
-    };
+  test_ptr_t test_ptr_array[] = /* Array of test programs */
+  {
+    lsm330acl_test,   /* LSM330 accelerometer tests */
+    lsm330gyro_test,  /* LSM330 gyroscope tests */
+  };
 
-  FAR char *test_path[nitems(test_ptr_array)];
+  FAR char *test_path[sizeof(test_ptr_array) / sizeof(test_ptr_array[0])];
 
-  if (argc < 2 || *argv[1] == 0 || *(argv[1] + 1) == 0)
+  if (argc < 2 || *argv[1] == 0 || *(argv[1]+1) == 0)
     {
       goto print_help;
     }
 
-  /* We have at least 2 parameters, the first has at least two characters. */
+  /* We have at least 2 parameters, and the first parameter has at least two characters. */
 
   if (*argv[1] == '-')
     {
       flag_present = 1;
-      if (*(argv[1] + 1) == 'b')
+      if (*(argv[1]+1) == 'b')
         {
           is_interactive = 0;
         }
-      else if (*(argv[1] + 1) == 'i')
+      else if (*(argv[1]+1) == 'i')
         {
           is_interactive = 1;
         }
@@ -671,15 +680,13 @@ int main(int argc, FAR char *argv[])
 
   if (stat(test_path[0], &sbuf))
     {
-      printf(CRED "Error: Accelerometer path not found. Path=%s" CRESET "\n",
-             test_path[0]);
+      printf(CRED "Error: Accelerometer path not found. Path=%s" CRESET "\n", test_path[0]);
       rc = RC_INVALPATH;
     }
 
   if (stat(test_path[1], &sbuf))
     {
-      printf(CRED "Error: Gyroscope path not found. Path=%s" CRESET "\n",
-             test_path[1]);
+      printf(CRED "Error: Gyroscope path not found. Path=%s" CRESET "\n", test_path[1]);
       rc = RC_INVALPATH;
     }
 
@@ -690,7 +697,7 @@ int main(int argc, FAR char *argv[])
 
   if (is_interactive)
     {
-      printf("LSM330 diagnostic started in interactive mode...\n");
+      printf("LSM330 diagnostic started in interactive mode... \n");
       ch = 0;
       while (ch != 'x')
         {
@@ -738,7 +745,7 @@ int main(int argc, FAR char *argv[])
                   printf("Set to batch mode.\n");
                 }
             }
-          else if (ui >= nitems(test_ptr_array))
+          else if (ui >= (sizeof(test_ptr_array) / sizeof(test_ptr_array[0])))
             {
               printf("Huh?\n");
             }
@@ -758,7 +765,7 @@ int main(int argc, FAR char *argv[])
   else /* not interactive mode */
     {
       printf("LSM330 sensor diagnostic started in batch mode...\n");
-      for (ui = 0; ui < nitems(test_ptr_array); ui++)
+      for (ui = 0; ui < (sizeof(test_ptr_array) / sizeof(test_ptr_array[0])); ui++)
         {
           step_rc = 0;
           if (test_ptr_array[ui] != 0)
@@ -785,8 +792,8 @@ print_help:
   printf("lsm330spi_test [-b | -i] <dev_path_acl> <dev_path_gyro>\n");
   printf("    -b = batch mode execution\n");
   printf("    -i = interactive mode execution (default)\n");
-  printf("    <dev_path_acl> = Device path for the LSM330 accelerometer\n");
-  printf("    <dev_path_gyro> = Device path for the LSM330 gyroscope\n");
+  printf("    <dev_path_acl> = Device path and name for the LSM330 accelerometer\n");
+  printf("    <dev_path_gyro> = Device path and name for the LSM330 gyroscope\n");
   printf(" Example:\n");
   printf("   lsm330spi_test -b /dev/lsm330acl0 /dev/lsm330gyro0\n");
   return RC_INVALPARM;

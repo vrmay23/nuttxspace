@@ -1,22 +1,35 @@
 /****************************************************************************
- * arch/arm/src/lpc43xx/lpc43_spifi.c
+ *  arch/arm/src/lpc43/lpc43_spifi.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -43,7 +56,8 @@
 #include <nuttx/irq.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 #include "lpc43_cgu.h"
 #include "lpc43_spifi.h"
@@ -55,9 +69,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* SPIFI Configuration ******************************************************/
-
 /* This logic supports some special options that can be used to create an
  * mtd device on the SPIFI FLASH.  NOTE:  CONFIG_LPC43_SPIFI=y must also
  * be defined to enable SPIFI setup support:
@@ -80,14 +92,14 @@
  *   from the SPI address space after each write.
  * CONFIG_DEBUG_SPIFI_DUMP - Debug option to dump read/write buffers.  You
  *   probably do not want to enable this unless you want to dig through a
- *   *lot* of debug output!  Also required CONFIG_DEBUG_FEATURES,
- *   CONFIG_DEBUG_INFO, and CONFIG_DEBUG_FS,
+ *   *lot* of debug output!  Also required CONFIG_DEBUG_FEATURES, CONFIG_DEBUG_INFO,
+ *   and CONFIG_DEBUG_FS,
  */
 
 /* This is where the LPC43xx address where random-access reads begin */
 
 #define SPIFI_BASE \
-       (uint8_t *)(LPC43_SPIFI_DATA_BASE + CONFIG_SPIFI_OFFSET)
+       (FAR uint8_t *)(LPC43_SPIFI_DATA_BASE + CONFIG_SPIFI_OFFSET)
 
 /* Check if we are using a hard-coded block size */
 
@@ -240,10 +252,9 @@
 
 /* The final parameter of the spifi_init() ROM driver call should be the
  * serial clock rate divided by 1000000, rounded to an integer.  The SPIFI
- * supports transfer rates of up to SPIFI_CLK/2 bytes per second.
- * The SPIF_CLK is the output of the LPC43_BASE_SPIFI_CLK configured above;
- * The frequency should be given by BOARD_SPIFI_FREQUENCY as provided by the
- * board.h header file.
+ * supports transfer rates of up to SPIFI_CLK/2 bytes per second.  The SPIF_CLK
+ * is the output of the LPC43_BASE_SPIFI_CLK configured above; The frequency should
+ * be given by BOARD_SPIFI_FREQUENCY as provided by the board.h header file.
  */
 
 #define SCLK_MHZ (BOARD_SPIFI_FREQUENCY + (1000000 / 2)) / 1000000
@@ -266,18 +277,18 @@
  * Private Types
  ****************************************************************************/
 
-/* This type represents the state of the MTD device.  The struct mtd_dev_s
- * must appear at the beginning of the definition so that you can freely
- * cast between pointers to struct mtd_dev_s and struct lpc43_dev_s.
+/* This type represents the state of the MTD device.  The struct mtd_dev_s must
+ * appear at the beginning of the definition so that you can freely cast between
+ * pointers to struct mtd_dev_s and struct lpc43_dev_s.
  */
 
 struct lpc43_dev_s
 {
   struct mtd_dev_s mtd;             /* MTD interface */
 #ifndef CONFIG_SPIFI_LIBRARY
-  struct spifi_driver_s *spifi;     /* Pointer to ROM driver table */
+  FAR struct spifi_driver_s *spifi; /* Pointer to ROM driver table */
 #endif
-  struct spifi_dev_s rom;           /* Needed for communication with ROM driver */
+  FAR struct spifi_dev_s rom;       /* Needed for communication with ROM driver */
   struct spifi_operands_s operands; /* Needed for program and erase ROM calls */
   uint16_t nblocks;                 /* Number of blocks of size blksize */
 #ifndef CONFIG_SPIFI_BLKSIZE
@@ -288,7 +299,7 @@ struct lpc43_dev_s
 #if defined(CONFIG_SPIFI_SECTOR512) && !defined(CONFIG_SPIFI_READONLY)
   uint8_t flags;                    /* Buffered sector flags */
   uint16_t blkno;                   /* Erase block number in the cache */
-  uint8_t *cache;                   /* Allocated sector data */
+  FAR uint8_t *cache;               /* Allocated sector data */
 #endif
 };
 
@@ -298,41 +309,37 @@ struct lpc43_dev_s
 
 /* Helpers */
 
-static void lpc43_blockerase(struct lpc43_dev_s *priv, off_t offset);
-static inline int lpc43_chiperase(struct lpc43_dev_s *priv);
-static inline void lpc43_pageread(struct lpc43_dev_s *priv,
-                                  uint8_t *dest, const uint8_t *src,
+static void lpc43_blockerase(FAR struct lpc43_dev_s *priv, off_t offset);
+static inline int lpc43_chiperase(FAR struct lpc43_dev_s *priv);
+static inline void lpc43_pageread(FAR struct lpc43_dev_s *priv,
+                                  FAR uint8_t *dest, FAR const uint8_t *src,
                                   size_t nbytes);
 #ifndef CONFIG_SPIFI_READONLY
 #ifdef CONFIG_SPIFI_VERIFY
-static int lpc43_verify(struct lpc43_dev_s *priv, uint8_t *dest,
-                        const uint8_t *src, size_t nbytes);
+static int lpc43_verify(FAR struct lpc43_dev_s *priv, FAR uint8_t *dest,
+                        FAR const uint8_t *src, size_t nbytes);
 #endif
-static int lpc43_pagewrite(struct lpc43_dev_s *priv, uint8_t *dest,
-                           const uint8_t *src, size_t nbytes);
+static int lpc43_pagewrite(FAR struct lpc43_dev_s *priv, FAR uint8_t *dest,
+                           FAR const uint8_t *src, size_t nbytes);
 #ifdef CONFIG_SPIFI_SECTOR512
 static void lpc43_cacheflush(struct lpc43_dev_s *priv);
-static uint8_t *lpc43_cacheread(struct lpc43_dev_s *priv, off_t sector);
+static FAR uint8_t *lpc43_cacheread(struct lpc43_dev_s *priv, off_t sector);
 static void lpc43_cacheerase(struct lpc43_dev_s *priv, off_t sector);
-static void lpc43_cachewrite(struct lpc43_dev_s *priv,
-                             const uint8_t *buffer,
+static void lpc43_cachewrite(FAR struct lpc43_dev_s *priv, FAR const uint8_t *buffer,
                              off_t sector, size_t nsectors);
 #endif
 #endif
 
 /* MTD driver methods */
 
-static int lpc43_erase(struct mtd_dev_s *dev,
-                       off_t startblock, size_t nblocks);
-static ssize_t lpc43_bread(struct mtd_dev_s *dev, off_t startblock,
-                           size_t nblocks, uint8_t *buf);
-static ssize_t lpc43_bwrite(struct mtd_dev_s *dev, off_t startblock,
-                            size_t nblocks, const uint8_t *buf);
-static ssize_t lpc43_read(struct mtd_dev_s *dev,
-                          off_t offset, size_t nbytes,
-                          uint8_t *buffer);
-static int lpc43_ioctl(struct mtd_dev_s *dev,
-                       int cmd, unsigned long arg);
+static int lpc43_erase(FAR struct mtd_dev_s *dev, off_t startblock, size_t nblocks);
+static ssize_t lpc43_bread(FAR struct mtd_dev_s *dev, off_t startblock,
+                           size_t nblocks, FAR uint8_t *buf);
+static ssize_t lpc43_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
+                            size_t nblocks, FAR const uint8_t *buf);
+static ssize_t lpc43_read(FAR struct mtd_dev_s *dev, off_t offset, size_t nbytes,
+                          FAR uint8_t *buffer);
+static int lpc43_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg);
 
 /* Initialization */
 
@@ -342,7 +349,7 @@ static inline void lpc43_idiv_clkconfig(void);
 
 static inline void lpc43_spifi_clkconfig(void);
 static inline void lpc43_spifi_pinconfig(void);
-static inline int lpc43_rominit(struct lpc43_dev_s *priv);
+static inline int lpc43_rominit(FAR struct lpc43_dev_s *priv);
 
 /****************************************************************************
  * Private Data
@@ -366,10 +373,9 @@ static void lpc43_blockerase(struct lpc43_dev_s *priv, off_t sector)
 
   /* Erase one block on the chip:
    *
-   * dest   - Specifies the first address to be programmed or erased, either
-   *          in the SPIFI memory area or as a zero-based device address.
-   *          It must be at an offset that is an exact multiple of the erase
-   *          block size.
+   * dest   - Specifies the first address to be programmed or erased, either in
+   *          the SPIFI memory area or as a zero-based device address.  It must
+   *          be at an offset that is an exact multiple of the erase block size.
    * length - The number of bytes to be programmed or erased
    */
 
@@ -396,10 +402,9 @@ static inline int lpc43_chiperase(struct lpc43_dev_s *priv)
 
   /* Erase the entire chip:
    *
-   * dest   - Specifies the first address to be programmed or erased,
-   *          either in the SPIFI memory area or as a zero-based device
-   *          address.  It must be at an offset that is an exact multiple
-   *          of the erase block size.
+   * dest   - Specifies the first address to be programmed or erased, either in
+   *          the SPIFI memory area or as a zero-based device address.  It must
+   *          be at an offset that is an exact multiple of the erase block size.
    * length - The number of bytes to be programmed or erased
    */
 
@@ -424,8 +429,8 @@ static inline int lpc43_chiperase(struct lpc43_dev_s *priv)
  ****************************************************************************/
 
 #if !defined(CONFIG_SPIFI_READONLY) && defined(CONFIG_SPIFI_VERIFY)
-static int lpc43_verify(struct lpc43_dev_s *priv, uint8_t *dest,
-                        const uint8_t *src, size_t nbytes)
+static int lpc43_verify(FAR struct lpc43_dev_s *priv, FAR uint8_t *dest,
+                        FAR const uint8_t *src, size_t nbytes)
 {
   return memcmp(src, dest, nbytes) != 0 ? -EIO : OK;
 }
@@ -436,17 +441,16 @@ static int lpc43_verify(struct lpc43_dev_s *priv, uint8_t *dest,
  ****************************************************************************/
 
 #ifndef CONFIG_SPIFI_READONLY
-static int lpc43_pagewrite(struct lpc43_dev_s *priv, uint8_t *dest,
-                           const uint8_t *src, size_t nbytes)
+static int lpc43_pagewrite(FAR struct lpc43_dev_s *priv, FAR uint8_t *dest,
+                           FAR const uint8_t *src, size_t nbytes)
 {
   int result;
 
   /* Write FLASH pages:
    *
-   * dest   - Specifies the first address to be programmed or erased, either
-   *          in the SPIFI memory area or as a zero-based device address.
-   *          It must be at an offset that is an exact multiple of the
-   *          erase block size.
+   * dest   - Specifies the first address to be programmed or erased, either in
+   *          the SPIFI memory area or as a zero-based device address.  It must
+   *          be at an offset that is an exact multiple of the erase block size.
    * length - The number of bytes to be programmed or erased
    */
 
@@ -463,8 +467,8 @@ static int lpc43_pagewrite(struct lpc43_dev_s *priv, uint8_t *dest,
       return -EIO;
     }
 
-  /* Verify the data that was written by comparing to the data visible in
-   * the SPIFI address space.
+  /* Verify the data that was written by comparing to the data visible in the
+   * SPIFI address space.
    */
 
 #ifdef CONFIG_SPIFI_VERIFY
@@ -484,8 +488,8 @@ static int lpc43_pagewrite(struct lpc43_dev_s *priv, uint8_t *dest,
  * Name: lpc43_pageread
  ****************************************************************************/
 
-static inline void lpc43_pageread(struct lpc43_dev_s *priv,
-                                  uint8_t *dest, const uint8_t *src,
+static inline void lpc43_pageread(FAR struct lpc43_dev_s *priv,
+                                  FAR uint8_t *dest, FAR const uint8_t *src,
                                   size_t nbytes)
 {
   finfo("src=%p dest=%p length=%d\n", src, dest, nbytes);
@@ -499,12 +503,12 @@ static inline void lpc43_pageread(struct lpc43_dev_s *priv,
 #if defined(CONFIG_SPIFI_SECTOR512) && !defined(CONFIG_SPIFI_READONLY)
 static void lpc43_cacheflush(struct lpc43_dev_s *priv)
 {
-  uint8_t *dest;
+  FAR uint8_t *dest;
   int ret;
 
-  /* If the cached is dirty (meaning that it no longer matches the old
-   * FLASH contents) or was erased (with the cache containing the correct
-   * FLASH contents), then write the cached erase block to FLASH.
+  /* If the cached is dirty (meaning that it no longer matches the old FLASH contents)
+   * or was erased (with the cache containing the correct FLASH contents), then write
+   * the cached erase block to FLASH.
    */
 
   finfo("flags: %02x blkno: %d\n", priv->flags, priv->blkno);
@@ -535,16 +539,15 @@ static void lpc43_cacheflush(struct lpc43_dev_s *priv)
  ****************************************************************************/
 
 #if defined(CONFIG_SPIFI_SECTOR512) && !defined(CONFIG_SPIFI_READONLY)
-static uint8_t *lpc43_cacheread(struct lpc43_dev_s *priv, off_t sector)
+static FAR uint8_t *lpc43_cacheread(struct lpc43_dev_s *priv, off_t sector)
 {
-  const uint8_t *src;
+  FAR const uint8_t *src;
   off_t blkno;
   int   index;
 
-  /* Convert from the 512 byte sector to the erase sector size of the device.
-   * For exmample, if the actual erase sector size if 4Kb (1 << 12), then we
-   * first shift to the right by 3 to get the sector number in 4096
-   * increments.
+  /* Convert from the 512 byte sector to the erase sector size of the device.  For
+   * exmample, if the actual erase sector size if 4Kb (1 << 12), then we first
+   * shift to the right by 3 to get the sector number in 4096 increments.
    */
 
   blkno = sector >> (SPIFI_BLKSHIFT - SPIFI_512SHIFT);
@@ -559,7 +562,6 @@ static uint8_t *lpc43_cacheread(struct lpc43_dev_s *priv, off_t sector)
       lpc43_cacheflush(priv);
 
       /* Read the new erase block into the cache */
-
       /* Get the SPIFI address corresponding to the new erase block */
 
       src = SPIFI_BASE + (blkno << SPIFI_BLKSHIFT);
@@ -577,9 +579,7 @@ static uint8_t *lpc43_cacheread(struct lpc43_dev_s *priv, off_t sector)
       CLR_ERASED(priv);         /* The underlying FLASH has not been erased */
     }
 
-  /* Get the index to the 512 sector in the erase block that holds the
-   * argument
-   */
+  /* Get the index to the 512 sector in the erase block that holds the argument */
 
   index = sector & ((1 << (SPIFI_BLKSHIFT - SPIFI_512SHIFT)) - 1);
 
@@ -596,17 +596,17 @@ static uint8_t *lpc43_cacheread(struct lpc43_dev_s *priv, off_t sector)
 #if defined(CONFIG_SPIFI_SECTOR512) && !defined(CONFIG_SPIFI_READONLY)
 static void lpc43_cacheerase(struct lpc43_dev_s *priv, off_t sector)
 {
-  uint8_t *dest;
+  FAR uint8_t *dest;
 
-  /* First, make sure that the erase block containing the 512 byte sector is
-   * in the cache.
+  /* First, make sure that the erase block containing the 512 byte sector is in
+   * the cache.
    */
 
   dest = lpc43_cacheread(priv, sector);
 
   /* Erase the block containing this sector if it is not already erased.
-   * The erased indicated will be cleared when the data from the erase
-   * sector is read into the cache and set here when we erase the block.
+   * The erased indicated will be cleared when the data from the erase sector
+   * is read into the cache and set here when we erase the block.
    */
 
   if (!IS_ERASED(priv))
@@ -618,9 +618,9 @@ static void lpc43_cacheerase(struct lpc43_dev_s *priv, off_t sector)
       SET_ERASED(priv);
     }
 
-  /* Put the cached sector data into the erase state and mart the cache as
-   * dirty (but don't update the FLASH yet.  The caller will do that at a
-   * more optimal time).
+  /* Put the cached sector data into the erase state and mart the cache as dirty
+   * (but don't update the FLASH yet.  The caller will do that at a more optimal
+   * time).
    */
 
   memset(dest, SPIFI_ERASED_STATE, SPIFI_512SIZE);
@@ -633,16 +633,15 @@ static void lpc43_cacheerase(struct lpc43_dev_s *priv, off_t sector)
  ****************************************************************************/
 
 #if defined(CONFIG_SPIFI_SECTOR512) && !defined(CONFIG_SPIFI_READONLY)
-static void lpc43_cachewrite(struct lpc43_dev_s *priv,
-                             const uint8_t *buffer,
-                             off_t sector, size_t nsectors)
+static void lpc43_cachewrite(FAR struct lpc43_dev_s *priv, FAR const uint8_t *buffer,
+                            off_t sector, size_t nsectors)
 {
-  uint8_t *dest;
+  FAR uint8_t *dest;
 
   for (; nsectors > 0; nsectors--)
     {
-      /* First, make sure that the erase block containing 512 byte sector
-       * is in memory.
+      /* First, make sure that the erase block containing 512 byte sector is in
+       * memory.
        */
 
       dest = lpc43_cacheread(priv, sector);
@@ -651,8 +650,8 @@ static void lpc43_cachewrite(struct lpc43_dev_s *priv,
             dest, buffer, sector, priv->flags);
 
       /* Erase the block containing this sector if it is not already erased.
-       * The erased indicated will be cleared when the data from the erase
-       * sector is read into the cache and set here when we erase the sector.
+       * The erased indicated will be cleared when the data from the erase sector
+       * is read into the cache and set here when we erase the sector.
        */
 
       if (!IS_ERASED(priv))
@@ -685,13 +684,12 @@ static void lpc43_cachewrite(struct lpc43_dev_s *priv,
  * Name: lpc43_erase
  ****************************************************************************/
 
-static int lpc43_erase(struct mtd_dev_s *dev,
-                       off_t startblock, size_t nblocks)
+static int lpc43_erase(FAR struct mtd_dev_s *dev, off_t startblock, size_t nblocks)
 {
 #ifdef CONFIG_SPIFI_READONLY
-  return -EACCES;
+  return -EACESS
 #else
-  struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
+  FAR struct lpc43_dev_s *priv = (FAR struct lpc43_dev_s *)dev;
   size_t blocksleft = nblocks;
 
   finfo("startblock: %08lx nblocks: %d\n", (long)startblock, (int)nblocks);
@@ -722,18 +720,15 @@ static int lpc43_erase(struct mtd_dev_s *dev,
  * Name: lpc43_bread
  ****************************************************************************/
 
-static ssize_t lpc43_bread(struct mtd_dev_s *dev,
-                           off_t startblock, size_t nblocks,
-                           uint8_t *buffer)
+static ssize_t lpc43_bread(FAR struct mtd_dev_s *dev, off_t startblock, size_t nblocks,
+                           FAR uint8_t *buffer)
 {
 #ifdef CONFIG_SPIFI_SECTOR512
   ssize_t nbytes;
 
   finfo("startblock: %08lx nblocks: %d\n", (long)startblock, (int)nblocks);
 
-  /* On this device, we can handle the block read just like the byte-oriented
-   * read
-   */
+  /* On this device, we can handle the block read just like the byte-oriented read */
 
   nbytes = lpc43_read(dev, startblock << SPIFI_512SHIFT,
                       nblocks << SPIFI_512SHIFT, buffer);
@@ -745,14 +740,12 @@ static ssize_t lpc43_bread(struct mtd_dev_s *dev,
 
   return (int)nbytes;
 #else
-  struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
+  FAR struct lpc43_dev_s *priv = (FAR struct lpc43_dev_s *)dev;
   ssize_t nbytes;
 
   finfo("startblock: %08lx nblocks: %d\n", (long)startblock, (int)nblocks);
 
-  /* On this device, we can handle the block read just like the byte-oriented
-   * read
-   */
+  /* On this device, we can handle the block read just like the byte-oriented read */
 
   nbytes = lpc43_read(dev, startblock << SPIFI_BLKSHIFT,
                       nblocks << SPIFI_BLKSHIFT, buffer);
@@ -770,9 +763,8 @@ static ssize_t lpc43_bread(struct mtd_dev_s *dev,
  * Name: lpc43_bwrite
  ****************************************************************************/
 
-static ssize_t lpc43_bwrite(struct mtd_dev_s *dev,
-                            off_t startblock, size_t nblocks,
-                            const uint8_t *buffer)
+static ssize_t lpc43_bwrite(FAR struct mtd_dev_s *dev, off_t startblock, size_t nblocks,
+                            FAR const uint8_t *buffer)
 {
 #if defined(CONFIG_SPIFI_READONLY)
 
@@ -780,7 +772,7 @@ static ssize_t lpc43_bwrite(struct mtd_dev_s *dev,
 
 #elif defined(CONFIG_SPIFI_SECTOR512)
 
-  struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
+  FAR struct lpc43_dev_s *priv = (FAR struct lpc43_dev_s *)dev;
 
   finfo("startblock: %08lx nblocks: %d\n", (long)startblock, (int)nblocks);
 
@@ -791,8 +783,8 @@ static ssize_t lpc43_bwrite(struct mtd_dev_s *dev,
 
 #else
 
-  struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
-  uint8_t *dest;
+  FAR struct lpc43_dev_s *priv = (FAR struct lpc43_dev_s *)dev;
+  FAR uint8_t *dest;
   int ret;
 
   finfo("startblock: %08lx nblocks: %d\n", (long)startblock, (int)nblocks);
@@ -820,12 +812,11 @@ static ssize_t lpc43_bwrite(struct mtd_dev_s *dev,
  * Name: lpc43_read
  ****************************************************************************/
 
-static ssize_t lpc43_read(struct mtd_dev_s *dev,
-                          off_t offset, size_t nbytes,
-                          uint8_t *buffer)
+static ssize_t lpc43_read(FAR struct mtd_dev_s *dev, off_t offset, size_t nbytes,
+                          FAR uint8_t *buffer)
 {
-  struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
-  const uint8_t *src;
+  FAR struct lpc43_dev_s *priv = (FAR struct lpc43_dev_s *)dev;
+  FAR const uint8_t *src;
 
   finfo("offset: %08lx nbytes: %d\n", (long)offset, (int)nbytes);
 
@@ -845,38 +836,33 @@ static ssize_t lpc43_read(struct mtd_dev_s *dev,
  * Name: lpc43_ioctl
  ****************************************************************************/
 
-static int lpc43_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg)
+static int lpc43_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
 {
-  struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
+  FAR struct lpc43_dev_s *priv = (FAR struct lpc43_dev_s *)dev;
   int ret = -EINVAL; /* Assume good command with bad parameters */
 
-  finfo("cmd: %d\n", cmd);
+  finfo("cmd: %d \n", cmd);
 
   switch (cmd)
     {
       case MTDIOC_GEOMETRY:
         {
-          struct mtd_geometry_s *geo =
-                             (struct mtd_geometry_s *)((uintptr_t)arg);
+          FAR struct mtd_geometry_s *geo = (FAR struct mtd_geometry_s *)((uintptr_t)arg);
           if (geo)
             {
-               memset(geo, 0, sizeof(*geo));
-
-              /* Populate the geometry structure with information need to
-               * know the capacity and how to access the device.
+              /* Populate the geometry structure with information need to know
+               * the capacity and how to access the device.
                *
-               * NOTE:
-               * that the device is treated as though it where just an array
-               * of fixed size blocks.  That is most likely not true, but the
-               * client will expect the device logic to do whatever is
-               * necessary to make it appear so.
+               * NOTE: that the device is treated as though it where just an array
+               * of fixed size blocks.  That is most likely not true, but the client
+               * will expect the device logic to do whatever is necessary to make it
+               * appear so.
                */
 
 #ifdef CONFIG_SPIFI_SECTOR512
               geo->blocksize    = 512;
               geo->erasesize    = 512;
-              geo->neraseblocks = priv->nblocks <<
-                                  (SPIFI_BLKSHIFT - SPIFI_512SHIFT);
+              geo->neraseblocks = priv->nblocks << (SPIFI_BLKSHIFT - SPIFI_512SHIFT);
 #else
               geo->blocksize    = SPIFI_BLKSIZE;
               geo->erasesize    = SPIFI_BLKSIZE;
@@ -890,27 +876,6 @@ static int lpc43_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg)
         }
         break;
 
-      case BIOC_PARTINFO:
-        {
-          struct partition_info_s *info =
-            (struct partition_info_s *)arg;
-          if (info != NULL)
-            {
-#ifdef CONFIG_SPIFI_SECTOR512
-              info->numsectors  = priv->nblocks <<
-                                  (SPIFI_BLKSHIFT - SPIFI_512SHIFT);
-              info->sectorsize  = 512;
-#else
-              info->numsectors  = priv->nblocks;
-              info->sectorsize  = SPIFI_BLKSIZE;
-#endif
-              info->startsector = 0;
-              info->parent[0]   = '\0';
-              ret               = OK;
-            }
-        }
-        break;
-
       case MTDIOC_BULKERASE:
         {
             /* Erase the entire device */
@@ -919,15 +884,7 @@ static int lpc43_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg)
         }
         break;
 
-      case MTDIOC_ERASESTATE:
-        {
-          uint8_t *result = (uint8_t *)arg;
-          *result = SPIFI_ERASED_STATE;
-
-          ret = OK;
-        }
-        break;
-
+      case MTDIOC_XIPBASE:
       default:
         ret = -ENOTTY; /* Bad command */
         break;
@@ -1029,10 +986,10 @@ static inline void lpc43_spifi_pinconfig(void)
  *
  ****************************************************************************/
 
-static inline int lpc43_rominit(struct lpc43_dev_s *priv)
+static inline int lpc43_rominit(FAR struct lpc43_dev_s *priv)
 {
 #ifndef CONFIG_SPIFI_BLKSIZE
-  struct spfi_desc_s *desc;
+  FAR struct spfi_desc_s *desc;
   uint16_t sectors;
   uint8_t log2;
 #endif
@@ -1045,14 +1002,13 @@ static inline int lpc43_rominit(struct lpc43_dev_s *priv)
 #endif
 
   /* The final parameter of the spifi_init() ROM driver call should be the
-   * serial clock rate divided by 1000000, rounded to an integer.  The
-   * SPIFI supports transfer rates of up to SPIFI_CLK/2 bytes per second.
-   * The SPIF_CLK is the output of the LPC43_BASE_SPIFI_CLK configured above;
-   * The frequency should be given by BOARD_SPIFI_FREQUENCY as provided by
-   * the board.h header file.
+   * serial clock rate divided by 1000000, rounded to an integer.  The SPIFI
+   * supports transfer rates of up to SPIFI_CLK/2 bytes per second.  The SPIF_CLK
+   * is the output of the LPC43_BASE_SPIFI_CLK configured above; The frequency should
+   * be given by BOARD_SPIFI_FREQUENCY as provided by the board.h header file.
    *
-   * A return value of zero frp spifi_init() indicates success.  Non-zero
-   * error codes include:
+   * A return value of zero frp spifi_init() indicates success.  Non-zero error
+   * codes include:
    *
    *   0x2000A  No operative serial flash (JEDEC ID all zeroes or all ones)
    *   0x20009  Unknown manufacturer code
@@ -1147,8 +1103,7 @@ static inline int lpc43_rominit(struct lpc43_dev_s *priv)
 
   /* Save the digested FLASH geometry info */
 
-  priv->nblocks  = ((priv->rom.memsize  - CONFIG_SPIFI_OFFSET) >>
-                     SPIFI_BLKSHIFT);
+  priv->nblocks  = ((priv->rom.memsize  - CONFIG_SPIFI_OFFSET) >> SPIFI_BLKSHIFT);
 
   finfo("Driver FLASH Geometry:\n");
   finfo("  blkshift: %d\n", SPIFI_BLKSHIFT);
@@ -1178,16 +1133,16 @@ static inline int lpc43_rominit(struct lpc43_dev_s *priv)
  *   None
  *
  * Returned Value:
- *   On success, a reference to the initialized MTD device instance is
+ *   One success, a reference to the initialized MTD device instance is
  *   returned;  NULL is returned on any failure.
  *
  ****************************************************************************/
 
-struct mtd_dev_s *lpc43_spifi_initialize(void)
+FAR struct mtd_dev_s *lpc43_spifi_initialize(void)
 {
   /* At present, only a single instance of the SPIFI driver is supported */
 
-  struct lpc43_dev_s *priv = &g_spifi;
+  FAR struct lpc43_dev_s *priv = &g_spifi;
   irqstate_t flags;
   int ret;
 
@@ -1240,12 +1195,10 @@ struct mtd_dev_s *lpc43_spifi_initialize(void)
 
   /* Allocate a buffer for the erase block cache */
 
-  priv->cache = kmm_malloc(SPIFI_BLKSIZE);
+  priv->cache = (FAR uint8_t *)kmm_malloc(SPIFI_BLKSIZE);
   if (!priv->cache)
     {
-      /* Allocation failed!
-       * Discard all of that work we just did and return NULL
-       */
+      /* Allocation failed! Discard all of that work we just did and return NULL */
 
       ferr("ERROR: Allocation failed\n");
       return NULL;
@@ -1255,11 +1208,11 @@ struct mtd_dev_s *lpc43_spifi_initialize(void)
   /* Return the implementation-specific state structure as the MTD device */
 
   finfo("Return %p\n", priv);
-  return (struct mtd_dev_s *)priv;
+  return (FAR struct mtd_dev_s *)priv;
 }
 
 /****************************************************************************
- * Name: pull_miso
+ * Name: pullMISO
  *
  * Description:
  *   hardware-control routine used by spifi_rom_api.c
@@ -1273,7 +1226,7 @@ struct mtd_dev_s *lpc43_spifi_initialize(void)
  ****************************************************************************/
 
 #ifdef CONFIG_SPIFI_LIBRARY
-void pull_miso(int high)
+void pullMISO(int high)
 {
   uint32_t pinconfig;
 

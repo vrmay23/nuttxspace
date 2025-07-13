@@ -1,22 +1,37 @@
 /****************************************************************************
  * fs/nxffs/nxffs_write.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011, 2013, 2017-2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References: Linux/Documentation/filesystems/romfs.txt
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,14 +41,13 @@
 
 #include <nuttx/config.h>
 
-#include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
+#include <crc32.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/crc32.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/mtd/mtd.h>
 
@@ -213,9 +227,7 @@ static inline int nxffs_wralloc(FAR struct nxffs_volume_s *volume,
           ret = nxffs_hdrerased(volume, wrfile, mindata);
           if (ret == OK)
             {
-              /* Valid memory for the data block was found.  Return
-               * success.
-               */
+              /* Valid memory for the data block was found.  Return success. */
 
               return OK;
             }
@@ -507,8 +519,7 @@ static inline ssize_t nxffs_zappend(FAR struct nxffs_volume_s *volume,
  *
  ****************************************************************************/
 
-ssize_t nxffs_write(FAR struct file *filep, FAR const char *buffer,
-                    size_t buflen)
+ssize_t nxffs_write(FAR struct file *filep, FAR const char *buffer, size_t buflen)
 {
   FAR struct nxffs_volume_s *volume;
   FAR struct nxffs_wrfile_s *wrfile;
@@ -517,11 +528,11 @@ ssize_t nxffs_write(FAR struct file *filep, FAR const char *buffer,
   ssize_t total;
   int ret;
 
-  finfo("Write %zd bytes to offset %jd\n", buflen, (intmax_t)filep->f_pos);
+  finfo("Write %d bytes to offset %d\n", buflen, filep->f_pos);
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv != NULL);
+  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
 
   /* Recover the open file state from the struct file instance */
 
@@ -529,17 +540,17 @@ ssize_t nxffs_write(FAR struct file *filep, FAR const char *buffer,
 
   /* Recover the volume state from the open file */
 
-  volume = filep->f_inode->i_private;
+  volume = (FAR struct nxffs_volume_s *)filep->f_inode->i_private;
   DEBUGASSERT(volume != NULL);
 
-  /* Get exclusive access to the volume.  Note that the volume lock
+  /* Get exclusive access to the volume.  Note that the volume exclsem
    * protects the open file list.
    */
 
-  ret = nxmutex_lock(&volume->lock);
+  ret = nxsem_wait(&volume->exclsem);
   if (ret < 0)
     {
-      ferr("ERROR: nxmutex_lock failed: %d\n", ret);
+      ferr("ERROR: nxsem_wait failed: %d\n", ret);
       goto errout;
     }
 
@@ -549,7 +560,7 @@ ssize_t nxffs_write(FAR struct file *filep, FAR const char *buffer,
     {
       ferr("ERROR: File not open for write access\n");
       ret = -EACCES;
-      goto errout_with_lock;
+      goto errout_with_semaphore;
     }
 
   /* Loop until we successfully appended all of the data to the file (or an
@@ -571,7 +582,7 @@ ssize_t nxffs_write(FAR struct file *filep, FAR const char *buffer,
           if (ret < 0)
             {
               ferr("ERROR: Failed to allocate a data block: %d\n", -ret);
-              goto errout_with_lock;
+              goto errout_with_semaphore;
             }
         }
 
@@ -579,15 +590,13 @@ ssize_t nxffs_write(FAR struct file *filep, FAR const char *buffer,
 
       nxffs_ioseek(volume, wrfile->doffset);
 
-      /* Verify that the FLASH data that was previously written is still
-       * intact
-       */
+      /* Verify that the FLASH data that was previously written is still intact */
 
       ret = nxffs_reverify(volume, wrfile);
       if (ret < 0)
         {
           ferr("ERROR: Failed to verify FLASH data block: %d\n", -ret);
-          goto errout_with_lock;
+          goto errout_with_semaphore;
         }
 
       /* Append the data to the end of the data block and write the updated
@@ -597,9 +606,8 @@ ssize_t nxffs_write(FAR struct file *filep, FAR const char *buffer,
       nwritten = nxffs_wrappend(volume, wrfile, &buffer[total], remaining);
       if (nwritten < 0)
         {
-          ferr("ERROR: Failed to append to FLASH to a data block: %d\n",
-               -ret);
-          goto errout_with_lock;
+          ferr("ERROR: Failed to append to FLASH to a data block: %d\n", -ret);
+          goto errout_with_semaphore;
         }
 
       /* Decrement the number of bytes remaining to be written */
@@ -609,11 +617,11 @@ ssize_t nxffs_write(FAR struct file *filep, FAR const char *buffer,
 
   /* Success.. return the number of bytes written */
 
-  ret          = total;
-  filep->f_pos = wrfile->datlen;
+  ret           = total;
+  filep->f_pos  = wrfile->datlen;
 
-errout_with_lock:
-  nxmutex_unlock(&volume->lock);
+errout_with_semaphore:
+  nxsem_post(&volume->exclsem);
 errout:
   return ret;
 }
@@ -676,9 +684,7 @@ int nxffs_wrextend(FAR struct nxffs_volume_s *volume,
 
       nxffs_ioseek(volume, wrfile->doffset);
 
-      /* Verify that the FLASH data that was previously written is still
-       * intact
-       */
+      /* Verify that the FLASH data that was previously written is still intact */
 
       ret = nxffs_reverify(volume, wrfile);
       if (ret < 0)
@@ -867,8 +873,8 @@ int nxffs_wrverify(FAR struct nxffs_volume_s *volume, size_t size)
            * the block has uncorrectable bit errors.
            */
 
-          ferr("ERROR: Failed to read block %jd: %d\n",
-               (intmax_t)volume->ioblock, -ret);
+          ferr("ERROR: Failed to read block %d: %d\n",
+               volume->ioblock, -ret);
         }
 
       /* Search to the very end of this block if we have to */
@@ -892,7 +898,7 @@ int nxffs_wrverify(FAR struct nxffs_volume_s *volume, size_t size)
 
                   if (nerased >= size)
                     {
-                      /* Yes.. this is where we will put the object */
+                      /* Yes.. this this is where we will put the object */
 
                       off_t offset =
                         volume->ioblock * volume->geo.blocksize + iooffset;
@@ -999,8 +1005,7 @@ int nxffs_wrblkhdr(FAR struct nxffs_volume_s *volume,
    *     begin the search for the next inode header or data block.
    */
 
-  volume->froffset = (wrfile->doffset + wrfile->datlen +
-                      SIZEOF_NXFFS_DATA_HDR);
+  volume->froffset = (wrfile->doffset + wrfile->datlen + SIZEOF_NXFFS_DATA_HDR);
 
   /* wrfile->file.entry:
    *   datlen:  Total file length accumulated so far.  When the file is

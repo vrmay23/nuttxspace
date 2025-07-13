@@ -1,22 +1,37 @@
 /****************************************************************************
  * boards/arm/stm32l4/nucleo-l432kc/src/nucleo-l432kc.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014, 2016, 2019 Gregory Nutt. All rights reserved.
+ *   Authors: Frank Bennett
+ *            Gregory Nutt <gnutt@nuttx.org>
+ *            Sebastien Lorquet <sebastien@lorquet.fr>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -65,8 +80,8 @@
 #  undef HAVE_AT45DB
 #endif
 
-/* LED.  User LD3: the green LED is a user LED connected to Arduino signal
- * D13 corresponding to MCU I/O PB3 (pin 26)
+/* LED.  User LD3: the green LED is a user LED connected to Arduino signal D13
+ * corresponding to MCU I/O PB3 (pin 26)
  * target.
  *
  * - When the I/O is HIGH value, the LED is on.
@@ -116,24 +131,8 @@ extern struct spi_dev_s *g_spi2;
 #endif
 
 /****************************************************************************
- * Public Functions Prototypes
+ * Public Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: stm32_bringup
- *
- * Description:
- *   Perform architecture-specific initialization
- *
- *   CONFIG_BOARD_LATE_INITIALIZE=y :
- *     Called from board_late_initialize().
- *
- *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_BOARDCTL=y :
- *     Called from the NSH library
- *
- ****************************************************************************/
-
-int stm32_bringup(void);
 
 /****************************************************************************
  * Name: stm32l4_gpio_initialize
@@ -146,17 +145,6 @@ int stm32_bringup(void);
 #ifdef CONFIG_DEV_GPIO
 int stm32l4_gpio_initialize(void);
 #endif
-
-/****************************************************************************
- * Name: stm32l4_spiregister
- *
- * Description:
- *   Called to register spi character driver of initialized
- *   spi device for the Nucleo-L432KC board.
- *
- ****************************************************************************/
-
-void stm32l4_spiregister(void);
 
 /****************************************************************************
  * Name: stm32l4_spiinitialize
@@ -203,18 +191,6 @@ int stm32l4_adc_setup(void);
 #endif
 
 /****************************************************************************
- * Name: stm32l4_dac_setup
- *
- * Description:
- *   Initialize DAC and register the DAC driver.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_DAC
-int stm32l4_dac_setup(void);
-#endif
-
-/****************************************************************************
  * Name: stm32_dac7571initialize
  *
  * Description:
@@ -223,7 +199,7 @@ int stm32l4_dac_setup(void);
  ****************************************************************************/
 
 #ifdef CONFIG_DAC7571
-int stm32_dac7571initialize(const char *devpath);
+int stm32_dac7571initialize(FAR const char *devpath);
 #endif
 
 /****************************************************************************
@@ -247,7 +223,7 @@ int stm32_at45dbinitialize(int minor);
  ****************************************************************************/
 
 #ifdef CONFIG_SENSORS_INA226
-int stm32_ina226initialize(const char *devpath);
+int stm32_ina226initialize(FAR const char *devpath);
 #endif
 
 /****************************************************************************
@@ -259,7 +235,7 @@ int stm32_ina226initialize(const char *devpath);
  ****************************************************************************/
 
 #ifdef CONFIG_SENSORS_INA219
-int stm32_ina219initialize(const char *devpath);
+int stm32_ina219initialize(FAR const char *devpath);
 #endif
 
 /****************************************************************************
@@ -283,7 +259,7 @@ int stm32_zerocross_initialize(void);
  ****************************************************************************/
 
 #ifdef CONFIG_TIMER
-int board_timer_driver_initialize(const char *devpath, int timer);
+int board_timer_driver_initialize(FAR const char *devpath, int timer);
 #endif
 
 /****************************************************************************
@@ -295,7 +271,7 @@ int board_timer_driver_initialize(const char *devpath, int timer);
  ****************************************************************************/
 
 #ifdef CONFIG_SENSORS_QENCODER
-int stm32l4_qencoder_initialize(const char *devpath, int timer);
+int stm32l4_qencoder_initialize(FAR const char *devpath, int timer);
 #endif
 
 #endif /* __BOARDS_ARM_STM32L4_NUCLEO_L432KC_SRC_NUCLEO_L432KC_H */

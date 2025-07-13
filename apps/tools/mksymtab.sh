@@ -2,147 +2,110 @@
 ############################################################################
 # apps/tools/mksymtab.sh
 #
-# SPDX-License-Identifier: Apache-2.0
+#   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+#   Author: Gregory Nutt <gnutt@nuttx.org>
 #
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.  The
-# ASF licenses this file to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance with the
-# License.  You may obtain a copy of the License at
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the
+#    distribution.
+# 3. Neither the name NuttX nor the names of its contributors may be
+#    used to endorse or promote products derived from this software
+#    without specific prior written permission.
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
-# License for the specific language governing permissions and limitations
-# under the License.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
 
 export LC_ALL=C
 
-usage() {
-  if [ $# -ne 0 ]; then
-    echo "ERROR: $@"
-  fi
-  echo -e "\nUsage: $0 <imagedirpath> [symtabprefix] [-a additionalsymbolspath]"
-  exit 1
-}
+usage="Usage: $0 <imagedirpath> <outfilepath>"
 
 # Check for the required directory path
 
 dir=$1
 if [ -z "$dir" ]; then
-  usage "Missing <imagedirpath>"
+  echo "ERROR: Missing <imagedirpath>"
+  echo ""
+  echo $usage
+  exit 1
 fi
 
-# Get the symbol table prefix
+# Get the output file name
 
-if [ "x${2:0:1}" != "x-" ]; then
-  prefix=$2
-  OPTIND=3
-else
-  OPTIND=2
+outfile=$2
+if [ -z "$outfile" ]; then
+  echo "ERROR: Missing <outfilepath>"
+  echo ""
+  echo $usage
+  exit 1
 fi
 
-# Parse remaining arguments
-
-while getopts a: opt; do
-  case $opt in
-    a)
-      addlist="${addlist[@]} $OPTARG"
-      ;;
-    \?)
-      usage
-  esac
-done
-
-if [ $OPTIND != $(($# + 1)) ]; then
-  usage "Arguments remaining: \"${@:$OPTIND}\""
-fi
+rm -f $outfile
 
 # Extract all of the undefined symbols from the ELF files and create a
 # list of sorted, unique undefined variable names.
 
-varlist=`find $dir -name *-thunk.S 2>/dev/null | xargs grep -h asciz | cut -f3 | sort | uniq`
-if [ -z "$varlist" ]; then
-  execlist=`find $dir -type f 2>/dev/null`
-  if [ ! -z "$execlist" ]; then
+execlist=`find ${dir} -type f`
+if [ ! -z "${execlist}" ]; then
+  for exec in ${execlist}; do
+    nm $exec | fgrep ' U ' | sed -e "s/^[ ]*//g" | cut -d' ' -f2  >>_tmplist
+  done
 
-# Get all undefined symbol names
-    varlist=`nm $execlist 2>/dev/null | fgrep ' U ' | sed -e "s/^[ ]*//g" | cut -d' ' -f2 | sort | uniq`
-
-# Get all defined symbol names
-    deflist=`nm $execlist 2>/dev/null | fgrep -v -e ' U ' -e ':' | sed -e "s/^[0-9a-z]* //g" | cut -d' ' -f2 | sort | uniq`
-
-# Remove the intersection between them, and the remaining symbols are found in the main image
-    common=`echo "$varlist" | tr ' ' '\n' | grep -Fxf <(echo "$deflist" | tr ' ' '\n') | tr '\n' ' '`
-    if [ "x$common" != "x" ]; then
-      varlist=`echo $varlist | sed "s/$common//g"`
-    fi
-  fi
+  varlist=`cat _tmplist | sort - | uniq -`
+  rm -f _tmplist
 fi
-
-for addsym in ${addlist[@]}; do
-  if [ -f $addsym ]; then
-    varlist="${varlist}\n$(cat $addsym | grep -v "^,.*")"
-  elif [ -d $addsym ]; then
-    varlist="${varlist}\n$(find $addsym -type f | xargs cat | grep -v "^,.*")"
-  else
-    usage
-  fi
-  varlist=$(echo -e "${varlist}" | sort -u)
-done
 
 # Now output the symbol table as a structure in a C source file.  All
 # undefined symbols are declared as void* types.  If the toolchain does
 # any kind of checking for function vs. data objects, then this could
 # failed
 
-echo "#include <nuttx/compiler.h>"
-echo "#include <nuttx/symtab.h>"
-echo ""
+echo "#include <nuttx/compiler.h>" >$outfile
+echo "#include <nuttx/symtab.h>" >>$outfile
+echo "" >>$outfile
 
-for string in $varlist; do
-  var=`echo $string | sed -e "s/\"//g"`
-  echo "extern void *${var/,*/};"
+for var in $varlist; do
+  echo "extern void *${var};" >>$outfile
 done
 
-echo ""
-if [ -z "$prefix" ]; then
-  echo "#if defined(CONFIG_EXECFUNCS_HAVE_SYMTAB)"
-  echo "const struct symtab_s CONFIG_EXECFUNCS_SYMTAB_ARRAY[] = "
-  echo "#elif defined(CONFIG_NSH_SYMTAB)"
-  echo "const struct symtab_s CONFIG_NSH_SYMTAB_ARRAYNAME[] = "
-  echo "#elif defined(CONFIG_LIBC_ELF_HAVE_SYMTAB)"
-  echo "const struct symtab_s CONFIG_LIBC_ELF_SYMTAB_ARRAY[] = "
-  echo "#else"
-  echo "const struct symtab_s dummy_symtab[] = "
-  echo "#endif"
-else
-  echo "const struct symtab_s ${prefix}_exports[] = "
-fi
-echo "{"
+echo "" >>$outfile
+echo "#if defined(CONFIG_EXECFUNCS_HAVE_SYMTAB)" >>$outfile
+echo "const struct symtab_s CONFIG_EXECFUNCS_SYMTAB_ARRAY[] = " >>$outfile
+echo "#elif defined(CONFIG_SYSTEM_NSH_SYMTAB)" >>$outfile
+echo "const struct symtab_s CONFIG_SYSTEM_NSH_SYMTAB_ARRAYNAME[] = " >>$outfile
+echo "#else" >>$outfile
+echo "const struct symtab_s dummy_symtab[] = " >>$outfile
+echo "#endif" >>$outfile
+echo "{" >>$outfile
 
-for string in $varlist; do
-  var=`echo $string | sed -e "s/\"//g"`
-  echo "  {\"${var/*,/}\", &${var/,*/}},"
+for var in $varlist; do
+  echo "  {\"${var}\", &${var}}," >>$outfile
 done
 
-echo "};"
-echo ""
-if [ -z "$prefix" ]; then
-  echo "#if defined(CONFIG_EXECFUNCS_HAVE_SYMTAB)"
-  echo "const int CONFIG_EXECFUNCS_NSYMBOLS_VAR = sizeof(CONFIG_EXECFUNCS_SYMTAB_ARRAY) / sizeof(struct symtab_s);"
-  echo "#elif defined(CONFIG_NSH_SYMTAB)"
-  echo "const int CONFIG_NSH_SYMTAB_COUNTNAME = sizeof(CONFIG_NSH_SYMTAB_ARRAYNAME) / sizeof(struct symtab_s);"
-  echo "#elif defined(CONFIG_LIBC_ELF_HAVE_SYMTAB)"
-  echo "const int CONFIG_LIBC_ELF_NSYMBOLS_VAR = sizeof(CONFIG_LIBC_ELF_SYMTAB_ARRAY) / sizeof(struct symtab_s);"
-  echo "#else"
-  echo "const int dummy_nsymtabs = sizeof(dummy_symtab) / sizeof(struct symtab_s);"
-  echo "#endif"
-else
-  echo "const int ${prefix}_nexports = sizeof(${prefix}_exports) / sizeof(struct symtab_s);"
-fi
+echo "};" >>$outfile
+echo "" >>$outfile
+echo "#if defined(CONFIG_EXECFUNCS_HAVE_SYMTAB)" >>$outfile
+echo "const int CONFIG_EXECFUNCS_NSYMBOLS_VAR = sizeof(CONFIG_EXECFUNCS_SYMTAB_ARRAY) / sizeof(struct symtab_s);" >>$outfile
+echo "#elif defined(CONFIG_SYSTEM_NSH_SYMTAB)" >>$outfile
+echo "const int CONFIG_SYSTEM_NSH_SYMTAB_COUNTNAME = sizeof(CONFIG_SYSTEM_NSH_SYMTAB_ARRAYNAME) / sizeof(struct symtab_s);" >>$outfile
+echo "#else" >>$outfile
+echo "const int dummy_nsymtabs = sizeof(dummy_symtab) / sizeof(struct symtab_s);" >>$outfile
+echo "#endif" >>$outfile

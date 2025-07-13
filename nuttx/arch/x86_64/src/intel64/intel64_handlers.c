@@ -1,7 +1,5 @@
 /****************************************************************************
- * arch/x86_64/src/intel64/intel64_handlers.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  arch/x86_64/src/intel64/intel64_handlers.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -27,18 +25,14 @@
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
 
-#include <nuttx/addrenv.h>
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
 #include <nuttx/signal.h>
 #include <arch/io.h>
-#include <assert.h>
-#include <debug.h>
-#include <inttypes.h>
 #include <syscall.h>
 #include <arch/board/board.h>
 
-#include "x86_64_internal.h"
+#include "up_internal.h"
 #include "sched/sched.h"
 
 /****************************************************************************
@@ -64,8 +58,7 @@
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
 static uint64_t *common_handler(int irq, uint64_t *regs)
 {
-  struct tcb_s **running_task = &g_running_tasks[this_cpu()];
-  struct tcb_s *tcb;
+  board_autoled_on(LED_INIRQ);
 
   /* Current regs non-zero indicates that we are processing an interrupt;
    * g_current_regs is also used to manage interrupt level context switches.
@@ -73,26 +66,28 @@ static uint64_t *common_handler(int irq, uint64_t *regs)
    * Nested interrupts are not supported.
    */
 
-  DEBUGASSERT(!up_interrupt_context());
-
-  /* Set irq flag */
-
-  up_set_interrupt_context(true);
+  DEBUGASSERT(g_current_regs == NULL);
+  g_current_regs = regs;
 
   /* Deliver the IRQ */
 
   irq_dispatch(irq, regs);
-  tcb = this_task();
 
+#if defined(CONFIG_ARCH_FPU) || defined(CONFIG_ARCH_ADDRENV)
   /* Check for a context switch.  If a context switch occurred, then
    * g_current_regs will have a different value than it did on entry.  If an
-   * interrupt level context switch has occurred, then the establish the
-   * correct address environment before returning from the interrupt.
+   * interrupt level context switch has occurred, then restore the floating
+   * point state and the establish the correct address environment before
+   * returning from the interrupt.
    */
 
-  if (*running_task != tcb)
+  if (regs != g_current_regs)
     {
-      tcb = this_task();
+#ifdef CONFIG_ARCH_FPU
+      /* Restore floating point registers */
+
+      up_restorefpu((uint64_t *)g_current_regs);
+#endif
 
 #ifdef CONFIG_ARCH_ADDRENV
       /* Make sure that the address environment for the previously
@@ -101,31 +96,25 @@ static uint64_t *common_handler(int irq, uint64_t *regs)
        * thread at the head of the ready-to-run list.
        */
 
-      addrenv_switch(tcb);
+      (void)group_addrenv(NULL);
+#endif
+    }
 #endif
 
-      /* Update scheduler parameters */
+  /* If a context switch occurred while processing the interrupt then
+   * g_current_regs may have change value.  If we return any value different
+   * from the input regs, then the lower level will know that a context
+   * switch occurred during interrupt processing.
+   */
 
-      nxsched_suspend_scheduler(*running_task);
-      nxsched_resume_scheduler(tcb);
+  regs = (uint64_t *)g_current_regs;
 
-      /* Record the new "running" task when context switch occurred.
-       * g_running_tasks[] is only used by assertion logic for reporting
-       * crashes.
-       */
+  /* Set g_current_regs to NULL to indicate that we are no longer in an
+   * interrupt handler.
+   */
 
-      *running_task = tcb;
-
-      /* Restore the cpu lock */
-
-      restore_critical_section(tcb, this_cpu());
-    }
-
-  /* Clear irq flag */
-
-  up_set_interrupt_context(false);
-
-  return tcb->xcp.regs;
+  g_current_regs = NULL;
+  return regs;
 }
 #endif
 
@@ -134,29 +123,82 @@ static uint64_t *common_handler(int irq, uint64_t *regs)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: irq_handler
+ * Name: isr_handler
  *
  * Description:
- *   This gets called from IRQ or ISR vector handling logic in
- *   intel64_vectors.S
+ *   This gets called from ISR vector handling logic in broadwell_vectors.S
+ *
+ ****************************************************************************/
+
+#define SIGFPE 8
+
+uint64_t *isr_handler(uint64_t *regs, uint64_t irq)
+{
+#ifdef CONFIG_SUPPRESS_INTERRUPTS
+  board_autoled_on(LED_INIRQ);
+  PANIC(); /* Doesn't return */
+  return regs;               /* To keep the compiler happy */
+#else
+  uint64_t *ret;
+
+  DEBUGASSERT(g_current_regs == NULL);
+  g_current_regs = regs;
+
+  switch (irq)
+    {
+      case 0:
+      case 16:
+        asm volatile("fnclex":::"memory");
+        nxsig_kill(this_task()->pid, SIGFPE);
+        break;
+
+      default:
+        /* Let's say, all ISR are asserted when REALLY BAD things happened.
+         * Don't even brother to recover, just dump the regs and PANIC.
+         */
+
+        _alert("PANIC:\n");
+        _alert("Exception %lld occurred with error code %lld:\n",
+               irq, regs[REG_ERRCODE]);
+
+        up_registerdump(regs);
+
+        up_trash_cpu();
+        break;
+  }
+
+  /* Maybe we need a context switch */
+
+  regs = (uint64_t *)g_current_regs;
+
+  /* Set g_current_regs to NULL to indicate that we are no longer in an
+   * interrupt handler.
+   */
+
+  g_current_regs = NULL;
+  return regs;
+#endif
+}
+
+/****************************************************************************
+ * Name: isr_handler
+ *
+ * Description:
+ *   This gets called from IRQ vector handling logic in intel64_vectors.S
  *
  ****************************************************************************/
 
 uint64_t *irq_handler(uint64_t *regs, uint64_t irq_no)
 {
-  board_autoled_on(LED_INIRQ);
-
 #ifdef CONFIG_SUPPRESS_INTERRUPTS
-  /* Doesn't return */
-
-  PANIC();
-
-  /* To keep the compiler happy */
-
-  return regs;
+  board_autoled_on(LED_INIRQ);
+  PANIC(); /* Doesn't return */
+  return regs;               /* To keep the compiler happy */
 #else
   uint64_t *ret;
   int irq;
+
+  board_autoled_on(LED_INIRQ);
 
   /* Get the IRQ number */
 
@@ -172,29 +214,4 @@ uint64_t *irq_handler(uint64_t *regs, uint64_t irq_no)
   board_autoled_off(LED_INIRQ);
   return ret;
 #endif
-}
-
-/****************************************************************************
- * Name: irq_xcp_regs
- *
- * Description:
- *   Return current task XCP registers area.
- *
- * ASSUMPTION:
- *   Interrupts are disabled.
- *
- *   This function should be called only form intel64_vector.S file !
- *   Any other use must be carefully considered.
- *
- ****************************************************************************/
-
-nosanitize_address
-uint64_t *irq_xcp_regs(void)
-{
-  /* This must be the simplest as possible, so we not use too much registers.
-   * Now this function corrupts only RAX and RDX registers regardless of
-   * the compiler optimization.
-   */
-
-  return (current_task(this_cpu()))->xcp.regs;
 }

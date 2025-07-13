@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/samv7/sam_timerisr.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,7 +47,9 @@
 
 #include "nvic.h"
 #include "clock/clock.h"
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 
 /****************************************************************************
@@ -47,9 +62,9 @@
  * prescaler output (i.e., the MDIV output divider is not applied so that
  * the driving frequency is the same as the CPU frequency).
  *
- * The SysTick calibration value is fixed to 37500 which allows the
- * generation of a time base of 1 ms with SysTick clock to the maximum
- * frequency on MCK divided by 8. (?)
+ * The SysTick calibration value is fixed to 37500 which allows the generation
+ * of a time base of 1 ms with SysTick clock to the maximum frequency on
+ * MCK divided by 8. (?)
  */
 
 #define SAM_SYSTICK_CLOCK  BOARD_CPU_FREQUENCY
@@ -66,8 +81,7 @@
  * will fit in the reload register.
  */
 
-#define SYSTICK_MAX 0x00ffffff
-#if SYSTICK_RELOAD > SYSTICK_MAX
+#if SYSTICK_RELOAD > 0x00ffffff
 #  error SYSTICK_RELOAD exceeds the range of the RELOAD register
 #endif
 
@@ -95,44 +109,6 @@ static int sam_timerisr(int irq, uint32_t *regs, void *arg)
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Function:  up_adjtime
- *
- * Description:
- *   Adjusts timer period. This call is used when adjusting timer period as
- *   defined in adjtime() function.
- *
- * Input Parameters:
- *   ppb - Adjustment in parts per billion (nanoseconds per second).
- *         Zero is default rate, positive value makes clock run faster
- *         and negative value slower.
- *
- * Assumptions:
- *   Called from within critical section or interrupt context.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_CLOCK_ADJTIME
-void up_adjtime(long ppb)
-{
-  uint32_t period = SYSTICK_RELOAD;
-
-  if (ppb != 0)
-    {
-      period -= (long long)ppb * SYSTICK_RELOAD / 1000000000;
-    }
-
-  /* Check whether period is at maximum value. */
-
-  if (period > SYSTICK_MAX)
-    {
-      period = SYSTICK_MAX;
-    }
-
-  putreg32(period, NVIC_SYSTICK_RELOAD);
-}
-#endif
 
 /****************************************************************************
  * Function:  up_timer_initialize

@@ -1,22 +1,40 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_trng.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Derives, in part, from Max Holtzberg's STM32 RNG Nuttx driver:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright (C) 2012 Max Holtzberg. All rights reserved.
+ *   Author: Max Holtzberg <mh@uvc.de>
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,10 +54,11 @@
 #include <nuttx/arch.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/drivers/drivers.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "sam_periphclks.h"
 #include "sam_trng.h"
 
@@ -52,7 +71,7 @@
 
 /* Interrupts */
 
-static int sam_interrupt(int irq, void *context, void *arg);
+static int sam_interrupt(int irq, void *context, FAR void *arg);
 
 /* Character driver methods */
 
@@ -64,7 +83,7 @@ static ssize_t sam_read(struct file *filep, char *buffer, size_t);
 
 struct trng_dev_s
 {
-  mutex_t lock;             /* Enforces exclusive access to the TRNG */
+  sem_t exclsem;            /* Enforces exclusive access to the TRNG */
   sem_t waitsem;            /* Wait for buffer full  */
   uint32_t *samples;        /* Current buffer being filled */
   size_t maxsamples;        /* Size of the current buffer (in 32-bit words) */
@@ -76,17 +95,17 @@ struct trng_dev_s
  * Private Data
  ****************************************************************************/
 
-static struct trng_dev_s g_trngdev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
+static struct trng_dev_s g_trngdev;
 
 static const struct file_operations g_trngops =
 {
   NULL,            /* open */
   NULL,            /* close */
   sam_read,        /* read */
+  NULL,            /* write */
+  NULL,            /* seek */
+  NULL,            /* ioctl */
+  NULL             /* poll */
 };
 
 /****************************************************************************
@@ -106,7 +125,7 @@ static const struct file_operations g_trngops =
  *
  ****************************************************************************/
 
-static int sam_interrupt(int irq, void *context, void *arg)
+static int sam_interrupt(int irq, void *context, FAR void *arg)
 {
   uint32_t odata;
 
@@ -129,9 +148,7 @@ static int sam_interrupt(int irq, void *context, void *arg)
 
       if ((getreg32(SAM_TRNG_ISR) & TRNG_INT_DATRDY) == 0)
         {
-          /* No?  Then return and continue processing on the next
-           * interrupt.
-           */
+          /* No?  Then return and continue processing on the next interrupt. */
 
           return OK;
         }
@@ -139,10 +156,10 @@ static int sam_interrupt(int irq, void *context, void *arg)
       /* As required by the FIPS PUB (Federal Information Processing Standard
        * Publication) 140-2, the first random number generated after setting
        * the RNGEN bit should not be used, but saved for comparison with the
-       * next generated random number. Each subsequent generated random
-       * number has to be compared with the previously generated number. The
-       * test fails if any two compared numbers are equal (continuous random
-       * number generator test).
+       * next generated random number. Each subsequent generated random number
+       * has to be compared with the previously generated number. The test
+       * fails if any two compared numbers are equal (continuous random number
+       * generator test).
        */
 
       if (g_trngdev.nsamples == 0)
@@ -162,9 +179,7 @@ static int sam_interrupt(int irq, void *context, void *arg)
 
       else if (odata == g_trngdev.samples[g_trngdev.nsamples - 1])
         {
-          /* Two samples with the same value.  Discard this one and try
-           * again.
-           */
+          /* Two samples with the same value.  Discard this one and try again. */
 
           continue;
         }
@@ -236,7 +251,7 @@ static ssize_t sam_read(struct file *filep, char *buffer, size_t buflen)
 
   /* Get exclusive access to the TRNG hardware */
 
-  ret = nxmutex_lock(&g_trngdev.lock);
+  ret = nxsem_wait(&g_trngdev.exclsem);
   if (ret < 0)
     {
       return ret;
@@ -292,7 +307,7 @@ static ssize_t sam_read(struct file *filep, char *buffer, size_t buflen)
 
   /* Success... calculate the number of bytes to return */
 
-  retval = g_trngdev.nsamples << 2;
+   retval = g_trngdev.nsamples << 2;
 
 errout:
 
@@ -306,7 +321,7 @@ errout:
 
   /* Release our lock on the TRNG hardware */
 
-  nxmutex_unlock(&g_trngdev.lock);
+  nxsem_post(&g_trngdev.exclsem);
 
   finfo("Return %d\n", (int)retval);
   return retval;
@@ -331,6 +346,21 @@ static int sam_rng_initialize(void)
   int ret;
 
   finfo("Initializing TRNG hardware\n");
+
+  /* Initialize the device structure */
+
+  memset(&g_trngdev, 0, sizeof(struct trng_dev_s));
+
+  /* Initialize semphores */
+
+  nxsem_init(&g_trngdev.exclsem, 0, 1);
+  nxsem_init(&g_trngdev.waitsem, 0, 0);
+
+  /* The waitsem semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
+  nxsem_setprotocol(&g_trngdev.waitsem, SEM_PRIO_NONE);
 
   /* Enable clocking to the TRNG */
 
@@ -386,7 +416,7 @@ void devrandom_register(void)
   ret = sam_rng_initialize();
   if (ret >= 0)
     {
-      ret = register_driver("/dev/random", &g_trngops, 0444, NULL);
+      ret = register_driver("/dev/random", &g_trngops, 0644, NULL);
       if (ret < 0)
         {
           ferr("ERROR: Failed to register /dev/random\n");
@@ -419,7 +449,7 @@ void devurandom_register(void)
   if (ret >= 0)
 #endif
     {
-      ret = register_driver("/dev/urandom", &g_trngops, 0444, NULL);
+      ret = register_driver("/dev/urandom", &g_trngops, 0644, NULL);
       if (ret < 0)
         {
           ferr("ERROR: Failed to register /dev/urandom\n");

@@ -1,22 +1,35 @@
 /****************************************************************************
  * fs/smartfs/smartfs.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013-2014 Ken Pettit. All rights reserved.
+ *   Author: Ken Pettit <pettitkd@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -35,6 +48,7 @@
 
 #include <nuttx/mtd/mtd.h>
 #include <nuttx/fs/smart.h>
+#include <nuttx/semaphore.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -162,6 +176,16 @@
 
 #define SMART_MAGICSIZE           4
 
+/* Quasi-standard definitions */
+
+#ifndef MIN
+#  define MIN(a,b)                (a < b ? a : b)
+#endif
+
+#ifndef MAX
+#  define MAX(a,b)                (a > b ? a : b)
+#endif
+
 /* Underlying MTD Block driver access functions */
 
 #define FS_BOPS(f)        (f)->fs_blkdriver->u.i_bops
@@ -195,27 +219,11 @@
 #define SMARTFS_TRUNCBUFFER_SIZE 512
 
 #ifndef offsetof
-#  define offsetof(type, member) ((size_t)&(((FAR type *)0)->member))
+#  define offsetof(type, member) ((size_t) & (((type *)0)->member))
 #endif
 
-#ifdef CONFIG_SMARTFS_ALIGNED_ACCESS
-#  define SMARTFS_NEXTSECTOR(h)        (smartfs_rdle16(h->nextsector))
-#  define SMARTFS_SET_NEXTSECTOR(h, v) smartfs_wrle16(h->nextsector, \
-                                            (uint16_t)(v))
-
-#  define SMARTFS_USED(h)              (smartfs_rdle16(h->used))
-#  define SMARTFS_SET_USED(h, v)       smartfs_wrle16(h->used, \
-                                            (uint16_t)(v))
-
-#else
-#  define SMARTFS_NEXTSECTOR(h)        (*((FAR uint16_t *)h->nextsector))
-#  define SMARTFS_SET_NEXTSECTOR(h, v) ((*((FAR uint16_t *)h->nextsector)) = \
-                                            (uint16_t)(v))
-
-#  define SMARTFS_USED(h)              (*((FAR uint16_t *)h->used))
-#  define SMARTFS_SET_USED(h, v)       ((*((FAR uint16_t *)h->used)) = \
-                                            (uint16_t)(v))
-#endif
+#define SMARTFS_NEXTSECTOR(h)    (*((uint16_t *)h->nextsector))
+#define SMARTFS_USED(h)          (*((uint16_t *)h->used))
 
 #ifdef CONFIG_MTD_SMART_ENABLE_CRC
 #define CONFIG_SMARTFS_USE_SECTOR_BUFFER
@@ -291,25 +299,24 @@ struct smartfs_chain_header_s
 
 struct smartfs_ofile_s
 {
-  FAR struct smartfs_ofile_s *fnext;        /* Supports a singly linked list */
+  struct smartfs_ofile_s   *fnext;        /* Supports a singly linked list */
 #ifdef CONFIG_SMARTFS_USE_SECTOR_BUFFER
-  FAR uint8_t                *buffer;       /* Sector buffer to reduce writes */
-  uint8_t                     bflags;       /* Buffer flags */
+  uint8_t                  *buffer;       /* Sector buffer to reduce writes */
+  uint8_t                   bflags;       /* Buffer flags */
 #endif
-  int16_t                     crefs;        /* Reference count */
-  mode_t                      oflags;       /* Open mode */
-  struct smartfs_entry_s      entry;        /* Describes the SMARTFS inode entry */
-  size_t                      filepos;      /* Current file position */
-  uint16_t                    currsector;   /* Current sector of filepos */
-  uint16_t                    curroffset;   /* Current offset in sector */
-  uint16_t                    byteswritten; /* Count of bytes written to currsector
-                                             * that have not been recorded in the
-                                             * sector yet.  We delay updating the
-                                             * used field until the file is closed,
-                                             * a seek, or more data is written that
-                                             * causes the sector to change.
-                                             */
-  char                        path[1];      /* The full path to the file */
+  int16_t                   crefs;        /* Reference count */
+  mode_t                    oflags;       /* Open mode */
+  struct smartfs_entry_s    entry;        /* Describes the SMARTFS inode entry */
+  size_t                    filepos;      /* Current file position */
+  uint16_t                  currsector;   /* Current sector of filepos */
+  uint16_t                  curroffset;   /* Current offset in sector */
+  uint16_t                  byteswritten; /* Count of bytes written to currsector
+                                           * that have not been recorded in the
+                                           * sector yet.  We delay updating the
+                                           * used field until the file is closed,
+                                           * a seek, or more data is written that
+                                           * causes the sector to change.
+                                           */
 };
 
 /* This structure represents the overall mountpoint state.  An instance of
@@ -320,15 +327,16 @@ struct smartfs_ofile_s
 struct smartfs_mountpt_s
 {
 #if defined(CONFIG_SMARTFS_MULTI_ROOT_DIRS) || defined(CONFIG_FS_PROCFS)
-  FAR struct smartfs_mountpt_s *fs_next;       /* Pointer to next SMART filesystem */
+  struct smartfs_mountpt_s   *fs_next;       /* Pointer to next SMART filesystem */
 #endif
-  FAR struct inode             *fs_blkdriver;  /* Our underlying block device */
-  FAR struct smartfs_ofile_s   *fs_head;       /* A singly-linked list of open files */
-  bool                          fs_mounted;    /* true: The file system is ready */
-  struct smart_format_s         fs_llformat;   /* Low level device format info */
-  FAR char                     *fs_rwbuffer;   /* Read/Write working buffer */
-  FAR char                     *fs_workbuffer; /* Working buffer */
-  uint8_t                       fs_rootsector; /* Root directory sector num */
+  FAR struct inode           *fs_blkdriver;  /* Our underlying block device */
+  sem_t                      *fs_sem;        /* Used to assure thread-safe access */
+  FAR struct smartfs_ofile_s *fs_head;       /* A singly-linked list of open files */
+  bool                        fs_mounted;    /* true: The file system is ready */
+  struct smart_format_s       fs_llformat;   /* Low level device format info */
+  char                       *fs_rwbuffer;   /* Read/Write working buffer */
+  char                       *fs_workbuffer; /* Working buffer */
+  uint8_t                     fs_rootsector; /* Root directory sector num */
 };
 
 /****************************************************************************
@@ -338,6 +346,11 @@ struct smartfs_mountpt_s
 /****************************************************************************
  * Public Functions Prototypes
  ****************************************************************************/
+
+/* Semaphore access for internal use */
+
+int  smartfs_semtake(struct smartfs_mountpt_s *fs);
+void smartfs_semgive(struct smartfs_mountpt_s *fs);
 
 /* Forward references for utility functions */
 
@@ -379,18 +392,18 @@ int smartfs_extendfile(FAR struct smartfs_mountpt_s *fs,
 
 uint16_t smartfs_rdle16(FAR const void *val);
 
-void smartfs_wrle16(FAR void *dest, uint16_t val);
+void smartfs_wrle16(void *dest, uint16_t val);
 
 uint32_t smartfs_rdle32(FAR const void *val);
 
-void smartfs_wrle32(FAR uint8_t *dest, uint32_t val);
+void smartfs_wrle32(uint8_t *dest, uint32_t val);
 
 #if defined(CONFIG_FS_PROCFS) && !defined(CONFIG_FS_PROCFS_EXCLUDE_SMARTFS)
-FAR struct smartfs_mountpt_s *smartfs_get_first_mount(void);
+struct smartfs_mountpt_s *smartfs_get_first_mount(void);
 #endif
 
 #if defined(CONFIG_FS_PROCFS) && !defined(CONFIG_FS_PROCFS_EXCLUDE_SMARTFS)
-FAR struct smartfs_mountpt_s *smartfs_get_first_mount(void);
+struct smartfs_mountpt_s *smartfs_get_first_mount(void);
 #endif
 
 struct file;        /* Forward references */

@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/mld/mld_main.c
+ * examples/mld/mld_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -176,7 +189,7 @@ void mld_catfile(FAR const char *filepath, FAR char **iobuffer)
 
   /* And just dump it byte for byte into stdout */
 
-  for (; ; )
+  for (;;)
     {
       ssize_t nbytesread = read(fd, *iobuffer, IOBUFFERSIZE);
 
@@ -238,7 +251,7 @@ void mld_catfile(FAR const char *filepath, FAR char **iobuffer)
 #ifdef HAVE_PROC_NET_STATS
 #  define mld_dumpstats(iobuffer) mld_catfile(PROCFS_MLD_PATH, iobuffer)
 #else
-#  define mld_dumpstats(iobuffer)
+#  define mld_dumpstats(iobuffer) mld_catfile(PROCFS_MLD_PATH, iobuffer)
 #endif
 
 #ifdef HAVE_PROC_NET_ROUTE
@@ -319,11 +332,10 @@ int main(int argc, FAR char *argv[])
   printf("Join group...\n");
   mld_dumpstats(&iobuffer);
 
-  memcpy(mrec.ipv6mr_multiaddr.s6_addr16,
-         g_grp_addr, sizeof(struct in6_addr));
+  memcpy(mrec.ipv6mr_multiaddr.s6_addr16, g_grp_addr, sizeof(struct in6_addr));
   mrec.ipv6mr_interface = if_nametoindex("eth0");
 
-  ret = setsockopt(sockfd, IPPROTO_IPV6, IPV6_JOIN_GROUP, (FAR void *)&mrec,
+  ret = setsockopt(sockfd, SOL_IPV6, IPV6_JOIN_GROUP, (FAR void *)&mrec,
                    sizeof(struct ipv6_mreq));
   if (ret < 0)
     {
@@ -361,28 +373,31 @@ int main(int argc, FAR char *argv[])
 
   /* Set up a routing table entry for the address of the multicast group */
 
-  memset(&target, 0, sizeof(target));
+  memset(&target, 0, sizeof(struct sockaddr_in6));
   target.sin6_family  = AF_INET6;
   target.sin6_port    = HTONS(0x4321);
-  memcpy(v6_addr->sin6_addr.s6_addr16, g_grp_addr, sizeof(struct in6_addr));
+  memcpy(target.sin6_addr.s6_addr16, g_grp_addr, sizeof(struct in6_addr));
 
-  memset(&netmask, 0, sizeof(netmask));
+  memset(&netmask, 0, sizeof(struct sockaddr_in6));
   netmask.sin6_family  = AF_INET6;
   netmask.sin6_port    = HTONS(0x4321);
-  memset(v6_addr->sin6_addr.s6_addr16, 0xff, sizeof(struct in6_addr));
+  memset(netmask.sin6_addr.s6_addr16, 0xff, sizeof(struct in6_addr));
 
-  memset(&router, 0, sizeof(router));
+  memset(&router, 0, sizeof(struct sockaddr_in6));
   router.sin6_family  = AF_INET6;
   router.sin6_port    = HTONS(0x4321);
 
-  ret = netlib_get_ipv6addr("eth0", &v6_addr->sin6_addr);
+  ret = netlib_get_ipv6addr("eth0", &router.sin6_addr);
   if (ret < 0)
     {
       fprintf(stderr, "ERROR: netlib_get_ipv6addr() failed: %d\n", ret);
     }
   else
     {
-      ret = addroute(sockfd, &target, &netmask, &router, sizeof(router));
+      ret = addroute(sockfd,
+                     (FAR struct sockaddr_storage *)&target,
+                     (FAR struct sockaddr_storage *)&netmask,
+                     (FAR struct sockaddr_storage *)&router);
       if (ret < 0)
         {
           fprintf(stderr, "ERROR: addroute() failed: %d\n", errno);
@@ -396,15 +411,16 @@ int main(int argc, FAR char *argv[])
       /* Send a garbage packet */
 
       ret = sendto(sockfd, g_garbage, sizeof(g_garbage), 0,
-                   (FAR struct sockaddr *)&target,
-                   sizeof(struct sockaddr_in6));
+                   (FAR struct sockaddr *)&target, sizeof(struct sockaddr_in6));
       if (ret < 0)
         {
           fprintf(stderr, "ERROR: sendto() failed: %d\n", errno);
         }
     }
 
-  ret = delroute(sockfd, &target, &netmask, sizeof(target));
+  ret = delroute(sockfd,
+                 (FAR struct sockaddr_storage *)&target,
+                 (FAR struct sockaddr_storage *)&netmask);
   if (ret < 0)
     {
       fprintf(stderr, "ERROR: delroute() failed: %d\n", errno);
@@ -422,7 +438,7 @@ int main(int argc, FAR char *argv[])
   /* Leave the group */
 
   printf("Leave group...\n");
-  ret = setsockopt(sockfd, IPPROTO_IPV6, IPV6_LEAVE_GROUP, (FAR void *)&mrec,
+  ret = setsockopt(sockfd, SOL_IPV6, IPV6_LEAVE_GROUP, (FAR void *)&mrec,
                    sizeof(struct ipv6_mreq));
   if (ret < 0)
     {

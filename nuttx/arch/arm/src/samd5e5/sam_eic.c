@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/samd5e5/sam_eic.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Matt Thompson <matt@extent3d.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,17 +40,15 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <assert.h>
 #include <debug.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "sam_gclk.h"
 #include "sam_periphclks.h"
 #include "sam_port.h"
 #include "sam_eic.h"
-#include "hardware/sam_pac.h"
 
 #include <arch/board/board.h>
 
@@ -90,17 +101,17 @@ void sam_eic_dumpregs(void)
   irqinfo("       CTRLA:  %02x\n", getreg8(SAM_EIC_CTRLA));
   irqinfo("     NMICTRL:  %02x\n", getreg8(SAM_EIC_NMICTRL));
   irqinfo("     NMIFLAG:  %04x\n", getreg16(SAM_EIC_NMIFLAG));
-  irqinfo("    SYNCBUSY:  %08" PRIx32 "\n", getreg32(SAM_EIC_SYNCBUSY));
-  irqinfo("      EVCTRL:  %08" PRIx32 "\n", getreg32(SAM_EIC_EVCTRL));
-  irqinfo("    INTENCLR:  %08" PRIx32 "\n", getreg32(SAM_EIC_INTENCLR));
-  irqinfo("    INTENSET:  %08" PRIx32 "\n", getreg32(SAM_EIC_INTENSET));
-  irqinfo("     INTFLAG:  %08" PRIx32 "\n", getreg32(SAM_EIC_INTFLAG));
-  irqinfo("      ASYNCH:  %08" PRIx32 "\n", getreg32(SAM_EIC_ASYNCH));
-  irqinfo("     CONFIG0:  %08" PRIx32 "\n", getreg32(SAM_EIC_CONFIG0));
-  irqinfo("     CONFIG1:  %08" PRIx32 "\n", getreg32(SAM_EIC_CONFIG1));
-  irqinfo("   DEBOUNCEN:  %08" PRIx32 "\n", getreg32(SAM_EIC_DEBOUNCEN));
-  irqinfo("  DPRESCALER:  %08" PRIx32 "\n", getreg32(SAM_EIC_DPRESCALER));
-  irqinfo("    PINSTATE:  %08" PRIx32 "\n", getreg32(SAM_EIC_PINSTATE));
+  irqinfo("    SYNCBUSY:  %08x\n", getreg32(SAM_EIC_SYNCBUSY));
+  irqinfo("      EVCTRL:  %08x\n", getreg32(SAM_EIC_EVCTRL));
+  irqinfo("    INTENCLR:  %08x\n", getreg32(SAM_EIC_INTENCLR));
+  irqinfo("    INTENSET:  %08x\n", getreg32(SAM_EIC_INTENSET));
+  irqinfo("     INTFLAG:  %08x\n", getreg32(SAM_EIC_INTFLAG));
+  irqinfo("      ASYNCH:  %08x\n", getreg32(SAM_EIC_ASYNCH));
+  irqinfo("     CONFIG0:  %08x\n", getreg32(SAM_EIC_CONFIG0));
+  irqinfo("     CONFIG1:  %08x\n", getreg32(SAM_EIC_CONFIG1));
+  irqinfo("   DEBOUNCEN:  %08x\n", getreg32(SAM_EIC_DEBOUNCEN));
+  irqinfo("  DPRESCALER:  %08x\n", getreg32(SAM_EIC_DPRESCALER));
+  irqinfo("    PINSTATE:  %08x\n", getreg32(SAM_EIC_PINSTATE));
 }
 
 /****************************************************************************
@@ -124,7 +135,7 @@ int sam_eic_initialize(void)
 
   /* Configure the EIC APB clock */
 
-  sam_apb_eic_enableperiph(); /* SAM_MCLK_APBAMASK(MCLK_APBAMASK_EIC) */
+  sam_apb_eic_enableperiph();
 
   /* Use the selected GCLK_EIC.  Some optional functions need a peripheral
    * clock, which can either be a generic clock (GCLK_EIC, for wider
@@ -133,13 +144,13 @@ int sam_eic_initialize(void)
    * and enabled before using the peripheral.
    */
 
-  regaddr = SAM_GCLK_PCHCTRL(GCLK_CHAN_EIC); /* (GCLK_CHAN_EIC) */
+  regaddr = SAM_GCLK_PCHCTRL(GCLK_CHAN_EIC);
   regval  = GCLK_PCHCTRL_GEN(BOARD_GCLK_EIC) | GCLK_PCHCTRL_CHEN;
   putreg32(regval, regaddr);
 
   /* Enable the EIC, selecting clocking via the GCLK_EIC  */
 
-  putreg8(EIC_CTRLA_ENABLE, SAM_EIC_CTRLA);
+  putreg8(EIC_CTRLA_ENABLE | EIC_CTRLA_ENABLE, SAM_EIC_CTRLA);
   sam_eic_syncwait();
 
   sam_eic_dumpregs();
@@ -168,11 +179,6 @@ int sam_eic_configure(uint8_t eirq, port_pinset_t pinset)
   uint32_t val;
   uint32_t config;
 
-  /* Disable the EIC: 23.6.2.1 */
-
-  putreg8(0, SAM_EIC_CTRLA);
-  sam_eic_syncwait();
-
   /* Determine which of the CONFIG[0:1] registers to write to */
 
   if (eirq < 8)
@@ -188,11 +194,6 @@ int sam_eic_configure(uint8_t eirq, port_pinset_t pinset)
       if ((pinset & PORT_INT_FALLING) != 0)
         {
           val = EIC_CONFIG0_SENSE_FALL(eirq);
-        }
-
-      if ((pinset & PORT_INT_HIGH) != 0)
-        {
-          val = EIC_CONFIG0_SENSE_HIGH(eirq);
         }
 
       val |= EIC_CONFIG0_FILTEN(eirq);
@@ -212,14 +213,7 @@ int sam_eic_configure(uint8_t eirq, port_pinset_t pinset)
           val = EIC_CONFIG1_SENSE_FALL(eirq);
         }
 
-      if ((pinset & PORT_INT_HIGH) != 0)
-        {
-          val = EIC_CONFIG1_SENSE_HIGH(eirq);
-        }
-
-      config  = getreg32(SAM_EIC_EVCTRL);
-      config |= EIC_EXTINT(eirq);
-      putreg32(config, SAM_EIC_EVCTRL);
+      val |= EIC_CONFIG1_FILTEN(eirq);
     }
 
   /* Write the new config to the CONFIGn register */
@@ -228,10 +222,9 @@ int sam_eic_configure(uint8_t eirq, port_pinset_t pinset)
   config |= val;
   putreg32(config, reg);
 
-  /* Enable the EIC, selecting clocking via the GCLK_EIC */
+  /* Enable interrupt generation for this pin */
 
-  putreg8(EIC_CTRLA_ENABLE, SAM_EIC_CTRLA);
-  sam_eic_syncwait();
+  putreg32(EIC_EXTINT(eirq), SAM_EIC_INTENSET);
 
   sam_eic_dumpregs();
   return OK;
@@ -255,9 +248,7 @@ int sam_eic_irq_ack(int irq)
 {
   int eirq = irq - SAM_IRQ_EXTINT0;
 
-  irqinfo("sam_eic_irq_ack: irq=%d eirq=%d EIC_EXTINT=0x%x\n", irq,
-                                                eirq, EIC_EXTINT(eirq));
-  putreg32(EIC_EXTINT(eirq), SAM_EIC_INTFLAG);
+  putreg32(EIC_EXTINT(eirq), SAM_EIC_INTENCLR);
   return OK;
 }
 

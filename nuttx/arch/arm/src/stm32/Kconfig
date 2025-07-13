@@ -798,6 +798,22 @@ config ARCH_CHIP_STM32F303VC
 	select STM32_HAVE_UART5
 	select STM32_HAVE_USBDEV
 
+config ARCH_CHIP_STM32F303RD
+	bool "STM32F303RD"
+	select STM32_STM32F30XX
+	select STM32_STM32F303
+	select STM32_HAVE_ADC3
+	select STM32_HAVE_ADC4
+	select STM32_HAVE_USART3
+
+config ARCH_CHIP_STM32F303RE
+	bool "STM32F303RE"
+	select STM32_STM32F30XX
+	select STM32_STM32F303
+	select STM32_HAVE_ADC3
+	select STM32_HAVE_ADC4
+	select STM32_HAVE_USART3
+
 config ARCH_CHIP_STM32F303VD
 	bool "STM32F303VD"
 	select STM32_STM32F30XX
@@ -991,11 +1007,6 @@ config ARCH_CHIP_STM32F410RB
 	select STM32_STM32F4XXX
 	select STM32_STM32F410
 
-config ARCH_CHIP_STM32F411CE
-	bool "STM32F411CE"
-	select STM32_STM32F4XXX
-	select STM32_STM32F411
-
 config ARCH_CHIP_STM32F411RE
 	bool "STM32F411RE"
 	select STM32_STM32F4XXX
@@ -1005,16 +1016,6 @@ config ARCH_CHIP_STM32F411VE
 	bool "STM32F411VE"
 	select STM32_STM32F4XXX
 	select STM32_STM32F411
-
-config ARCH_CHIP_STM32F412CE
-	bool "STM32F412CE"
-	select STM32_STM32F4XXX
-	select STM32_STM32F412
-
-config ARCH_CHIP_STM32F412ZG
-	bool "STM32F412ZG"
-	select STM32_STM32F4XXX
-	select STM32_STM32F412
 
 config ARCH_CHIP_STM32F405RG
 	bool "STM32F405RG"
@@ -1144,67 +1145,6 @@ config ARCH_CHIP_STM32F469N
 	select STM32_STM32F469
 	select STM32_HAVE_ETHMAC
 
-config ARCH_CHIP_STM32G431K
-	bool "STM32G431K"
-	select STM32_STM32G43XX
-	select STM32_STM32G4XXK
-	select STM32_STM32G431K
-
-config ARCH_CHIP_STM32G431C
-	bool "STM32G431C"
-	select STM32_STM32G43XX
-	select STM32_STM32G4XXC
-	select STM32_STM32G431C
-
-config ARCH_CHIP_STM32G431R
-	bool "STM32G431R"
-	select STM32_STM32G43XX
-	select STM32_STM32G4XXR
-	select STM32_STM32G431R
-
-config ARCH_CHIP_STM32G431M
-	bool "STM32G431M"
-	select STM32_STM32G43XX
-	select STM32_STM32G4XXM
-	select STM32_STM32G431M
-
-config ARCH_CHIP_STM32G431V
-	bool "STM32G431V"
-	select STM32_STM32G43XX
-	select STM32_STM32G4XXV
-	select STM32_STM32G431V
-
-config ARCH_CHIP_STM32G474C
-	bool "STM32G474C"
-	select STM32_STM32G47XX
-	select STM32_STM32G4XXC
-	select STM32_STM32G474C
-
-config ARCH_CHIP_STM32G474M
-	bool "STM32G474M"
-	select STM32_STM32G47XX
-	select STM32_STM32G4XXM
-	select STM32_STM32G474M
-
-config ARCH_CHIP_STM32G474R
-	bool "STM32G474R"
-	select STM32_STM32G47XX
-	select STM32_STM32G4XXR
-	select STM32_STM32G474R
-	select STM32_HAVE_USBFS
-
-config ARCH_CHIP_STM32G474Q
-	bool "STM32G474Q"
-	select STM32_STM32G47XX
-	select STM32_STM32G4XXQ
-	select STM32_STM32G474Q
-
-config ARCH_CHIP_STM32G474V
-	bool "STM32G474V"
-	select STM32_STM32G47XX
-	select STM32_STM32G4XXV
-	select STM32_STM32G474V
-
 endchoice
 
 choice
@@ -1212,70 +1152,69 @@ choice
 	default STM32_FLASH_CONFIG_DEFAULT
 	depends on ARCH_CHIP_STM32
 	---help---
-		STM32F/STM32G/STM32L series parts numbering (sans the package type)
-		ends with a number or letter that designates the FLASH size.
+		STM32F/STM32L series parts numbering (sans the package type) ends with a number or letter
+		that designates the FLASH size.
 
 				Designator  Size in KiB
-				   4    16
-				   6    32
-				   8    64
-				   B    128
-				   Z    192
-				   C    256
-				   D    384
-				   E    512
-				   F    768
-				   G    1024
-				   I    2048
+				   4   	16
+				   6   	32
+				   8   	64
+				   B   	128
+				   Z   	192
+				   C   	256
+				   D   	384
+				   E   	512
+				   F   	768
+				   G   	1024
+				   I   	2048
 
-		This configuration option defaults to using the configuration based
-		on that designator or the default smaller size if there is no last
-		character designator is present in the STM32 Chip Selection.
+		This configuration option defaults to using the configuration based on that designator
+		or the default smaller size if there is no last character designator is present in the
+		STM32 Chip Selection.
 
 		Examples:
-		   If the STM32F407VE is chosen, the Flash configuration would be
-		   'E', if a variant of the part with a 2048 KiB Flash is released
-		   in the future one could simply select the 'I' designator here.
+		   If the STM32F407VE is chosen, the Flash configuration would be 'E', if a variant of
+		   the part with a  2048 KiB Flash is released in the future one could simply select
+		   the 'I' designator here.
 
-		   If an STM32F42xxx or  Series parts is chosen the default Flash
-		   configuration will be 'G' and can be set herein to 'I' to choose
-		   the larger FLASH part.
+		   If an STM32F42xxx or  Series parts is chosen the default Flash configuration will be 'G'
+		   and can be set herein to 'I' to choose the larger FLASH part.
 
 config STM32_FLASH_CONFIG_DEFAULT
-	bool "Default"
+			bool "Default"
 
 config STM32_FLASH_CONFIG_4
-	bool "4 16KiB"
+			bool "4 16KiB"
 
 config STM32_FLASH_CONFIG_6
-	bool "6 32KiB"
+			bool "6 32KiB"
 
 config STM32_FLASH_CONFIG_8
-	bool "8 64KiB"
+			bool "8 64KiB"
 
 config STM32_FLASH_CONFIG_B
-	bool "B 128KiB"
+			bool "B 128KiB"
 
 config STM32_FLASH_CONFIG_Z
-	bool "Z 192KiB"
+			bool "Z 192KiB"
 
 config STM32_FLASH_CONFIG_C
-	bool "C 256KiB"
+			bool "C 256KiB"
 
 config STM32_FLASH_CONFIG_D
-	bool "D 384KiB"
+			bool "D 384KiB"
 
 config STM32_FLASH_CONFIG_E
-	bool "E 512KiB"
+			bool "E 512KiB"
 
 config STM32_FLASH_CONFIG_F
-	bool "F 768KiB"
+			bool "F 768KiB"
 
 config STM32_FLASH_CONFIG_G
-	bool "G 1024KiB"
+			bool "G 1024KiB"
 
 config STM32_FLASH_CONFIG_I
-	bool "I 2048KiB"
+			bool "I 2048KiB"
 
 endchoice
 
@@ -1298,10 +1237,8 @@ config STM32_STM32L15XX
 	select STM32_HAVE_ADC2
 	select STM32_HAVE_USART3
 	select STM32_HAVE_RTC_SUBSECONDS if !STM32_LOWDENSITY
-	select STM32_HAVE_IP_DBGMCU_V2
 	select STM32_HAVE_IP_TIMERS_V1
 	select STM32_HAVE_IP_ADC_V1
-	select STM32_HAVE_IP_DAC_V1
 	select STM32_HAVE_IP_DMA_V1
 	select STM32_HAVE_IP_I2C_V1
 
@@ -1319,10 +1256,8 @@ config STM32_STM32F10XX
 	select STM32_HAVE_SPI3 if STM32_HIGHDENSITY || STM32_MEDIUMDENSITY
 	select STM32_HAVE_RTC_COUNTER
 	select STM32_HAVE_TIM3
-	select STM32_HAVE_IP_DBGMCU_V1
 	select STM32_HAVE_IP_TIMERS_V1
 	select STM32_HAVE_IP_ADC_V1_BASIC
-	select STM32_HAVE_IP_DAC_V1
 	select STM32_HAVE_IP_DMA_V1
 	select STM32_HAVE_IP_I2C_V1
 
@@ -1439,8 +1374,6 @@ config STM32_STM32F20XX
 	bool
 	default n
 	select ARCH_CORTEXM3
-	select STM32_HAVE_FLASH_ICACHE
-	select STM32_HAVE_FLASH_DCACHE
 	select STM32_HAVE_CRYP
 	select STM32_HAVE_OTGFS
 	select STM32_HAVE_OTGHS
@@ -1472,10 +1405,8 @@ config STM32_STM32F20XX
 	select STM32_HAVE_SPI2
 	select STM32_HAVE_SPI3
 	select STM32_HAVE_IOCOMPENSATION
-	select STM32_HAVE_IP_DBGMCU_V2
 	select STM32_HAVE_IP_TIMERS_V1
 	select STM32_HAVE_IP_ADC_V1
-	select STM32_HAVE_IP_DAC_V1
 	select STM32_HAVE_IP_DMA_V2
 	select STM32_HAVE_IP_I2C_V1
 
@@ -1504,10 +1435,8 @@ config STM32_STM32F30XX
 	select STM32_HAVE_TIM16
 	select STM32_HAVE_TIM17
 	select STM32_HAVE_TSC
-	select STM32_HAVE_IP_DBGMCU_V2
 	select STM32_HAVE_IP_TIMERS_V2
 	select STM32_HAVE_IP_ADC_V2
-	select STM32_HAVE_IP_DAC_V1
 	select STM32_HAVE_IP_DMA_V1
 	select STM32_HAVE_IP_I2C_V2
 
@@ -1536,7 +1465,6 @@ config STM32_STM32F33XX
 	select ARCH_CORTEXM4
 	select ARCH_HAVE_FPU
 	select STM32_HAVE_HRTIM1
-	select STM32_HAVE_HRTIM1_PLLCLK
 	select STM32_HAVE_COMP2
 	select STM32_HAVE_COMP4
 	select STM32_HAVE_COMP6
@@ -1556,11 +1484,8 @@ config STM32_STM32F33XX
 	select STM32_HAVE_DAC1
 	select STM32_HAVE_DAC2
 	select STM32_HAVE_USART3
-	select STM32_HAVE_IP_DBGMCU_V2
 	select STM32_HAVE_IP_TIMERS_V2
 	select STM32_HAVE_IP_ADC_V2
-	select STM32_HAVE_IP_COMP_V1
-	select STM32_HAVE_IP_DAC_V1
 	select STM32_HAVE_IP_DMA_V1
 	select STM32_HAVE_IP_I2C_V2
 
@@ -1591,7 +1516,6 @@ config STM32_STM32F37XX
 	select STM32_HAVE_USART3
 	select STM32_HAVE_IP_TIMERS_V1
 	select STM32_HAVE_IP_ADC_V1_BASIC
-	select STM32_HAVE_IP_DAC_V1
 	select STM32_HAVE_IP_DMA_V1
 	select STM32_HAVE_IP_I2C_V2
 
@@ -1600,16 +1524,12 @@ config STM32_STM32F4XXX
 	default n
 	select ARCH_CORTEXM4
 	select ARCH_HAVE_FPU
-	select STM32_HAVE_FLASH_ICACHE
-	select STM32_HAVE_FLASH_DCACHE
 	select STM32_HAVE_CRYP
 	select STM32_HAVE_SPI2
 	select STM32_HAVE_I2C2
 	select STM32_HAVE_IOCOMPENSATION
-	select STM32_HAVE_IP_DBGMCU_V2
 	select STM32_HAVE_IP_TIMERS_V1
 	select STM32_HAVE_IP_ADC_V1
-	select STM32_HAVE_IP_DAC_V1
 	select STM32_HAVE_IP_DMA_V2
 	select STM32_HAVE_IP_I2C_V1
 
@@ -1673,32 +1593,6 @@ config STM32_STM32F411
 	select STM32_HAVE_I2C3
 	select STM32_HAVE_OTGFS
 
-config STM32_STM32F412
-	bool
-	default n
-	select STM32_HAVE_TIM1
-	select STM32_HAVE_TIM2
-	select STM32_HAVE_TIM3
-	select STM32_HAVE_TIM4
-	select STM32_HAVE_TIM5
-	select STM32_HAVE_TIM8
-	select STM32_HAVE_TIM9
-	select STM32_HAVE_TIM12
-	select STM32_HAVE_TIM13
-	select STM32_HAVE_TIM14
-	select STM32_HAVE_USART2
-	select STM32_HAVE_USART6
-	select STM32_HAVE_I2C1
-	select STM32_HAVE_I2C2
-	select STM32_HAVE_I2C3
-	select STM32_HAVE_SPI1
-	select STM32_HAVE_SPI2
-	select STM32_HAVE_SPI3
-	select STM32_HAVE_CAN1
-	select STM32_HAVE_CAN2
-	select STM32_HAVE_OTGFS
-	select STM32_HAVE_I2SPLL
-
 config STM32_STM32F405
 	bool
 	default n
@@ -1726,7 +1620,6 @@ config STM32_STM32F405
 	select STM32_HAVE_CAN1
 	select STM32_HAVE_CAN2
 	select STM32_HAVE_DAC1
-	select STM32_HAVE_DAC2
 	select STM32_HAVE_SPI3
 	select STM32_HAVE_I2S3
 	select STM32_HAVE_I2C3
@@ -1773,7 +1666,6 @@ config STM32_STM32F407
 config STM32_STM32F427
 	bool
 	default n
-	select STM32_HAVE_OVERDRIVE
 	select STM32_HAVE_FMC
 	select STM32_HAVE_CCM
 	select STM32_HAVE_USART3
@@ -1817,7 +1709,6 @@ config STM32_STM32F427
 config STM32_STM32F429
 	bool
 	default n
-	select STM32_HAVE_OVERDRIVE
 	select STM32_HAVE_FMC
 	select STM32_HAVE_LTDC
 	select STM32_HAVE_CCM
@@ -1860,7 +1751,6 @@ config STM32_STM32F429
 config STM32_STM32F446
 	bool
 	default n
-	select STM32_HAVE_OVERDRIVE
 	select STM32_HAVE_USART3
 	select STM32_HAVE_UART4
 	select STM32_HAVE_UART5
@@ -1897,7 +1787,6 @@ config STM32_STM32F446
 config STM32_STM32F469
 	bool
 	default n
-	select STM32_HAVE_OVERDRIVE
 	select STM32_HAVE_FMC
 	select STM32_HAVE_LTDC
 	select STM32_HAVE_CCM
@@ -1937,223 +1826,6 @@ config STM32_STM32F469
 	select STM32_HAVE_I2S3
 	select STM32_HAVE_I2C3
 
-config STM32_STM32G4XXX
-	bool
-	default n
-	select ARCH_CORTEXM4
-	select ARCH_HAVE_FPU
-	select STM32_HAVE_DMAMUX
-	select STM32_HAVE_IP_DBGMCU_V3
-	select STM32_HAVE_IP_ADC_V2
-	select STM32_HAVE_IP_COMP_V2
-	select STM32_HAVE_IP_DAC_V2
-	select STM32_HAVE_IP_DMA_V1
-	select STM32_HAVE_IP_I2C_V2
-	select STM32_HAVE_IP_TIMERS_V3
-
-config STM32_STM32G4_CAT2
-	bool
-	default n
-
-config STM32_STM32G4_CAT3
-	bool
-	default n
-
-config STM32_STM32G4_CAT4
-	bool
-	default n
-
-config STM32_STM32G4XXK
-	bool
-	default n
-
-config STM32_STM32G4XXC
-	bool
-	default n
-
-config STM32_STM32G4XXR
-	bool
-	default n
-
-config STM32_STM32G4XXM
-	bool
-	default n
-
-config STM32_STM32G4XXV
-	bool
-	default n
-
-config STM32_STM32G4XXP
-	bool
-	default n
-
-config STM32_STM32G4XXQ
-	bool
-	default n
-
-config STM32_STM32G43XX
-	bool
-	default n
-	select STM32_STM32G4XXX
-	select STM32_STM32G4_CAT2
-	select STM32_HAVE_ADC2
-	select STM32_HAVE_CCM
-	select STM32_HAVE_COMP1
-	select STM32_HAVE_COMP2
-	select STM32_HAVE_COMP3
-	select STM32_HAVE_COMP4
-	select STM32_HAVE_CORDIC
-	select STM32_HAVE_CRS
-	select STM32_HAVE_DAC1
-	select STM32_HAVE_DAC3
-	select STM32_HAVE_FMAC
-	select STM32_HAVE_FDCAN1
-	select STM32_HAVE_I2C2
-	select STM32_HAVE_I2C3
-	select STM32_HAVE_LPTIM1
-	select STM32_HAVE_LPUART1
-	select STM32_HAVE_OPAMP1
-	select STM32_HAVE_OPAMP2
-	select STM32_HAVE_OPAMP3
-	select STM32_HAVE_RNG
-	select STM32_HAVE_SPI2
-	select STM32_HAVE_SPI3
-	select STM32_HAVE_TIM1
-	select STM32_HAVE_TIM15
-	select STM32_HAVE_TIM16
-	select STM32_HAVE_TIM17
-	select STM32_HAVE_TIM2
-	select STM32_HAVE_TIM3
-	select STM32_HAVE_TIM4
-	select STM32_HAVE_TIM8
-	select STM32_HAVE_UCPD
-	select STM32_HAVE_USBDEV
-
-config STM32_STM32G431K
-	bool
-	default n
-
-config STM32_STM32G431C
-	bool
-	default n
-	select STM32_HAVE_USART3
-
-config STM32_STM32G431R
-	bool
-	default n
-	select STM32_HAVE_USART3
-	select STM32_HAVE_UART4
-
-config STM32_STM32G431M
-	bool
-	default n
-	select STM32_HAVE_USART3
-	select STM32_HAVE_UART4
-
-config STM32_STM32G431V
-	bool
-	default n
-	select STM32_HAVE_USART3
-	select STM32_HAVE_UART4
-
-config STM32_STM32G47XX
-	bool
-	default n
-	select STM32_STM32G4XXX
-	select STM32_STM32G4_CAT3
-	select STM32_HAVE_ADC2
-	select STM32_HAVE_ADC3
-	select STM32_HAVE_ADC4
-	select STM32_HAVE_ADC5
-	select STM32_HAVE_CCM
-	select STM32_HAVE_COMP1
-	select STM32_HAVE_COMP2
-	select STM32_HAVE_COMP3
-	select STM32_HAVE_COMP4
-	select STM32_HAVE_COMP5
-	select STM32_HAVE_COMP6
-	select STM32_HAVE_COMP7
-	select STM32_HAVE_CORDIC
-	select STM32_HAVE_CRS
-	select STM32_HAVE_DAC1
-	select STM32_HAVE_DAC2
-	select STM32_HAVE_DAC3
-	select STM32_HAVE_DAC4
-	select STM32_HAVE_DMA1_CHAN8
-	select STM32_HAVE_DMA2_CHAN678
-	select STM32_HAVE_FSMC
-	select STM32_HAVE_FMAC
-	select STM32_HAVE_FDCAN1
-	select STM32_HAVE_FDCAN2
-	select STM32_HAVE_HRTIM1
-	select STM32_HAVE_I2C2
-	select STM32_HAVE_I2C3
-	select STM32_HAVE_I2C4
-	select STM32_HAVE_I2S3
-	select STM32_HAVE_LPTIM1
-	select STM32_HAVE_LPUART1
-	select STM32_HAVE_OPAMP1
-	select STM32_HAVE_OPAMP2
-	select STM32_HAVE_OPAMP3
-	select STM32_HAVE_OPAMP4
-	select STM32_HAVE_OPAMP5
-	select STM32_HAVE_OPAMP6
-	select STM32_HAVE_QSPI
-	select STM32_HAVE_RNG
-	select STM32_HAVE_SPI2
-	select STM32_HAVE_SPI3
-	select STM32_HAVE_TIM1
-	select STM32_HAVE_TIM15
-	select STM32_HAVE_TIM16
-	select STM32_HAVE_TIM17
-	select STM32_HAVE_TIM2
-	select STM32_HAVE_TIM20
-	select STM32_HAVE_TIM3
-	select STM32_HAVE_TIM4
-	select STM32_HAVE_TIM5
-	select STM32_HAVE_TIM8
-	select STM32_HAVE_USART3
-	select STM32_HAVE_UCPD
-	select STM32_HAVE_USBDEV
-
-config STM32_STM32G474C
-	bool
-	default n
-	select STM32_HAVE_FDCAN3
-
-config STM32_STM32G474M
-	bool
-	default n
-	select STM32_HAVE_FDCAN3
-	select STM32_HAVE_SPI4
-	select STM32_HAVE_UART4
-	select STM32_HAVE_UART5
-
-config STM32_STM32G474R
-	bool
-	default n
-	select STM32_HAVE_FDCAN3
-	select STM32_HAVE_UART4
-	select STM32_HAVE_UART5
-
-config STM32_STM32G474Q
-	bool
-	default n
-	select STM32_HAVE_FDCAN3
-	select STM32_HAVE_FMC
-	select STM32_HAVE_SPI4
-	select STM32_HAVE_UART4
-	select STM32_HAVE_UART5
-
-config STM32_STM32G474V
-	bool
-	default n
-	select STM32_HAVE_FDCAN3
-	select STM32_HAVE_FMC
-	select STM32_HAVE_SPI4
-	select STM32_HAVE_UART4
-	select STM32_HAVE_UART5
-
 config STM32_DFU
 	bool "DFU bootloader"
 	default n
@@ -2167,18 +1839,6 @@ menu "STM32 Peripheral Support"
 # These "hidden" settings determine whether a peripheral option is available
 # for the selected MCU
 
-config STM32_HAVE_FLASH_ICACHE
-	bool
-	default n
-
-config STM32_HAVE_FLASH_DCACHE
-	bool
-	default n
-
-config STM32_HAVE_OVERDRIVE
-	bool
-	default n
-
 config STM32_HAVE_AES
 	bool
 	default n
@@ -2191,27 +1851,7 @@ config STM32_HAVE_CCM
 	bool
 	default n
 
-config STM32_HAVE_DMA1_CHAN8
-	bool
-	default n
-
-config STM32_HAVE_DMA2_CHAN678
-	bool
-	default n
-
-config STM32_HAVE_DMAMUX
-	bool
-	default n
-
-config STM32_HAVE_UCPD
-	bool
-	default n
-
 config STM32_HAVE_USBDEV
-	bool
-	default n
-
-config STM32_HAVE_USBFS
 	bool
 	default n
 
@@ -2223,23 +1863,7 @@ config STM32_HAVE_FMC
 	bool
 	default n
 
-config STM32_HAVE_FMAC
-	bool
-	default n
-
 config STM32_HAVE_FSMC
-	bool
-	default n
-
-config STM32_HAVE_FDCAN1
-	bool
-	default n
-
-config STM32_HAVE_FDCAN2
-	bool
-	default n
-
-config STM32_HAVE_FDCAN3
 	bool
 	default n
 
@@ -2248,10 +1872,6 @@ config STM32_HAVE_IOCOMPENSATION
 	default n
 
 config STM32_HAVE_HRTIM1
-	bool
-	default n
-
-config STM32_HAVE_HRTIM1_PLLCLK
 	bool
 	default n
 
@@ -2351,25 +1971,9 @@ config STM32_HAVE_TIM17
 	bool
 	default n
 
-config STM32_HAVE_TIM18
-	bool
-	default n
-
-config STM32_HAVE_TIM19
-	bool
-	default n
-
-config STM32_HAVE_TIM20
-	bool
-	default n
-
 config STM32_HAVE_TSC
 	bool
 	default n
-
-config STM32_HAVE_ADC1
-	bool
-	default y
 
 config STM32_HAVE_ADC2
 	bool
@@ -2380,10 +1984,6 @@ config STM32_HAVE_ADC3
 	default n
 
 config STM32_HAVE_ADC4
-	bool
-	default n
-
-config STM32_HAVE_ADC5
 	bool
 	default n
 
@@ -2400,10 +2000,6 @@ config STM32_HAVE_ADC3_DMA
 	default n
 
 config STM32_HAVE_ADC4_DMA
-	bool
-	default n
-
-config STM32_HAVE_ADC5_DMA
 	bool
 	default n
 
@@ -2467,31 +2063,11 @@ config STM32_HAVE_COMP7
 	bool
 	default n
 
-config STM32_HAVE_CORDIC
-	bool
-	default n
-
-config STM32_HAVE_CRS
-	bool
-	default n
-
 config STM32_HAVE_DAC1
 	bool
 	default n
 
 config STM32_HAVE_DAC2
-	bool
-	default n
-
-config STM32_HAVE_DAC3
-	bool
-	default n
-
-config STM32_HAVE_DAC4
-	bool
-	default n
-
-config STM32_HAVE_QSPI
 	bool
 	default n
 
@@ -2508,18 +2084,6 @@ config STM32_HAVE_I2C2
 	default n
 
 config STM32_HAVE_I2C3
-	bool
-	default n
-
-config STM32_HAVE_I2C4
-	bool
-	default n
-
-config STM32_HAVE_LPTIM1
-	bool
-	default n
-
-config STM32_HAVE_LPUART1
 	bool
 	default n
 
@@ -2571,27 +2135,7 @@ config STM32_HAVE_OPAMP4
 	bool
 	default n
 
-config STM32_HAVE_OPAMP5
-	bool
-	default n
-
-config STM32_HAVE_OPAMP6
-	bool
-	default n
-
 # These are STM32 peripherals IP blocks
-
-config STM32_HAVE_IP_DBGMCU_V1
-	bool
-	default n
-
-config STM32_HAVE_IP_DBGMCU_V2
-	bool
-	default n
-
-config STM32_HAVE_IP_DBGMCU_V3
-	bool
-	default n
 
 config STM32_HAVE_IP_I2C_V1
 	bool
@@ -2617,10 +2161,6 @@ config STM32_HAVE_IP_TIMERS_V2
 	bool
 	default n
 
-config STM32_HAVE_IP_TIMERS_V3
-	bool
-	default n
-
 config STM32_HAVE_IP_ADC_V1
 	bool
 	default n
@@ -2639,22 +2179,6 @@ config STM32_HAVE_IP_ADC_V2_BASIC
 	default n
 	select STM32_HAVE_IP_ADC_V2
 
-config STM32_HAVE_IP_COMP_V1
-	bool
-	default n
-
-config STM32_HAVE_IP_COMP_V2
-	bool
-	default n
-
-config STM32_HAVE_IP_DAC_V1
-	bool
-	default n
-
-config STM32_HAVE_IP_DAC_V2
-	bool
-	default n
-
 # These are the peripheral selections proper
 
 config STM32_ADC1
@@ -2664,7 +2188,6 @@ config STM32_ADC1
 	select STM32_HAVE_ADC1_DMA if STM32_STM32F10XX && STM32_DMA1
 	select STM32_HAVE_ADC1_DMA if STM32_STM32F37XX && STM32_DMA1
 	select STM32_HAVE_ADC1_DMA if !STM32_STM32F10XX && STM32_DMA2
-	select STM32_HAVE_ADC1_DMA if STM32_DMAMUX
 
 config STM32_ADC2
 	bool "ADC2"
@@ -2672,7 +2195,6 @@ config STM32_ADC2
 	select STM32_ADC
 	depends on STM32_HAVE_ADC2
 	select STM32_HAVE_ADC2_DMA if STM32_DMA2
-	select STM32_HAVE_ADC2_DMA if STM32_DMAMUX
 
 config STM32_ADC3
 	bool "ADC3"
@@ -2680,7 +2202,6 @@ config STM32_ADC3
 	select STM32_ADC
 	depends on STM32_HAVE_ADC3
 	select STM32_HAVE_ADC3_DMA if STM32_DMA2
-	select STM32_HAVE_ADC3_DMA if STM32_DMAMUX
 
 config STM32_ADC4
 	bool "ADC4"
@@ -2688,15 +2209,6 @@ config STM32_ADC4
 	select STM32_ADC
 	depends on STM32_HAVE_ADC4
 	select STM32_HAVE_ADC4_DMA if STM32_DMA2
-	select STM32_HAVE_ADC4_DMA if STM32_DMAMUX
-
-config STM32_ADC5
-	bool "ADC5"
-	default n
-	select STM32_ADC
-	depends on STM32_HAVE_ADC5
-	select STM32_HAVE_ADC5_DMA if STM32_DMA2
-	select STM32_HAVE_ADC5_DMA if STM32_DMAMUX
 
 config STM32_SDADC1
 	bool "SDADC1"
@@ -2761,12 +2273,6 @@ config STM32_COMP7
 	select STM32_COMP
 	depends on STM32_HAVE_COMP7
 
-config STM32_CORDIC
-	bool "CORDIC Accelerator"
-	default n
-	depends on STM32_HAVE_CORDIC
-	depends on MATH_CORDIC_USE_Q31
-
 config STM32_BKP
 	bool "BKP"
 	default n
@@ -2780,12 +2286,14 @@ config STM32_BKPSRAM
 config STM32_CAN1
 	bool "CAN1"
 	default n
+	select CAN
 	select STM32_CAN
 	depends on STM32_HAVE_CAN1
 
 config STM32_CAN2
 	bool "CAN2"
 	default n
+	select CAN
 	select STM32_CAN
 	depends on STM32_HAVE_CAN2
 
@@ -2810,11 +2318,6 @@ config STM32_CRC
 	bool "CRC"
 	default n
 
-config STM32_CRS
-	bool "CRS (Clock Recovery System)"
-	default n
-	depends on STM32_HAVE_CRS
-
 config STM32_CRYP
 	bool "CRYP"
 	default n
@@ -2823,21 +2326,13 @@ config STM32_CRYP
 config STM32_DMA1
 	bool "DMA1"
 	default n
-	select STM32_DMA
 	select ARCH_DMA
 
 config STM32_DMA2
 	bool "DMA2"
 	default n
-	select STM32_DMA
 	select ARCH_DMA
 	depends on !STM32_VALUELINE || (STM32_VALUELINE && STM32_HIGHDENSITY)
-
-config STM32_DMAMUX1
-	bool "DMAMUX1"
-	default n
-	depends on STM32_HAVE_DMAMUX
-	select STM32_DMAMUX
 
 config STM32_DAC1
 	bool "DAC1"
@@ -2871,42 +2366,6 @@ config STM32_DAC2CH1
 
 endif #STM32_DAC2
 
-config STM32_DAC3
-	bool "DAC3"
-	default n
-	depends on STM32_HAVE_DAC3
-	select STM32_DAC
-
-if STM32_DAC3
-
-config STM32_DAC3CH1
-	bool "DAC3CH1 Internal"
-	default n
-
-config STM32_DAC3CH2
-	bool "DAC3CH2 Internal"
-	default n
-
-endif #STM32_DAC3
-
-config STM32_DAC4
-	bool "DAC4"
-	default n
-	depends on STM32_HAVE_DAC4
-	select STM32_DAC
-
-if STM32_DAC4
-
-config STM32_DAC4CH1
-	bool "DAC4CH1 Internal"
-	default n
-
-config STM32_DAC4CH2
-	bool "DAC4CH2 Internal"
-	default n
-
-endif #STM32_DAC4
-
 config STM32_DCMI
 	bool "DCMI"
 	default n
@@ -2919,24 +2378,6 @@ config STM32_ETHMAC
 	select NETDEVICES
 	select ARCH_HAVE_PHY
 
-config STM32_FDCAN1
-	bool "FDCAN1"
-	default n
-	depends on STM32_HAVE_FDCAN1
-	select STM32_FDCAN
-
-config STM32_FDCAN2
-	bool "FDCAN2"
-	default n
-	depends on STM32_HAVE_FDCAN2
-	select STM32_FDCAN
-
-config STM32_FDCAN3
-	bool "FDCAN3"
-	default n
-	depends on STM32_HAVE_FDCAN3
-	select STM32_FDCAN
-
 config STM32_FSMC
 	bool "FSMC"
 	default n
@@ -2946,11 +2387,6 @@ config STM32_FMC
 	bool "FMC"
 	default n
 	depends on STM32_HAVE_FMC
-
-config STM32_FMAC
-	bool "FMAC (Filter Math Accelerator)"
-	default n
-	depends on STM32_HAVE_FMAC
 
 config STM32_HASH
 	bool "HASH"
@@ -3024,35 +2460,6 @@ config STM32_I2C3
 	depends on STM32_HAVE_I2C3
 	select STM32_I2C
 
-config STM32_I2C1_SLAVE
-	bool "I2C1 Slave"
-	default n
-	depends on !STM32_I2C1 && I2C_SLAVE
-	select STM32_I2C_SLAVE
-
-config STM32_I2C2_SLAVE
-	bool "I2C2 Slave"
-	default n
-	depends on STM32_HAVE_I2C2 && !STM32_I2C2 && I2C_SLAVE
-	select STM32_I2C_SLAVE
-
-config STM32_I2C3_SLAVE
-	bool "I2C3 Slave"
-	default n
-	depends on STM32_HAVE_I2C3 && !STM32_I2C3 && I2C_SLAVE
-	select STM32_I2C_SLAVE
-
-config STM32_LPTIM1
-	bool "LPTIM1"
-	default n
-	depends on STM32_HAVE_LPTIM1
-
-config STM32_LPUART1
-	bool "LPUART1"
-	default n
-	depends on STM32_HAVE_LPUART1
-	select STM32_USART
-
 config STM32_LTDC
 	bool "LTDC"
 	default n
@@ -3117,11 +2524,6 @@ config STM32_OTGHS
 
 config STM32_PWR
 	bool "PWR"
-	default n
-
-config STM32_QSPI
-	bool "QSPI (QUADSPI)"
-	depends on STM32_HAVE_QSPI
 	default n
 
 config STM32_RNG
@@ -3191,7 +2593,7 @@ config STM32_SPI6
 config STM32_SYSCFG
 	bool "SYSCFG"
 	default y
-	depends on STM32_STM32L15XX || STM32_STM32F30XX || STM32_STM32F33XX || STM32_STM32F37XX || STM32_STM32F20XX || STM32_STM32F4XXX || STM32_STM32G4XXX || STM32_CONNECTIVITYLINE
+	depends on STM32_STM32L15XX || STM32_STM32F30XX || STM32_STM32F33XX || STM32_STM32F37XX || STM32_STM32F20XX || STM32_STM32F4XXX || STM32_CONNECTIVITYLINE
 
 config STM32_TIM1
 	bool "TIM1"
@@ -3351,18 +2753,6 @@ config STM32_USB
 	depends on STM32_HAVE_USBDEV
 	select USBDEV
 
-config STM32_USBFS
-	bool "USB Full Speed Device"
-	default n
-	depends on STM32_HAVE_USBFS
-	select USBDEV
-
-config STM32_UCPD
-	bool "UCPD (USB Type C Power Delivery)"
-	default n
-	depends on STM32_HAVE_UCPD
-	select USBDEV
-
 config STM32_LCD
 	bool "Segment LCD"
 	default n
@@ -3404,52 +2794,21 @@ endmenu
 
 config STM32_ADC
 	bool
-	default n
 
 config STM32_SDADC
 	bool
-	default n
 
 config STM32_DAC
 	bool
-	default n
-
-config STM32_DMA
-	bool
-	default n
-
-config STM32_DMAMUX
-	bool
-	default n
 
 config STM32_SPI
 	bool
-	default n
-
-config STM32_SPI_DMA
-	bool
-	default n
-
-config STM32_I2S
-	bool
-	default n
-	select STM32_SPI_DMA
 
 config STM32_I2C
 	bool
-	default n
-
-config STM32_I2C_SLAVE
-	bool
-	default n
 
 config STM32_CAN
 	bool
-	default n
-
-config STM32_FDCAN
-	bool
-	default n
 
 config STM32_TIM
 	bool
@@ -3458,16 +2817,11 @@ config STM32_TIM
 config STM32_PWM
 	bool
 	default n
-	select ARCH_HAVE_PWM_PULSECOUNT
-
-config STM32_CAP
-	bool
-	default n
 
 config STM32_COMP
 	bool
 	default n
-	depends on STM32_STM32L15XX || STM32_STM32F33XX || STM32_STM32G4XXX
+	depends on STM32_STM32L15XX || STM32_STM32F33XX
 
 config STM32_OPAMP
 	bool
@@ -3479,26 +2833,6 @@ config STM32_NOEXT_VECTORS
 	---help---
 		Sometimes you may not need any Vector support beyond SysTick
 		and wish to save memory. This applies only to ARMv7-M architectures.
-
-config STM32_USE_LEGACY_PINMAP
-	bool "Use the legacy pinmap with GPIO_SPEED_xxx included."
-	default y
-	---help---
-		In the past, pinmap files included GPIO_SPEED_xxxMhz. These speed
-		settings should have come from the board.h as it describes the wiring
-		of the SoC to the board. The speed is really slew rate control and
-		therefore is related to the layout and can only be properly set
-		in board.h.
-
-		STM32_USE_LEGACY_PINMAP is provided, to allow lazy migration to
-		using pinmaps without speeds. The work required to do this can be aided
-		by running tools/stm32_pinmap_tool.py. The tools will take a board.h
-		file and a legacy pinmap and output the required changes that one needs
-		to make to a board.h file.
-
-		Eventually, STM32_USE_LEGACY_PINMAP will be deprecated and the legacy
-		pinmaps removed from NuttX. Any new boards added should set
-		STM32_USE_LEGACY_PINMAP=n and fully define the pins in board.h
 
 config STM32_SYSCFG_IOCOMPENSATION
 	bool "SYSCFG I/O Compensation"
@@ -3514,7 +2848,6 @@ config STM32_SYSCFG_IOCOMPENSATION
 		from 2.4 to 3.6 V.
 
 menu "Alternate Pin Mapping"
-	depends on STM32_STM32F10XX || STM32_CONNECTIVITYLINE
 
 choice
 	prompt "CAN1 Alternate Pin Mappings"
@@ -3696,38 +3029,24 @@ endchoice
 
 endmenu
 
-config STM32_FLASH_ICACHE
-	bool "Enable FLASH Instruction Cache"
-	default y
-	depends on STM32_HAVE_FLASH_ICACHE
+config STM32_FLASH_PREFETCH
+	bool "Enable FLASH Pre-fetch"
+	default y if STM32_STM32F427 || STM32_STM32F429 || STM32_STM32F446
+	default n
+	depends on STM32_STM32F20XX || STM32_STM32F4XXX
 	---help---
-		Enable the FLASH instruction cache.
-
-config STM32_FLASH_DCACHE
-	bool "Enable FLASH Data Cache"
-	default y
-	depends on STM32_HAVE_FLASH_DCACHE
-	---help---
-		Enable the FLASH data cache.
+		Enable FLASH prefetch and F2 and F4 parts (FLASH pre-fetch is always enabled
+		on F1 parts).  Some early revisions of F4 parts do not support FLASH pre-fetch
+		properly and enabling this option may interfere with ADC accuracy.
 
 config STM32_FLASH_WORKAROUND_DATA_CACHE_CORRUPTION_ON_RWW
 	bool "Workaround for FLASH data cache corruption"
 	default n
-	depends on (STM32_STM32F20XX || STM32_STM32F4XXX) && STM32_FLASH_DCACHE
+	depends on STM32_STM32F20XX || STM32_STM32F4XXX
 	---help---
 		Enable the workaround to fix flash data cache corruption when reading
 		from one flash bank while writing on other flash bank.  See your STM32
 		errata to check if your STM32 is affected by this problem.
-
-config STM32_FLASH_PREFETCH
-	bool "Enable FLASH Pre-fetch"
-	default STM32_STM32F427 || STM32_STM32F429 || STM32_STM32F446
-	default n
-	depends on STM32_STM32F20XX || STM32_STM32F4XXX
-	---help---
-		Enable FLASH prefetch in F2 and F4 parts (FLASH pre-fetch is always enabled
-		on F1 parts).  Some early revisions of F4 parts do not support FLASH pre-fetch
-		properly and enabling this option may interfere with ADC accuracy.
 
 choice
 	prompt "JTAG Configuration"
@@ -3792,7 +3111,7 @@ config STM32_I2SPLL
 
 config STM32_CCMEXCLUDE
 	bool "Exclude CCM SRAM from the heap"
-	default ARCH_DMA || LIBC_ARCH_ELF
+	default y if  ARCH_DMA || ELF
 	depends on STM32_HAVE_CCM
 	---help---
 		Exclude CCM SRAM from the HEAP because (1) it cannot be used for DMA
@@ -3811,7 +3130,8 @@ config STM32_CCM_PROCFS
 config STM32_DMACAPABLE
 	bool "Workaround non-DMA capable memory"
 	depends on ARCH_DMA
-	default STM32_STM32F4XXX && !STM32_CCMEXCLUDE
+	default y if STM32_STM32F4XXX && !STM32_CCMEXCLUDE
+	default n if !STM32_STM32F4XXX || STM32_CCMEXCLUDE
 	---help---
 		This option enables the DMA interface stm32_dmacapable that can be
 		used to check if it is possible to do DMA from the selected address.
@@ -3885,6 +3205,7 @@ config STM32_TIM1_PWM
 	bool "TIM1 PWM"
 	default n
 	depends on STM32_TIM1
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 1 for use by PWM
@@ -4045,7 +3366,7 @@ config STM32_TIM1_CHANNEL5
 	default n
 	depends on STM32_HAVE_IP_TIMERS_V2
 	---help---
-		Enables channel 5 (not available externally)
+		Enables channel 5 (no available externaly)
 
 if STM32_TIM1_CHANNEL5
 
@@ -4069,7 +3390,7 @@ config STM32_TIM1_CHANNEL6
 	default n
 	depends on STM32_HAVE_IP_TIMERS_V2
 	---help---
-		Enables channel 6 (not available externally)
+		Enables channel 6 (no available externaly)
 
 if STM32_TIM1_CHANNEL6
 
@@ -4174,6 +3495,7 @@ config STM32_TIM2_PWM
 	bool "TIM2 PWM"
 	default n
 	depends on STM32_TIM2
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 2 for use by PWM
@@ -4358,6 +3680,7 @@ config STM32_TIM3_PWM
 	bool "TIM3 PWM"
 	default n
 	depends on STM32_TIM3
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 3 for use by PWM
@@ -4542,6 +3865,7 @@ config STM32_TIM4_PWM
 	bool "TIM4 PWM"
 	default n
 	depends on STM32_TIM4
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 4 for use by PWM
@@ -4726,6 +4050,7 @@ config STM32_TIM5_PWM
 	bool "TIM5 PWM"
 	default n
 	depends on STM32_TIM5
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 5 for use by PWM
@@ -4910,6 +4235,7 @@ config STM32_TIM8_PWM
 	bool "TIM8 PWM"
 	default n
 	depends on STM32_TIM8
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 8 for use by PWM
@@ -5070,7 +4396,7 @@ config STM32_TIM8_CHANNEL5
 	default n
 	depends on STM32_HAVE_IP_TIMERS_V2
 	---help---
-		Enables channel 5 (not available externally)
+		Enables channel 5 (no available externaly)
 
 if STM32_TIM8_CHANNEL5
 
@@ -5094,7 +4420,7 @@ config STM32_TIM8_CHANNEL6
 	default n
 	depends on STM32_HAVE_IP_TIMERS_V2
 	---help---
-		Enables channel 6 (not available externally)
+		Enables channel 6 (no available externaly)
 
 if STM32_TIM8_CHANNEL6
 
@@ -5199,6 +4525,7 @@ config STM32_TIM9_PWM
 	bool "TIM9 PWM"
 	default n
 	depends on STM32_TIM9
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 9 for use by PWM
@@ -5308,6 +4635,7 @@ config STM32_TIM10_PWM
 	bool "TIM10 PWM"
 	default n
 	depends on STM32_TIM10
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 10 for use by PWM
@@ -5383,6 +4711,7 @@ config STM32_TIM11_PWM
 	bool "TIM11 PWM"
 	default n
 	depends on STM32_TIM11
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 11 for use by PWM
@@ -5458,6 +4787,7 @@ config STM32_TIM12_PWM
 	bool "TIM12 PWM"
 	default n
 	depends on STM32_TIM12
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 12 for use by PWM
@@ -5567,6 +4897,7 @@ config STM32_TIM13_PWM
 	bool "TIM13 PWM"
 	default n
 	depends on STM32_TIM13
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 13 for use by PWM
@@ -5642,6 +4973,7 @@ config STM32_TIM14_PWM
 	bool "TIM14 PWM"
 	default n
 	depends on STM32_TIM14
+	select ARCH_HAVE_PWM_PULSECOUNT
 	select STM32_PWM
 	---help---
 		Reserve timer 14 for use by PWM
@@ -6052,7 +5384,7 @@ endif # STM32_TIM17_PWM
 config STM32_PWM_MULTICHAN
 	bool "PWM Multiple Output Channels"
 	default n
-	depends on STM32_PWM
+	depends on STM32_TIM1_PWM || STM32_TIM2_PWM || STM32_TIM3_PWM || STM32_TIM4_PWM || STM32_TIM5_PWM || STM32_TIM8_PWM || STM32_TIM9_PWM || STM32_TIM10_PWM || STM32_TIM11_PWM || STM32_TIM12_PWM || STM32_TIM13_PWM || STM32_TIM14_PWM || STM32_TIM15_PWM || STM32_TIM16_PWM || STM32_TIM17_PWM
 	select ARCH_HAVE_PWM_MULTICHAN
 	---help---
 		Specifies that the PWM driver supports multiple output
@@ -6329,9 +5661,6 @@ config STM32_HAVE_ADC3_TIMER
 config STM32_HAVE_ADC4_TIMER
 	bool
 
-config STM32_HAVE_ADC5_TIMER
-	bool
-
 config STM32_ADC1_SAMPLE_FREQUENCY
 	int "ADC1 Sampling Frequency"
 	default 100
@@ -6342,10 +5671,10 @@ config STM32_ADC1_SAMPLE_FREQUENCY
 config STM32_ADC1_TIMTRIG
 	int "ADC1 Timer Trigger"
 	default 0
-	range 0 5
+	range 0 4
 	depends on STM32_HAVE_ADC1_TIMER
 	---help---
-		Values 0:CC1 1:CC2 2:CC3 3:CC4 4:TRGO 5:TRGO2
+		Values 0:CC1 1:CC2 2:CC3 3:CC4 4:TRGO
 
 config STM32_ADC2_SAMPLE_FREQUENCY
 	int "ADC2 Sampling Frequency"
@@ -6357,10 +5686,10 @@ config STM32_ADC2_SAMPLE_FREQUENCY
 config STM32_ADC2_TIMTRIG
 	int "ADC2 Timer Trigger"
 	default 0
-	range 0 5
+	range 0 4
 	depends on STM32_HAVE_ADC2_TIMER
 	---help---
-		Values 0:CC1 1:CC2 2:CC3 3:CC4 4:TRGO 5:TRGO2
+		Values 0:CC1 1:CC2 2:CC3 3:CC4 4:TRGO
 
 config STM32_ADC3_SAMPLE_FREQUENCY
 	int "ADC3 Sampling Frequency"
@@ -6372,10 +5701,10 @@ config STM32_ADC3_SAMPLE_FREQUENCY
 config STM32_ADC3_TIMTRIG
 	int "ADC3 Timer Trigger"
 	default 0
-	range 0 5
+	range 0 4
 	depends on STM32_HAVE_ADC3_TIMER
 	---help---
-		Values 0:CC1 1:CC2 2:CC3 3:CC4 4:TRGO 5:TRGO2
+		Values 0:CC1 1:CC2 2:CC3 3:CC4 4:TRGO
 
 config STM32_TIM1_DAC
 	bool "TIM1 DAC"
@@ -6815,349 +6144,121 @@ config STM32_TIM1_CAP
 	bool "TIM1 Capture"
 	default n
 	depends on STM32_TIM1
-	select STM32_CAP
 	---help---
 		Reserve timer 1 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM1_CAP
-
-config STM32_TIM1_CHANNEL
-	int "TIM1 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM1 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM1_CLOCK
-	int "TIM1 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM1_CAP
-
 config STM32_TIM2_CAP
 	bool "TIM2 Capture"
 	default n
 	depends on STM32_TIM2
-	select STM32_CAP
 	---help---
 		Reserve timer 2 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM2_CAP
-
-config STM32_TIM2_CHANNEL
-	int "TIM2 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM2 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM2_CLOCK
-	int "TIM2 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM2_CAP
-
 config STM32_TIM3_CAP
 	bool "TIM3 Capture"
 	default n
 	depends on STM32_TIM3
-	select STM32_CAP
 	---help---
 		Reserve timer 3 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM3_CAP
-
-config STM32_TIM3_CHANNEL
-	int "TIM3 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM3 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM3_CLOCK
-	int "TIM3 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM3_CAP
-
 config STM32_TIM4_CAP
 	bool "TIM4 Capture"
 	default n
 	depends on STM32_TIM4
-	select STM32_CAP
 	---help---
 		Reserve timer 4 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM4_CAP
-
-config STM32_TIM4_CHANNEL
-	int "TIM4 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM4 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM4_CLOCK
-	int "TIM4 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM4_CAP
-
 config STM32_TIM5_CAP
 	bool "TIM5 Capture"
 	default n
 	depends on STM32_TIM5
-	select STM32_CAP
 	---help---
 		Reserve timer 5 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM5_CAP
-
-config STM32_TIM5_CHANNEL
-	int "TIM5 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM5 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM5_CLOCK
-	int "TIM5 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM5_CAP
-
 config STM32_TIM8_CAP
 	bool "TIM8 Capture"
 	default n
 	depends on STM32_TIM8
-	select STM32_CAP
 	---help---
 		Reserve timer 8 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM8_CAP
-
-config STM32_TIM8_CHANNEL
-	int "TIM8 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM8 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM8_CLOCK
-	int "TIM8 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM8_CAP
-
 config STM32_TIM9_CAP
 	bool "TIM9 Capture"
 	default n
 	depends on STM32_TIM9
-	select STM32_CAP
 	---help---
 		Reserve timer 9 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM9_CAP
-
-config STM32_TIM9_CHANNEL
-	int "TIM9 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM9 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM9_CLOCK
-	int "TIM9 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM9_CAP
-
 config STM32_TIM10_CAP
 	bool "TIM10 Capture"
 	default n
 	depends on STM32_TIM10
-	select STM32_CAP
 	---help---
 		Reserve timer 10 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM10_CAP
-
-config STM32_TIM10_CHANNEL
-	int "TIM10 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM10 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM10_CLOCK
-	int "TIM10 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM10_CAP
-
 config STM32_TIM11_CAP
 	bool "TIM11 Capture"
 	default n
 	depends on STM32_TIM11
-	select STM32_CAP
 	---help---
 		Reserve timer 11 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM11_CAP
-
-config STM32_TIM11_CHANNEL
-	int "TIM11 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM11 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM11_CLOCK
-	int "TIM11 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM11_CAP
-
 config STM32_TIM12_CAP
 	bool "TIM12 Capture"
 	default n
 	depends on STM32_TIM12
-	select STM32_CAP
 	---help---
 		Reserve timer 12 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM12_CAP
-
-config STM32_TIM12_CHANNEL
-	int "TIM12 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM12 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM12_CLOCK
-	int "TIM12 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM12_CAP
-
 config STM32_TIM13_CAP
 	bool "TIM13 Capture"
 	default n
 	depends on STM32_TIM13
-	select STM32_CAP
 	---help---
 		Reserve timer 13 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
 
-if STM32_TIM13_CAP
-
-config STM32_TIM13_CHANNEL
-	int "TIM13 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM13 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM13_CLOCK
-	int "TIM13 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM13_CAP
-
 config STM32_TIM14_CAP
 	bool "TIM14 Capture"
 	default n
 	depends on STM32_TIM14
-	select STM32_CAP
 	---help---
 		Reserve timer 14 for use by Capture
 
 		Timer devices may be used for different purposes.  One special purpose is
 		to capture input.
-
-if STM32_TIM14_CAP
-
-config STM32_TIM14_CHANNEL
-	int "TIM14 Capture Input Channel"
-	default 1
-	range 1 4
-	---help---
-		If TIM14 is enabled for capture usage, you also need specifies the timer input
-		channel {1,..,4}
-
-config STM32_TIM14_CLOCK
-	int "TIM14 work frequency for capture"
-	default 1000000
-	---help---
-		This clock frequency limiting the count rate at the expense of resolution.
-
-endif # STM32_TIM14_CAP
 
 menu "STM32 TIMx Outputs Configuration"
 
@@ -8135,7 +7236,6 @@ endif # STM32_HRTIM_FAULTS
 config STM32_HRTIM_CLK_FROM_PLL
 	bool "HRTIM Clock from PLL"
 	default n
-	depends on STM32_HAVE_HRTIM1_PLLCLK
 	---help---
 		Set PLL as the clock source for HRTIM.
 		This configuration requires the following conditions:
@@ -8549,25 +7649,6 @@ config STM32_ADC4_RESOLUTION
 	---help---
 		ADC4 resolution. 0 - 12 bit, 1 - 10 bit, 2 - 8 bit, 3 - 6 bit
 
-config STM32_ADC5_RESOLUTION
-	int "ADC5 resolution"
-	depends on STM32_ADC5 && !STM32_HAVE_IP_ADC_V1_BASIC
-	default 0
-	range 0 3
-	---help---
-		ADC5 resolution. 0 - 12 bit, 1 - 10 bit, 2 - 8 bit, 3 - 6 bit
-
-config STM32_ADC_MAX_SAMPLES
-	int "The maximum number of channels that can be sampled"
-	default 16
-	---help---
-		The maximum number of samples which can be handled without
-		overrun depends on various factors. This is the user's
-		responsibility to correctly select this value.
-		Since the interface to update the sampling time is available
-		for all supported devices, the user can change the default
-		values in the board initialization logic and avoid ADC overrun.
-
 config STM32_ADC_NO_STARTUP_CONV
 	bool "Do not start conversion when opening ADC device"
 	default n
@@ -8602,12 +7683,6 @@ config STM32_ADC1_DMA
 		DMA transfer, which is necessary if multiple channels are read
 		or if very high trigger frequencies are used.
 
-config STM32_ADC1_SCAN
-	bool "ADC1 scan mode"
-	depends on STM32_ADC1 && STM32_HAVE_IP_ADC_V1
-	default STM32_ADC1_DMA
-	default n
-
 config STM32_ADC1_DMA_CFG
 	int "ADC1 DMA configuration"
 	depends on STM32_ADC1_DMA && !STM32_HAVE_IP_ADC_V1_BASIC
@@ -8615,26 +7690,6 @@ config STM32_ADC1_DMA_CFG
 	default 0
 	---help---
 		0 - ADC1 DMA in One Shot Mode, 1 - ADC1 DMA in Circular Mode
-
-config STM32_ADC1_DMA_BATCH
-	int "ADC1 DMA number of conversions"
-	depends on STM32_ADC1 && STM32_ADC1_DMA
-	default 1
-	---help---
-		This option allows you to select the number of regular group conversions
-		that will trigger a DMA callback transerring data to the upper-half driver.
-		By default, this value is 1, which means that data is transferred after
-		each group conversion.
-
-config STM32_ADC1_ANIOC_TRIGGER
-	int "ADC1 software trigger (ANIOC_TRIGGER) configuration"
-	depends on STM32_ADC1
-	range 1 3
-	default 3
-	---help---
-		1 - ANIOC_TRIGGER only starts regular conversion
-		2 - ANIOC_TRIGGER only starts injected conversion
-		3 - ANIOC_TRIGGER starts both regular and injected conversions
 
 config STM32_ADC2_DMA
 	bool "ADC2 DMA"
@@ -8645,12 +7700,6 @@ config STM32_ADC2_DMA
 		DMA transfer, which is necessary if multiple channels are read
 		or if very high trigger frequencies are used.
 
-config STM32_ADC2_SCAN
-	bool "ADC2 scan mode"
-	depends on STM32_ADC2 && STM32_HAVE_IP_ADC_V1
-	default STM32_ADC2_DMA
-	default n
-
 config STM32_ADC2_DMA_CFG
 	int "ADC2 DMA configuration"
 	depends on STM32_ADC2_DMA && !STM32_HAVE_IP_ADC_V1_BASIC
@@ -8658,26 +7707,6 @@ config STM32_ADC2_DMA_CFG
 	default 0
 	---help---
 		0 - ADC2 DMA in One Shot Mode, 1 - ADC2 DMA in Circular Mode
-
-config STM32_ADC2_DMA_BATCH
-	int "ADC2 DMA number of conversions"
-	depends on STM32_ADC2 && STM32_ADC2_DMA
-	default 1
-	---help---
-		This option allows you to select the number of regular group conversions
-		that will trigger a DMA callback transerring data to the upper-half driver.
-		By default, this value is 1, which means that data is transferred after
-		each group conversion.
-
-config STM32_ADC2_ANIOC_TRIGGER
-	int "ADC2 software trigger (ANIOC_TRIGGER) configuration"
-	depends on STM32_ADC2
-	range 1 3
-	default 3
-	---help---
-		1 - ANIOC_TRIGGER only starts regular conversion
-		2 - ANIOC_TRIGGER only starts injected conversion
-		3 - ANIOC_TRIGGER starts both regular and injected conversions
 
 config STM32_ADC3_DMA
 	bool "ADC3 DMA"
@@ -8688,12 +7717,6 @@ config STM32_ADC3_DMA
 		DMA transfer, which is necessary if multiple channels are read
 		or if very high trigger frequencies are used.
 
-config STM32_ADC3_SCAN
-	bool "ADC3 scan mode"
-	depends on STM32_ADC3 && STM32_HAVE_IP_ADC_V1
-	default STM32_ADC3_DMA
-	default n
-
 config STM32_ADC3_DMA_CFG
 	int "ADC3 DMA configuration"
 	depends on STM32_ADC3_DMA && !STM32_HAVE_IP_ADC_V1_BASIC
@@ -8701,26 +7724,6 @@ config STM32_ADC3_DMA_CFG
 	default 0
 	---help---
 		0 - ADC3 DMA in One Shot Mode, 1 - ADC3 DMA in Circular Mode
-
-config STM32_ADC3_DMA_BATCH
-	int "ADC3 DMA number of conversions"
-	depends on STM32_ADC3 && STM32_ADC3_DMA
-	default 1
-	---help---
-		This option allows you to select the number of regular group conversions
-		that will trigger a DMA callback transerring data to the upper-half driver.
-		By default, this value is 1, which means that data is transferred after
-		each group conversion.
-
-config STM32_ADC3_ANIOC_TRIGGER
-	int "ADC3 software trigger (ANIOC_TRIGGER) configuration"
-	depends on STM32_ADC3
-	range 1 3
-	default 3
-	---help---
-		1 - ANIOC_TRIGGER only starts regular conversion
-		2 - ANIOC_TRIGGER only starts injected conversion
-		3 - ANIOC_TRIGGER starts both regular and injected conversions
 
 config STM32_ADC4_DMA
 	bool "ADC4 DMA"
@@ -8738,53 +7741,6 @@ config STM32_ADC4_DMA_CFG
 	default 0
 	---help---
 		0 - ADC4 DMA in One Shot Mode, 1 - ADC4 DMA in Circular Mode
-
-config STM32_ADC4_DMA_BATCH
-	int "ADC4 DMA number of conversions"
-	depends on STM32_ADC4 && STM32_ADC4_DMA
-	default 1
-	---help---
-		This option allows you to select the number of regular group conversions
-		that will trigger a DMA callback transerring data to the upper-half driver.
-		By default, this value is 1, which means that data is transferred after
-		each group conversion.
-
-config STM32_ADC4_ANIOC_TRIGGER
-	int "ADC4 software trigger (ANIOC_TRIGGER) configuration"
-	depends on STM32_ADC4
-	range 1 3
-	default 3
-	---help---
-		1 - ANIOC_TRIGGER only starts regular conversion
-		2 - ANIOC_TRIGGER only starts injected conversion
-		3 - ANIOC_TRIGGER starts both regular and injected conversions
-
-config STM32_ADC5_DMA
-	bool "ADC5 DMA"
-	depends on STM32_ADC5 && STM32_HAVE_ADC5_DMA
-	default n
-	---help---
-		If DMA is selected, then the ADC may be configured to support
-		DMA transfer, which is necessary if multiple channels are read
-		or if very high trigger frequencies are used.
-
-config STM32_ADC5_DMA_CFG
-	int "ADC5 DMA configuration"
-	depends on STM32_ADC5_DMA && !STM32_HAVE_IP_ADC_V1_BASIC
-	range 0 1
-	default 0
-	---help---
-		0 - ADC5 DMA in One Shot Mode, 1 - ADC5 DMA in Circular Mode
-
-config STM32_ADC5_DMA_BATCH
-	int "ADC5 DMA number of conversions"
-	depends on STM32_ADC5 && STM32_ADC5_DMA
-	default 1
-	---help---
-		This option allows you to select the number of regular group conversions
-		that will trigger a DMA callback transerring data to the upper-half driver.
-		By default, this value is 1, which means that data is transferred after
-		each group conversion.
 
 config STM32_ADC1_INJECTED_CHAN
 	int "ADC1 injected channels"
@@ -8817,481 +7773,6 @@ config STM32_ADC4_INJECTED_CHAN
 	default 0
 	---help---
 		Support for ADC4 injected channels.
-
-config STM32_ADC5_INJECTED_CHAN
-	int "ADC5 injected channels"
-	depends on STM32_ADC5
-	range 0 4
-	default 0
-	---help---
-		Support for ADC5 injected channels.
-
-config STM32_ADC1_EXTSEL
-	bool "ADC1 external trigger for regular group"
-	depends on STM32_ADC1 && !STM32_HAVE_ADC1_TIMER
-	default n
-	---help---
-		Enable EXTSEL for ADC1.
-
-config STM32_ADC2_EXTSEL
-	bool "ADC2 external trigger for regular group"
-	depends on STM32_ADC2 && !STM32_HAVE_ADC2_TIMER
-	default n
-	---help---
-		Enable EXTSEL for ADC2.
-
-config STM32_ADC3_EXTSEL
-	bool "ADC3 external trigger for regular group"
-	depends on STM32_ADC3 && !STM32_HAVE_ADC3_TIMER
-	default n
-	---help---
-		Enable EXTSEL for ADC3.
-
-config STM32_ADC4_EXTSEL
-	bool "ADC4 external trigger for regular group"
-	depends on STM32_ADC4 && !STM32_HAVE_ADC4_TIMER
-	default n
-	---help---
-		Enable EXTSEL for ADC4.
-
-config STM32_ADC5_EXTSEL
-	bool "ADC5 external trigger for regular group"
-	depends on STM32_ADC5 && !STM32_HAVE_ADC5_TIMER
-	default n
-	---help---
-		Enable EXTSEL for ADC5.
-
-config STM32_ADC1_JEXTSEL
-	bool "ADC1 external trigger for injected group"
-	depends on STM32_ADC1
-	default n
-	---help---
-		Enable JEXTSEL for ADC1.
-
-config STM32_ADC2_JEXTSEL
-	bool "ADC2 external trigger for injected group"
-	depends on STM32_ADC2
-	default n
-	---help---
-		Enable JEXTSEL for ADC2.
-
-config STM32_ADC3_JEXTSEL
-	bool "ADC3 external trigger for injected group"
-	depends on STM32_ADC3
-	default n
-	---help---
-		Enable JEXTSEL for ADC3.
-
-config STM32_ADC4_JEXTSEL
-	bool "ADC4 external trigger for injected group"
-	depends on STM32_ADC4
-	default n
-	---help---
-		Enable JEXTSEL for ADC4.
-
-config STM32_ADC5_JEXTSEL
-	bool "ADC5 external trigger for injected group"
-	depends on STM32_ADC5
-	default n
-	---help---
-		Enable JEXTSEL for ADC5.
-
-endmenu
-
-menu "COMP Configuration"
-	depends on STM32_COMP && STM32_HAVE_IP_COMP_V2
-
-config STM32_COMP1_OUT
-	bool "COMP1 GPIO Output"
-	depends on STM32_COMP1
-	default n
-	---help---
-		Enables COMP1 output.
-
-config STM32_COMP1_INM
-	int "COMP1 inverting input assignment"
-	depends on STM32_COMP1
-	range 0 7
-	default 0
-	---help---
-		Selects COMP1 inverting input pin.
-
-config STM32_COMP1_INP
-	int "COMP1 non-inverting input assignment"
-	depends on STM32_COMP1
-	range 0 1
-	default 0
-	---help---
-		Selects COMP1 non-inverting input pin.
-
-config STM32_COMP1_POL
-	int "COMP1 polarity"
-	depends on STM32_COMP1
-	range 0 1
-	default 0
-	---help---
-		Selects COMP1 output polarity.
-
-config STM32_COMP1_HYST
-	int "COMP1 hysteresis"
-	depends on STM32_STM32G4XXX && STM32_COMP1
-	range 0 7
-	default 0
-	---help---
-		Selects the hysteresis of the COMP1.
-
-config STM32_COMP1_BLANKSEL
-	int "COMP1 blanking signal select"
-	depends on STM32_COMP1
-	range 0 7
-	default 0
-	---help---
-		Selects the blanking signal for comparator COMP1.
-
-config STM32_COMP1_LOCK
-	int "COMP1 COMP_CxCSR register lock"
-	depends on STM32_COMP1
-	range 0 1
-	default 0
-	---help---
-		Locks COMP_CxCSR register.
-		  0 - Unlock 1 - Lock
-
-config STM32_COMP2_OUT
-	bool "COMP2 GPIO Output"
-	depends on STM32_COMP2
-	default n
-	---help---
-		Enables COMP2 output.
-
-config STM32_COMP2_INM
-	int "COMP2 inverting input assignment"
-	depends on STM32_COMP2
-	range 0 7
-	default 0
-	---help---
-		Selects COMP2 inverting input pin.
-
-config STM32_COMP2_INP
-	int "COMP2 non-inverting input assignment"
-	depends on STM32_COMP2
-	range 0 1
-	default 0
-	---help---
-		Selects COMP2 non-inverting input pin.
-
-config STM32_COMP2_POL
-	int "COMP2 polarity"
-	depends on STM32_COMP2
-	range 0 1
-	default 0
-	---help---
-		Selects COMP2 output polarity.
-
-config STM32_COMP2_HYST
-	int "COMP2 hysteresis"
-	depends on STM32_STM32G4XXX && STM32_COMP2
-	range 0 7
-	default 0
-	---help---
-		Selects the hysteresis of the COMP2.
-
-config STM32_COMP2_BLANKSEL
-	int "COMP2 blanking signal select"
-	depends on STM32_COMP2
-	range 0 7
-	default 0
-	---help---
-		Selects the blanking signal for comparator COMP2.
-
-config STM32_COMP2_LOCK
-	int "COMP2 COMP_CxCSR register lock"
-	depends on STM32_COMP2
-	range 0 1
-	default 0
-	---help---
-		Locks COMP_CxCSR register.
-		  0 - Unlock 1 - Lock
-
-config STM32_COMP3_OUT
-	bool "COMP3 GPIO Output"
-	depends on STM32_COMP3
-	default n
-	---help---
-		Enables COMP3 output.
-
-config STM32_COMP3_INM
-	int "COMP3 inverting input assignment"
-	depends on STM32_COMP3
-	range 0 7
-	default 0
-	---help---
-		Selects COMP3 inverting input pin.
-
-config STM32_COMP3_INP
-	int "COMP3 non-inverting input assignment"
-	depends on STM32_COMP3
-	range 0 1
-	default 0
-	---help---
-		Selects COMP3 non-inverting input pin.
-
-config STM32_COMP3_POL
-	int "COMP3 polarity"
-	depends on STM32_COMP3
-	range 0 1
-	default 0
-	---help---
-		Selects COMP3 output polarity.
-
-config STM32_COMP3_HYST
-	int "COMP3 hysteresis"
-	depends on STM32_STM32G4XXX && STM32_COMP3
-	range 0 7
-	default 0
-	---help---
-		Selects the hysteresis of the COMP3.
-
-config STM32_COMP3_BLANKSEL
-	int "COMP3 blanking signal select"
-	depends on STM32_COMP3
-	range 0 7
-	default 0
-	---help---
-		Selects the blanking signal for comparator COMP3.
-
-config STM32_COMP3_LOCK
-	int "COMP3 COMP_CxCSR register lock"
-	depends on STM32_COMP3
-	range 0 1
-	default 0
-	---help---
-		Locks COMP_CxCSR register.
-		  0 - Unlock 1 - Lock
-
-config STM32_COMP4_OUT
-	bool "COMP4 GPIO Output"
-	depends on STM32_COMP4
-	default n
-	---help---
-		Enables COMP4 output.
-
-config STM32_COMP4_INM
-	int "COMP4 inverting input assignment"
-	depends on STM32_COMP4
-	range 0 7
-	default 0
-	---help---
-		Selects COMP4 inverting input pin.
-
-config STM32_COMP4_INP
-	int "COMP4 non-inverting input assignment"
-	depends on STM32_COMP4
-	range 0 1
-	default 0
-	---help---
-		Selects COMP4 non-inverting input pin.
-
-config STM32_COMP4_POL
-	int "COMP4 polarity"
-	depends on STM32_COMP4
-	range 0 1
-	default 0
-	---help---
-		Selects COMP4 output polarity.
-
-config STM32_COMP4_HYST
-	int "COMP4 hysteresis"
-	depends on STM32_STM32G4XXX && STM32_COMP4
-	range 0 7
-	default 0
-	---help---
-		Selects the hysteresis of the COMP4.
-
-config STM32_COMP4_BLANKSEL
-	int "COMP4 blanking signal select"
-	depends on STM32_COMP4
-	range 0 7
-	default 0
-	---help---
-		Selects the blanking signal for comparator COMP4.
-
-config STM32_COMP4_LOCK
-	int "COMP4 COMP_CxCSR register lock"
-	depends on STM32_COMP4
-	range 0 1
-	default 0
-	---help---
-		Locks COMP_CxCSR register.
-		  0 - Unlock 1 - Lock
-
-config STM32_COMP5_OUT
-	bool "COMP5 GPIO Output"
-	depends on STM32_COMP5
-	default n
-	---help---
-		Enables COMP5 output.
-
-config STM32_COMP5_INM
-	int "COMP5 inverting input assignment"
-	depends on STM32_COMP5
-	range 0 7
-	default 0
-	---help---
-		Selects COMP5 inverting input pin.
-
-config STM32_COMP5_INP
-	int "COMP5 non-inverting input assignment"
-	depends on STM32_COMP5
-	range 0 1
-	default 0
-	---help---
-		Selects COMP5 non-inverting input pin.
-
-config STM32_COMP5_POL
-	int "COMP5 polarity"
-	depends on STM32_COMP5
-	range 0 1
-	default 0
-	---help---
-		Selects COMP5 output polarity.
-
-config STM32_COMP5_HYST
-	int "COMP5 hysteresis"
-	depends on STM32_STM32G4XXX && STM32_COMP5
-	range 0 7
-	default 0
-	---help---
-		Selects the hysteresis of the COMP5.
-
-config STM32_COMP5_BLANKSEL
-	int "COMP5 blanking signal select"
-	depends on STM32_COMP5
-	range 0 7
-	default 0
-	---help---
-		Selects the blanking signal for comparator COMP5.
-
-config STM32_COMP5_LOCK
-	int "COMP5 COMP_CxCSR register lock"
-	depends on STM32_COMP5
-	range 0 1
-	default 0
-	---help---
-		Locks COMP_CxCSR register.
-		  0 - Unlock 1 - Lock
-
-config STM32_COMP6_OUT
-	bool "COMP6 GPIO Output"
-	depends on STM32_COMP6
-	default n
-	---help---
-		Enables COMP6 output.
-
-config STM32_COMP6_INM
-	int "COMP6 inverting input assignment"
-	depends on STM32_COMP6
-	range 0 7
-	default 0
-	---help---
-		Selects COMP6 inverting input pin.
-
-config STM32_COMP6_INP
-	int "COMP6 non-inverting input assignment"
-	depends on STM32_COMP6
-	range 0 1
-	default 0
-	---help---
-		Selects COMP6 non-inverting input pin.
-
-config STM32_COMP6_POL
-	int "COMP6 polarity"
-	depends on STM32_COMP6
-	range 0 1
-	default 0
-	---help---
-		Selects COMP6 output polarity.
-
-config STM32_COMP6_HYST
-	int "COMP6 hysteresis"
-	depends on STM32_STM32G4XXX && STM32_COMP6
-	range 0 7
-	default 0
-	---help---
-		Selects the hysteresis of the COMP6.
-
-config STM32_COMP6_BLANKSEL
-	int "COMP6 blanking signal select"
-	depends on STM32_COMP6
-	range 0 7
-	default 0
-	---help---
-		Selects the blanking signal for comparator COMP6.
-
-config STM32_COMP6_LOCK
-	int "COMP6 COMP_CxCSR register lock"
-	depends on STM32_COMP6
-	range 0 1
-	default 0
-	---help---
-		Locks COMP_CxCSR register.
-		  0 - Unlock 1 - Lock
-
-config STM32_COMP7_OUT
-	bool "COMP7 GPIO Output"
-	depends on STM32_COMP7
-	default n
-	---help---
-		Enables COMP7 output.
-
-config STM32_COMP7_INM
-	int "COMP7 inverting input assignment"
-	depends on STM32_COMP7
-	range 0 7
-	default 0
-	---help---
-		Selects COMP7 inverting input pin.
-
-config STM32_COMP7_INP
-	int "COMP7 non-inverting input assignment"
-	depends on STM32_COMP7
-	range 0 1
-	default 0
-	---help---
-		Selects COMP7 non-inverting input pin.
-
-config STM32_COMP7_POL
-	int "COMP7 polarity"
-	depends on STM32_COMP7
-	range 0 1
-	default 0
-	---help---
-		Selects COMP7 output polarity.
-
-config STM32_COMP7_HYST
-	int "COMP7 hysteresis"
-	depends on STM32_STM32G4XXX && STM32_COMP7
-	range 0 7
-	default 0
-	---help---
-		Selects the hysteresis of the COMP7.
-
-config STM32_COMP7_BLANKSEL
-	int "COMP7 blanking signal select"
-	depends on STM32_COMP7
-	range 0 7
-	default 0
-	---help---
-		Selects the blanking signal for comparator COMP7.
-
-config STM32_COMP7_LOCK
-	int "COMP7 COMP_CxCSR register lock"
-	depends on STM32_COMP7
-	range 0 1
-	default 0
-	---help---
-		Locks COMP_CxCSR register.
-		  0 - Unlock 1 - Lock
 
 endmenu
 
@@ -9328,24 +7809,7 @@ config STM32_SDADC3_DMA
 endmenu
 
 menu "DAC Configuration"
-	depends on STM32_DAC1 || STM32_DAC2 || STM32_DAC3 || STM32_DAC4
-
-config STM32_DAC1CH1_MODE
-	int "DAC1CH1 channel mode"
-	depends on STM32_DAC1CH1 && STM32_HAVE_IP_DAC_V2
-	default 0
-	range 0 7
-	---help---
-		– DAC channel in Normal mode
-			0: DAC channel is connected to external pin with Buffer enabled
-			1: DAC channel is connected to external pin and to on chip peripherals with buffer enabled
-			2: DAC channel2 is connected to external pin with buffer disabled
-			3: DAC channel is connected to on chip peripherals with Buffer disabled
-		- DAC channel in Sample and hold mode
-			4: DAC channel is connected to external pin with Buffer enabled
-			5: DAC channel is connected to external pin and to on chip peripherals with Buffer enabled
-			6: DAC channel is connected to external pin and to on chip peripherals with Buffer disabled
-			7: DAC channel is connected to on chip peripherals with Buffer disabled
+	depends on STM32_DAC1 || STM32_DAC2
 
 config STM32_DAC1CH1_DMA
 	bool "DAC1CH1 DMA"
@@ -9391,23 +7855,6 @@ config STM32_DAC1CH1_TIMER_FREQUENCY
 
 endif
 
-config STM32_DAC1CH2_MODE
-	int "DAC1CH2 channel mode"
-	depends on STM32_DAC1CH2 && STM32_HAVE_IP_DAC_V2
-	default 0
-	range 0 7
-	---help---
-		– DAC channel in Normal mode
-			0: DAC channel is connected to external pin with Buffer enabled
-			1: DAC channel is connected to external pin and to on chip peripherals with buffer enabled
-			2: DAC channel2 is connected to external pin with buffer disabled
-			3: DAC channel is connected to on chip peripherals with Buffer disabled
-		- DAC channel in Sample and hold mode
-			4: DAC channel is connected to external pin with Buffer enabled
-			5: DAC channel is connected to external pin and to on chip peripherals with Buffer enabled
-			6: DAC channel is connected to external pin and to on chip peripherals with Buffer disabled
-			7: DAC channel is connected to on chip peripherals with Buffer disabled
-
 config STM32_DAC1CH2_DMA
 	bool "DAC1CH2 DMA"
 	depends on STM32_DAC1CH2
@@ -9452,23 +7899,6 @@ config STM32_DAC1CH2_TIMER_FREQUENCY
 
 endif
 
-config STM32_DAC2CH1_MODE
-	int "DAC2CH1 channel mode"
-	depends on STM32_DAC2CH1 && STM32_HAVE_IP_DAC_V2
-	default 0
-	range 0 7
-	---help---
-		– DAC channel in Normal mode
-			0: DAC channel is connected to external pin with Buffer enabled
-			1: DAC channel is connected to external pin and to on chip peripherals with buffer enabled
-			2: DAC channel2 is connected to external pin with buffer disabled
-			3: DAC channel is connected to on chip peripherals with Buffer disabled
-		- DAC channel in Sample and hold mode
-			4: DAC channel is connected to external pin with Buffer enabled
-			5: DAC channel is connected to external pin and to on chip peripherals with Buffer enabled
-			6: DAC channel is connected to external pin and to on chip peripherals with Buffer disabled
-			7: DAC channel is connected to on chip peripherals with Buffer disabled
-
 config STM32_DAC2CH1_DMA
 	bool "DAC2CH1 DMA"
 	depends on STM32_DAC2CH1
@@ -9510,125 +7940,13 @@ config STM32_DAC2CH1_TIMER_FREQUENCY
 
 endif
 
-config STM32_DAC3CH1_MODE
-	int "DAC3CH1 channel mode"
-	depends on STM32_DAC3CH1 && STM32_HAVE_IP_DAC_V2
-	default 0
-	range 0 7
-	---help---
-		– DAC channel in Normal mode
-			0: DAC channel is connected to external pin with Buffer enabled
-			1: DAC channel is connected to external pin and to on chip peripherals with buffer enabled
-			2: DAC channel is connected to external pin with buffer disabled
-			3: DAC channel is connected to on chip peripherals with Buffer disabled
-		- DAC channel in Sample and hold mode
-			4: DAC channel is connected to external pin with Buffer enabled
-			5: DAC channel is connected to external pin and to on chip peripherals with Buffer enabled
-			6: DAC channel is connected to external pin and to on chip peripherals with Buffer disabled
-			7: DAC channel is connected to on chip peripherals with Buffer disabled
-
-config STM32_DAC3CH1_DMA
-	bool "DAC3CH1 DMA"
-	depends on STM32_DAC3CH1
-	default n
-	---help---
-		If DMA is selected, then a timer and output frequency must also be
-		provided to support the DMA transfer. The DMA transfer could be
-		supported by an EXTI trigger, but this feature is not currently
-		supported by the driver.
-
-if STM32_DAC3CH1_DMA
-
-config STM32_DAC3CH1_DMA_BUFFER_SIZE
-	int "DAC3CH1 DMA buffer size"
-	default 256
-
-config STM32_DAC3CH1_DMA_EXTERNAL
-	bool "DAC3CH1 DMA External Trigger"
-	default n
-
-if STM32_HRTIM_DAC
-
-config STM32_DAC3CH1_HRTIM_TRG3
-	bool "DAC3CH1 HRTIM Trigger 3"
-	default n
-
-endif # STM32_HRTIM_DAC
-
-config STM32_DAC3CH1_TIMER
-	int "DAC3CH1 timer"
-	depends on !STM32_DAC3CH1_DMA_EXTERNAL
-	default 0
-	range 2 8
-
-config STM32_DAC3CH1_TIMER_FREQUENCY
-	int "DAC3CH1 timer frequency"
-	depends on !STM32_DAC3CH1_DMA_EXTERNAL
-	default 0
-
-endif
-
-config STM32_DAC3CH2_MODE
-	int "DAC3CH2 channel mode"
-	depends on STM32_DAC3CH2 && STM32_HAVE_IP_DAC_V2
-	default 0
-	range 0 7
-	---help---
-		– DAC channel in Normal mode
-			0: DAC channel is connected to external pin with Buffer enabled
-			1: DAC channel is connected to external pin and to on chip peripherals with buffer enabled
-			2: DAC channel2 is connected to external pin with buffer disabled
-			3: DAC channel is connected to on chip peripherals with Buffer disabled
-		- DAC channel in Sample and hold mode
-			4: DAC channel is connected to external pin with Buffer enabled
-			5: DAC channel is connected to external pin and to on chip peripherals with Buffer enabled
-			6: DAC channel is connected to external pin and to on chip peripherals with Buffer disabled
-			7: DAC channel is connected to on chip peripherals with Buffer disabled
-
-config STM32_DAC3CH2_DMA
-	bool "DAC3CH2 DMA"
-	depends on STM32_DAC3CH2
-	default n
-	---help---
-		If DMA is selected, then a timer and output frequency must also be
-		provided to support the DMA transfer. The DMA transfer could be
-		supported by an EXTI trigger, but this feature is not currently
-		supported by the driver.
-
-if STM32_DAC3CH2_DMA
-
-config STM32_DAC3CH2_DMA_BUFFER_SIZE
-	int "DAC3CH2 DMA buffer size"
-	default 256
-
-config STM32_DAC3CH2_DMA_EXTERNAL
-	bool "DAC3CH1 DMA External Trigger"
-	default n
-
-if STM32_HRTIM_DAC
-
-config STM32_DAC3CH2_HRTIM_TRG3
-	bool "DAC3CH2 HRTIM Trigger 3"
-	default n
-
-endif # STM32_HRTIM_DAC
-
-config STM32_DAC3CH2_TIMER
-	int "DAC3CH2 timer"
-	depends on !STM32_DAC3CH2_DMA_EXTERNAL
-	default 0
-	range 2 8
-
-config STM32_DAC3CH2_TIMER_FREQUENCY
-	int "DAC3CH2 timer frequency"
-	depends on !STM32_DAC3CH2_DMA_EXTERNAL
-	default 0
-
-endif
-
 endmenu
 
 config STM32_USART
+	bool
+	default n
+
+config STM32_USART_RXDMA
 	bool
 	default n
 
@@ -9698,6 +8016,7 @@ config USART1_RXDMA
 	bool "USART1 Rx DMA"
 	default n
 	depends on (((STM32_STM32F10XX || STM32_STM32L15XX) && STM32_DMA1) || (!STM32_STM32F10XX && STM32_DMA2))
+	select STM32_USART_RXDMA
 	---help---
 		In high data rate usage, Rx DMA may eliminate Rx overrun errors
 
@@ -9705,6 +8024,7 @@ config USART1_TXDMA
 	bool "USART1 Tx DMA"
 	default n
 	depends on (((STM32_STM32F10XX || STM32_STM32L15XX) && STM32_DMA1) || (!STM32_STM32F10XX && STM32_DMA2))
+	select STM32_USART_TXDMA
 	---help---
 		In high data rate usage, Tx DMA may reduce CPU load
 
@@ -9791,6 +8111,7 @@ config USART2_RXDMA
 	bool "USART2 Rx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_RXDMA
 	---help---
 		In high data rate usage, Rx DMA may eliminate Rx overrun errors
 
@@ -9798,6 +8119,7 @@ config USART2_TXDMA
 	bool "USART2 Tx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_TXDMA
 	---help---
 		In high data rate usage, Tx DMA may reduce CPU load
 
@@ -9884,6 +8206,7 @@ config USART3_RXDMA
 	bool "USART3 Rx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_RXDMA
 	---help---
 		In high data rate usage, Rx DMA may eliminate Rx overrun errors
 
@@ -9891,6 +8214,7 @@ config USART3_TXDMA
 	bool "USART3 Tx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_TXDMA
 	---help---
 		In high data rate usage, Tx DMA may reduce CPU load
 
@@ -9972,6 +8296,7 @@ config UART4_RXDMA
 	bool "UART4 Rx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_RXDMA
 	---help---
 		In high data rate usage, Rx DMA may eliminate Rx overrun errors
 
@@ -9979,6 +8304,7 @@ config UART4_TXDMA
 	bool "UART4 Tx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_TXDMA
 	---help---
 		In high data rate usage, Tx DMA may reduce CPU load
 
@@ -10024,6 +8350,7 @@ config UART5_RXDMA
 	bool "UART5 Rx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_RXDMA
 	---help---
 		In high data rate usage, Rx DMA may eliminate Rx overrun errors
 
@@ -10031,6 +8358,7 @@ config UART5_TXDMA
 	bool "UART5 Tx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_TXDMA
 	---help---
 		In high data rate usage, Tx DMA may reduce CPU load
 
@@ -10081,6 +8409,7 @@ config USART6_RXDMA
 	bool "USART6 Rx DMA"
 	default n
 	depends on STM32_DMA2
+	select STM32_USART_RXDMA
 	---help---
 		In high data rate usage, Rx DMA may eliminate Rx overrun errors
 
@@ -10088,6 +8417,7 @@ config USART6_TXDMA
 	bool "USART6 Tx DMA"
 	default n
 	depends on STM32_DMA2
+	select STM32_USART_TXDMA
 	---help---
 		In high data rate usage, Tx DMA may reduce CPU load
 
@@ -10174,6 +8504,7 @@ config UART7_RXDMA
 	bool "UART7 Rx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_RXDMA
 	---help---
 		In high data rate usage, Rx DMA may eliminate Rx overrun errors
 
@@ -10181,6 +8512,7 @@ config UART7_TXDMA
 	bool "UART7 Tx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_TXDMA
 	---help---
 		In high data rate usage, Tx DMA may reduce CPU load
 
@@ -10225,7 +8557,7 @@ endif # STM32_UART7_HCIUART
 choice
 	prompt "UART8 Driver Configuration"
 	default STM32_UART8_SERIALDRIVER
-	depends on STM32_UART8
+	depends on STM32_UART7
 
 config STM32_UART8_SERIALDRIVER
 	bool "Standard serial driver"
@@ -10267,6 +8599,7 @@ config UART8_RXDMA
 	bool "UART8 Rx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_RXDMA
 	---help---
 		In high data rate usage, Rx DMA may eliminate Rx overrun errors
 
@@ -10274,6 +8607,7 @@ config UART8_TXDMA
 	bool "UART8 Tx DMA"
 	default n
 	depends on STM32_DMA1
+	select STM32_USART_TXDMA
 	---help---
 		In high data rate usage, Tx DMA may reduce CPU load
 
@@ -10315,54 +8649,6 @@ config STM32_HCIUART8_RXDMA
 
 endif # STM32_UART8_HCIUART
 
-choice
-	prompt "LPUART1 Driver Configuration"
-	default STM32_LPUART1_SERIALDRIVER
-	depends on STM32_LPUART1
-
-config STM32_LPUART1_SERIALDRIVER
-	bool "Standard serial driver"
-	select LPUART1_SERIALDRIVER
-	select ARCH_HAVE_SERIAL_TERMIOS
-	select STM32_SERIALDRIVER
-
-endchoice # LPUART1 Driver Configuration
-
-if STM32_LPUART1_SERIALDRIVER
-
-config LPUART1_RS485
-	bool "RS-485 on LPUART1"
-	default n
-	---help---
-		Enable RS-485 interface on LPUART1. Your board config will have to
-		provide GPIO_LPUART1_RS485_DIR pin definition. Currently it cannot be
-		used with LPUART1_RXDMA.
-
-config LPUART1_RS485_DIR_POLARITY
-	int "LPUART1 RS-485 DIR pin polarity"
-	default 1
-	range 0 1
-	depends on LPUART1_RS485
-	---help---
-		Polarity of DIR pin for RS-485 on LPUART1. Set to state on DIR pin which
-		enables TX (0 - low / nTXEN, 1 - high / TXEN).
-
-config LPUART1_RXDMA
-	bool "LPUART1 Rx DMA"
-	default n
-	depends on STM32_DMA1
-	---help---
-		In high data rate usage, Rx DMA may eliminate Rx overrun errors
-
-config LPUART1_TXDMA
-	bool "LPUART1 Tx DMA"
-	default n
-	depends on STM32_DMA1
-	---help---
-		In high data rate usage, Tx DMA may reduce CPU load
-
-endif # STM32_LPUART1_SERIALDRIVER
-
 menu "Serial Driver Configuration"
 	depends on STM32_SERIALDRIVER
 
@@ -10370,6 +8656,7 @@ config STM32_SERIAL_RXDMA_BUFFER_SIZE
 	int "Rx DMA buffer size"
 	default 32
 	range 32 4096
+	depends on STM32_USART_RXDMA
 	---help---
 		The DMA buffer size when using RX DMA to emulate a FIFO.
 
@@ -10415,10 +8702,9 @@ config STM32_SERIALBRK_BSDCOMPAT
 	---help---
 		Enable using GPIO on the TX pin to send a BSD compatible break:
 		TIOCSBRK will start the break and TIOCCBRK will end the break.
-		The current STM32 U[S]ARTS have no way to leave the break on
-		(TX=LOW) because software starts the break and then the hardware
-		automatically clears the break. This makes it difficult to send
-		a long break.
+		The current STM32 U[S]ARTS have no way to leave the break (TX=LOW)
+		on because the SW starts the break and then the HW automatically clears
+		the break. This makes it is difficult to sent a long break.
 
 config STM32_USART_SINGLEWIRE
 	bool "Single Wire Support"
@@ -10521,13 +8807,18 @@ config STM32_SPI_INTERRUPTS
 		poll-waiting is recommended if the interrupt rate would be to high in
 		the interrupt driven case.
 
+config STM32_SPI_DMA
+	bool "SPI DMA"
+	default n
+	---help---
+		Use DMA to improve SPI transfer performance.  Cannot be used with STM32_SPI_INTERRUPT.
+
 config STM32_SPI1_DMA
 	bool "SPI1 DMA"
 	default n
-	depends on STM32_SPI1 && !STM32_SPI_INTERRUPT
-	select STM32_SPI_DMA
+	depends on STM32_SPI1 && STM32_SPI_DMA
 	---help---
-		Use DMA to improve SPI1 transfer performance.  Cannot be used with STM32_SPI_INTERRUPT.
+		Use DMA to improve SPI1 transfer performance.
 
 config STM32_SPI1_DMA_BUFFER
 	int "SPI1 DMA buffer size"
@@ -10548,10 +8839,9 @@ config STM32_SPI_DMATHRESHOLD
 config STM32_SPI2_DMA
 	bool "SPI2 DMA"
 	default n
-	depends on STM32_SPI2 && !STM32_SPI_INTERRUPT
-	select STM32_SPI_DMA
+	depends on STM32_SPI2 && STM32_SPI_DMA
 	---help---
-		Use DMA to improve SPI2 transfer performance.  Cannot be used with STM32_SPI_INTERRUPT.
+		Use DMA to improve SPI2 transfer performance.
 
 config STM32_SPI2_DMA_BUFFER
 	int "SPI2 DMA buffer size"
@@ -10563,10 +8853,9 @@ config STM32_SPI2_DMA_BUFFER
 config STM32_SPI3_DMA
 	bool "SPI3 DMA"
 	default n
-	depends on STM32_SPI3 && !STM32_SPI_INTERRUPT
-	select STM32_SPI_DMA
+	depends on STM32_SPI3 && STM32_SPI_DMA
 	---help---
-		Use DMA to improve SPI3 transfer performance.  Cannot be used with STM32_SPI_INTERRUPT.
+		Use DMA to improve SPI3 transfer performance.
 
 config STM32_SPI3_DMA_BUFFER
 	int "SPI3 DMA buffer size"
@@ -10578,10 +8867,9 @@ config STM32_SPI3_DMA_BUFFER
 config STM32_SPI4_DMA
 	bool "SPI4 DMA"
 	default n
-	depends on STM32_SPI4 && !STM32_SPI_INTERRUPT
-	select STM32_SPI_DMA
+	depends on STM32_SPI4 && STM32_SPI_DMA
 	---help---
-		Use DMA to improve SPI4 transfer performance.  Cannot be used with STM32_SPI_INTERRUPT.
+		Use DMA to improve SPI4 transfer performance.
 
 config STM32_SPI4_DMA_BUFFER
 	int "SPI4 DMA buffer size"
@@ -10593,10 +8881,9 @@ config STM32_SPI4_DMA_BUFFER
 config STM32_SPI5_DMA
 	bool "SPI5 DMA"
 	default n
-	depends on STM32_SPI5 && !STM32_SPI_INTERRUPT
-	select STM32_SPI_DMA
+	depends on STM32_SPI5 && STM32_SPI_DMA
 	---help---
-		Use DMA to improve SPI5 transfer performance.  Cannot be used with STM32_SPI_INTERRUPT.
+		Use DMA to improve SPI5 transfer performance.
 
 config STM32_SPI5_DMA_BUFFER
 	int "SPI5 DMA buffer size"
@@ -10608,10 +8895,9 @@ config STM32_SPI5_DMA_BUFFER
 config STM32_SPI6_DMA
 	bool "SPI6 DMA"
 	default n
-	depends on STM32_SPI6 && !STM32_SPI_INTERRUPT
-	select STM32_SPI_DMA
+	depends on STM32_SPI6 && STM32_SPI_DMA
 	---help---
-		Use DMA to improve SPI6 transfer performance.  Cannot be used with STM32_SPI_INTERRUPT.
+		Use DMA to improve SPI6 transfer performance.
 
 config STM32_SPI5_DMA_BUFFER
 	int "SPI5 DMA buffer size"
@@ -10651,7 +8937,7 @@ config STM32_I2S3_DATALEN
 
 #if STM32_I2S
 config STM32_I2S3_RX
-	bool "Enable I2S receiver"
+	bool "Enable I2C receiver"
 	default n
 	---help---
 		Enable I2S receipt logic
@@ -10687,7 +8973,8 @@ menu "I2C Configuration"
 
 config STM32_I2C_ALT
 	bool "Alternate I2C implementation"
-	default STM32_PERFORMANCELINE
+	default n if !STM32_PERFORMANCELINE
+	default y if STM32_PERFORMANCELINE
 	depends on !STM32_STM32F30XX
 	---help---
 		This selection enables an alternative I2C driver.  This alternate
@@ -10727,7 +9014,7 @@ config STM32_I2CTIMEOTICKS
 	depends on STM32_I2C && !STM32_I2C_DYNTIMEO
 
 config STM32_I2C_DUTY16_9
-	bool "Frequency with Tlow/Thigh = 16/9"
+	bool "Frequency with Tlow/Thigh = 16/9 "
 	default n
 	depends on STM32_I2C
 
@@ -10739,31 +9026,6 @@ config STM32_I2C_DMA
 		This option enables the DMA for I2C transfers.
 		Note: The user can define CONFIG_I2C_DMAPRIO: a custom priority value for the
 		I2C dma streams, else the default priority level is set to medium.
-
-endmenu
-
-menu "I2C Slave Configuration"
-	depends on STM32_I2C_SLAVE
-
-config STM32_I2C_SLAVE_DEFAULT_TX
-	hex "Default TX byte to be sent when the TX buffer is empty"
-	default 0xFF
-
-config STM32_I2C_SLAVE_USEWQ
-	bool "Use work queue to delegate the isr completion status"
-	default n
-	---help---
-		With the current upperhalf I2C slave driver implementation, the user
-		should delegate the callback completion status using a work queue.
-		However, work queues introduce a delay, so in certain scenarios
-		it is better to use a custom driver without using a work queue.
-
-config STM32_I2C_SLAVE_RETRANSFER
-	bool "The frame is retransferred when stop is issued beforehand"
-	default n
-	---help---
-		If stop is issued before the whole frame is transferred,
-		the tx pointer is reset to 0.
 
 endmenu
 
@@ -10788,7 +9050,8 @@ config STM32_SDIO_PULLUP
 
 config STM32_SDIO_DMA
 	bool "Support DMA data transfers"
-	default STM32_DMA2
+	default y if STM32_DMA2
+	default n if !STM32_DMA2
 	select SDIO_DMA
 	depends on STM32_DMA2
 	---help---
@@ -10846,7 +9109,7 @@ menu "RTC Configuration"
 config STM32_RTC_MAGIC_REG
 	int "BKP register"
 	default 0
-	range 0 19
+	range  0 19
 	depends on !STM32_HAVE_RTC_COUNTER
 	---help---
 		The BKP register used to store/check the Magic value to determine if
@@ -11051,49 +9314,16 @@ config STM32_PHYSR_100FD
 		This must be provided if STM32_AUTONEG is defined.  This is the value
 		under the bit mask that represents the 100Mbps, full duplex setting.
 
-config STM32_ETH_ENHANCEDDESC
-	bool "Enable enhanced RX/TX descriptors"
-	default n
-	---help---
-		Enables double-length DMA descriptors that have space for packet
-		timestamps and checksum offloading.
-
 config STM32_ETH_PTP
 	bool "Precision Time Protocol (PTP)"
 	default n
 	---help---
-		Enables Precision Time Protocol (PTP) hardware timer.
-
-config STM32_ETH_PTP_GPIO
-	bool "PTP pulse-per-second output signal"
-	depends on STM32_ETH_PTP
-	default n
-	---help---
-		Enables pulse-per-second output on GPIO pin.
-
-config STM32_ETH_PTP_RTC_HIRES
-	bool "Use PTP timer as system high-resolution RTC"
-	depends on STM32_ETH_PTP
-	default n
-	---help---
-		Uses the Ethernet peripheral PTP timer as the CONFIG_RTC_HIRES source.
-		This provides high resolution timestamps to clock_gettime().
-		Note that PTP timer is disabled when Ethernet interface is down or
-		being reset. During this time g_rtc_enabled is set to false and system
-		uses the lower resolution system tick counter.
-
-config STM32_ETH_TIMESTAMP_RX
-	bool "Hardware timestamping of received packets"
-	depends on STM32_ETH_PTP && NET_TIMESTAMP && STM32_ETH_ENHANCEDDESC
-	select ARCH_HAVE_NETDEV_TIMESTAMP
-	default n
-	---help---
-		Timestamp all received Ethernet packets.
-		Timestamp is available to application through SO_TIMESTAMP socket option.
+		Precision Time Protocol (PTP).  Not supported but some hooks are indicated
+		with this condition.
 
 config STM32_RMII
 	bool
-	default !STM32_MII
+	default y if !STM32_MII
 
 choice
 	prompt "RMII clock configuration"
@@ -11249,34 +9479,10 @@ endmenu
 
 comment "USB Device Configuration"
 
-menu "USB Full Speed Debug Configuration"
-	depends on STM32_USBFS
-
-config STM32_USBFS_REGDEBUG
-	bool "Register-Level Debug"
-	default n
-	depends on STM32_USBFS && DEBUG_USB_INFO
-	---help---
-		Enable very low-level register access debug.
-
-endmenu
-
-menu "OTG Configuration"
-	depends on STM32_OTGFS
-
-config OTG_ID_GPIO_DISABLE
-	bool "Disable the use of GPIO_OTG_ID pin."
-	default n
-	---help---
-		Disables/Enables the use of GPIO_OTG_ID pin. This allows non OTG use
-		cases to reuse this GPIO pin and ensure it is not set incorrectlty
-		during OS boot.
-
-endmenu
-
 config STM32_USB_ITRMP
 	bool "Re-map USB interrupt"
-	default STM32_CAN1
+	default n if !STM32_CAN1
+	default y if STM32_CAN1
 	depends on STM32_USB && STM32_STM32F30XX
 	---help---
 		The legacy USB in the F1 series shared interrupt lines with USB
@@ -11287,21 +9493,6 @@ config STM32_USB_ITRMP
 
 menu "CAN driver configuration"
 	depends on STM32_CAN
-
-choice
-	prompt "CAN character driver or SocketCAN support"
-	default STM32_CAN_CHARDRIVER
-
-config STM32_CAN_CHARDRIVER
-	bool "STM32 CAN character driver support"
-	select ARCH_HAVE_CAN_ERRORS
-	select CAN
-
-config STM32_CAN_SOCKET
-	bool "STM32 CAN SocketCAN support"
-	select NET_CAN_HAVE_ERRORS
-
-endchoice # CAN character driver or SocketCAN support
 
 config STM32_CAN1_BAUD
 	int "CAN1 BAUD"
@@ -11337,382 +9528,7 @@ config STM32_CAN_REGDEBUG
 		Output detailed register-level CAN device debug information.
 		Requires also CONFIG_DEBUG_CAN_INFO.
 
-endmenu # "CAN driver configuration"
-
-menu "FDCAN driver configuration"
-	depends on STM32_FDCAN
-
-choice
-	prompt "FDCAN character driver or SocketCAN support"
-	default STM32_FDCAN_CHARDRIVER
-
-config STM32_FDCAN_CHARDRIVER
-	bool "STM32 FDCAN character driver support"
-	select ARCH_HAVE_CAN_ERRORS
-	select CAN
-
-config STM32_FDCAN_SOCKET
-	bool "STM32 FDCAN SocketCAN support"
-	select NET_CAN_HAVE_ERRORS
-	select NET_CAN_HAVE_CANFD
-
-endchoice # FDCAN character driver or SocketCAN support
-
-config STM32_FDCAN_REGDEBUG
-	bool "CAN Register level debug"
-	depends on DEBUG_CAN_INFO
-	default n
-	---help---
-		Output detailed register-level CAN device debug information.
-		Requires also CONFIG_DEBUG_CAN_INFO.
-
-config STM32_FDCAN_QUEUE_MODE
-	bool "FDCAN QUEUE mode (vs FIFO mode)"
-	default n
-
-menu "FDCAN1 device driver options"
-	depends on STM32_FDCAN1
-
-choice
-	prompt "FDCAN1 frame format"
-	default STM32_FDCAN1_ISO11898_1
-
-config STM32_FDCAN1_ISO11898_1
-	bool "ISO11898-1"
-	---help---
-		Enable ISO11898-1 frame format
-
-config STM32_FDCAN1_NONISO_FORMAT
-	bool "Non ISO"
-	---help---
-		Enable Non ISO, Bosch CAN FD Specification V1.0
-
-endchoice # FDCAN1 frame format
-
-choice
-	prompt "FDCAN1 mode"
-	default STM32_FDCAN1_CLASSIC
-
-config STM32_FDCAN1_CLASSIC
-	bool "Classic CAN"
-	---help---
-		Enable Classic CAN mode
-
-config STM32_FDCAN1_FD
-	bool "CAN FD"
-	depends on CAN_FD || NET_CAN_CANFD
-	---help---
-		Enable CAN FD mode
-
-config STM32_FDCAN1_FD_BRS
-	bool "CAN FD with fast bit rate switching"
-	depends on CAN_FD || NET_CAN_CANFD
-	---help---
-		Enable CAN FD mode with fast bit rate switching mode.
-
-endchoice # FDCAN1 mode
-
-config STM32_FDCAN1_LOOPBACK
-	bool "Enable FDCAN1 loopback mode"
-	default n
-	---help---
-		Enable the FDCAN1 local loopback mode for testing purposes.
-
-comment "Nominal Bit Timing"
-
-config STM32_FDCAN1_BITRATE
-	int "FDCAN bitrate"
-	default 500000
-	range 0 1000000
-	---help---
-		FDCAN1 bitrate in bits per second.  Required if STM32_FDCAN1 is defined.
-
-config STM32_FDCAN1_NTSEG1
-	int "FDCAN1 NTSEG1 (PropSeg + PhaseSeg1)"
-	default 6
-	range 1 256 if STM32_STM32G4XXX
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN1_NTSEG2
-	int "FDCAN1 NTSEG2 (PhaseSeg2)"
-	default 7
-	range 1 128 if STM32_STM32G4XXX
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN1_NSJW
-	int "FDCAN1 synchronization jump width"
-	default 1
-	range 1 128 if STM32_STM32G4XXX
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-comment "Data Bit Timing"
-	depends on CAN_FD && STM32_FDCAN1_FD_BRS
-
-config STM32_FDCAN1_DBITRATE
-	int "FDCAN1 data bitrate"
-	default 2000000
-	depends on CAN_FD && STM32_FDCAN1_FD_BRS
-	---help---
-		FDCAN1 bitrate in bits per second.  Required if operating in FD mode with bit rate switching (BRS).
-
-config STM32_FDCAN1_DTSEG1
-	int "FDCAN1 DTSEG1 (PropSeg + PhaseSeg1 of data phase)"
-	default 4
-	range 1 31 if STM32_STM32G4XXX
-	depends on CAN_FD && STM32_FDCAN1_FD_BRS
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN1_DTSEG2
-	int "FDCAN1 DTSEG2 (PhaseSeg2 of data phase)"
-	default 4
-	range 1 15 if STM32_STM32G4XXX
-	depends on CAN_FD && STM32_FDCAN1_FD_BRS
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN1_DSJW
-	int "FDCAN1 fast synchronization jump width"
-	default 2
-	range 1 15 if STM32_STM32G4XXX
-	depends on CAN_FD && STM32_FDCAN1_FD_BRS
-	---help---
-		The duration of a synchronization jump is Tcan_clk x DSJW.
-
-endmenu # FDCAN1 device driver options
-
-menu "FDCAN2 device driver options"
-	depends on STM32_FDCAN2
-
-choice
-	prompt "FDCAN2 frame format"
-	default STM32_FDCAN2_ISO11898_1
-
-config STM32_FDCAN2_ISO11898_1
-	bool "ISO11898-1"
-	---help---
-		Enable ISO11898-1 frame format
-
-config STM32_FDCAN2_NONISO_FORMAT
-	bool "Non ISO"
-	---help---
-		Enable Non ISO, Bosch CAN FD Specification V1.0
-
-endchoice # FDCAN2 frame format
-
-choice
-	prompt "FDCAN2 mode"
-	default STM32_FDCAN2_CLASSIC
-
-config STM32_FDCAN2_CLASSIC
-	bool "Classic CAN"
-	---help---
-		Enable Classic CAN mode
-
-config STM32_FDCAN2_FD
-	bool "CAN FD"
-	depends on CAN_FD || NET_CAN_CANFD
-	---help---
-		Enable CAN FD mode
-
-config STM32_FDCAN2_FD_BRS
-	bool "CAN FD with fast bit rate switching"
-	depends on CAN_FD || NET_CAN_CANFD
-	---help---
-		Enable CAN FD mode with fast bit rate switching mode.
-
-endchoice # FDCAN2 mode
-
-config STM32_FDCAN2_LOOPBACK
-	bool "Enable FDCAN2 loopback mode"
-	default n
-	---help---
-		Enable the FDCAN2 local loopback mode for testing purposes.
-
-comment "Nominal Bit Timing"
-
-config STM32_FDCAN2_BITRATE
-	int "FDCAN bitrate"
-	default 500000
-	range 0 1000000
-	---help---
-		FDCAN2 bitrate in bits per second.  Required if STM32_FDCAN2 is defined.
-
-config STM32_FDCAN2_NTSEG1
-	int "FDCAN2 NTSEG1 (PropSeg + PhaseSeg1)"
-	default 6
-	range 1 256 if STM32_STM32G4XXX
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN2_NTSEG2
-	int "FDCAN2 NTSEG2 (PhaseSeg2)"
-	default 7
-	range 1 128 if STM32_STM32G4XXX
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN2_NSJW
-	int "FDCAN2 synchronization jump width"
-	default 1
-	range 1 128 if STM32_STM32G4XXX
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-comment "Data Bit Timing"
-	depends on CAN_FD && STM32_FDCAN2_FD_BRS
-
-config STM32_FDCAN2_DBITRATE
-	int "FDCAN2 data bitrate"
-	default 2000000
-	depends on CAN_FD && STM32_FDCAN2_FD_BRS
-	---help---
-		FDCAN2 bitrate in bits per second.  Required if operating in FD mode with bit rate switching (BRS).
-
-config STM32_FDCAN2_DTSEG1
-	int "FDCAN2 DTSEG1 (PropSeg + PhaseSeg1 of data phase)"
-	default 4
-	range 1 31 if STM32_STM32G4XXX
-	depends on CAN_FD && STM32_FDCAN2_FD_BRS
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN2_DTSEG2
-	int "FDCAN2 DTSEG2 (PhaseSeg2 of data phase)"
-	default 4
-	range 1 15 if STM32_STM32G4XXX
-	depends on CAN_FD && STM32_FDCAN2_FD_BRS
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN2_DSJW
-	int "FDCAN2 fast synchronization jump width"
-	default 2
-	range 1 15 if STM32_STM32G4XXX
-	depends on CAN_FD && STM32_FDCAN2_FD_BRS
-	---help---
-		The duration of a synchronization jump is Tcan_clk x DSJW.
-
-endmenu # FDCAN2 device driver options
-
-menu "FDCAN3 device driver options"
-	depends on STM32_FDCAN3
-
-choice
-	prompt "FDCAN3 frame format"
-	default STM32_FDCAN3_ISO11898_1
-
-config STM32_FDCAN3_ISO11898_1
-	bool "ISO11898-1"
-	---help---
-		Enable ISO11898-1 frame format
-
-config STM32_FDCAN3_NONISO_FORMAT
-	bool "Non ISO"
-	---help---
-		Enable Non ISO, Bosch CAN FD Specification V1.0
-
-endchoice # FDCAN3 frame format
-
-choice
-	prompt "FDCAN3 mode"
-	default STM32_FDCAN3_CLASSIC
-
-config STM32_FDCAN3_CLASSIC
-	bool "Classic CAN"
-	---help---
-		Enable Classic CAN mode
-
-config STM32_FDCAN3_FD
-	bool "CAN FD"
-	depends on CAN_FD || NET_CAN_CANFD
-	---help---
-		Enable CAN FD mode
-
-config STM32_FDCAN3_FD_BRS
-	bool "CAN FD with fast bit rate switching"
-	depends on CAN_FD || NET_CAN_CANFD
-	---help---
-		Enable CAN FD mode with fast bit rate switching mode.
-
-endchoice # FDCAN3 mode
-
-config STM32_FDCAN3_LOOPBACK
-	bool "Enable FDCAN3 loopback mode"
-	default n
-	---help---
-		Enable the FDCAN3 local loopback mode for testing purposes.
-
-comment "Nominal Bit Timing"
-
-config STM32_FDCAN3_BITRATE
-	int "FDCAN bitrate"
-	default 500000
-	range 0 1000000
-	---help---
-		FDCAN3 bitrate in bits per second.  Required if STM32_FDCAN3 is defined.
-
-config STM32_FDCAN3_NTSEG1
-	int "FDCAN3 NTSEG1 (PropSeg + PhaseSeg1)"
-	default 6
-	range 1 256 if STM32_STM32G4XXX
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN3_NTSEG2
-	int "FDCAN3 NTSEG2 (PhaseSeg2)"
-	default 7
-	range 1 128 if STM32_STM32G4XXX
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN3_NSJW
-	int "FDCAN3 synchronization jump width"
-	default 1
-	range 1 128 if STM32_STM32G4XXX
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-comment "Data Bit Timing"
-	depends on CAN_FD && STM32_FDCAN3_FD_BRS
-
-config STM32_FDCAN3_DBITRATE
-	int "FDCAN3 data bitrate"
-	default 2000000
-	depends on CAN_FD && STM32_FDCAN3_FD_BRS
-	---help---
-		FDCAN3 bitrate in bits per second.  Required if operating in FD mode with bit rate switching (BRS).
-
-config STM32_FDCAN3_DTSEG1
-	int "FDCAN3 DTSEG1 (PropSeg + PhaseSeg1 of data phase)"
-	default 4
-	range 1 31 if STM32_STM32G4XXX
-	depends on CAN_FD && STM32_FDCAN3_FD_BRS
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN3_DTSEG2
-	int "FDCAN3 DTSEG2 (PhaseSeg2 of data phase)"
-	default 4
-	range 1 15 if STM32_STM32G4XXX
-	depends on CAN_FD && STM32_FDCAN3_FD_BRS
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config STM32_FDCAN3_DSJW
-	int "FDCAN3 fast synchronization jump width"
-	default 2
-	range 1 15 if STM32_STM32G4XXX
-	depends on CAN_FD && STM32_FDCAN3_FD_BRS
-	---help---
-		The duration of a synchronization jump is Tcan_clk x DSJW.
-
-endmenu # FDCAN3 device driver options
-
-endmenu # "FDCAN driver configuration"
+endmenu
 
 if STM32_LTDC
 
@@ -12003,20 +9819,12 @@ config STM32_DMA2D_REGDEBUG
 endmenu
 endif # STM32_DMA2D
 
-menu "STM32 QEncoder Driver"
+menu "QEncoder Driver"
 	depends on SENSORS_QENCODER
 	depends on STM32_TIM1 || STM32_TIM2 || STM32_TIM3 || STM32_TIM4 || STM32_TIM5 || STM32_TIM8
 
-config STM32_QENCODER_DISABLE_EXTEND16BTIMERS
-	bool "Disable QEncoder timers extension from 16-bit to 32-bit"
-	default n
-
-config STM32_QENCODER_INDEX_PIN
-	bool "Enable QEncoder timers support for index pin"
-	default n
-
 config STM32_TIM1_QE
-	bool "TIM1 QE"
+	bool "TIM1"
 	default n
 	depends on STM32_TIM1
 	---help---
@@ -12025,7 +9833,7 @@ config STM32_TIM1_QE
 if STM32_TIM1_QE
 
 config STM32_TIM1_QEPSC
-	int "TIM1 QE pulse prescaler"
+	int "TIM1 pulse prescaler"
 	default 1
 	---help---
 		This prescaler divides the number of recorded encoder pulses,
@@ -12034,7 +9842,7 @@ config STM32_TIM1_QEPSC
 endif
 
 config STM32_TIM2_QE
-	bool "TIM2 QE"
+	bool "TIM2"
 	default n
 	depends on STM32_TIM2
 	---help---
@@ -12043,7 +9851,7 @@ config STM32_TIM2_QE
 if STM32_TIM2_QE
 
 config STM32_TIM2_QEPSC
-	int "TIM2 QE pulse prescaler"
+	int "TIM2 pulse prescaler"
 	default 1
 	---help---
 		This prescaler divides the number of recorded encoder pulses,
@@ -12052,7 +9860,7 @@ config STM32_TIM2_QEPSC
 endif
 
 config STM32_TIM3_QE
-	bool "TIM3 QE"
+	bool "TIM3"
 	default n
 	depends on STM32_TIM3
 	---help---
@@ -12061,7 +9869,7 @@ config STM32_TIM3_QE
 if STM32_TIM3_QE
 
 config STM32_TIM3_QEPSC
-	int "TIM3 QE pulse prescaler"
+	int "TIM3 pulse prescaler"
 	default 1
 	---help---
 		This prescaler divides the number of recorded encoder pulses,
@@ -12070,7 +9878,7 @@ config STM32_TIM3_QEPSC
 endif
 
 config STM32_TIM4_QE
-	bool "TIM4 QE"
+	bool "TIM4"
 	default n
 	depends on STM32_TIM4
 	---help---
@@ -12079,7 +9887,7 @@ config STM32_TIM4_QE
 if STM32_TIM4_QE
 
 config STM32_TIM4_QEPSC
-	int "TIM4 QE pulse prescaler"
+	int "TIM4 pulse prescaler"
 	default 1
 	---help---
 		This prescaler divides the number of recorded encoder pulses,
@@ -12088,7 +9896,7 @@ config STM32_TIM4_QEPSC
 endif
 
 config STM32_TIM5_QE
-	bool "TIM5 QE"
+	bool "TIM5"
 	default n
 	depends on STM32_TIM5
 	---help---
@@ -12097,7 +9905,7 @@ config STM32_TIM5_QE
 if STM32_TIM5_QE
 
 config STM32_TIM5_QEPSC
-	int "TIM5 QE pulse prescaler"
+	int "TIM5 pulse prescaler"
 	default 1
 	---help---
 		This prescaler divides the number of recorded encoder pulses,
@@ -12106,7 +9914,7 @@ config STM32_TIM5_QEPSC
 endif
 
 config STM32_TIM8_QE
-	bool "TIM8 QE"
+	bool "TIM8"
 	default n
 	depends on STM32_TIM8
 	---help---
@@ -12115,7 +9923,7 @@ config STM32_TIM8_QE
 if STM32_TIM8_QE
 
 config STM32_TIM8_QEPSC
-	int "TIM8 QE pulse prescaler"
+	int "TIM8 pulse prescaler"
 	default 1
 	---help---
 		This prescaler divides the number of recorded encoder pulses,
@@ -12187,202 +9995,3 @@ config STM32_QENCODER_SAMPLE_EVENT_8
 endchoice
 
 endmenu
-
-menuconfig STM32_FOC
-	bool "STM32 lower-half FOC support"
-	default n
-	select ARCH_IRQPRIO
-	select STM32_PWM_MULTICHAN
-	select STM32_PWM_LL_OPS
-	select STM32_ADC_LL_OPS
-	select STM32_ADC_CHANGE_SAMPLETIME
-	select STM32_ADC_NO_STARTUP_CONV
-
-if STM32_FOC
-
-config STM32_FOC_FOC0
-	bool "FOC0 device (TIM1 for PWM modulation)"
-	default n
-	depends on STM32_HAVE_TIM1
-	select STM32_FOC_USE_TIM1
-	---help---
-		Enable support for FOC0 device that uses TIM1 for PWM modulation
-
-config STM32_FOC_FOC1
-	bool "FOC1 device (TIM8 for PWM modulation)"
-	default n
-	depends on STM32_HAVE_TIM8
-	select STM32_FOC_USE_TIM8
-	---help---
-		Enable support for FOC1 device that uses TIM8 for PWM modulation
-
-choice
-	prompt "FOC ADC trigger selection"
-	default STM32_FOC_ADC_TRGO
-
-config STM32_FOC_ADC_CCR4
-	bool "FOC uses CCR4 as ADC trigger"
-	---help---
-		This option uses the software frequency prescaler and is
-		not possible for 4-phase output.
-
-config STM32_FOC_ADC_TRGO
-	bool "FOC uses TRGO as ADC trigger"
-	depends on STM32_HAVE_IP_ADC_V2 || (STM32_HAVE_IP_ADC_V1 && !STM32_FOC_FOC1)
-	select STM32_PWM_TRGO
-	---help---
-		This option allows you to use higher PWM frequency and works for 4-phase output.
-		It is not possible for ADC IPv1 if FOC1 enabled (no T8TRGO in JEXTSEL).
-
-endchoice # "FOC ADC trigger selection"
-
-if STM32_FOC_FOC0
-
-choice
-	prompt "FOC0 device ADC selection"
-	default STM32_FOC_FOC0_ADC1
-
-config STM32_FOC_FOC0_ADC1
-	bool "FOC0 uses ADC1"
-	depends on STM32_HAVE_ADC1
-	select STM32_FOC_USE_ADC1
-
-config STM32_FOC_FOC0_ADC2
-	bool "FOC0 uses ADC2"
-	depends on STM32_HAVE_ADC2
-	select STM32_FOC_USE_ADC2
-
-config STM32_FOC_FOC0_ADC3
-	bool "FOC0 uses ADC3"
-	depends on STM32_HAVE_ADC3
-	select STM32_FOC_USE_ADC3
-
-config STM32_FOC_FOC0_ADC4
-	bool "FOC0 uses ADC4"
-	depends on STM32_HAVE_ADC4
-	select STM32_FOC_USE_ADC4
-
-endchoice # "FOC0 device ADC selection"
-
-endif # STM32_FOC_FOC0
-
-if STM32_FOC_FOC1
-
-choice
-	prompt "FOC1 device ADC selection"
-	default STM32_FOC_FOC1_ADC2
-
-config STM32_FOC_FOC1_ADC1
-	bool "FOC1 uses ADC1"
-	depends on STM32_HAVE_ADC1
-	select STM32_FOC_USE_ADC1
-
-config STM32_FOC_FOC1_ADC2
-	bool "FOC1 uses ADC2"
-	depends on STM32_HAVE_ADC2
-	select STM32_FOC_USE_ADC2
-
-config STM32_FOC_FOC1_ADC3
-	bool "FOC1 uses ADC3"
-	depends on STM32_HAVE_ADC3
-	select STM32_FOC_USE_ADC3
-
-config STM32_FOC_FOC1_ADC4
-	bool "FOC1 uses ADC4"
-	depends on STM32_HAVE_ADC4
-	select STM32_FOC_USE_ADC4
-
-endchoice # "FOC0 device ADC selection"
-
-endif # STM32_FOC_FOC1
-
-config STM32_FOC_HAS_PWM_COMPLEMENTARY
-	bool "FOC PWM has complementary outputs"
-	default n
-	---help---
-		Enable complementary outputs for the FOC PWM (sometimes called 6-PWM mode)
-
-# hidden variables and automatic configuration
-
-config STM32_FOC_USE_TIM1
-	bool
-	default n
-	select STM32_TIM1
-	select STM32_TIM1_PWM
-	select STM32_TIM1_CHANNEL1
-	select STM32_TIM1_CHANNEL2
-	select STM32_TIM1_CHANNEL3
-	select STM32_TIM1_CHANNEL4 if STM32_FOC_ADC_CCR4
-	select STM32_TIM1_CH1OUT
-	select STM32_TIM1_CH2OUT
-	select STM32_TIM1_CH3OUT
-	select STM32_TIM1_CH4OUT if STM32_FOC_ADC_CCR4
-	select STM32_TIM1_CH1NOUT if STM32_FOC_HAS_PWM_COMPLEMENTARY
-	select STM32_TIM1_CH2NOUT if STM32_FOC_HAS_PWM_COMPLEMENTARY
-	select STM32_TIM1_CH3NOUT if STM32_FOC_HAS_PWM_COMPLEMENTARY
-	---help---
-		The TIM1 generates PWM for the FOC
-
-config STM32_FOC_USE_TIM8
-	bool
-	default n
-	select STM32_TIM8
-	select STM32_TIM8_PWM
-	select STM32_TIM8_CHANNEL1
-	select STM32_TIM8_CHANNEL2
-	select STM32_TIM8_CHANNEL3
-	select STM32_TIM8_CHANNEL4 if STM32_FOC_ADC_CCR4
-	select STM32_TIM8_CH1OUT
-	select STM32_TIM8_CH2OUT
-	select STM32_TIM8_CH3OUT
-	select STM32_TIM8_CH4OUT if STM32_FOC_ADC_CCR4
-	select STM32_TIM8_CH1NOUT if STM32_FOC_HAS_PWM_COMPLEMENTARY
-	select STM32_TIM8_CH2NOUT if STM32_FOC_HAS_PWM_COMPLEMENTARY
-	select STM32_TIM8_CH3NOUT if STM32_FOC_HAS_PWM_COMPLEMENTARY
-	---help---
-		The TIM8 generates PWM for the FOC
-
-config STM32_FOC_USE_ADC1
-	bool
-	default n
-	select STM32_ADC1
-	select STM32_ADC1_SCAN if STM32_HAVE_IP_ADC_V1
-	select STM32_ADC1_JEXTSEL
-
-config STM32_FOC_USE_ADC2
-	bool
-	default n
-	select STM32_ADC2
-	select STM32_ADC2_SCAN if STM32_HAVE_IP_ADC_V1
-	select STM32_ADC2_JEXTSEL
-
-config STM32_FOC_USE_ADC3
-	bool
-	default n
-	select STM32_ADC3
-	select STM32_ADC3_SCAN if STM32_HAVE_IP_ADC_V1
-	select STM32_ADC3_JEXTSEL
-
-config STM32_FOC_USE_ADC4
-	bool
-	default n
-	select STM32_ADC4
-	select STM32_ADC3_JEXTSEL
-
-config STM32_FOC_G4_ADCCHAN0_WORKAROUND
-	bool "FOC G4 ADC channel 0 unwanted conversion workaround"
-	default n
-	depends on STM32_STM32G4XXX
-	---help---
-		Some STM32G4 family chips have an issue that causes unwanted ADC channel 0
-		conversion when a regular conversion is interrupted by an injected conversion.
-		This FOC implementation uses injected conversion to sample phase currents
-		and allows user to use regular conversion as an auxiliary analog conversion.
-		In this case, there is a certain probability that regular conversion will be
-		interrupted by an injected conversion that will lead to an incorrect reading
-		of phase currents.
-
-		This workaround inserts a dummy conversion at the beginning of the injected
-		sequence. For more details look at the chip errata documents.
-
-endif #STM32_FOC

@@ -1,8 +1,6 @@
 /****************************************************************************
  * net/sixlowpan/sixlowpan_framelist.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- *
  *   Copyright (C) 2017-2018 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -209,8 +207,8 @@ static uint16_t sixlowpan_protosize(FAR const struct ipv6_hdr_s *ipv6hdr,
 
 #ifdef CONFIG_WIRELESS_IEEE802154
 static int sixlowpan_ieee802154_metadata(FAR struct radio_driver_s *radio,
-                                 FAR const struct netdev_varaddr_s *destmac,
-                                 FAR union sixlowpan_metadata_u *meta)
+                                         FAR const struct netdev_varaddr_s *destmac,
+                                         FAR union sixlowpan_metadata_u *meta)
 {
   struct ieee802_txmetadata_s pktmeta;
   int ret;
@@ -308,8 +306,8 @@ static int sixlowpan_ieee802154_metadata(FAR struct radio_driver_s *radio,
 
 #ifdef CONFIG_WIRELESS_PKTRADIO
 static int sixlowpan_pktradio_metadata(FAR struct radio_driver_s *radio,
-                               FAR const struct netdev_varaddr_s *destmac,
-                               FAR union sixlowpan_metadata_u *meta)
+                                       FAR const struct netdev_varaddr_s *destmac,
+                                       FAR union sixlowpan_metadata_u *meta)
 {
   FAR struct pktradio_metadata_s *pktmeta = &meta->pktradio;
 
@@ -412,12 +410,18 @@ int sixlowpan_queue_frames(FAR struct radio_driver_s *radio,
    * necessary.
    */
 
-  iob = net_ioballoc(false);
+  iob = net_ioballoc(false, IOBUSER_NET_6LOWPAN);
   DEBUGASSERT(iob != NULL);
 
-  fptr = iob->io_data;
+  /* Initialize the IOB */
 
-  ninfo("Sending packet length %zd\n", buflen);
+  iob->io_flink  = NULL;
+  iob->io_len    = 0;
+  iob->io_offset = 0;
+  iob->io_pktlen = 0;
+  fptr           = iob->io_data;
+
+  ninfo("Sending packet length %d\n", buflen);
 
   /* Get the metadata that describes the MAC header on the packet */
 
@@ -540,11 +544,11 @@ int sixlowpan_queue_frames(FAR struct radio_driver_s *radio,
       /* The outbound IPv6 packet is too large to fit into a single 15.4
        * packet, so we fragment it into multiple packets and send them.
        * The first fragment contains frag1 dispatch, then
-       * IPv6/HC1/HC06/HC_UDP dispatches/headers.
+       * IPv6/HC1/HC06/HC_UDP dispatchs/headers.
        * The following fragments contain only the fragn dispatch.
        */
 
-      ninfo("Sending fragmented packet length %zd\n", buflen);
+      ninfo("Sending fragmented packet length %d\n", buflen);
 
       /* Create 1st Fragment */
 
@@ -564,8 +568,8 @@ int sixlowpan_queue_frames(FAR struct radio_driver_s *radio,
        *   1. Datagram size describes the total (un-fragmented) payload.
        *   2. Datagram tag identifies the set of fragments and is used to
        *      match fragments of the same payload.
-       *   3. Datagram offset identifies the fragment's offset within the
-       *      unfragmented payload.
+       *   3. Datagram offset identifies the fragment’s offset within the un-
+       *      fragmented payload.
        *
        * The fragment header length is 4 bytes for the first header and 5
        * bytes for all subsequent headers.
@@ -630,12 +634,15 @@ int sixlowpan_queue_frames(FAR struct radio_driver_s *radio,
            * necessary.
            */
 
-          iob = net_ioballoc(false);
+          iob = net_ioballoc(false, IOBUSER_NET_6LOWPAN);
           DEBUGASSERT(iob != NULL);
 
           /* Initialize the IOB */
 
+          iob->io_flink  = NULL;
+          iob->io_len    = 0;
           iob->io_offset = framer_hdrlen;
+          iob->io_pktlen = 0;
           fptr           = iob->io_data;
 
           /* Copy the HC1/HC06/IPv6 header the frame header from first

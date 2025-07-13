@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/timer/timer_settime.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -29,7 +27,6 @@
 #include <stdint.h>
 #include <time.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
@@ -46,7 +43,7 @@
 static inline void timer_signotify(FAR struct posix_timer_s *timer);
 static inline void timer_restart(FAR struct posix_timer_s *timer,
                                  wdparm_t itimer);
-static void timer_timeout(wdparm_t itimer);
+static void timer_timeout(int argc, wdparm_t itimer, ...);
 
 /****************************************************************************
  * Private Functions
@@ -72,13 +69,8 @@ static void timer_timeout(wdparm_t itimer);
 
 static inline void timer_signotify(FAR struct posix_timer_s *timer)
 {
-#ifdef CONFIG_SIG_EVTHREAD
   DEBUGVERIFY(nxsig_notification(timer->pt_owner, &timer->pt_event,
                                  SI_TIMER, &timer->pt_work));
-#else
-  DEBUGVERIFY(nxsig_notification(timer->pt_owner, &timer->pt_event,
-                                 SI_TIMER, NULL));
-#endif
 }
 
 /****************************************************************************
@@ -101,38 +93,13 @@ static inline void timer_signotify(FAR struct posix_timer_s *timer)
 static inline void timer_restart(FAR struct posix_timer_s *timer,
                                  wdparm_t itimer)
 {
-  clock_t ticks;
-  sclock_t delay;
-  sclock_t frame;
-
   /* If this is a repetitive timer, then restart the watchdog */
 
   if (timer->pt_delay)
     {
-      /* Check whether next expected time is reached */
-
-      ticks = clock_systime_ticks();
-      delay = ticks - timer->pt_expected;
-
-      /* Calculate the number of timer overruns and the next expected tick.
-       * The next expired tick frame can be computed as align up:
-       * frame <- (elapsed_ticks + pt_delay) / pt_delay
-       * For instance:
-       *  |   pt_delay   |   pt_delay   |   pt_delay   | ... |
-       *  ^ pt_expected                    ^ ticks     ^ next pt_expected
-       * In this case, frame equals 3.
-       * Then, pt_overrun <- frame - 1 and
-       * the next pt_expected <- pt_expected + frame * pt_delay.
-       * Assumption of correctness:
-       * (delay + timer->pt_delay) should not overflow.
-       */
-
-      frame = (delay + timer->pt_delay) / timer->pt_delay;
-      timer->pt_overrun   = frame - 1;
-      timer->pt_expected += frame * timer->pt_delay;
-
-      wd_start_abstick(&timer->pt_wdog, timer->pt_expected,
-                       timer_timeout, itimer);
+      timer->pt_last = timer->pt_delay;
+      wd_start(timer->pt_wdog, timer->pt_delay,
+               timer_timeout, 1, itimer);
     }
 }
 
@@ -144,7 +111,9 @@ static inline void timer_restart(FAR struct posix_timer_s *timer,
  *   signaled.
  *
  * Input Parameters:
+ *   argc   - the number of arguments (should be 1)
  *   itimer - A reference to the POSIX timer that just timed out
+ *   signo  - The signal to use to wake up the task
  *
  * Returned Value:
  *   None
@@ -154,14 +123,9 @@ static inline void timer_restart(FAR struct posix_timer_s *timer,
  *
  ****************************************************************************/
 
-static void timer_timeout(wdparm_t itimer)
+static void timer_timeout(int argc, wdparm_t itimer, ...)
 {
-  FAR struct posix_timer_s *timer = timer_gethandle((timer_t)itimer);
-
-  if (timer == NULL)
-    {
-      return;
-    }
+  FAR struct posix_timer_s *timer = (FAR struct posix_timer_s *)itimer;
 
   /* Send the specified signal to the specified task.   Increment the
    * reference count on the timer first so that will not be deleted until
@@ -255,7 +219,8 @@ int timer_settime(timer_t timerid, int flags,
                   FAR const struct itimerspec *value,
                   FAR struct itimerspec *ovalue)
 {
-  FAR struct posix_timer_s *timer = timer_gethandle(timerid);
+  FAR struct posix_timer_s *timer = (FAR struct posix_timer_s *)timerid;
+  irqstate_t intflags;
   sclock_t delay;
   int ret = OK;
 
@@ -271,19 +236,19 @@ int timer_settime(timer_t timerid, int flags,
     {
       /* Get the number of ticks before the underlying watchdog expires */
 
-      delay = wd_gettime(&timer->pt_wdog);
+      delay = wd_gettime(timer->pt_wdog);
 
       /* Convert that to a struct timespec and return it */
 
-      clock_ticks2time(&ovalue->it_value, delay);
-      clock_ticks2time(&ovalue->it_interval, timer->pt_delay);
+      clock_ticks2time(delay, &ovalue->it_value);
+      clock_ticks2time(timer->pt_last, &ovalue->it_interval);
     }
 
   /* Disarm the timer (in case the timer was already armed when
    * timer_settime() is called).
    */
 
-  wd_cancel(&timer->pt_wdog);
+  wd_cancel(timer->pt_wdog);
 
   /* Cancel any pending notification */
 
@@ -302,21 +267,33 @@ int timer_settime(timer_t timerid, int flags,
 
   if (value->it_interval.tv_sec > 0 || value->it_interval.tv_nsec > 0)
     {
-      delay = clock_time2ticks(&value->it_interval);
-      timer->pt_delay = delay;
+      clock_time2ticks(&value->it_interval, &delay);
+
+      /* REVISIT: Should pt_delay be sclock_t? */
+
+      timer->pt_delay = (int)delay;
     }
   else
     {
       timer->pt_delay = 0;
     }
 
+  /* We need to disable timer interrupts through the following section so
+   * that the system timer is stable.
+   */
+
+  intflags = enter_critical_section();
+
   /* Check if abstime is selected */
 
   if ((flags & TIMER_ABSTIME) != 0)
     {
-      /* Calculate a delay corresponding to the absolute time in 'value' */
+      /* Calculate a delay corresponding to the absolute time in 'value'.
+       * NOTE:  We have internal knowledge the clock_abstime2ticks only
+       * returns an error if clockid != CLOCK_REALTIME.
+       */
 
-      clock_abstime2ticks(timer->pt_clock, &value->it_value, &delay);
+      clock_abstime2ticks(CLOCK_REALTIME, &value->it_value, &delay);
     }
   else
     {
@@ -325,22 +302,41 @@ int timer_settime(timer_t timerid, int flags,
        * returns success.
        */
 
-      delay = clock_time2ticks(&value->it_value);
+      clock_time2ticks(&value->it_value, &delay);
     }
 
-  timer->pt_expected = clock_delay2abstick(delay);
+  /* If the time is in the past or now, then set up the next interval
+   * instead (assuming a repetitive timer).
+   */
+
+  if (delay <= 0)
+    {
+      delay = timer->pt_delay;
+    }
 
   /* Then start the watchdog */
 
-  ret = wd_start_abstick(&timer->pt_wdog, timer->pt_expected,
-                         timer_timeout, (wdparm_t)timer);
-
-  if (ret < 0)
+  if (delay > 0)
     {
-      set_errno(-ret);
-      ret = ERROR;
+      /* REVISIT: Should pt_last be sclock_t? Should wd_start delay be
+       *          sclock_t?
+       */
+
+      timer->pt_last = delay;
+      ret = wd_start(timer->pt_wdog, delay, timer_timeout,
+                     1, (wdparm_t)timer);
+      if (ret < 0)
+        {
+          set_errno(-ret);
+          ret = ERROR;
+        }
+      else
+        {
+          ret = OK;
+        }
     }
 
+  leave_critical_section(intflags);
   return ret;
 }
 

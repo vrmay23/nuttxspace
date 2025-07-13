@@ -1,22 +1,35 @@
 /****************************************************************************
  * include/syslog.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013-2014, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,10 +43,6 @@
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
 
-#ifdef CONFIG_SYSLOG_TO_SCHED_NOTE
-#include <nuttx/sched_note.h>
-#endif
-
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -41,7 +50,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* The option argument to openlog() is an OR of any of these:
  *
  *   LOG_CONS     - Write directly to system console if there is an error
@@ -58,13 +66,6 @@
  *   LOG_PID      - Include PID with each message.
  */
 
-#define LOG_PID         0x01    /* log the pid with each message */
-#define LOG_CONS        0x02    /* log on the console if errors in sending */
-#define LOG_ODELAY      0x04    /* delay open until first syslog() (default) */
-#define LOG_NDELAY      0x08    /* don't delay open */
-#define LOG_NOWAIT      0x10    /* don't wait for console forks: DEPRECATED */
-#define LOG_PERROR      0x20    /* log to stderr as well */
-
 /* Note: openlog() is not currently supported */
 
 /* The facility argument is used to specify what type of program is logging
@@ -75,8 +76,8 @@
  *   LOG_AUTHPRIV - Security/authorization messages (private)
  *   LOG_CRON     - Clock daemon (cron and at)
  *   LOG_DAEMON   - System daemons without separate facility value
- *   LOG_FTP      - FTP daemon
- *   LOG_KERN     - Kernel messages (these can't be generated from user
+ *   LOG_FTP      - Ftp daemon
+ *   LOG_KERN     - Lernel messages (these can't be generated from user
  *                  processes)
  *   LOG_LOCAL0 through LOG_LOCAL7 - Reserved for local use
  *   LOG_LPR      - Line printer subsystem
@@ -87,26 +88,26 @@
  *   LOG_UUCP     - UUCP subsystem
  */
 
-#define LOG_KERN      (0 << 3)
-#define LOG_USER      (1 << 3)
-#define LOG_MAIL      (2 << 3)
-#define LOG_DAEMON    (3 << 3)
-#define LOG_AUTH      (4 << 3)
-#define LOG_SYSLOG    (5 << 3)
-#define LOG_LPR       (6 << 3)
-#define LOG_NEWS      (7 << 3)
-#define LOG_UUCP      (8 << 3)
-#define LOG_CRON      (9 << 3)
-#define LOG_AUTHPRIV  (10 << 3)
-#define LOG_FTP       (11 << 3)
-#define LOG_LOCAL0    (16 << 3)
-#define LOG_LOCAL1    (17 << 3)
-#define LOG_LOCAL2    (18 << 3)
-#define LOG_LOCAL3    (19 << 3)
-#define LOG_LOCAL4    (20 << 3)
-#define LOG_LOCAL5    (21 << 3)
-#define LOG_LOCAL6    (22 << 3)
-#define LOG_LOCAL7    (23 << 3)
+#define LOG_AUTH      0
+#define LOG_AUTHPRIV  0
+#define LOG_CRON      0
+#define LOG_DAEMON    0
+#define LOG_FTP       0
+#define LOG_KERN      0
+#define LOG_LOCAL0    0
+#define LOG_LOCAL1    0
+#define LOG_LOCAL2    0
+#define LOG_LOCAL3    0
+#define LOG_LOCAL4    0
+#define LOG_LOCAL5    0
+#define LOG_LOCAL6    0
+#define LOG_LOCAL7    0
+#define LOG_LPR       0
+#define LOG_MAIL      0
+#define LOG_NEWS      0
+#define LOG_SYSLOG    0
+#define LOG_USER      0
+#define LOG_UUCP      0
 
 /* This determines the importance of the message. The levels are, in order
  * of decreasing importance:
@@ -126,10 +127,6 @@
 #define LOG_MASK(p)   (1 << (p))
 #define LOG_UPTO(p)   ((1 << ((p)+1)) - 1)
 #define LOG_ALL       0xff
-
-#define LOG_PRIMASK            0x07               /* mask to extract priority part (internal) */
-#define LOG_PRI(p)            ((p) & LOG_PRIMASK) /* extract priority */
-#define LOG_MAKEPRI(fac, pri) ((fac) | (pri))
 
 /****************************************************************************
  * Public Function Prototypes
@@ -179,8 +176,9 @@ extern "C"
  *
  ****************************************************************************/
 
-/* Not supported */
-#define openlog(i, o, f) {(void)(i); (void)(o); (void)(f);}
+#if 0 /* Not supported */
+void openlog(FAR const char *ident, int option, int facility);
+#endif
 
 /****************************************************************************
  * Name: closelog
@@ -192,8 +190,9 @@ extern "C"
  *
  ****************************************************************************/
 
-/* Not supported */
-#define closelog()
+#if 0 /* Not supported */
+void closelog(void);
+#endif
 
 /****************************************************************************
  * Name: syslog and vsyslog
@@ -213,16 +212,8 @@ extern "C"
  *
  ****************************************************************************/
 
-#ifndef CONFIG_SYSLOG_TO_SCHED_NOTE
-void syslog(int priority, FAR const IPTR char *fmt, ...) syslog_like(2, 3);
-void vsyslog(int priority, FAR const IPTR char *fmt, va_list ap)
-     syslog_like(2, 0);
-#else
-#  define syslog(priority, fmt, ...) \
-          sched_note_printf(NOTE_TAG_LOG + priority, fmt, ##__VA_ARGS__)
-#  define vsyslog(priority, fmt, ap) \
-          sched_note_vprintf(NOTE_TAG_LOG + priority, fmt, ap)
-#endif
+void syslog(int priority, FAR const IPTR char *fmt, ...);
+void vsyslog(int priority, FAR const IPTR char *fmt, va_list ap);
 
 /****************************************************************************
  * Name: setlogmask
@@ -236,8 +227,9 @@ void vsyslog(int priority, FAR const IPTR char *fmt, va_list ap)
  *   to a priority p is LOG_MASK(p); LOG_UPTO(p) provides the mask of all
  *   priorities in the above list up to and including p.
  *
- *   NOTE:  setlogmask is not a thread-safe, re-entrant function.  Concurrent
- *   use of setlogmask() will have undefined behavior.
+ *   Per OpenGroup.org "If the maskpri argument is 0, the current log mask
+ *   is not modified."  In this implementation, the value zero is permitted
+ *   in order to disable all syslog levels.
  *
  *   REVISIT: Per POSIX the syslog mask should be a per-process value but in
  *   NuttX, the scope of the mask is dependent on the nature of the build:

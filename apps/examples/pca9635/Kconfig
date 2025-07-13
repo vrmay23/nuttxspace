@@ -6,7 +6,6 @@
 config EXAMPLES_PCA9635
 	tristate "PCA9635 PWM LED example"
 	default n
-	depends on PCA9635PW
 	---help---
 		Enable the PCA9635 example
 

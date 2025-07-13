@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/risc-v/src/litex/litex_lowputc.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -30,7 +28,9 @@
 
 #include <arch/board/board.h>
 
-#include "riscv_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "litex_config.h"
 #include "hardware/litex_memorymap.h"
 #include "hardware/litex_uart.h"
@@ -70,14 +70,14 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: riscv_lowputc
+ * Name: up_lowputc
  *
  * Description:
  *   Output one byte on the serial console
  *
  ****************************************************************************/
 
-void riscv_lowputc(char ch)
+void up_lowputc(char ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   /* Wait until the TX data register is empty */
@@ -111,7 +111,7 @@ void litex_lowsetup(void)
 
 #if defined(HAVE_SERIAL_CONSOLE) && !defined(CONFIG_SUPPRESS_UART_CONFIG)
 
-  /* default baudrate set by fpga fabric is 1e6 */
+  /* defualt baudrate set by fpga fabric is 1e6 */
 
   /* Enable TX */
 

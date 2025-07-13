@@ -1,9 +1,11 @@
-/****************************************************************************
+/**************************************************************************************
  * drivers/lcd/ra8875.h
+ * Definitions for the RAiO Technologies RA8875 LCD controller
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Intuitive Aerial AB. All rights reserved.
- * SPDX-FileContributor: Marten Svanfeldt <marten@intuitiveaerial.com>
+ *   Copyright (C) 2015 Intuitive Aerial AB. All rights reserved.
+ *   Author: Marten Svanfeldt <marten@intuitiveaerial.com>
+ *
+ * References: RA8875, Rev 1.6, Apr 2013, RAiO Technologies Inc
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,22 +34,22 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 #ifndef __DRIVERS_LCD_RA8875_H
 #define __DRIVERS_LCD_RA8875_H
 
-/****************************************************************************
+/**************************************************************************************
  * Included Files
- ****************************************************************************/
+ **************************************************************************************/
 
 #include <nuttx/config.h>
 
 #ifdef CONFIG_LCD_RA8875
 
-/****************************************************************************
+/**************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ **************************************************************************************/
 
 /* RA8875 Register Addresses (All with RS=1) */
 
@@ -148,7 +150,6 @@
 #define RA8875_DTPV1      0xAC  /* Draw Triangle Point 2 Vertical Address Register 1 */
 
 /* Bit definitions */
-
 /* Power and display control */
 
 #define RA8875_PWRR_DISPLAY_OFF         (0)

@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/xtensa/include/syscall.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,106 +44,9 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-
-#ifndef __ASSEMBLY__
-#  include <stdint.h>
-#endif
-
-#include <arch/xtensa/core.h>
-#include <arch/xtensa/xtensa_corebits.h>
-
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define SYS_syscall 0x00
-
-/* This logic uses three system calls {0,1,2} for context switching and one
- * for the syscall return.  So a minimum of four syscall values must be
- * reserved.  If CONFIG_BUILD_FLAT isn't defined, then four more syscall
- * values must be reserved.
- */
-
-#ifndef CONFIG_BUILD_FLAT
-#  define CONFIG_SYS_RESERVED 9
-#else
-#  define CONFIG_SYS_RESERVED 5
-#endif
-
-/* Xtensa system calls ******************************************************/
-
-/* SYS call 0:
- *
- * int up_saveusercontext(void *saveregs);
- */
-
-#define SYS_save_context          (0)
-
-/* SYS call 1:
- *
- * void xtensa_context_restore(uint32_t *restoreregs) noreturn_function;
- */
-
-#define SYS_restore_context       (1)
-
-/* SYS call 2:
- *
- * void xtensa_switchcontext(uint32_t **saveregs, uint32_t *restoreregs);
- */
-
-#define SYS_switch_context        (2)
-
-/* SYS call 3:
- *
- * void xtensa_flushcontext(void);
- */
-
-#define SYS_flush_context         (3)
-
-#ifdef CONFIG_LIB_SYSCALL
-
-/* SYS call 3:
- *
- * void xtensa_syscall_return(void);
- */
-
-#define SYS_syscall_return        (4)
-#endif /* CONFIG_LIB_SYSCALL */
-
-#ifndef CONFIG_BUILD_FLAT
-/* SYS call 4:
- *
- * void up_task_start(main_t taskentry, int argc, char *argv[])
- *        noreturn_function;
- */
-
-#define SYS_task_start            (5)
-
-/* SYS call 5:
- *
- * void up_pthread_start(pthread_trampoline_t startup,
- *                       pthread_startroutine_t entrypt, pthread_addr_t arg)
- *        noreturn_function
- */
-
-#define SYS_pthread_start         (6)
-
-/* SYS call 6:
- *
- * void signal_handler(_sa_sigaction_t sighand, int signo,
- *                     siginfo_t *info, void *ucontext);
- */
-
-#define SYS_signal_handler        (7)
-
-/* SYS call 7:
- *
- * void signal_handler_return(void);
- */
-
-#define SYS_signal_handler_return (8)
-#endif /* !CONFIG_BUILD_FLAT */
 
 /****************************************************************************
  * Public Types
@@ -140,8 +56,6 @@
  * Inline functions
  ****************************************************************************/
 
-#ifndef __ASSEMBLY__
-
 /****************************************************************************
  * Public Data
  ****************************************************************************/
@@ -150,6 +64,7 @@
  * Public Function Prototypes
  ****************************************************************************/
 
+#ifndef __ASSEMBLY__
 #ifdef __cplusplus
 #define EXTERN extern "C"
 extern "C"
@@ -158,205 +73,10 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/****************************************************************************
- * Name: sys_call0
- *
- * Description:
- *   System call SYS_ argument and no additional parameters.
- *
- ****************************************************************************/
-
-static inline uintptr_t sys_call0(unsigned int nbr)
-{
-  register long reg0 __asm__("a2") = (long)(nbr);
-
-  __asm__ __volatile__
-  (
-    "syscall\n"
-    : "=r"(reg0)
-    : "r"(reg0)
-    : "memory"
-  );
-
-  return reg0;
-}
-
-/****************************************************************************
- * Name: sys_call1
- *
- * Description:
- *   System call SYS_ argument and one additional parameter.
- *
- ****************************************************************************/
-
-static inline uintptr_t sys_call1(unsigned int nbr, uintptr_t parm1)
-{
-  register long reg0 __asm__("a2") = (long)(nbr);
-  register long reg1 __asm__("a3") = (long)(parm1);
-
-  __asm__ __volatile__
-  (
-    "syscall\n"
-    : "=r"(reg0)
-    : "r"(reg0), "r"(reg1)
-    : "memory"
-  );
-
-  return reg0;
-}
-
-/****************************************************************************
- * Name: sys_call2
- *
- * Description:
- *   System call SYS_ argument and two additional parameters.
- *
- ****************************************************************************/
-
-static inline uintptr_t sys_call2(unsigned int nbr, uintptr_t parm1,
-                                  uintptr_t parm2)
-{
-  register long reg0 __asm__("a2") = (long)(nbr);
-  register long reg2 __asm__("a4") = (long)(parm2);
-  register long reg1 __asm__("a3") = (long)(parm1);
-
-  __asm__ __volatile__
-  (
-    "syscall\n"
-    : "=r"(reg0)
-    : "r"(reg0), "r"(reg1), "r"(reg2)
-    : "memory"
-  );
-
-  return reg0;
-}
-
-/****************************************************************************
- * Name: sys_call3
- *
- * Description:
- *   System call SYS_ argument and three additional parameters.
- *
- ****************************************************************************/
-
-static inline uintptr_t sys_call3(unsigned int nbr, uintptr_t parm1,
-                                  uintptr_t parm2, uintptr_t parm3)
-{
-  register long reg0 __asm__("a2") = (long)(nbr);
-  register long reg3 __asm__("a5") = (long)(parm3);
-  register long reg2 __asm__("a4") = (long)(parm2);
-  register long reg1 __asm__("a3") = (long)(parm1);
-
-  __asm__ __volatile__
-  (
-    "syscall\n"
-    : "=r"(reg0)
-    : "r"(reg0), "r"(reg1), "r"(reg2),
-      "r"(reg3)
-    : "memory"
-  );
-
-  return reg0;
-}
-
-/****************************************************************************
- * Name: sys_call4
- *
- * Description:
- *   System call SYS_ argument and four additional parameters.
- *
- ****************************************************************************/
-
-static inline uintptr_t sys_call4(unsigned int nbr, uintptr_t parm1,
-                                  uintptr_t parm2, uintptr_t parm3,
-                                  uintptr_t parm4)
-{
-  register long reg0 __asm__("a2") = (long)(nbr);
-  register long reg4 __asm__("a6") = (long)(parm4);
-  register long reg3 __asm__("a5") = (long)(parm3);
-  register long reg2 __asm__("a4") = (long)(parm2);
-  register long reg1 __asm__("a3") = (long)(parm1);
-
-  __asm__ __volatile__
-  (
-    "syscall\n"
-    : "=r"(reg0)
-    : "r"(reg0), "r"(reg1), "r"(reg2),
-      "r"(reg3), "r"(reg4)
-    : "memory"
-  );
-
-  return reg0;
-}
-
-/****************************************************************************
- * Name: sys_call5
- *
- * Description:
- *   System call SYS_ argument and five additional parameters.
- *
- ****************************************************************************/
-
-static inline uintptr_t sys_call5(unsigned int nbr, uintptr_t parm1,
-                                  uintptr_t parm2, uintptr_t parm3,
-                                  uintptr_t parm4, uintptr_t parm5)
-{
-  register long reg0 __asm__("a2") = (long)(nbr);
-  register long reg5 __asm__("a7") = (long)(parm5);
-  register long reg4 __asm__("a6") = (long)(parm4);
-  register long reg3 __asm__("a5") = (long)(parm3);
-  register long reg2 __asm__("a4") = (long)(parm2);
-  register long reg1 __asm__("a3") = (long)(parm1);
-
-  __asm__ __volatile__
-  (
-    "syscall\n"
-    : "=r"(reg0)
-    : "r"(reg0), "r"(reg1), "r"(reg2),
-      "r"(reg3), "r"(reg4), "r"(reg5)
-    : "memory"
-  );
-
-  return reg0;
-}
-
-/****************************************************************************
- * Name: sys_call6
- *
- * Description:
- *   System call SYS_ argument and six additional parameters.
- *
- ****************************************************************************/
-
-static inline uintptr_t sys_call6(unsigned int nbr, uintptr_t parm1,
-                                  uintptr_t parm2, uintptr_t parm3,
-                                  uintptr_t parm4, uintptr_t parm5,
-                                  uintptr_t parm6)
-{
-  register long reg0 __asm__("a2") = (long)(nbr);
-  register long reg6 __asm__("a8") = (long)(parm6);
-  register long reg5 __asm__("a7") = (long)(parm5);
-  register long reg4 __asm__("a6") = (long)(parm4);
-  register long reg3 __asm__("a5") = (long)(parm3);
-  register long reg2 __asm__("a4") = (long)(parm2);
-  register long reg1 __asm__("a3") = (long)(parm1);
-
-  __asm__ __volatile__
-  (
-    "syscall\n"
-    : "=r"(reg0)
-    : "r"(reg0), "r"(reg1), "r"(reg2),
-      "r"(reg3), "r"(reg4), "r"(reg5), "r"(reg6)
-    : "memory"
-  );
-
-  return reg0;
-}
-
 #undef EXTERN
 #ifdef __cplusplus
 }
 #endif
+#endif
 
-#endif /* __ASSEMBLY__ */
 #endif /* __ARCH_XTENSA_INCLUDE_SYSCALL_H */

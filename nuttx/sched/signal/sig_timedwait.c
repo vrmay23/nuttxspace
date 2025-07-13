@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/signal/sig_timedwait.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2012-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -41,7 +54,6 @@
 #include <nuttx/wdog.h>
 #include <nuttx/signal.h>
 #include <nuttx/cancelpt.h>
-#include <nuttx/queue.h>
 
 #include "sched/sched.h"
 #include "signal/signal.h"
@@ -75,53 +87,60 @@
  *
  ****************************************************************************/
 
-static void nxsig_timeout(wdparm_t arg)
+static void nxsig_timeout(int argc, wdparm_t itcb, ...)
 {
-  FAR struct tcb_s *wtcb = (FAR struct tcb_s *)(uintptr_t)arg;
-
+#ifdef CONFIG_SMP
   irqstate_t flags;
+#endif
 
-  /* We must be in a critical section in order to call up_switch_context()
-   * below.
+  /* On many small machines, pointers are encoded and cannot be simply cast
+   * from uint32_t to struct tcb_s *.  The following union works around this
+   * (see wdogparm_t).  This odd logic could be conditioned on
+   * CONFIG_CAN_CAST_POINTERS, but it is not too bad in any case.
+   */
+
+  union
+  {
+    FAR struct tcb_s *wtcb;
+    wdparm_t itcb;
+  } u;
+
+  u.itcb = itcb;
+  DEBUGASSERT(u.wtcb);
+
+#ifdef CONFIG_SMP
+  /* We must be in a critical section in order to call up_unblock_task()
+   * below.  If we are running on a single CPU architecture, then we know
+   * interrupts a disabled an there is no need to explicitly call
+   * enter_critical_section().  However, in the SMP case,
+   * enter_critical_section() does much more than just disable interrupts on
+   * the local CPU; it also manages spinlocks to assure the stability of the
+   * TCB that we are manipulating.
    */
 
   flags = enter_critical_section();
+#endif
 
   /* There may be a race condition -- make sure the task is
    * still waiting for a signal
    */
 
-  if (wtcb->task_state == TSTATE_WAIT_SIG)
+  if (u.wtcb->task_state == TSTATE_WAIT_SIG)
     {
-      FAR struct tcb_s *rtcb = this_task();
-
-      if (wtcb->sigunbinfo != NULL)
-        {
-          wtcb->sigunbinfo->si_signo           = SIG_WAIT_TIMEOUT;
-          wtcb->sigunbinfo->si_code            = SI_TIMER;
-          wtcb->sigunbinfo->si_errno           = ETIMEDOUT;
-          wtcb->sigunbinfo->si_value.sival_int = 0;
+      u.wtcb->sigunbinfo.si_signo           = SIG_WAIT_TIMEOUT;
+      u.wtcb->sigunbinfo.si_code            = SI_TIMER;
+      u.wtcb->sigunbinfo.si_errno           = ETIMEDOUT;
+      u.wtcb->sigunbinfo.si_value.sival_int = 0;
 #ifdef CONFIG_SCHED_HAVE_PARENT
-          wtcb->sigunbinfo->si_pid             = 0;  /* Not applicable */
-          wtcb->sigunbinfo->si_status          = OK;
+      u.wtcb->sigunbinfo.si_pid             = 0;  /* Not applicable */
+      u.wtcb->sigunbinfo.si_status          = OK;
 #endif
-        }
-
-      /* Remove the task from waiting list */
-
-      dq_rem((FAR dq_entry_t *)wtcb, list_waitingforsignal());
-
-      /* Add the task to ready-to-run task list, and
-       * perform the context switch if one is needed
-       */
-
-      if (nxsched_add_readytorun(wtcb))
-        {
-          up_switch_context(wtcb, rtcb);
-        }
+      up_unblock_task(u.wtcb);
     }
 
+#ifdef CONFIG_SMP
   leave_critical_section(flags);
+#endif
 }
 
 /****************************************************************************
@@ -143,7 +162,7 @@ void nxsig_wait_irq(FAR struct tcb_s *wtcb, int errcode)
 #ifdef CONFIG_SMP
   irqstate_t flags;
 
-  /* We must be in a critical section in order to call up_switch_context()
+  /* We must be in a critical section in order to call up_unblock_task()
    * below.  If we are running on a single CPU architecture, then we know
    * interrupts a disabled an there is no need to explicitly call
    * enter_critical_section().  However, in the SMP case,
@@ -161,32 +180,15 @@ void nxsig_wait_irq(FAR struct tcb_s *wtcb, int errcode)
 
   if (wtcb->task_state == TSTATE_WAIT_SIG)
     {
-      FAR struct tcb_s *rtcb = this_task();
-
-      if (wtcb->sigunbinfo != NULL)
-        {
-          wtcb->sigunbinfo->si_signo           = SIG_CANCEL_TIMEOUT;
-          wtcb->sigunbinfo->si_code            = SI_USER;
-          wtcb->sigunbinfo->si_errno           = errcode;
-          wtcb->sigunbinfo->si_value.sival_int = 0;
+      wtcb->sigunbinfo.si_signo           = SIG_CANCEL_TIMEOUT;
+      wtcb->sigunbinfo.si_code            = SI_USER;
+      wtcb->sigunbinfo.si_errno           = errcode;
+      wtcb->sigunbinfo.si_value.sival_int = 0;
 #ifdef CONFIG_SCHED_HAVE_PARENT
-          wtcb->sigunbinfo->si_pid             = 0;  /* Not applicable */
-          wtcb->sigunbinfo->si_status          = OK;
+      wtcb->sigunbinfo.si_pid             = 0;  /* Not applicable */
+      wtcb->sigunbinfo.si_status          = OK;
 #endif
-        }
-
-      /* Remove the task from waiting list */
-
-      dq_rem((FAR dq_entry_t *)wtcb, list_waitingforsignal());
-
-      /* Add the task to ready-to-run task list, and
-       * perform the context switch if one is needed
-       */
-
-      if (nxsched_add_readytorun(wtcb))
-        {
-          up_switch_context(wtcb, rtcb);
-        }
+      up_unblock_task(wtcb);
     }
 
 #ifdef CONFIG_SMP
@@ -194,155 +196,6 @@ void nxsig_wait_irq(FAR struct tcb_s *wtcb, int errcode)
 #endif
 }
 #endif /* CONFIG_CANCELLATION_POINTS */
-
-/****************************************************************************
- * Name: nxsig_clockwait
- *
- * Description:
- *   This function selects the pending signal set specified by the argument
- *   set.  If multiple signals are pending in set, it will remove and return
- *   the lowest numbered one.  If no signals in set are pending at the time
- *   of the call, the calling process will be suspended until one of the
- *   signals in set becomes pending, OR until the process is interrupted by
- *   an unblocked signal, OR until the time interval specified by timeout
- *   (if any), has expired. If timeout is NULL, then the timeout interval
- *   is forever.
- *
- *   If the info argument is non-NULL, the selected signal number is stored
- *   in the si_signo member and the cause of the signal is stored in the
- *   si_code member.  The content of si_value is only meaningful if the
- *   signal was generated by sigqueue() (or nxsig_queue).
- *
- *   This is an internal OS interface.  It is functionally equivalent to
- *   sigtimedwait() except that:
- *
- *   - It is not a cancellation point, and
- *   - It does not modify the errno value.
- *
- * Input Parameters:
- *   clockid - The ID of the clock to be used to measure the timeout.
- *   flags   - Open flags.  TIMER_ABSTIME  is the only supported flag.
- *   rqtp - The amount of time to be suspended from execution.
- *   rmtp - If the rmtp argument is non-NULL, the timespec structure
- *          referenced by it is updated to contain the amount of time
- *          remaining in the interval (the requested time minus the time
- *          actually slept)
- *
- * Returned Value:
- *   This is an internal OS interface and should not be used by applications.
- *   A negated errno value is returned on failure.
- *
- *   EAGAIN - wait time is zero.
- *   EINTR  - The wait was interrupted by an unblocked, caught signal.
- *
- * Notes:
- *  This function should be called with critical section set.
- *
- ****************************************************************************/
-
-int nxsig_clockwait(int clockid, int flags,
-                    FAR const struct timespec *rqtp,
-                    FAR struct timespec *rmtp)
-{
-  FAR struct tcb_s *rtcb;
-  irqstate_t        iflags;
-  clock_t expect = 0;
-  clock_t stop;
-
-  if (rqtp && (rqtp->tv_nsec < 0 || rqtp->tv_nsec >= 1000000000))
-    {
-      return -EINVAL;
-    }
-
-  /* If rqtp is zero, yield CPU and return
-   * Notice: The behavior of sleep(0) is not defined in POSIX, so there are
-   * different implementations:
-   * 1. In Linux, nanosleep(0) will call schedule() to yield CPU:
-   *    https://elixir.bootlin.com/linux/latest/source/kernel/time/
-   *    hrtimer.c#L2038
-   * 2. In BSD, nanosleep(0) will return immediately:
-   *    https://github.com/freebsd/freebsd-src/blob/
-   *    475fa89800086718bd9249fd4dc3f862549f1f78/crypto/openssh/
-   *    openbsd-compat/bsd-misc.c#L243
-   */
-
-  if (rqtp && rqtp->tv_sec == 0 && rqtp->tv_nsec == 0)
-    {
-      sched_yield();
-      return -EAGAIN;
-    }
-
-#ifdef CONFIG_CANCELLATION_POINTS
-  /* nxsig_clockwait() is not a cancellation point, but it may be called
-   * from a cancellation point.  So if a cancellation is pending, we
-   * must exit immediately without waiting.
-   */
-
-  if (check_cancellation_point())
-    {
-      /* If there is a pending cancellation, then do not perform
-       * the wait.  Exit now with ECANCELED.
-       */
-
-      return -ECANCELED;
-    }
-#endif
-
-  iflags = enter_critical_section();
-  rtcb = this_task();
-
-  if (rqtp)
-    {
-      /* Start the watchdog timer */
-
-      if ((flags & TIMER_ABSTIME) == 0)
-        {
-          expect = clock_delay2abstick(clock_time2ticks(rqtp));
-          wd_start_abstick(&rtcb->waitdog, expect,
-                           nxsig_timeout, (uintptr_t)rtcb);
-        }
-      else if (clockid == CLOCK_REALTIME)
-        {
-          wd_start_realtime(&rtcb->waitdog, rqtp,
-                            nxsig_timeout, (uintptr_t)rtcb);
-        }
-      else
-        {
-          wd_start_abstime(&rtcb->waitdog, rqtp,
-                           nxsig_timeout, (uintptr_t)rtcb);
-        }
-    }
-
-  /* Remove the tcb task from the ready-to-run list. */
-
-  nxsched_remove_self(rtcb);
-
-  /* Add the task to the specified blocked task list */
-
-  rtcb->task_state = TSTATE_WAIT_SIG;
-  dq_addlast((FAR dq_entry_t *)rtcb, &g_waitingforsignal);
-
-  /* Now, perform the context switch if one is needed */
-
-  up_switch_context(this_task(), rtcb);
-
-  /* We no longer need the watchdog */
-
-  if (rqtp)
-    {
-      wd_cancel(&rtcb->waitdog);
-      stop = clock_systime_ticks();
-    }
-
-  leave_critical_section(iflags);
-
-  if (rqtp && rmtp && expect)
-    {
-      clock_ticks2time(rmtp, expect > stop ? expect - stop : 0);
-    }
-
-  return 0;
-}
 
 /****************************************************************************
  * Name: nxsig_timedwait
@@ -358,7 +211,7 @@ int nxsig_clockwait(int clockid, int flags,
  *   is forever.
  *
  *   If the info argument is non-NULL, the selected signal number is stored
- *   in the si_signo member and the cause of the signal is stored in the
+ *   in the si_signo member and the cause of the signal is store din the
  *   si_code member.  The content of si_value is only meaningful if the
  *   signal was generated by sigqueue() (or nxsig_queue).
  *
@@ -387,14 +240,14 @@ int nxsig_clockwait(int clockid, int flags,
 int nxsig_timedwait(FAR const sigset_t *set, FAR struct siginfo *info,
                     FAR const struct timespec *timeout)
 {
-  FAR struct tcb_s *rtcb;
+  FAR struct tcb_s *rtcb = this_task();
   sigset_t intersection;
   FAR sigpendq_t *sigpend;
   irqstate_t flags;
-  siginfo_t unbinfo;
+  int32_t waitticks;
   int ret;
 
-  DEBUGASSERT(set != NULL);
+  DEBUGASSERT(set != NULL && rtcb->waitdog == NULL);
 
   /* Several operations must be performed below:  We must determine if any
    * signal is pending and, if not, wait for the signal.  Since signals can
@@ -403,15 +256,13 @@ int nxsig_timedwait(FAR const sigset_t *set, FAR struct siginfo *info,
    */
 
   flags = enter_critical_section();
-  rtcb  = this_task();
 
   /* Check if there is a pending signal corresponding to one of the
    * signals in the pending signal set argument.
    */
 
-  intersection = nxsig_pendingset(rtcb);
-  sigandset(&intersection, &intersection, set);
-  if (!sigisemptyset(&intersection))
+  intersection = *set & nxsig_pendingset(rtcb);
+  if (intersection != NULL_SIGNAL_SET)
     {
       /* One or more of the signals in intersections is sufficient to cause
        * us to not wait.  Pick the lowest numbered signal and mark it not
@@ -436,50 +287,132 @@ int nxsig_timedwait(FAR const sigset_t *set, FAR struct siginfo *info,
       /* Then dispose of the pending signal structure properly */
 
       nxsig_release_pendingsignal(sigpend);
+      leave_critical_section(flags);
     }
 
   /* We will have to wait for a signal to be posted to this task. */
 
   else
     {
-      rtcb->sigunbinfo = (info == NULL) ? &unbinfo : info;
+#ifdef CONFIG_CANCELLATION_POINTS
+      /* nxsig_timedwait() is not a cancellation point, but it may be called
+       * from a cancellation point.  So if a cancellation is pending, we
+       * must exit immediately without waiting.
+       */
+
+      if (check_cancellation_point())
+        {
+          /* If there is a pending cancellation, then do not perform
+           * the wait.  Exit now with ECANCELED.
+           */
+
+          leave_critical_section(flags);
+          return -ECANCELED;
+        }
+#endif
 
       /* Save the set of pending signals to wait for */
 
       rtcb->sigwaitmask = *set;
 
-      leave_critical_section(flags);
+      /* Check if we should wait for the timeout */
 
-      ret = nxsig_clockwait(CLOCK_REALTIME, 0, timeout, NULL);
-      if (ret < 0)
+      if (timeout != NULL)
         {
-          rtcb->sigunbinfo = NULL;
-          return ret;
+          /* Convert the timespec to system clock ticks, making sure that
+           * the resulting delay is greater than or equal to the requested
+           * time in nanoseconds.
+           */
+
+#ifdef CONFIG_HAVE_LONG_LONG
+          uint64_t waitticks64 = ((uint64_t)timeout->tv_sec * NSEC_PER_SEC +
+                                  (uint64_t)timeout->tv_nsec +
+                                  NSEC_PER_TICK - 1) /
+                                 NSEC_PER_TICK;
+          DEBUGASSERT(waitticks64 <= UINT32_MAX);
+          waitticks = (uint32_t)waitticks64;
+#else
+          uint32_t waitmsec;
+
+          DEBUGASSERT(timeout->tv_sec < UINT32_MAX / MSEC_PER_SEC);
+          waitmsec = timeout->tv_sec * MSEC_PER_SEC +
+                     (timeout->tv_nsec + NSEC_PER_MSEC - 1) / NSEC_PER_MSEC;
+          waitticks = MSEC2TICK(waitmsec);
+#endif
+
+          /* Create a watchdog */
+
+          rtcb->waitdog = wd_create();
+          DEBUGASSERT(rtcb->waitdog);
+
+          if (rtcb->waitdog)
+            {
+              /* This little bit of nonsense is necessary for some
+               * processors where sizeof(pointer) < sizeof(uint32_t).
+               * see wdog.h.
+               */
+
+              union wdparm_u wdparm;
+              wdparm.pvarg = (FAR void *)rtcb;
+
+              /* Start the watchdog */
+
+              wd_start(rtcb->waitdog, waitticks,
+                       nxsig_timeout, 1, wdparm.pvarg);
+
+              /* Now wait for either the signal or the watchdog, but
+               * first, make sure this is not the idle task,
+               * descheduling that isn't going to end well.
+               */
+
+              DEBUGASSERT(NULL != rtcb->flink);
+              up_block_task(rtcb, TSTATE_WAIT_SIG);
+
+              /* We no longer need the watchdog */
+
+              wd_delete(rtcb->waitdog);
+              rtcb->waitdog = NULL;
+            }
+
+          /* REVISIT: And do what if there are no watchdog timers?  The wait
+           * will fail and we will return something bogus.
+           */
         }
 
-      flags = enter_critical_section();
+      /* No timeout, just wait */
+
+      else
+        {
+          /* And wait until one of the unblocked signals is posted,
+           * but first make sure this is not the idle task,
+           * descheduling that isn't going to end well.
+           */
+
+          DEBUGASSERT(NULL != rtcb->flink);
+          up_block_task(rtcb, TSTATE_WAIT_SIG);
+        }
 
       /* We are running again, clear the sigwaitmask */
 
-      sigemptyset(&rtcb->sigwaitmask);
+      rtcb->sigwaitmask = NULL_SIGNAL_SET;
 
       /* When we awaken, the cause will be in the TCB.  Get the signal number
        * or timeout) that awakened us.
        */
 
-      if (GOOD_SIGNO(rtcb->sigunbinfo->si_signo))
+      if (GOOD_SIGNO(rtcb->sigunbinfo.si_signo))
         {
           /* We were awakened by a signal... but is it one of the signals
            * that we were waiting for?
            */
 
-          if (nxsig_ismember(set, rtcb->sigunbinfo->si_signo))
+          if (sigismember(set, rtcb->sigunbinfo.si_signo))
             {
               /* Yes.. the return value is the number of the signal that
                * awakened us.
                */
 
-              ret = rtcb->sigunbinfo->si_signo;
+              ret = rtcb->sigunbinfo.si_signo;
             }
           else
             {
@@ -495,11 +428,11 @@ int nxsig_timedwait(FAR const sigset_t *set, FAR struct siginfo *info,
            */
 
 #ifdef CONFIG_CANCELLATION_POINTS
-          if (rtcb->sigunbinfo->si_signo == SIG_CANCEL_TIMEOUT)
+          if (rtcb->sigunbinfo.si_signo == SIG_CANCEL_TIMEOUT)
             {
               /* The wait was canceled */
 
-              ret = -rtcb->sigunbinfo->si_errno;
+              ret = -rtcb->sigunbinfo.si_errno;
               DEBUGASSERT(ret < 0);
             }
           else
@@ -509,15 +442,20 @@ int nxsig_timedwait(FAR const sigset_t *set, FAR struct siginfo *info,
                * error.
                */
 
-              DEBUGASSERT(rtcb->sigunbinfo->si_signo == SIG_WAIT_TIMEOUT);
+              DEBUGASSERT(rtcb->sigunbinfo.si_signo == SIG_WAIT_TIMEOUT);
               ret = -EAGAIN;
             }
         }
 
-      rtcb->sigunbinfo = NULL;
-    }
+      /* Return the signal info to the caller if so requested */
 
-  leave_critical_section(flags);
+      if (info)
+        {
+          memcpy(info, &rtcb->sigunbinfo, sizeof(struct siginfo));
+        }
+
+      leave_critical_section(flags);
+    }
 
   return ret;
 }

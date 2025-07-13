@@ -1,31 +1,44 @@
-/****************************************************************************
+/************************************************************************************
  * arch/z16/src/z16f/chip.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_Z16_SRC_Z16F_CHIP_H
 #define __ARCH_Z16_SRC_Z16F_CHIP_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -38,49 +51,49 @@
 #  include <nuttx/spi/spi.h>
 #endif
 
-#include "z16_internal.h"
+#include "common/up_internal.h"
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
-/* Hexadecimal Representation ***********************************************/
+/* Hexadecimal Representation *******************************************************/
 
 #ifdef __ASSEMBLY__
-#  define _HX32(w)                %##w
-#  define _HX8(b)                 %##b
+# define _HX32(w)                 %##w
+# define _HX8(b)                  %##b
 #else
-#  define _HX32(w)                0x##w
-#  define _HX8(b)                 0x##b
+# define _HX32(w)                 0x##w
+# define _HX8(b)                  0x##b
 #endif
 
-/* Z16F Chip Variants *******************************************************/
+/* Z16F Chip Variants ***************************************************************/
 
 #if defined(CONFIG_ARCH_CHIP_Z16F2810)
-#  define Z16F_INVMEM_SIZE        (128*1024)
-#  define Z16F_IRAM_SIZE          (4*1024)
+# define Z16F_INVMEM_SIZE         (128*1024)
+# define Z16F_IRAM_SIZE           (4*1024)
 # undef  Z16F_HAVE_EXTMEM
 # undef  Z16F_HAVE_GPIO_PORTJ
 # undef  Z16F_HAVE_GPIO_PORTK
 #elif defined(CONFIG_ARCH_CHIP_Z16F2811)
-#  define Z16F_INVMEM_SIZE        (128*1024)
-#  define Z16F_IRAM_SIZE          (4*1024)
-#  define Z16F_HAVE_EXTMEM        1
-#  define Z16F_HAVE_GPIO_PORTJ    1
-#  define Z16F_HAVE_GPIO_PORTK    1
+# define Z16F_INVMEM_SIZE         (128*1024)
+# define Z16F_IRAM_SIZE           (4*1024)
+# define Z16F_HAVE_EXTMEM         1
+# define Z16F_HAVE_GPIO_PORTJ     1
+# define Z16F_HAVE_GPIO_PORTK     1
 #elif defined(CONFIG_ARCH_CHIP_Z16F3211)
-#  define Z16F_INVMEM_SIZE        (32*1024)
-#  define Z16F_IRAM_SIZE          (2*1024)
-#  define Z16F_HAVE_EXTMEM        1
+# define Z16F_INVMEM_SIZE         (32*1024)
+# define Z16F_IRAM_SIZE           (2*1024)
+# define Z16F_HAVE_EXTMEM         1
 #elif defined(CONFIG_ARCH_CHIP_Z16F6411)
-#  define Z16F_INVMEM_SIZE        (64*1024)
-#  define Z16F_IRAM_SIZE          (4*1024)
-#  define Z16F_HAVE_EXTMEM        1
+# define Z16F_INVMEM_SIZE         (64*1024)
+# define Z16F_IRAM_SIZE           (4*1024)
+# define Z16F_HAVE_EXTMEM         1
 #else
 # error "Z16F chip variant not specified"
 #endif
 
-/* Flash option settings at address 0x00000000 ******************************/
+/* Flash option settings at address 0x00000000 ************************************/
 
 #define Z16F_FLOPTION0            rom char _flash_option0 _At 0x0
 #define Z16F_FLOPTION1            rom char _flash_option1 _At 0x1
@@ -110,7 +123,7 @@
 #define Z16F_FLOPTION3_NORMAL     _HX8(40)        /* Bit 6: 1:Normal 0:Low power mode */
 #define Z16F_FLOPTION3_RESVD      _HX8(3f)        /* Bits 0-5: Reserved */
 
-/* Memory areas *************************************************************
+/* Memory areas *******************************************************************
  *
  * Internal non-volatile memory starts at address zero.  The size
  * of the internal non-volatile memory is chip-dependent.
@@ -144,14 +157,14 @@
 #define Z16F_IIO_BASE             _HX32(ffffe000) /* Internal I/O memory and SFRs */
 #define Z16F_IIO_SIZE             _HX32(00001fff)
 
-/* Control Registers  *******************************************************/
+/* Control Registers  ***************************************************************/
 
 #define Z16F_CNTRL_PCOV           _HX32(ffffe004) /* 32-bits: Program counter overflow */
 #define Z16F_CNTRL_SPOV           _HX32(ffffe00c) /* 32-bits: Stack pointer overflow */
 #define Z16F_CNTRL_FLAGS          _HX32(ffffe100) /*  8-bits: flags */
 #define Z16F_CNTRL_CPUCTL         _HX32(ffffe102) /*  8-bits: CPU control */
 
-/* Flag register bits *******************************************************/
+/* Flag register bits ***************************************************************/
 
 #define Z16F_CNTRL_FLAGS_C        _HX8(80)        /* Bit 7: Carry flag */
 #define Z16F_CNTRL_FLAGS_Z        _HX8(40)        /* Bit 6: Zero flag */
@@ -162,27 +175,21 @@
 #define Z16F_CNTRL_FLAGS_CIRQE    _HX8(02)        /* Bit 1: Chained interrupt enable */
 #define Z16F_CNTRL_FLAGS_IRQE     _HX8(01)        /* Bit 0: Master interrupt enable */
 
-/* CPU control register bits ************************************************/
+/* CPU control register bits ********************************************************/
 
-                                              /* Bits 7-2: Reserved, must be
-                                               * zero
-                                               */
-
-                                              /* Bits 1-0: DMA bandwidth
-                                               *   control
-                                               */
-
+                                                  /* Bits 7-2: Reserved, must be zero */
+                                                  /* Bits 1-0: DMA bandwidth control */
 #define Z16F_CNTRL_CPUCTL_BWALL   _HX8(00)        /*   DMA can consume 100% bandwidth */
 #define Z16F_CNTRL_CPUCTL_BW11    _HX8(01)        /*   DMA can do 1 transaction per 1 cycle */
 #define Z16F_CNTRL_CPUCTL_BW12    _HX8(01)        /*   DMA can do 1 transaction per 2 cycles */
 #define Z16F_CNTRL_CPUCTL_BW13    _HX8(01)        /*   DMA can do 1 transaction per 3 cycles */
 
-/* Trace registers **********************************************************/
+/* Trace registers ******************************************************************/
 
 #define Z16F_TRACE_CTL            _HX32(ffffe013) /*  8-bit: Trace Control */
 #define Z16F_TRACE_ADDR           _HX32(ffffe014) /* 32-bit: Trace Address */
 
-/* Interrupt controller registers *******************************************/
+/* Interrupt controller registers ***************************************************/
 
 #define Z16F_SYSEXCP              _HX32(ffffe020) /* 16-bit: System Exception Status */
 #  define Z16F_SYSEXCPH           _HX32(ffffe020) /*  8-bit: System Exception Status High */
@@ -204,7 +211,7 @@
 #  define Z16F_IRQ2_ENH           _HX32(ffffe03a) /*  8-bit: IRQ2 Enable High Bit */
 #  define Z16F_IRQ2_ENL           _HX32(ffffe03c) /*  8-bit: IRQ2 Enable Low Bit */
 
-/* System exception status register bit definitions *************************/
+/* System exception status register bit definitions *********************************/
 
 #define Z16F_SYSEXCPH_SPOVF       _HX8(80)        /* Bit 7: Stack pointer overflow */
 #define Z16F_SYSEXCPH_PCOVF       _HX8(40)        /* Bit 6: Program counter overflow */
@@ -226,7 +233,7 @@
 #define Z16F_SYSEXCP_PRIOSC       Z16F_SYSEXCPL_PRIOSC
 #define Z16F_SYSEXCP_WDT          Z16F_SYSEXCPL_WDT
 
-/* External memory interface ************************************************/
+/* External memory interface ********************************************************/
 
 #define Z16F_EXTCT                _HX32(ffffe070) /* External Interface Control */
 #define Z16F_EXTCS0               _HX32(ffffe072) /* Chip Select 0 Control */
@@ -248,12 +255,12 @@
 #  define Z16F_EXTCS5H            _HX32(ffffe07c) /* Chip Select 5 Control High */
 #  define Z16F_EXTCS5L            _HX32(ffffe07d) /* Chip Select 5 Control Low */
 
-/* Oscillator control registers *********************************************/
+/* Oscillator control registers *****************************************************/
 
 #define Z16F_OSC_CTL              _HX32(ffffe0A0) /*  8-bit: Oscillator Control */
 #define Z16F_OSC_DIV              _HX32(ffffe0A1) /*  8-bit: Oscillator Divide */
 
-/* Oscillator control register bits *****************************************/
+/* Oscillator control register bits *************************************************/
 
 #define Z16F_OSCCTL_INTEN         _HX8(80)        /* Bit 7: Internal oscillator enabled */
 #define Z16F_OSCCTL_XTLEN         _HX8(40)        /* Bit 6: Crystal oscillator enabled */
@@ -265,7 +272,7 @@
 #define Z16F_OSCCTL_EXTCLK        _HX8(02)        /* Bits 0-1=2: External clock */
 #define Z16F_OSCCTL_WDT10KHZ      _HX8(03)        /* Bits 0-1=3: WD Timer 10 KHz*/
 
-/* GPIO Port A-K ************************************************************/
+/* GPIO Port A-K ********************************************************************/
 
 #define Z16F_GPIOA_IN             _HX32(ffffe100) /*  8-bits: Port A Input Data */
 #define Z16F_GPIOA_OUT            _HX32(ffffe101) /*  8-bits: Port A Output Data */
@@ -351,27 +358,27 @@
 #define Z16F_GPIOH_SMRE           _HX32(ffffe178) /*  8-bits: Port H Stop Mode Recovery En */
 
 #ifdef Z16F_HAVE_GPIO_PORTJ
-#  define Z16F_GPIOJ_IN           _HX32(ffffe180) /*  8-bits: Port J Input Data */
-#  define Z16F_GPIOJ_OUT          _HX32(ffffe181) /*  8-bits: Port J Output Data */
-#  define Z16F_GPIOJ_DD           _HX32(ffffe182) /*  8-bits: Port J Data Direction */
-#  define Z16F_GPIOJ_HDE          _HX32(ffffe183) /*  8-bits: Port J High Drive Enable */
-#  define Z16F_GPIOJ_OC           _HX32(ffffe186) /*  8-bits: Port J Output Control */
-#  define Z16F_GPIOJ_PUE          _HX32(ffffe187) /*  8-bits: Port J Pull-Up Enable */
-#  define Z16F_GPIOJ_SMRE         _HX32(ffffe188) /*  8-bits: Port J Stop Mode Recovery En */
+# define Z16F_GPIOJ_IN            _HX32(ffffe180) /*  8-bits: Port J Input Data */
+# define Z16F_GPIOJ_OUT           _HX32(ffffe181) /*  8-bits: Port J Output Data */
+# define Z16F_GPIOJ_DD            _HX32(ffffe182) /*  8-bits: Port J Data Direction */
+# define Z16F_GPIOJ_HDE           _HX32(ffffe183) /*  8-bits: Port J High Drive Enable */
+# define Z16F_GPIOJ_OC            _HX32(ffffe186) /*  8-bits: Port J Output Control */
+# define Z16F_GPIOJ_PUE           _HX32(ffffe187) /*  8-bits: Port J Pull-Up Enable */
+# define Z16F_GPIOJ_SMRE          _HX32(ffffe188) /*  8-bits: Port J Stop Mode Recovery En */
 #endif
 
 #ifdef Z16F_HAVE_GPIO_PORTK
-#  define Z16F_GPIOK_IN           _HX32(ffffe190) /*  8-bits: Port K Input Data */
-#  define Z16F_GPIOK_OUT          _HX32(ffffe191) /*  8-bits: Port K Output Data */
-#  define Z16F_GPIOK_DD           _HX32(ffffe192) /*  8-bits: Port K Data Direction */
-#  define Z16F_GPIOK_HDE          _HX32(ffffe193) /*  8-bits: Port K High Drive Enable */
-#  define Z16F_GPIOK_AFL          _HX32(ffffe195) /*  8-bits: Port K Alternate Function Low */
-#  define Z16F_GPIOK_OC           _HX32(ffffe196) /*  8-bits: Port K Output Control */
-#  define Z16F_GPIOK_PUE          _HX32(ffffe197) /*  8-bits: Port K Pull-Up Enable */
-#  define Z16F_GPIOK_SMRE         _HX32(ffffe198) /*  8-bits: Port K Stop Mode Recovery En */
+# define Z16F_GPIOK_IN            _HX32(ffffe190) /*  8-bits: Port K Input Data */
+# define Z16F_GPIOK_OUT           _HX32(ffffe191) /*  8-bits: Port K Output Data */
+# define Z16F_GPIOK_DD            _HX32(ffffe192) /*  8-bits: Port K Data Direction */
+# define Z16F_GPIOK_HDE           _HX32(ffffe193) /*  8-bits: Port K High Drive Enable */
+# define Z16F_GPIOK_AFL           _HX32(ffffe195) /*  8-bits: Port K Alternate Function Low */
+# define Z16F_GPIOK_OC            _HX32(ffffe196) /*  8-bits: Port K Output Control */
+# define Z16F_GPIOK_PUE           _HX32(ffffe197) /*  8-bits: Port K Pull-Up Enable */
+# define Z16F_GPIOK_SMRE          _HX32(ffffe198) /*  8-bits: Port K Stop Mode Recovery En */
 #endif
 
-/* UART Register Offsets ****************************************************/
+/* UART Register Offsets *************************************************************/
 
 #define Z16F_UART_TXD             _HX8(00)        /*  8-bits: UART Transmit Data */
 #define Z16F_UART_RXD             _HX8(00)        /*  8-bits: UART Receive Data */
@@ -388,7 +395,7 @@
 #define Z16F_UART0_BASE           _HX32(ffffe200) /* UART0 Register Base Address */
 #define Z16F_UART1_BASE           _HX32(ffffe210) /* UART1 Register Base Address */
 
-/* UART0/1 Registers ********************************************************/
+/* UART0/1 Registers ****************************************************************/
 
 #define Z16F_UART0_TXD            _HX32(ffffe200) /*  8-bits: UART0 Transmit Data */
 #define Z16F_UART0_RXD            _HX32(ffffe200) /*  8-bits: UART0 Receive Data */
@@ -414,7 +421,7 @@
 #  define Z16F_UART1_BRH          _HX32(ffffe216) /*  8-bits: UART1 Baud Rate High Byte */
 #  define Z16F_UART1_BRL          _HX32(ffffe217) /*  8-bits: UART1 Baud Rate Low Byte */
 
-/* UART0/1 Status 0 Register Bit Definitions ********************************/
+/* UART0/1 Status 0 Register Bit Definitions ****************************************/
 
 #define Z16F_UARTSTAT0_RDA        _HX8(80)        /* Bit 7: Receive Data Available */
 #define Z16F_UARTSTAT0_PE         _HX8(40)        /* Bit 6: Parity Error */
@@ -425,7 +432,7 @@
 #define Z16F_UARTSTAT0_TXE        _HX8(02)        /* Bit 1: Transmitter Empty */
 #define Z16F_UARTSTAT0_CTS        _HX8(01)        /* Bit 0: Clear To Send */
 
-/* UART0/1 Control 0/1 Register Bit Definitions *****************************/
+/* UART0/1 Control 0/1 Register Bit Definitions *************************************/
 
 #define Z16F_UARTCTL0_TEN         _HX8(80)        /* Bit 7: Transmit Enable */
 #define Z16F_UARTCTL0_REN         _HX8(40)        /* Bit 6: Receive Enable */
@@ -445,7 +452,7 @@
 #define Z16F_UARTCTL1_RDAIRQ      _HX8(02)        /* Bit 1: Receive Data Interrupt Enable */
 #define Z16F_UARTCTL1_IREN        _HX8(01)        /* Bit 0: Infrared Encoder/Decoder Enable */
 
-/* UART0/1 Mode Status/Select Register Bit Definitions **********************/
+/* UART0/1 Mode Status/Select Register Bit Definitions ******************************/
 
 #define Z16F_UARTMDSEL_NORMAL     _HX8(00)        /* Bits 5-7=0: Multiprocessor and Normal Mode */
 #define Z16F_UARTMDSEL_FILTER     _HX8(20)        /* Bits 5-7=1: Noise Filter Control/Status */
@@ -453,7 +460,7 @@
 #define Z16F_UARTMDSEL_HWREV      _HX8(e0)        /* Bits 5-7=7: LIN-UART Hardware Revision */
                                                   /* Bits 0-4:   Mode dependent status */
 
-/* ESPI registers ***********************************************************/
+/* ESPI registers *******************************************************************/
 
 #define Z16F_ESPI_DATA            _HX32(ffffe260) /*  8-bit: ESPI Data */
 #define Z16F_ESPI_DCR             _HX32(ffffe261) /*  8-bit: ESPI Transmit Data Command */
@@ -465,7 +472,7 @@
 #  define Z16F_ESPI_BRH           _HX32(ffffe266) /*  8-bit: ESPI Baud Rate High Byte */
 #  define Z16F_ESPI_BRL           _HX32(ffffe267) /*  8-bit: ESPI Baud Rate Low Byte */
 
-/* ESPI register bit definitions ********************************************/
+/* ESPI register bit definitions ****************************************************/
 
 #define Z16F_ESPI_DCR_SSV         _HX8(01)        /* Bit 0: Slave Select Value */
 #define Z16F_ESPI_DCR_TEOF        _HX8(02)        /* Bit 1: Transmit End of Frame */
@@ -479,9 +486,9 @@
 #define Z16F_ESPI_CTL_ESPIEN1     _HX8(40)        /* Bit 6: ESPI Enable and Direction Control */
 #define Z16F_ESPI_CTL_DIRQE       _HX8(80)        /* Bit 7: Data Interrupt Request Enable */
 
-#define Z16F_ESPI_MODE_SSPO       _HX8(01)                                 /* Bit 0: Slave Select Polarity */
-#define Z16F_ESPI_MODE_SSIO       _HX8(02)                                 /* Bit 1: Slave Select I/O */
-#define Z16F_ESPI_MODE_NUMBITS_SHIFT   (2)                                 /* Bits 2-4: Number of Data Bits Per Character */
+#define Z16F_ESPI_MODE_SSPO       _HX8(01)        /* Bit 0: Slave Select Polarity */
+#define Z16F_ESPI_MODE_SSIO       _HX8(02)        /* Bit 1: Slave Select I/O */
+#define Z16F_ESPI_MODE_NUMBITS_SHIFT   (2)       /* Bits 2-4: Number of Data Bits Per Character */
 #define Z16F_ESPI_MODE_NUMBITS_MASK    (7 << Z16F_ESPI_MODE_NUMBITS_SHIFT)
 #  define Z16F_ESPI_MODE_NUMBITS_8BITS (0 << Z16F_ESPI_MODE_NUMBITS_SHIFT) /* 8 bits */
 #  define Z16F_ESPI_MODE_NUMBITS_1BIT  (1 << Z16F_ESPI_MODE_NUMBITS_SHIFT) /* 1 bit */
@@ -491,11 +498,11 @@
 #  define Z16F_ESPI_MODE_NUMBITS_5BITS (5 << Z16F_ESPI_MODE_NUMBITS_SHIFT) /* 5 bits */
 #  define Z16F_ESPI_MODE_NUMBITS_6BITS (6 << Z16F_ESPI_MODE_NUMBITS_SHIFT) /* 6 bits */
 #  define Z16F_ESPI_MODE_NUMBITS_7BITS (7 << Z16F_ESPI_MODE_NUMBITS_SHIFT) /* 7 bits */
-#define Z16F_ESPI_MODE_SSMD_SHIFT      (5)                                 /* Bits 5-7: SLAVE SELECT Mode */
+#define Z16F_ESPI_MODE_SSMD_SHIFT      (5)       /* Bits 5-7: SLAVE SELECT Mode */
 #define Z16F_ESPI_MODE_SSMD_MASK       (7 << Z16F_ESPI_MODE_SSMD_SHIFT)
-#  define Z16F_ESPI_MODE_SSMD_SPI      (0 << Z16F_ESPI_MODE_SSMD_SHIFT)    /* SPI mode */
-#  define Z16F_ESPI_MODE_SSMD_LPBK     (1 << Z16F_ESPI_MODE_SSMD_SHIFT)    /* LOOPBACK Mode */
-#  define Z16F_ESPI_MODE_SSMD_I2S      (2 << Z16F_ESPI_MODE_SSMD_SHIFT)    /* I2S Mode */
+#  define Z16F_ESPI_MODE_SSMD_SPI      (0 << Z16F_ESPI_MODE_SSMD_SHIFT) /* SPI mode */
+#  define Z16F_ESPI_MODE_SSMD_LPBK     (1 << Z16F_ESPI_MODE_SSMD_SHIFT) /* LOOPBACK Mode */
+#  define Z16F_ESPI_MODE_SSMD_I2S      (2 << Z16F_ESPI_MODE_SSMD_SHIFT) /* I2S Mode */
 
 #define Z16F_ESPI_STAT_SLAS       _HX8(01)        /* Bit 0: Slave Select */
 #define Z16F_ESPI_STAT_TFST       _HX8(02)        /* Bit 1: Transfer Status */
@@ -506,7 +513,7 @@
 #define Z16F_ESPI_STAT_TUND       _HX8(40)        /* Bit 6: Transmit Underrun */
 #define Z16F_ESPI_STAT_TDRE       _HX8(80)        /* Bit 7: Transmit Data Register Empty */
 
-#define Z16F_ESPI_STATE_SHIFT     (0)                             /* Bits 0-5: ESPI State Machine */
+#define Z16F_ESPI_STATE_SHIFT     (0)             /* Bits 0-5: ESPI State Machine */
 #define Z16F_ESPI_STATE_MASK      (0x3f << Z16F_ESPI_STATE_SHIFT)
 #  define Z16F_ESPI_STATE_IDLE    (0x00 << Z16F_ESPI_STATE_SHIFT) /* Idle */
 #  define Z16F_ESPI_STATE_SWAIT   (0x01 << Z16F_ESPI_STATE_SHIFT) /* Slave Wait For SCK */
@@ -531,17 +538,17 @@
 #  define Z16F_ESPI_STATE_B1XMT   (0x23 << Z16F_ESPI_STATE_SHIFT) /* Bit 1 Transmit */
 #  define Z16F_ESPI_STATE_B0RCV   (0x20 << Z16F_ESPI_STATE_SHIFT) /* Bit 0 Receive */
 #  define Z16F_ESPI_STATE_B0XMT   (0x21 << Z16F_ESPI_STATE_SHIFT) /* Bit 0 Transmit */
-#define Z16F_ESPI_STATE_SDI       _HX8(40)                        /* Bit 6: Serial Data Input */
-#define Z16F_ESPI_STATE_SCKI      _HX8(80)                        /* Bit 7: Serial Clock Input */
+#define Z16F_ESPI_STATE_SDI       _HX8(40)        /* Bit 6: Serial Data Input */
+#define Z16F_ESPI_STATE_SCKI      _HX8(80)        /* Bit 7: Serial Clock Input */
 
-/* Timer0/1/2 registers *****************************************************/
+/* Timer0/1/2 registers *************************************************************/
 
 #define Z16F_TIMER0_HL            _HX32(ffffe300) /* 16-bit: Timer 0 */
 #  define Z16F_TIMER0_H           _HX32(ffffe300) /*  8-bit: Timer 0 High Byte */
 #  define Z16F_TIMER0_L           _HX32(ffffe301) /*  8-bit: Timer 0 Low Byte */
 #define Z16F_TIMER0_R             _HX32(ffffe302) /* 16-bit: Timer 0 Reload */
 #  define Z16F_TIMER0_RH          _HX32(ffffe302) /*  8-bit: Timer 0 Reload High Byte */
-#  define Z16F_TIMER0_RL          _HX32(ffffe303) /*  8-bit: Timer 0 Reload Low Byte */
+# define Z16F_TIMER0_RL           _HX32(ffffe303) /*  8-bit: Timer 0 Reload Low Byte */
 #define Z16F_TIMER0_PWM           _HX32(ffffe304) /* 16-bit: Timer 0 PWM */
 #  define Z16F_TIMER0_PWMH        _HX32(ffffe304) /*  8-bit: Timer 0 PWM High Byte */
 #  define Z16F_TIMER0_PWML        _HX32(ffffe305) /*  8-bit: Timer 0 PWM Low Byte */
@@ -575,7 +582,7 @@
 #  define Z16F_TIMER2_CTL0        _HX32(ffffe326) /*  8-bit: Timer 2 Control 0 */
 #  define Z16F_TIMER2_CTL1        _HX32(ffffe327) /*  8-bit: Timer 2 Control 1 */
 
-/* Common timer0/1/2 register bit definitions *******************************/
+/* Common timer0/1/2 register bit definitions ***************************************/
 
 #define Z16F_TIMERCTL0_TMODE      _HX8(80)        /* Bit 7: Timer mode */
                                                   /* Bits 5-6: Timer configuration,
@@ -621,9 +628,20 @@
 #  define Z16F_TIMERSCTL1_GATED   _HX8(06)        /*   Gated mode (CTL0 TMOD = 0)*/
 #  define Z16F_TIMERSCTL1_CAPCMP  _HX8(07)        /*   Capture/Compare mode (CTL0 TMOD = 0)*/
 
-/****************************************************************************
+/* Register access macros ***********************************************************/
+
+#ifndef __ASSEMBLY__
+#  define getreg8(a)              (*(uint8_t volatile _Near*)(a))
+#  define putreg8(v,a)            (*(uint8_t volatile _Near*)(a) = (v))
+#  define getreg16(a)             (*(uint16_t volatile _Near*)(a))
+#  define putreg16(v,a)           (*(uint16_t volatile _Near*)(a) = (v))
+#  define getreg32(a)             (*(uint32_t volatile _Near*)(a))
+#  define putreg32(v,a)           (*(uint32_t volatile _Near*)(a) = (v))
+#endif /* __ASSEMBLY__ */
+
+/************************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ASSEMBLY__
 #ifdef __cplusplus
@@ -636,8 +654,8 @@ extern "C"
 
 /* The following two routines are called from the low-level reset logic.
  * z16f_board_initialize() must be provided by the board-specific logic;
- * z16f_lowuartinit() is called only if debugging support for z16_lowputc
- * (or getc) is enabled.
+ * z16f_lowuartinit() is called only if debugging support for up_lowputc (or getc)
+ * is enabled.
  */
 
 void z16f_board_initialize(void);
@@ -667,8 +685,7 @@ FAR struct spi_dev_s *z16_spibus_initialize(int port);
 
 /* Select an SPI device (see include/nuttx/spi/spi.h) */
 
-void z16f_espi_select(FAR struct spi_dev_s *dev, uint32_t devid,
-                      bool selected);
+void z16f_espi_select(FAR struct spi_dev_s *dev, uint32_t devid, bool selected);
 
 /* Provide SPI device status (see include/nuttx/spi/spi.h) */
 

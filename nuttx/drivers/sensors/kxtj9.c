@@ -1,22 +1,40 @@
 /****************************************************************************
  * drivers/sensors/kxtj9.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * This driver derives from the Motorola Moto Z MDK:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright (c) 2016 Motorola Mobility, LLC.
+ *   All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,16 +44,16 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <debug.h>
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/sensors/kxtj9.h>
 #include <nuttx/random.h>
 
@@ -44,6 +62,12 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/* Configuration ************************************************************/
+
+#ifndef CONFIG_KXTJ9_I2C_BUS_SPEED
+#  define CONFIG_KXTJ9_I2C_BUS_SPEED 400000
+#endif
 
 /* Register Definitions *****************************************************/
 
@@ -109,7 +133,7 @@
 struct kxtj9_dev_s
 {
   FAR struct i2c_master_s *i2c;
-  mutex_t lock;
+  sem_t exclsem;
   bool enable;
   bool power_enabled;
   uint8_t address;
@@ -126,9 +150,9 @@ struct kxtj9_dev_s
 /* I2C helpers */
 
 static int     kxtj9_reg_read(FAR struct kxtj9_dev_s *priv, uint8_t regaddr,
-                              FAR uint8_t *regval, unsigned int len);
+                 FAR uint8_t *regval, unsigned int len);
 static int     kxtj9_reg_write(FAR struct kxtj9_dev_s *priv,
-                               uint8_t regaddr,  uint8_t regval);
+                 uint8_t regaddr,  uint8_t regval);
 
 /* KXTJ9 helpers */
 
@@ -141,12 +165,14 @@ static void    kxtj9_set_mode_standby(FAR struct kxtj9_dev_s *priv);
 
 /* Character driver methods */
 
+static int     kxtj9_open(FAR struct file *filep);
+static int     kxtj9_close(FAR struct file *filep);
 static ssize_t kxtj9_read(FAR struct file *filep, FAR char *buffer,
-                          size_t buflen);
+                 size_t buflen);
 static ssize_t kxtj9_write(FAR struct file *filep, FAR const char *buffer,
                  size_t buflen);
 static int     kxtj9_ioctl(FAR struct file *filep, int cmd,
-                           unsigned long arg);
+                 unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -154,12 +180,16 @@ static int     kxtj9_ioctl(FAR struct file *filep, int cmd,
 
 static const struct file_operations g_fops =
 {
-  NULL,            /* open */
-  NULL,            /* close */
-  kxtj9_read,      /* read */
-  kxtj9_write,     /* write */
-  NULL,            /* seek */
-  kxtj9_ioctl,     /* ioctl */
+  kxtj9_open,
+  kxtj9_close,
+  kxtj9_read,
+  kxtj9_write,
+  NULL,
+  kxtj9_ioctl,
+  NULL,
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  NULL,
+#endif
 };
 
 /****************************************************************************
@@ -316,7 +346,7 @@ static int kxtj9_configure(FAR struct kxtj9_dev_s *priv, uint8_t odr)
   uint8_t wbuf[0];
   int ret;
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nxsem_wait_uninterruptible(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -351,7 +381,7 @@ static int kxtj9_configure(FAR struct kxtj9_dev_s *priv, uint8_t odr)
   priv->int_ctrl = KXTJ9_IEN | KXTJ9_IEA | KXTJ9_IEL;
   kxtj9_reg_write(priv, INT_CTRL1, priv->int_ctrl);
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->exclsem);
   return 0;
 }
 
@@ -369,7 +399,7 @@ static int kxtj9_enable(FAR struct kxtj9_dev_s *priv, bool on)
   uint8_t wbuf[1];
   int ret;
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nxsem_wait_uninterruptible(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -397,7 +427,7 @@ static int kxtj9_enable(FAR struct kxtj9_dev_s *priv, bool on)
       sninfo("KXTJ9 in operating mode\n");
     }
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->exclsem);
   return OK;
 }
 
@@ -416,13 +446,13 @@ static int kxtj9_read_sensor_data(FAR struct kxtj9_dev_s *priv,
   uint8_t data;
   int ret;
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nxsem_wait_uninterruptible(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
     }
 
-  kxtj9_reg_read(priv, XOUT_L, (FAR uint8_t *)acc_data, 6);
+  kxtj9_reg_read(priv, XOUT_L, (uint8_t *)acc_data, 6);
 
   /* 12 bit resolution, get rid of the lowest 4 bits */
 
@@ -433,13 +463,39 @@ static int kxtj9_read_sensor_data(FAR struct kxtj9_dev_s *priv,
   /* Read INT_REL to clear interrupt status */
 
   kxtj9_reg_read(priv, INT_REL, &data, 1);
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->exclsem);
 
   /* Feed sensor data to entropy pool */
 
   add_sensor_randomness((acc_data[0] << 16) ^ (acc_data[1] << 8) ^
                         acc_data[2]);
 
+  return OK;
+}
+
+/****************************************************************************
+ * Name: kxtj9_open
+ *
+ * Description:
+ *   This method is called when the device is opened.
+ *
+ ****************************************************************************/
+
+static int kxtj9_open(FAR struct file *filep)
+{
+  return OK;
+}
+
+/****************************************************************************
+ * Name: kxtj9_close
+ *
+ * Description:
+ *   This method is called when the device is closed.
+ *
+ ****************************************************************************/
+
+static int kxtj9_close(FAR struct file *filep)
+{
   return OK;
 }
 
@@ -475,10 +531,10 @@ static ssize_t kxtj9_read(FAR struct file *filep, FAR char *buffer,
       return (ssize_t)-EINVAL;
     }
 
-  DEBUGASSERT(buffer != NULL);
+  DEBUGASSERT(filep != NULL && filep->f_inode != NULL && buffer != NULL);
   inode = filep->f_inode;
 
-  priv = inode->i_private;
+  priv = (FAR struct kxtj9_dev_s *)inode->i_private;
   DEBUGASSERT(priv != NULL  && priv->i2c != NULL);
 
   /* Return all of the samples that will fit in the user-provided buffer */
@@ -533,9 +589,10 @@ static int kxtj9_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Sanity check */
 
+  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
 
-  priv = inode->i_private;
+  priv = (FAR struct kxtj9_dev_s *)inode->i_private;
   DEBUGASSERT(priv != NULL && priv->i2c != NULL);
 
   /* Handle ioctl commands */
@@ -609,7 +666,7 @@ int kxtj9_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   /* Initialize the device's structure */
 
-  priv = kmm_zalloc(sizeof(struct kxtj9_dev_s));
+  priv = (FAR struct kxtj9_dev_s *)kmm_zalloc(sizeof(struct kxtj9_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate driver instance\n");
@@ -618,7 +675,7 @@ int kxtj9_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   priv->i2c     = i2c;
   priv->address = address;
-  nxmutex_init(&priv->lock);
+  nxsem_init(&priv->exclsem, 0, 1);
 
   /* Register the character driver */
 
@@ -626,7 +683,6 @@ int kxtj9_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   if (ret < 0)
     {
       snerr("ERROR: Failed to register driver: %d\n", ret);
-      nxmutex_destroy(&priv->lock);
       kmm_free(priv);
       return ret;
     }

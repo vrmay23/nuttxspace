@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/arm/src/samv7/sam_spi_slave.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -36,10 +34,11 @@
 #include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/irq.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/spi/slave.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "sam_config.h"
 #include "sam_gpio.h"
 #include "sam_periphclks.h"
@@ -73,16 +72,12 @@
 
 struct sam_spidev_s
 {
-  /* Externally visible part of the SPI slave controller interface */
-
-  struct spi_slave_ctrlr_s ctrlr;
-
-  /* Bound SPI slave device interface */
-
-  struct spi_slave_dev_s *dev;
+  struct spi_sctrlr_s sctrlr;  /* Externally visible part of the SPI slave
+                                * controller interface */
+  struct spi_sdev_s *sdev;     /* Bound SPI slave device interface */
   xcpt_t handler;              /* SPI interrupt handler */
   uint32_t base;               /* SPI controller register base address */
-  mutex_t spilock;             /* Assures mutually exclusive access to SPI */
+  sem_t spisem;                /* Assures mutually exclusive access to SPI */
   uint16_t outval;             /* Default shift-out value */
   uint16_t irq;                /* SPI IRQ number */
   uint8_t mode;                /* Mode 0,1,2,3 */
@@ -116,45 +111,47 @@ struct sam_spidev_s
 
 #ifdef CONFIG_SAMV7_SPI_REGDEBUG
 static bool     spi_checkreg(struct sam_spidev_s *priv, bool wr,
-                             uint32_t value, uint32_t address);
+                  uint32_t value, uint32_t address);
 #else
-#  define       spi_checkreg(priv,wr,value,address) (false)
+# define        spi_checkreg(priv,wr,value,address) (false)
 #endif
 
 static uint32_t spi_getreg(struct sam_spidev_s *priv,
-                           unsigned int offset);
+                  unsigned int offset);
 static void     spi_putreg(struct sam_spidev_s *priv, uint32_t value,
-                           unsigned int offset);
+                  unsigned int offset);
 
 #ifdef CONFIG_DEBUG_SPI_INFO
 static void     spi_dumpregs(struct sam_spidev_s *priv, const char *msg);
 #else
-#  define       spi_dumpregs(priv,msg)
+# define        spi_dumpregs(priv,msg)
 #endif
+
+static int      spi_semtake(struct sam_spidev_s *priv);
+static void     spi_semtake_noncancelable(struct sam_spidev_s *priv);
+#define         spi_semgive(priv) (nxsem_post(&(priv)->spisem))
 
 /* Interrupt Handling */
 
-static int      spi_interrupt(int irq, void *context, void *arg);
+static int      spi_interrupt(int irq, void *context, FAR void *arg);
 
 /* SPI Helpers */
 
 static uint16_t spi_dequeue(struct sam_spidev_s *priv);
 static void     spi_setmode(struct sam_spidev_s *priv,
-                            enum spi_slave_mode_e mode);
+                 enum spi_smode_e mode);
 static void     spi_setbits(struct sam_spidev_s *priv,
-                            int nbits);
+                  int nbits);
 
 /* SPI slave controller methods */
 
-static void     spi_bind(struct spi_slave_ctrlr_s *ctrlr,
-                         struct spi_slave_dev_s *dev,
-                         enum spi_slave_mode_e mode,
-                         int nbits);
-static void     spi_unbind(struct spi_slave_ctrlr_s *ctrlr);
-static int      spi_enqueue(struct spi_slave_ctrlr_s *ctrlr,
-                            const void *data, size_t len);
-static bool     spi_qfull(struct spi_slave_ctrlr_s *ctrlr);
-static void     spi_qflush(struct spi_slave_ctrlr_s *ctrlr);
+static void     spi_bind(struct spi_sctrlr_s *sctrlr,
+                  struct spi_sdev_s *sdev, enum spi_smode_e mode,
+                  int nbits);
+static void     spi_unbind(struct spi_sctrlr_s *sctrlr);
+static int      spi_enqueue(struct spi_sctrlr_s *sctrlr, uint16_t data);
+static bool     spi_qfull(struct spi_sctrlr_s *sctrlr);
+static void     spi_qflush(struct spi_sctrlr_s *sctrlr);
 
 /****************************************************************************
  * Private Data
@@ -170,49 +167,25 @@ static const uint8_t g_csroffset[4] =
 
 /* SPI slave controller driver operations */
 
-static const struct spi_slave_ctrlrops_s g_ctrlr_ops =
+static const struct spi_sctrlrops_s g_sctrlr_ops =
 {
-  .bind    = spi_bind,
-  .unbind  = spi_unbind,
-  .enqueue = spi_enqueue,
-  .qfull   = spi_qfull,
-  .qflush  = spi_qflush,
+  .bind              = spi_bind,
+  .unbind            = spi_unbind,
+  .enqueue           = spi_enqueue,
+  .qfull             = spi_qfull,
+  .qflush            = spi_qflush,
 };
 
 #ifdef CONFIG_SAMV7_SPI0_SLAVE
 /* This is the overall state of the SPI0 controller */
 
-static struct sam_spidev_s g_spi0_ctrlr =
-{
-  .ctrlr   =
-  {
-    .ops   = g_ctrlr_ops,
-  },
-  .base    = SAM_SPI0_BASE,
-  .spilock = NXMUTEX_INITIALIZER,
-  .irq     = SAM_IRQ_SPI0,
-  .nbits   = 8,
-  .spino   = 0,
-  .nss     = true,
-};
+static struct sam_spidev_s g_spi0_sctrlr;
 #endif
 
 #ifdef CONFIG_SAMV7_SPI1_SLAVE
 /* This is the overall state of the SPI0 controller */
 
-static struct sam_spidev_s g_spi1_ctrlr =
-{
-  .ctrlr   =
-  {
-    .ops   = g_ctrlr_ops,
-  },
-  .base    = SAM_SPI1_BASE,
-  .spilock = NXMUTEX_INITIALIZER,
-  .irq     = SAM_IRQ_SPI0,
-  .nbits   = 8,
-  .spino   = 1,
-  .nss     = true,
-};
+static struct sam_spidev_s g_spi1_sctrlr;
 #endif
 
 /****************************************************************************
@@ -235,7 +208,7 @@ static struct sam_spidev_s g_spi1_ctrlr =
  *
  * Returned Value:
  *   true:  This is the first register access of this type.
- *   false: This is the same as the preceding register access.
+ *   flase: This is the same as the preceding register access.
  *
  ****************************************************************************/
 
@@ -358,6 +331,56 @@ static void spi_dumpregs(struct sam_spidev_s *priv, const char *msg)
 #endif
 
 /****************************************************************************
+ * Name: spi_semtake
+ *
+ * Description:
+ *   Take the semaphore that enforces mutually exclusive access to SPI
+ *   resources.  May return ECANCELED if the calling thread was canceled.
+ *
+ * Input Parameters:
+ *   priv - A reference to the MCAN peripheral state
+ *
+ * Returned Value:
+ *  None
+ *
+ ****************************************************************************/
+
+static int spi_semtake(struct sam_spidev_s *priv)
+{
+  return nxsem_wait_uninterruptible(&priv->spisem);
+}
+
+/****************************************************************************
+ * Name: spi_semtake_noncancelable
+ *
+ * Description:
+ *   Take the semaphore that enforces mutually exclusive access to SPI
+ *   resources, handling any exceptional conditions.  Always successful.
+ *
+ * Input Parameters:
+ *   priv - A reference to the MCAN peripheral state
+ *
+ * Returned Value:
+ *  None
+ *
+ ****************************************************************************/
+
+static void spi_semtake_noncancelable(struct sam_spidev_s *priv)
+{
+  int ret;
+
+  do
+    {
+      ret = nxsem_wait_uninterruptible(&priv->spisem);
+
+      /* ECANCELED is the only error expected here */
+
+      DEBUGASSERT(ret == OK || ret == -ECANCELED);
+    }
+  while (ret < 0);
+}
+
+/****************************************************************************
  * Name: spi_interrupt
  *
  * Description:
@@ -371,7 +394,7 @@ static void spi_dumpregs(struct sam_spidev_s *priv, const char *msg)
  *
  ****************************************************************************/
 
-static int spi_interrupt(int irq, void *context, void *arg)
+static int spi_interrupt(int irq, void *context, FAR void *arg)
 {
   struct sam_spidev_s *priv = (struct sam_spidev_s *)arg;
   uint32_t sr;
@@ -444,7 +467,7 @@ static int spi_interrupt(int irq, void *context, void *arg)
           if (priv->nss)
             {
               priv->nss = false;
-              SPIS_DEV_SELECT(priv->dev, true);
+              SPI_SDEV_SELECT(priv->sdev, true);
             }
 
           /* Read the RDR to get the data and to clear the pending RDRF
@@ -462,9 +485,7 @@ static int spi_interrupt(int irq, void *context, void *arg)
 
           /* Report the receipt of data to the SPI device driver */
 
-          SPIS_DEV_RECEIVE(priv->dev, (const uint16_t *)&data,
-                           sizeof(data));
-          SPIS_DEV_NOTIFY(priv->dev, SPISLAVE_RX_COMPLETE);
+          SPI_SDEV_RECEIVE(priv->sdev, data);
         }
 
       /* When a transfer starts, the data shifted out is the data present
@@ -512,7 +533,6 @@ static int spi_interrupt(int irq, void *context, void *arg)
 
           regval = spi_dequeue(priv);
           spi_putreg(priv, regval, SAM_SPI_TDR_OFFSET);
-          SPIS_DEV_NOTIFY(priv->dev, SPISLAVE_TX_COMPLETE);
         }
 
       /* The SPI slave hardware provides only an event when NSS rises
@@ -530,7 +550,7 @@ static int spi_interrupt(int irq, void *context, void *arg)
           /* Report the state change to the SPI device driver */
 
           priv->nss = true;
-          SPIS_DEV_SELECT(priv->dev, false);
+          SPI_SDEV_SELECT(priv->sdev, false);
         }
     }
 
@@ -595,7 +615,7 @@ static uint16_t spi_dequeue(struct sam_spidev_s *priv)
 
       ret = priv->outval;
 
-      /* Disable further TXDR/OVRE interrupts until spi_enqueue() is called */
+      /* Disable further TXDR/OVRE interrupts until spi_enqueue() is called. */
 
       regval = (SPI_INT_TDRE | SPI_INT_UNDES);
       spi_putreg(priv, regval, SAM_SPI_IDR_OFFSET);
@@ -608,7 +628,7 @@ static uint16_t spi_dequeue(struct sam_spidev_s *priv)
  * Name: spi_setmode
  *
  * Description:
- *   Set the SPI mode. See enum spi_slave_mode_e for mode definitions
+ *   Set the SPI mode. See enum spi_smode_e for mode definitions
  *
  * Input Parameters:
  *   priv - SPI device data structure
@@ -619,8 +639,7 @@ static uint16_t spi_dequeue(struct sam_spidev_s *priv)
  *
  ****************************************************************************/
 
-static void spi_setmode(struct sam_spidev_s *priv,
-                        enum spi_slave_mode_e mode)
+static void spi_setmode(struct sam_spidev_s *priv, enum spi_smode_e mode)
 {
   uint32_t regval;
 
@@ -682,7 +701,7 @@ static void spi_setmode(struct sam_spidev_s *priv,
  *
  * Input Parameters:
  *   priv   - SPI device data structure
- *   nbits  - The number of bits requested
+ *   nbits  - The number of bits requests
  *
  * Returned Value:
  *   none
@@ -709,9 +728,7 @@ static void spi_setbits(struct sam_spidev_s *priv, int nbits)
 
       spiinfo("csr0=%08x\n", regval);
 
-      /* Save the selection so that subsequent re-configurations will be
-       * faster.
-       */
+      /* Save the selection so the subsequence re-configurations will be faster */
 
       priv->nbits = nbits;
     }
@@ -722,47 +739,45 @@ static void spi_setbits(struct sam_spidev_s *priv, int nbits)
  *
  * Description:
  *   Bind the SPI slave device interface to the SPI slave controller
- *   interface and configure the SPI interface. Upon return, the SPI
+ *   interface and configure the SPI interface.  Upon return, the SPI
  *   slave controller driver is fully operational and ready to perform
  *   transfers.
  *
  * Input Parameters:
- *   ctrlr - SPI Slave controller interface instance
- *   dev   - SPI Slave device interface instance
- *   mode  - The SPI Slave mode requested
- *   nbits - The number of bits requested.
- *           If value is greater than 0, then it implies MSB first
- *           If value is less than 0, then it implies LSB first with -nbits
+ *   sctrlr - SPI slave controller interface instance
+ *   sdev   - SPI slave device interface instance
+ *   mode   - The SPI mode requested
+ *   nbits  - The number of bits requests.
+ *            If value is greater > 0 then it implies MSB first
+ *            If value is below < 0, then it implies LSB first with -nbits
  *
  * Returned Value:
- *   None.
+ *   none
  *
  ****************************************************************************/
 
-static void spi_bind(struct spi_slave_ctrlr_s *ctrlr,
-                     struct spi_slave_dev_s *dev,
-                     enum spi_slave_mode_e mode,
+static void spi_bind(struct spi_sctrlr_s *sctrlr,
+                     struct spi_sdev_s *sdev, enum spi_smode_e mode,
                      int nbits)
 {
-  struct sam_spidev_s *priv = (struct sam_spidev_s *)ctrlr;
+  struct sam_spidev_s *priv = (struct sam_spidev_s *)sctrlr;
   uint32_t regval;
   int ret;
-  const void *data;
 
-  spiinfo("dev=%p mode=%d nbits=%d\n", sdv, mode, nbits);
+  spiinfo("sdev=%p mode=%d nbits=%d\n", sdv, mode, nbits);
 
-  DEBUGASSERT(priv != NULL && priv->dev == NULL && dev != NULL);
+  DEBUGASSERT(priv != NULL && priv->sdev == NULL && sdev != NULL);
 
   /* Get exclusive access to the SPI device */
 
-  ret = nxmutex_lock(&priv->spilock);
+  ret = spi_semtake(priv);
   if (ret < 0)
     {
       /* REVISIT:  No mechanism to report error.  This error should only
        * occur if the calling task was canceled.
        */
 
-      spierr("RROR: nxmutex_lock failed: %d\n", ret);
+      spierr("RROR: spi_semtake failed: %d\n", ret);
       return;
     }
 
@@ -770,7 +785,7 @@ static void spi_bind(struct spi_slave_ctrlr_s *ctrlr,
    * controller interface.
    */
 
-  priv->dev = dev;
+  priv->sdev = sdev;
 
   /* Call the slaved device's select() and cmddata() methods to indicate
    * the initial state of the chip select and  command/data discretes.
@@ -784,9 +799,9 @@ static void spi_bind(struct spi_slave_ctrlr_s *ctrlr,
    * the Command/Data indication (not yet impklemented).
    */
 
-  SPIS_DEV_SELECT(dev, false);
+  SPI_SDEV_SELECT(sdev, false);
 #warning Missing logic
-  SPIS_DEV_CMDDATA(dev, false);
+  SPI_SDEV_CMDDATA(sdev, false);
 
   /* Discard any queued data */
 
@@ -797,8 +812,7 @@ static void spi_bind(struct spi_slave_ctrlr_s *ctrlr,
    * be shifted out the SPI clock is detected.
    */
 
-  SPIS_DEV_GETDATA(dev, &data);
-  priv->outval = *(const uint16_t *)data;
+  priv->outval = SPI_SDEV_GETDATA(sdev);
   spi_putreg(priv, priv->outval, SAM_SPI_TDR_OFFSET);
 
   /* Setup to begin normal SPI operation */
@@ -837,7 +851,7 @@ static void spi_bind(struct spi_slave_ctrlr_s *ctrlr,
 
   spi_putreg(priv, regval, SAM_SPI_IER_OFFSET);
 
-  nxmutex_unlock(&priv->spilock);
+  spi_semgive(priv);
 }
 
 /****************************************************************************
@@ -845,29 +859,29 @@ static void spi_bind(struct spi_slave_ctrlr_s *ctrlr,
  *
  * Description:
  *   Un-bind the SPI slave device interface from the SPI slave controller
- *   interface. Reset the SPI interface and restore the SPI slave
- *   controller driver to its initial state.
+ *   interface.  Reset the SPI interface and restore the SPI slave
+ *   controller driver to its initial state,
  *
  * Input Parameters:
- *   ctrlr - SPI Slave controller interface instance
+ *   sctrlr - SPI slave controller interface instance
  *
  * Returned Value:
- *   None.
+ *   none
  *
  ****************************************************************************/
 
-static void spi_unbind(struct spi_slave_ctrlr_s *ctrlr)
+static void spi_unbind(struct spi_sctrlr_s *sctrlr)
 {
-  struct sam_spidev_s *priv = (struct sam_spidev_s *)ctrlr;
+  struct sam_spidev_s *priv = (struct sam_spidev_s *)sctrlr;
 
   DEBUGASSERT(priv != NULL);
-  spiinfo("Unbinding %p\n", priv->dev);
+  spiinfo("Unbinding %p\n", priv->sdev);
 
-  DEBUGASSERT(priv->dev != NULL);
+  DEBUGASSERT(priv->sdev != NULL);
 
   /* Get exclusive access to the SPI device */
 
-  nxmutex_lock(&priv->spilock);
+  spi_semtake_noncancelable(priv);
 
   /* Disable SPI interrupts (still enabled at the NVIC) */
 
@@ -875,7 +889,7 @@ static void spi_unbind(struct spi_slave_ctrlr_s *ctrlr)
 
   /* Unbind the SPI slave interface */
 
-  priv->dev = NULL;
+  priv->sdev = NULL;
 
   /* Disable the SPI peripheral */
 
@@ -886,25 +900,22 @@ static void spi_unbind(struct spi_slave_ctrlr_s *ctrlr)
   spi_putreg(priv, SPI_CR_SWRST, SAM_SPI_CR_OFFSET);
   spi_putreg(priv, SPI_CR_SWRST, SAM_SPI_CR_OFFSET);
 
-  nxmutex_unlock(&priv->spilock);
+  spi_semgive(priv);
 }
 
 /****************************************************************************
  * Name: spi_enqueue
  *
  * Description:
- *   Enqueue the next value to be shifted out from the interface. This adds
+ *   Enqueue the next value to be shifted out from the interface.  This adds
  *   the word the controller driver for a subsequent transfer but has no
- *   effect on any in-process or currently "committed" transfers.
+ *   effect on anyin-process or currently "committed" transfers
  *
  * Input Parameters:
- *   ctrlr - SPI Slave controller interface instance
- *   data  - Pointer to the command/data mode data to be shifted out.
- *           The data width must be aligned to the nbits parameter which was
- *           previously provided to the bind() method.
- *   len   - Number of units of "nbits" wide to enqueue,
- *           "nbits" being the data width previously provided to the bind()
- *           method.
+ *   sctrlr - SPI slave controller interface instance
+ *   data   - Command/data mode data value to be shifted out.  The width of
+ *            the data must be the same as the nbits parameter previously
+ *            provided to the bind() methods.
  *
  * Returned Value:
  *   Zero if the word was successfully queue; A negated errno valid is
@@ -913,21 +924,20 @@ static void spi_unbind(struct spi_slave_ctrlr_s *ctrlr)
  *
  ****************************************************************************/
 
-static int spi_enqueue(struct spi_slave_ctrlr_s *ctrlr,
-                       const void *data, size_t len)
+static int spi_enqueue(struct spi_sctrlr_s *sctrlr, uint16_t data)
 {
-  struct sam_spidev_s *priv = (struct sam_spidev_s *)ctrlr;
+  struct sam_spidev_s *priv = (struct sam_spidev_s *)sctrlr;
   irqstate_t flags;
   uint32_t regval;
   int next;
   int ret;
 
-  spiinfo("data=%04x\n", *(const uint16_t *)data);
-  DEBUGASSERT(priv != NULL && priv->dev != NULL);
+  spiinfo("data=%04x\n", data);
+  DEBUGASSERT(priv != NULL && priv->sdev != NULL);
 
   /* Get exclusive access to the SPI device */
 
-  ret = nxmutex_lock(&priv->spilock);
+  ret = spi_semtake(priv);
   if (ret < 0)
     {
       return ret;
@@ -956,7 +966,7 @@ static int spi_enqueue(struct spi_slave_ctrlr_s *ctrlr,
        * be overwritten.
        */
 
-      priv->outq[priv->head] = *(const uint16_t *)data;
+      priv->outq[priv->head] = data;
       priv->head = next;
       ret = OK;
 
@@ -972,7 +982,7 @@ static int spi_enqueue(struct spi_slave_ctrlr_s *ctrlr,
     }
 
   leave_critical_section(flags);
-  nxmutex_unlock(&priv->spilock);
+  spi_semgive(priv);
   return ret;
 }
 
@@ -984,33 +994,33 @@ static int spi_enqueue(struct spi_slave_ctrlr_s *ctrlr,
  *   additional word to the queue.
  *
  * Input Parameters:
- *   ctrlr - SPI Slave controller interface instance
+ *   sctrlr - SPI slave controller interface instance
  *
  * Returned Value:
- *   true if the output queue is full, false otherwise.
+ *   true if the output wueue is full
  *
  ****************************************************************************/
 
-static bool spi_qfull(struct spi_slave_ctrlr_s *ctrlr)
+static bool spi_qfull(struct spi_sctrlr_s *sctrlr)
 {
-  struct sam_spidev_s *priv = (struct sam_spidev_s *)ctrlr;
+  struct sam_spidev_s *priv = (struct sam_spidev_s *)sctrlr;
   irqstate_t flags;
   bool bret;
   int ret;
   int next;
 
-  DEBUGASSERT(priv != NULL && priv->dev != NULL);
+  DEBUGASSERT(priv != NULL && priv->sdev != NULL);
 
   /* Get exclusive access to the SPI device */
 
-  ret = nxmutex_lock(&priv->spilock);
+  ret = spi_semtake(priv);
   if (ret < 0)
     {
       /* REVISIT:  No mechanism to report error.  This error should only
-       * occur if the calling task was canceled.
+       * occurr if the calling task was canceled.
        */
 
-      spierr("RROR: nxmutex_lock failed: %d\n", ret);
+      spierr("RROR: spi_semtake failed: %d\n", ret);
       return true;
     }
 
@@ -1028,7 +1038,7 @@ static bool spi_qfull(struct spi_slave_ctrlr_s *ctrlr)
 
   bret = (next == priv->tail);
   leave_critical_section(flags);
-  nxmutex_unlock(&priv->spilock);
+  spi_semgive(priv);
   return bret;
 }
 
@@ -1036,30 +1046,30 @@ static bool spi_qfull(struct spi_slave_ctrlr_s *ctrlr)
  * Name: spi_qflush
  *
  * Description:
- *   Discard all saved values in the output queue. On return from this
- *   function the output queue will be empty. Any in-progress or otherwise
+ *   Discard all saved values in the output queue.  On return from this
+ *   function the output queue will be empty.  Any in-progress or otherwise
  *   "committed" output values may not be flushed.
  *
  * Input Parameters:
- *   ctrlr - SPI Slave controller interface instance
+ *   sctrlr - SPI slave controller interface instance
  *
  * Returned Value:
- *   None.
+ *   None
  *
  ****************************************************************************/
 
-static void spi_qflush(struct spi_slave_ctrlr_s *ctrlr)
+static void spi_qflush(struct spi_sctrlr_s *sctrlr)
 {
-  struct sam_spidev_s *priv = (struct sam_spidev_s *)ctrlr;
+  struct sam_spidev_s *priv = (struct sam_spidev_s *)sctrlr;
   irqstate_t flags;
 
   spiinfo("data=%04x\n", data);
 
-  DEBUGASSERT(priv != NULL && priv->dev != NULL);
+  DEBUGASSERT(priv != NULL && priv->sdev != NULL);
 
   /* Get exclusive access to the SPI device */
 
-  nxmutex_lock(&priv->spilock);
+  spi_semtake_noncancelable(priv);
 
   /* Mark the buffer empty, momentarily disabling interrupts */
 
@@ -1067,7 +1077,7 @@ static void spi_qflush(struct spi_slave_ctrlr_s *ctrlr)
   priv->head = 0;
   priv->tail = 0;
   leave_critical_section(flags);
-  nxmutex_unlock(&priv->spilock);
+  spi_semgive(priv);
 }
 
 /****************************************************************************
@@ -1089,7 +1099,7 @@ static void spi_qflush(struct spi_slave_ctrlr_s *ctrlr)
  *
  ****************************************************************************/
 
-struct spi_slave_ctrlr_s *sam_spi_slave_initialize(int port)
+struct spi_sctrlr_s *sam_spi_slave_initialize(int port)
 {
   struct sam_spidev_s *priv;
   int spino = (port & __SPI_SPI_MASK) >> __SPI_SPI_SHIFT;
@@ -1111,19 +1121,33 @@ struct spi_slave_ctrlr_s *sam_spi_slave_initialize(int port)
 #if defined(CONFIG_SAMV7_SPI0_SLAVE) && defined(CONFIG_SAMV7_SPI1_SLAVE)
   if (spino == 0)
     {
-      priv = &g_spi0_ctrlr;
+      priv = &g_spi0_sctrlr;
     }
   else
     {
-      priv = &g_spi1_ctrlr;
+      priv = &g_spi1_sctrlr;
     }
 
 #elif defined(CONFIG_SAMV7_SPI0_SLAVE)
-  priv = &g_spi0_ctrlr;
+  priv = &g_spi0_sctrlr;
 
 #elif defined(CONFIG_SAMV7_SPI1_SLAVE)
-  priv = &g_spi1_ctrlr;
+  priv = &g_spi1_sctrlr;
 #endif
+
+  /* Set up the initial state for this chip select structure.  Other fields
+   * are zeroed.
+   */
+
+  memset(priv, 0, sizeof(struct sam_spidev_s));
+
+  /* Initialize the SPI operations */
+
+  priv->sctrlr.ops = &g_sctrlr_ops;
+
+  /* Save the SPI controller number */
+
+  priv->spino = spino;
 
   /* Has the SPI hardware been initialized? */
 
@@ -1137,6 +1161,11 @@ struct spi_slave_ctrlr_s *sam_spi_slave_initialize(int port)
 #endif
 #if defined(CONFIG_SAMV7_SPI0_SLAVE)
         {
+          /* Set the SPI0 register base address and interrupt information */
+
+          priv->base = SAM_SPI0_BASE,
+          priv->irq  = SAM_IRQ_SPI0;
+
           /* Enable peripheral clocking to SPI0 */
 
           sam_spi0_enableclk();
@@ -1154,6 +1183,11 @@ struct spi_slave_ctrlr_s *sam_spi_slave_initialize(int port)
 #endif
 #if defined(CONFIG_SAMV7_SPI1_SLAVE)
         {
+          /* Set the SPI1 register base address and interrupt information */
+
+          priv->base = SAM_SPI1_BASE,
+          priv->irq  = SAM_IRQ_SPI1;
+
           /* Enable peripheral clocking to SPI1 */
 
           sam_spi1_enableclk();
@@ -1191,6 +1225,12 @@ struct spi_slave_ctrlr_s *sam_spi_slave_initialize(int port)
       spi_getreg(priv, SAM_SPI_SR_OFFSET);
       spi_getreg(priv, SAM_SPI_RDR_OFFSET);
 
+      /* Initialize the SPI semaphore that enforces mutually exclusive
+       * access to the SPI registers.
+       */
+
+      nxsem_init(&priv->spisem, 0, 1);
+      priv->nss         = true;
       priv->initialized = true;
 
       /* Disable all SPI interrupts at the SPI peripheral */
@@ -1212,8 +1252,9 @@ struct spi_slave_ctrlr_s *sam_spi_slave_initialize(int port)
   regval |= (SPI_CSR_NCPHA | SPI_CSR_BITS(8));
   spi_putreg(priv, regval, SAM_SPI_CSR0_OFFSET);
 
+  priv->nbits = 8;
   spiinfo("csr[offset=%02x]=%08x\n", offset, regval);
 
-  return &priv->ctrlr;
+  return &priv->sctrlr;
 }
 #endif /* CONFIG_SAMV7_SPI_SLAVE */

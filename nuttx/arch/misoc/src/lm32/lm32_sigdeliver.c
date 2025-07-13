@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/misoc/src/lm32/lm32_sigdeliver.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016, 2018-2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +42,6 @@
 #include <stdint.h>
 #include <sched.h>
 #include <syscall.h>
-#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -59,11 +71,18 @@ void lm32_sigdeliver(void)
   struct tcb_s *rtcb = this_task();
   uint32_t regs[XCPTCONTEXT_REGS];
 
+  /* Save the errno.  This must be preserved throughout the signal handling
+   * so that the user code final gets the correct errno value (probably
+   * EINTR).
+   */
+
+  int saved_errno = rtcb->pterrno;
+
   board_autoled_on(LED_SIGNAL);
 
   sinfo("rtcb=%p sigdeliver=%p sigpendactionq.head=%p\n",
-        rtcb, rtcb->sigdeliver, rtcb->sigpendactionq.head);
-  DEBUGASSERT(rtcb->sigdeliver != NULL);
+        rtcb, rtcb->xcp.sigdeliver, rtcb->sigpendactionq.head);
+  DEBUGASSERT(rtcb->xcp.sigdeliver != NULL);
 
   /* Save the return state on the stack. */
 
@@ -79,17 +98,17 @@ void lm32_sigdeliver(void)
 
   /* Deliver the signal */
 
-  (rtcb->sigdeliver)(rtcb);
+  ((sig_deliver_t)rtcb->xcp.sigdeliver)(rtcb);
 
   /* Output any debug messages BEFORE restoring errno (because they may
    * alter errno), then disable interrupts again and restore the original
    * errno that is needed by the user logic (it is probably EINTR).
    */
 
-  sinfo("Resuming EPC: %08x INT_CTX: %08x\n",
-        regs[REG_EPC], regs[REG_INT_CTX]);
+  sinfo("Resuming EPC: %08x INT_CTX: %08x\n", regs[REG_EPC], regs[REG_INT_CTX]);
 
   up_irq_save();
+  rtcb->pterrno        = saved_errno;
 
   /* Modify the saved return state with the actual saved values in the
    * TCB.  This depends on the fact that nested signal handling is
@@ -101,9 +120,9 @@ void lm32_sigdeliver(void)
    * could be modified by a hostile program.
    */
 
-  regs[REG_EPC]     = rtcb->xcp.saved_epc;
-  regs[REG_INT_CTX] = rtcb->xcp.saved_int_ctx;
-  rtcb->sigdeliver  = NULL;  /* Allows next handler to be scheduled */
+  regs[REG_EPC]        = rtcb->xcp.saved_epc;
+  regs[REG_INT_CTX]    = rtcb->xcp.saved_int_ctx;
+  rtcb->xcp.sigdeliver = NULL;  /* Allows next handler to be scheduled */
 
   /* Then restore the correct state for this thread of
    * execution.

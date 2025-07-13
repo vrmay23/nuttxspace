@@ -1,22 +1,37 @@
 /****************************************************************************
- * apps/examples/usrsocktest/usrsocktest_basic_send.c
+ * examples/usrsocktest/usrsocktest_basic_send.c
+ * Basic sending tests
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
+ *   Authors: Roman Saveljev <roman.saveljev@haltian.com>
+ *            Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -32,7 +47,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "defines.h"
 
@@ -64,7 +78,7 @@ static int sd;
  ****************************************************************************/
 
 /****************************************************************************
- * Name: basic_send_send
+ * Name: Send
  *
  * Description:
  *   Open socket and send
@@ -80,7 +94,7 @@ static int sd;
  *
  ****************************************************************************/
 
-static void basic_send_send(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void Send(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   struct sockaddr_in addr;
   ssize_t ret;
@@ -169,10 +183,11 @@ static void basic_send_send(FAR struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_send_bytes());
   TEST_ASSERT_EQUAL(0, usrsocktest_endp_malloc_cnt);
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
+
 }
 
 /****************************************************************************
- * Name: connect_send
+ * Name: ConnectSend
  *
  * Description:
  *   Send over connected socket
@@ -187,8 +202,7 @@ static void basic_send_send(FAR struct usrsocktest_daemon_conf_s *dconf)
  *   None
  *
  ****************************************************************************/
-
-static void connect_send(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void ConnectSend(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   struct sockaddr_in addr;
   ssize_t ret;
@@ -252,7 +266,7 @@ static void connect_send(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: basic_send test group setup
+ * Name: BasicSend test group setup
  *
  * Description:
  *   Setup function executed before each testcase in this test group
@@ -268,14 +282,14 @@ static void connect_send(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-TEST_SETUP(basic_send)
+TEST_SETUP(BasicSend)
 {
   sd = -1;
   started = false;
 }
 
 /****************************************************************************
- * Name: basic_send test group teardown
+ * Name: BasicSend test group teardown
  *
  * Description:
  *   Setup function executed after each testcase in this test group
@@ -291,56 +305,55 @@ TEST_SETUP(basic_send)
  *
  ****************************************************************************/
 
-TEST_TEAR_DOWN(basic_send)
+TEST_TEAR_DOWN(BasicSend)
 {
-  int unused_data ret;
+  int ret;
   if (sd >= 0)
     {
       ret = close(sd);
-      TEST_ASSERT_TRUE(ret >= 0);
+      assert(ret >= 0);
     }
-
   if (started)
     {
       ret = usrsocktest_daemon_stop();
-      TEST_ASSERT_EQUAL(ret, OK);
+      assert(ret == OK);
     }
 }
 
-TEST(basic_send, basic_send_send)
+TEST(BasicSend, Send)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  basic_send_send(&usrsocktest_daemon_config);
+  Send(&usrsocktest_daemon_config);
 }
 
-TEST(basic_send, basic_send_send_delay)
+TEST(BasicSend, SendDelay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  basic_send_send(&usrsocktest_daemon_config);
+  Send(&usrsocktest_daemon_config);
 }
 
-TEST(basic_send, connect_send)
+TEST(BasicSend, ConnectSend)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  connect_send(&usrsocktest_daemon_config);
+  ConnectSend(&usrsocktest_daemon_config);
 }
 
-TEST(basic_send, connect_send_delay)
+TEST(BasicSend, ConnectSendDelay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  connect_send(&usrsocktest_daemon_config);
+  ConnectSend(&usrsocktest_daemon_config);
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-TEST_GROUP(basic_send)
+TEST_GROUP(BasicSend)
 {
-  RUN_TEST_CASE(basic_send, basic_send_send);
-  RUN_TEST_CASE(basic_send, basic_send_send_delay);
-  RUN_TEST_CASE(basic_send, connect_send);
-  RUN_TEST_CASE(basic_send, connect_send_delay);
+  RUN_TEST_CASE(BasicSend, Send);
+  RUN_TEST_CASE(BasicSend, SendDelay);
+  RUN_TEST_CASE(BasicSend, ConnectSend);
+  RUN_TEST_CASE(BasicSend, ConnectSendDelay);
 }

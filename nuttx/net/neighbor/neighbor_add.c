@@ -1,22 +1,39 @@
 /****************************************************************************
  * net/neighbor/neighbor_add.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2015, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * A leverage of logic from uIP which also has a BSD style license
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright (c) 2006, Swedish Institute of Computer Science.  All rights
+ *     reserved.
+ *   Author: Adam Dunkels <adam@sics.se>
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the Institute nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE INSTITUTE AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE INSTITUTE OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -38,7 +55,6 @@
 #include <nuttx/net/neighbor.h>
 
 #include "netdev/netdev.h"
-#include "netlink/netlink.h"
 #include "neighbor/neighbor.h"
 
 /****************************************************************************
@@ -68,8 +84,6 @@ void neighbor_add(FAR struct net_driver_s *dev, FAR net_ipv6addr_t ipaddr,
   uint8_t lltype;
   clock_t oldest_time;
   int     oldest_ndx;
-  bool    found = false;
-  bool    new_entry;
   int     i;
 
   DEBUGASSERT(dev != NULL && addr != NULL);
@@ -90,7 +104,6 @@ void neighbor_add(FAR struct net_driver_s *dev, FAR net_ipv6addr_t ipaddr,
           net_ipv6addr_cmp(g_neighbors[i].ne_ipaddr, ipaddr))
         {
           oldest_ndx = i;
-          found = true;
           break;
         }
 
@@ -101,25 +114,11 @@ void neighbor_add(FAR struct net_driver_s *dev, FAR net_ipv6addr_t ipaddr,
         }
     }
 
-  /* When overwrite old entry, need to notify RTM_DELNEIGH */
-
-  if (!found && g_neighbors[oldest_ndx].ne_time != 0)
-    {
-      netlink_neigh_notify(&g_neighbors[oldest_ndx], RTM_DELNEIGH,
-                           AF_INET6);
-    }
-
-  /* Need to notify when entry is not found or changes in table */
-
-  new_entry = !found || memcmp(&g_neighbors[oldest_ndx].ne_addr.u, addr,
-                             g_neighbors[oldest_ndx].ne_addr.na_llsize) != 0;
-
   /* Use the oldest or first free entry (either pointed to by the
    * "oldest_ndx" variable).
    */
 
-  g_neighbors[oldest_ndx].ne_dev  = dev;
-  g_neighbors[oldest_ndx].ne_time = clock_systime_ticks();
+  g_neighbors[oldest_ndx].ne_time = clock_systimer();
   net_ipv6addr_copy(g_neighbors[oldest_ndx].ne_ipaddr, ipaddr);
 
   g_neighbors[oldest_ndx].ne_addr.na_lltype = lltype;
@@ -127,14 +126,6 @@ void neighbor_add(FAR struct net_driver_s *dev, FAR net_ipv6addr_t ipaddr,
 
   memcpy(&g_neighbors[oldest_ndx].ne_addr.u, addr,
          g_neighbors[oldest_ndx].ne_addr.na_llsize);
-
-  /* Notify the new entry */
-
-  if (new_entry)
-    {
-      netlink_neigh_notify(&g_neighbors[oldest_ndx], RTM_NEWNEIGH,
-                           AF_INET6);
-    }
 
   /* Dump the contents of the new entry */
 

@@ -1,7 +1,5 @@
 /****************************************************************************
- * sched/mqueue/mq_msgqfree.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  sched/mqueue/mq_msgqfree.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -40,12 +38,12 @@
  * Description:
  *   This function deallocates an initialized message queue structure.
  *   First, it deallocates all of the queued messages in the message
- *   queue.  It is assumed that this message queue is fully unlinked
- *   and closed so that no thread will attempt to access it while it
- *   is being deleted.
+ *   queue.  It is assumed that this message is fully unlinked and
+ *   closed so that no thread will attempt access it while it is being
+ *   deleted.
  *
  * Input Parameters:
- *   msgq - Named message queue to be freed
+ *   msgq - Named essage queue to be freed
  *
  * Returned Value:
  *   None
@@ -54,18 +52,19 @@
 
 void nxmq_free_msgq(FAR struct mqueue_inode_s *msgq)
 {
-  FAR struct mqueue_msg_s *entry;
-  FAR struct mqueue_msg_s *tmp;
+  FAR struct mqueue_msg_s *curr;
+  FAR struct mqueue_msg_s *next;
 
   /* Deallocate any stranded messages in the message queue. */
 
-  list_for_every_entry_safe(&msgq->msglist, entry,
-                            tmp, struct mqueue_msg_s, node)
+  curr = (FAR struct mqueue_msg_s *)msgq->msglist.head;
+  while (curr)
     {
       /* Deallocate the message structure. */
 
-      list_delete(&entry->node);
-      nxmq_free_msg(entry);
+      next = curr->next;
+      nxmq_free_msg(curr);
+      curr = next;
     }
 
   /* Then deallocate the message queue itself */

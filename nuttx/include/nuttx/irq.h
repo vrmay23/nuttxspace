@@ -1,22 +1,36 @@
 /****************************************************************************
  * include/nuttx/irq.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2011, 2013, 2016-2017 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,13 +44,9 @@
 #include <nuttx/config.h>
 
 #ifndef __ASSEMBLY__
-#  include <stdint.h>
-#  include <stdbool.h>
+# include <stdint.h>
+# include <assert.h>
 #endif
-
-/* Now include architecture-specific types */
-
-#include <arch/irq.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -49,9 +59,6 @@
  */
 
 #  define irq_detach(irq) irq_attach(irq, NULL, NULL)
-#  define irq_detach_wqueue(irq) irq_attach_wqueue(irq, NULL, NULL, NULL, 0)
-#  define irq_detach_thread(irq) \
-     irq_attach_thread(irq, NULL, NULL, NULL, 0, 0)
 
 /* Maximum/minimum values of IRQ integer types */
 
@@ -74,50 +81,6 @@
 #  endif
 
 #endif /* __ASSEMBLY__ */
-
-#ifdef CONFIG_SMP
-#  define cpu_irqlock_clear() \
-  do \
-    { \
-      g_cpu_irqset = 0; \
-      spin_unlock_notrace(&g_cpu_irqlock); \
-    } \
-  while (0)
-#endif
-
-/* Interrupt was handled by this device */
-
-#define IRQ_HANDLED     0
-
-/* Handler requests to wake the handler thread */
-
-#define IRQ_WAKE_THREAD 1
-
-/* Scheduling monitor */
-
-#ifndef CONFIG_SCHED_CRITMONITOR_MAXTIME_THREAD
-#  define CONFIG_SCHED_CRITMONITOR_MAXTIME_THREAD -1
-#endif
-
-#ifndef CONFIG_SCHED_CRITMONITOR_MAXTIME_WQUEUE
-#  define CONFIG_SCHED_CRITMONITOR_MAXTIME_WQUEUE -1
-#endif
-
-#ifndef CONFIG_SCHED_CRITMONITOR_MAXTIME_PREEMPTION
-#  define CONFIG_SCHED_CRITMONITOR_MAXTIME_PREEMPTION -1
-#endif
-
-#ifndef CONFIG_SCHED_CRITMONITOR_MAXTIME_CSECTION
-#  define CONFIG_SCHED_CRITMONITOR_MAXTIME_CSECTION -1
-#endif
-
-#ifndef CONFIG_SCHED_CRITMONITOR_MAXTIME_IRQ
-#  define CONFIG_SCHED_CRITMONITOR_MAXTIME_IRQ -1
-#endif
-
-#ifndef CONFIG_SCHED_CRITMONITOR_MAXTIME_WDOG
-#  define CONFIG_SCHED_CRITMONITOR_MAXTIME_WDOG -1
-#endif
 
 /****************************************************************************
  * Public Types
@@ -154,6 +117,10 @@ typedef uint32_t irq_mapped_t;
 
 typedef CODE int (*xcpt_t)(int irq, FAR void *context, FAR void *arg);
 #endif /* __ASSEMBLY__ */
+
+/* Now include architecture-specific types */
+
+#include <arch/irq.h>
 
 /****************************************************************************
  * Public Data
@@ -197,57 +164,6 @@ extern "C"
 
 int irq_attach(int irq, xcpt_t isr, FAR void *arg);
 
-/****************************************************************************
- * Name: irq_attach_thread
- *
- * Description:
- *   Configure the IRQ subsystem so that IRQ number 'irq' is dispatched to
- *   'isrthread'
- *
- * Input Parameters:
- *   irq - Irq num
- *   isr - Function to be called when the IRQ occurs, called in interrupt
- *   context.
- *   If isr is NULL the default handler is installed(irq_default_handler).
- *   isrthread - called in thread context, If the isrthread is NULL,
- *   then the ISR is being detached.
- *   arg - privdate data
- *   priority   - Priority of the new task
- *   stack_size - size (in bytes) of the stack needed
- *
- * Returned Value:
- *   Zero on success; a negated errno value on failure.
- *
- ****************************************************************************/
-
-int irq_attach_thread(int irq, xcpt_t isr, xcpt_t isrthread, FAR void *arg,
-                      int priority, int stack_size);
-
-/****************************************************************************
- * Name: irq_attach_wqueue
- *
- * Description:
- *   Configure the IRQ subsystem so that IRQ number 'irq' is dispatched to
- *   'wqueue'
- *
- * Input Parameters:
- *   irq - Irq num
- *   isr - Function to be called when the IRQ occurs, called in interrupt
- *   context.
- *   If isr is NULL the default handler is installed(irq_default_handler).
- *   isrwork - called in thread context, If the isrwork is NULL,
- *   then the ISR is being detached.
- *   arg - privdate data
- *   priority - isrwork pri
- *
- * Returned Value:
- *   Zero on success; a negated errno value on failure.
- *
- ****************************************************************************/
-
-int irq_attach_wqueue(int irq, xcpt_t isr, xcpt_t isrwork,
-                      FAR void *arg, int priority);
-
 #ifdef CONFIG_IRQCHAIN
 int irqchain_detach(int irq, xcpt_t isr, FAR void *arg);
 #else
@@ -262,7 +178,7 @@ int irqchain_detach(int irq, xcpt_t isr, FAR void *arg);
  *   instrumentation):
  *
  *     Take the CPU IRQ lock and disable interrupts on all CPUs.  A thread-
- *     specific counter is incremented to indicate that the thread has IRQs
+ *     specific counter is increment to indicate that the thread has IRQs
  *     disabled and to support nested calls to enter_critical_section().
  *
  *     NOTE: Most architectures do not support disabling all CPUs from one
@@ -284,17 +200,9 @@ int irqchain_detach(int irq, xcpt_t isr, FAR void *arg);
  ****************************************************************************/
 
 #ifdef CONFIG_IRQCOUNT
-#  if CONFIG_SCHED_CRITMONITOR_MAXTIME_CSECTION >= 0 || \
-      defined(CONFIG_SCHED_INSTRUMENTATION_CSECTION)
-irqstate_t enter_critical_section(void) noinstrument_function;
-#  else
-#    define enter_critical_section() enter_critical_section_wo_note()
-#  endif
-
-irqstate_t enter_critical_section_wo_note(void) noinstrument_function;
+irqstate_t enter_critical_section(void);
 #else
 #  define enter_critical_section() up_irq_save()
-#  define enter_critical_section_wo_note() up_irq_save()
 #endif
 
 /****************************************************************************
@@ -322,46 +230,70 @@ irqstate_t enter_critical_section_wo_note(void) noinstrument_function;
  ****************************************************************************/
 
 #ifdef CONFIG_IRQCOUNT
-#  if CONFIG_SCHED_CRITMONITOR_MAXTIME_CSECTION >= 0 || \
-      defined(CONFIG_SCHED_INSTRUMENTATION_CSECTION)
-void leave_critical_section(irqstate_t flags) noinstrument_function;
-#  else
-#    define leave_critical_section(f) leave_critical_section_wo_note(f)
-#  endif
-
-void leave_critical_section_wo_note(irqstate_t flags) noinstrument_function;
+void leave_critical_section(irqstate_t flags);
 #else
 #  define leave_critical_section(f) up_irq_restore(f)
-#  define leave_critical_section_wo_note(f) up_irq_restore(f)
 #endif
 
 /****************************************************************************
- * Name: restore_critical_section
+ * Name: spin_lock_irqsave
  *
  * Description:
- *   Restore the critical_section
+ *   If SMP and SPINLOCK_IRQ are enabled:
+ *     Disable local interrupts and take the global spinlock (g_irq_spin)
+ *     if the call counter (g_irq_spin_count[cpu]) equals to 0. Then the
+ *     counter on the CPU is increment to allow nested call.
+ *
+ *     NOTE: This API is very simple to protect data (e.g. H/W register
+ *     or internal data structure) in SMP mode. But do not use this API
+ *     with kernel APIs which suspend a caller thread. (e.g. nxsem_wait)
+ *
+ *   If SMP and SPINLOCK_IRQ are not enabled:
+ *     This function is equivalent to enter_critical_section().
  *
  * Input Parameters:
  *   None
+ *
+ * Returned Value:
+ *   An opaque, architecture-specific value that represents the state of
+ *   the interrupts prior to the call to spin_lock_irqsave();
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_SMP) && defined(CONFIG_SPINLOCK_IRQ) && \
+    defined(CONFIG_ARCH_GLOBAL_IRQDISABLE)
+irqstate_t spin_lock_irqsave(void);
+#else
+#  define spin_lock_irqsave() enter_critical_section()
+#endif
+
+/****************************************************************************
+ * Name: spin_unlock_irqrestore
+ *
+ * Description:
+ *   If SMP and SPINLOCK_IRQ are enabled:
+ *     Decrement the call counter (g_irq_spin_count[cpu]) and if it
+ *     decrements to zero then release the spinlock (g_irq_spin) and
+ *     restore the interrupt state as it was prior to the previous call to
+ *     spin_lock_irqsave().
+ *
+ *   If SMP and SPINLOCK_IRQ are not enabled:
+ *     This function is equivalent to leave_critical_section().
+ *
+ * Input Parameters:
+ *   flags - The architecture-specific value that represents the state of
+ *           the interrupts prior to the call to spin_lock_irqsave();
  *
  * Returned Value:
  *   None
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SMP
-#  define restore_critical_section(tcb, cpu) \
-   do { \
-       if (tcb->irqcount <= 0) \
-         {\
-           if ((g_cpu_irqset & (1 << cpu)) != 0) \
-             { \
-               cpu_irqlock_clear(); \
-             } \
-         } \
-    } while (0)
+#if defined(CONFIG_SMP) && defined(CONFIG_SPINLOCK_IRQ) && \
+    defined(CONFIG_ARCH_GLOBAL_IRQDISABLE)
+void spin_unlock_irqrestore(irqstate_t flags);
 #else
-#  define restore_critical_section(tcb, cpu)
+#  define spin_unlock_irqrestore(f) leave_critical_section(f)
 #endif
 
 #undef EXTERN

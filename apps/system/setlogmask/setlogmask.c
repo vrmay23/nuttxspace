@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/system/setlogmask/setlogmask.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
+ *   Author: Anthony Merlino <anthony@vergeaero.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,17 +39,10 @@
 
 #include <nuttx/config.h>
 
-#include <fcntl.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include <syslog.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-
-#include <nuttx/syslog/syslog.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -58,78 +64,10 @@
  * Name: show_usage
  ****************************************************************************/
 
-#ifdef CONFIG_SYSLOG_IOCTL
-static int print_channels(void)
-{
-  struct syslog_channel_info_s info[CONFIG_SYSLOG_MAX_CHANNELS];
-  int ret;
-  int fd;
-  int i;
-
-  fd = open("/dev/log", O_WRONLY);
-  if (fd < 0)
-    {
-      perror("Failed to open /dev/log");
-      return EXIT_FAILURE;
-    }
-
-  memset(info, 0, sizeof(info));
-  ret = ioctl(fd, SYSLOGIOC_GETCHANNELS, &info);
-  close(fd);
-  if (ret < 0)
-    {
-      perror("Failed to get channels");
-      return EXIT_FAILURE;
-    }
-
-  printf("Channels:\n");
-  for (i = 0; i < CONFIG_SYSLOG_MAX_CHANNELS; i++)
-    {
-      if (info[i].sc_name[0] == '\0')
-        {
-          break;
-        }
-
-      printf("  %s: %s\n", info[i].sc_name,
-             info[i].sc_disable ? "disable" : "enable");
-    }
-
-  return ret;
-}
-
-static int disable_channel(FAR const char *name, bool disable)
-{
-  struct syslog_channel_info_s info;
-  int ret;
-  int fd;
-
-  fd = open("/dev/log", O_WRONLY);
-  if (fd < 0)
-    {
-      perror("Failed to open /dev/log");
-      return EXIT_FAILURE;
-    }
-
-  info.sc_disable = disable;
-  strlcpy(info.sc_name, name, sizeof(info.sc_name));
-  ret = ioctl(fd, SYSLOGIOC_SETFILTER, (unsigned long)&info);
-  if (ret < 0)
-    {
-      perror("Failed to set filter");
-    }
-
-  close(fd);
-  return ret;
-}
-#endif
-
+static void show_usage(FAR const char *progname, int exitcode) noreturn_function;
 static void show_usage(FAR const char *progname, int exitcode)
 {
   printf("\nUsage: %s <d|i|n|w|e|c|a|r>\n", progname);
-#ifdef CONFIG_SYSLOG_IOCTL
-  printf("       %s list\n", progname);
-  printf("       %s <enable/disable> <channel>\n", progname);
-#endif
   printf("       %s -h\n", progname);
   printf("\nWhere:\n");
   printf("  d=DEBUG\n");
@@ -153,29 +91,6 @@ int main(int argc, FAR char *argv[])
     {
       show_usage(argv[0], EXIT_FAILURE);
     }
-
-#ifdef CONFIG_SYSLOG_IOCTL
-  if (strcmp(argv[1], "list") == 0)
-    {
-      print_channels();
-      return EXIT_SUCCESS;
-    }
-  else if (argc == 3)
-    {
-      if (strcmp(argv[1], "enable") == 0)
-        {
-          return disable_channel(argv[2], false);
-        }
-      else if (strcmp(argv[1], "disable") == 0)
-        {
-          return disable_channel(argv[2], true);
-        }
-      else
-        {
-          show_usage(argv[0], EXIT_FAILURE);
-        }
-    }
-#endif
 
   switch (*argv[1])
     {

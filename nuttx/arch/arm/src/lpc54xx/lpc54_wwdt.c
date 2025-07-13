@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/lpc54xx/lpc54_wwdt.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
 #include <nuttx/arch.h>
 
 #include <stdint.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -36,7 +48,7 @@
 #include <nuttx/timers/watchdog.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "hardware/lpc54_wwdt.h"
 #include "lpc54_power.h"
 #include "lpc54_wdt.h"
@@ -46,7 +58,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Clocking *****************************************************************/
 
 #define WWDT_FREQ              3000000  /* Watchdog clock is IRC 12MHz, but
@@ -75,8 +86,7 @@
 
 struct lpc54_lowerhalf_wwdt_s
 {
-  const struct watchdog_ops_s  *ops;  /* Lower half operations */
-
+  FAR const struct watchdog_ops_s  *ops;  /* Lower half operations */
   xcpt_t   handler;  /* Current watchdog interrupt handler */
   uint32_t timeout;  /* The actual timeout value */
   bool     started;  /* The timer has been started */
@@ -92,20 +102,20 @@ static void   lpc54_setwarning(uint32_t warning);
 
 /* Interrupt handling *******************************************************/
 
-static int    lpc54_wwdt_interrupt(int irq, void *context);
+static int    lpc54_wwdt_interrupt(int irq, FAR void *context);
 
 /* "Lower half" driver methods **********************************************/
 
-static int    lpc54_start(struct watchdog_lowerhalf_s *lower);
-static int    lpc54_stop(struct watchdog_lowerhalf_s *lower);
-static int    lpc54_keepalive(struct watchdog_lowerhalf_s *lower);
-static int    lpc54_getstatus(struct watchdog_lowerhalf_s *lower,
-                struct watchdog_status_s *status);
-static int    lpc54_settimeout(struct watchdog_lowerhalf_s *lower,
+static int    lpc54_start(FAR struct watchdog_lowerhalf_s *lower);
+static int    lpc54_stop(FAR struct watchdog_lowerhalf_s *lower);
+static int    lpc54_keepalive(FAR struct watchdog_lowerhalf_s *lower);
+static int    lpc54_getstatus(FAR struct watchdog_lowerhalf_s *lower,
+                FAR struct watchdog_status_s *status);
+static int    lpc54_settimeout(FAR struct watchdog_lowerhalf_s *lower,
                 uint32_t timeout);
-static xcpt_t lpc54_capture(struct watchdog_lowerhalf_s *lower,
+static xcpt_t lpc54_capture(FAR struct watchdog_lowerhalf_s *lower,
                  xcpt_t handler);
-static int    lpc54_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
+static int    lpc54_ioctl(FAR struct watchdog_lowerhalf_s *lower, int cmd,
                  unsigned long arg);
 
 /****************************************************************************
@@ -180,9 +190,9 @@ static void lpc54_setwarning(uint32_t warning)
 {
   /* WWDT warning maximum value limiting */
 
-  if (warning > 0x3ff)
+  if (warning > 0x3FF)
     {
-        warning = 0x3ff;
+        warning = 0x3FF;
     }
 
   putreg32(warning, LPC54_WWDT_WARNINT);
@@ -202,9 +212,9 @@ static void lpc54_setwarning(uint32_t warning)
  *
  ****************************************************************************/
 
-static int lpc54_wwdt_interrupt(int irq, void *context)
+static int lpc54_wwdt_interrupt(int irq, FAR void *context)
 {
-  struct lpc54_lowerhalf_wwdt_s *priv = &g_wdgdev;
+  FAR struct lpc54_lowerhalf_wwdt_s *priv = &g_wdgdev;
   uint32_t regval;
 
   /* Check if the watchdog warning interrupt is really pending */
@@ -250,10 +260,10 @@ static int lpc54_wwdt_interrupt(int irq, void *context)
  *
  ****************************************************************************/
 
-static int lpc54_start(struct watchdog_lowerhalf_s *lower)
+static int lpc54_start(FAR struct watchdog_lowerhalf_s *lower)
 {
-  struct lpc54_lowerhalf_wwdt_s *priv =
-    (struct lpc54_lowerhalf_wwdt_s *)lower;
+  FAR struct lpc54_lowerhalf_wwdt_s *priv =
+    (FAR struct lpc54_lowerhalf_wwdt_s *)lower;
 
   wdinfo("Entry\n");
   DEBUGASSERT(priv);
@@ -269,7 +279,7 @@ static int lpc54_start(struct watchdog_lowerhalf_s *lower)
 
   /* Feed the watchdog to enable it */
 
-  putreg32(0xaa, LPC54_WWDT_FEED);
+  putreg32(0xAA, LPC54_WWDT_FEED);
   putreg32(0x55, LPC54_WWDT_FEED);
 
   priv->started = true;
@@ -283,20 +293,21 @@ static int lpc54_start(struct watchdog_lowerhalf_s *lower)
  *   Stop the watchdog timer
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the
- *           "lower-half" driver state structure.
+ *   lower - A pointer the publicly visible representation of the "lower-half"
+ *           driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static int lpc54_stop(struct watchdog_lowerhalf_s *lower)
+static int lpc54_stop(FAR struct watchdog_lowerhalf_s *lower)
 {
+
   /* The watchdog is always disabled after a reset. It is enabled by setting
-   * the WDEN bit in the WDMOD register, then it cannot be disabled again
-   * except by a reset.
-   */
+  * the WDEN bit in the WDMOD register, then it cannot be disabled again
+  * except by a reset.
+  */
 
   wdinfo("Entry\n");
   return -ENOSYS;
@@ -311,30 +322,30 @@ static int lpc54_stop(struct watchdog_lowerhalf_s *lower)
  *   the watchdog timer or "feeding the dog".
  *
  *   The application program must write in the FEED register at regular
- *   intervals during normal operation to prevent an MCU reset. This
- *   operation must occur only when the counter value is lower than the
- *   window register value.
+ *   intervals during normal operation to prevent an MCU reset. This operation
+ *   must occur only when the counter value is lower than the window register
+ *   value.
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the
- *           "lower-half" driver state structure.
+ *   lower - A pointer the publicly visible representation of the "lower-half"
+ *           driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static int lpc54_keepalive(struct watchdog_lowerhalf_s *lower)
+static int lpc54_keepalive(FAR struct watchdog_lowerhalf_s *lower)
 {
-  struct lpc54_lowerhalf_wwdt_s *priv =
-    (struct lpc54_lowerhalf_wwdt_s *)lower;
+  FAR struct lpc54_lowerhalf_wwdt_s *priv =
+    (FAR struct lpc54_lowerhalf_wwdt_s *)lower;
 
   wdinfo("Entry\n");
   DEBUGASSERT(priv);
 
   /* Feed the watchdog */
 
-  putreg32(0xaa, LPC54_WWDT_FEED);
+  putreg32(0xAA, LPC54_WWDT_FEED);
   putreg32(0x55, LPC54_WWDT_FEED);
 
   return OK;
@@ -347,8 +358,8 @@ static int lpc54_keepalive(struct watchdog_lowerhalf_s *lower)
  *   Get the current watchdog timer status
  *
  * Input Parameters:
- *   lower  - A pointer the publicly visible representation of the
- *            "lower-half" driver state structure.
+ *   lower  - A pointer the publicly visible representation of the "lower-half"
+ *            driver state structure.
  *   status - The location to return the watchdog status information.
  *
  * Returned Value:
@@ -356,11 +367,11 @@ static int lpc54_keepalive(struct watchdog_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int lpc54_getstatus(struct watchdog_lowerhalf_s *lower,
-                           struct watchdog_status_s *status)
+static int lpc54_getstatus(FAR struct watchdog_lowerhalf_s *lower,
+                           FAR struct watchdog_status_s *status)
 {
-  struct lpc54_lowerhalf_wwdt_s *priv =
-    (struct lpc54_lowerhalf_wwdt_s *)lower;
+  FAR struct lpc54_lowerhalf_wwdt_s *priv =
+    (FAR struct lpc54_lowerhalf_wwdt_s *)lower;
   uint32_t elapsed;
   uint32_t reload;
 
@@ -385,6 +396,7 @@ static int lpc54_getstatus(struct watchdog_lowerhalf_s *lower,
   status->timeout = priv->timeout;
 
   /* Get the time remaining until the watchdog expires (in milliseconds) */
+
 
   reload  = getreg32(LPC54_WWDT_TC);
   elapsed = priv->reload - reload;
@@ -413,11 +425,11 @@ static int lpc54_getstatus(struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static int lpc54_settimeout(struct watchdog_lowerhalf_s *lower,
+static int lpc54_settimeout(FAR struct watchdog_lowerhalf_s *lower,
                             uint32_t timeout)
 {
-  struct lpc54_lowerhalf_wwdt_s *priv =
-    (struct lpc54_lowerhalf_wwdt_s *)lower;
+  FAR struct lpc54_lowerhalf_wwdt_s *priv =
+    (FAR struct lpc54_lowerhalf_wwdt_s *)lower;
   uint32_t reload;
   uint32_t regval;
 
@@ -435,7 +447,7 @@ static int lpc54_settimeout(struct watchdog_lowerhalf_s *lower,
 
   /* Determine timeout value */
 
-  reload = WWDT_FREQ / 1000;
+  reload = WWDT_FREQ/1000;
   reload = timeout * reload;
 
   /* Make sure that the final reload value is within range */
@@ -445,7 +457,7 @@ static int lpc54_settimeout(struct watchdog_lowerhalf_s *lower,
       reload = LPC54_MAX_WWDT_TC;
     }
 
-  /* Save the actual timeout value in milliseconds */
+  /* Save the actual timeout value in milliseconds*/
 
   priv->timeout = timeout;
 
@@ -477,8 +489,8 @@ static int lpc54_settimeout(struct watchdog_lowerhalf_s *lower,
  *   behavior.
  *
  * Input Parameters:
- *   lower      - A pointer the publicly visible representation of the
- *                "lower-half" driver state structure.
+ *   lower      - A pointer the publicly visible representation of the "lower-half"
+ *                driver state structure.
  *   newhandler - The new watchdog expiration function pointer.  If this
  *                function pointer is NULL, then the reset-on-expiration
  *                behavior is restored,
@@ -490,11 +502,11 @@ static int lpc54_settimeout(struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static xcpt_t lpc54_capture(struct watchdog_lowerhalf_s *lower,
+static xcpt_t lpc54_capture(FAR struct watchdog_lowerhalf_s *lower,
                             xcpt_t handler)
 {
-  struct lpc54_lowerhalf_wwdt_s *priv =
-    (struct lpc54_lowerhalf_wwdt_s *)lower;
+  FAR struct lpc54_lowerhalf_wwdt_s *priv =
+    (FAR struct lpc54_lowerhalf_wwdt_s *)lower;
   irqstate_t flags;
   xcpt_t oldhandler;
   uint16_t regval;
@@ -509,7 +521,7 @@ static xcpt_t lpc54_capture(struct watchdog_lowerhalf_s *lower,
 
   /* Save the new handler */
 
-  priv->handler = handler;
+   priv->handler = handler;
 
   /* Are we attaching or detaching the handler? */
 
@@ -545,8 +557,8 @@ static xcpt_t lpc54_capture(struct watchdog_lowerhalf_s *lower,
  *   are forwarded to the lower half driver through this method.
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the
- *           "lower-half" driver state structure.
+ *   lower - A pointer the publicly visible representation of the "lower-half"
+ *           driver state structure.
  *   cmd   - The ioctl command value
  *   arg   - The optional argument that accompanies the 'cmd'.  The
  *           interpretation of this argument depends on the particular
@@ -557,11 +569,11 @@ static xcpt_t lpc54_capture(struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static int lpc54_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
+static int lpc54_ioctl(FAR struct watchdog_lowerhalf_s *lower, int cmd,
                        unsigned long arg)
 {
-  struct lpc54_lowerhalf_wwdt_s *priv =
-    (struct lpc54_lowerhalf_wwdt_s *)lower;
+  FAR struct lpc54_lowerhalf_wwdt_s *priv =
+    (FAR struct lpc54_lowerhalf_wwdt_s *)lower;
   int ret = -ENOTTY;
 
   DEBUGASSERT(priv);
@@ -583,9 +595,9 @@ static int lpc54_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
       ret = -EINVAL;
       if (mintime < priv->timeout)
         {
-          uint32_t window = mintime*WWDT_FREQ / 1000;
+          uint32_t window = mintime*WWDT_FREQ/1000;
           DEBUGASSERT(window < priv->reload);
-          lpc54_setwindow(window);
+          lpc54_setwindow( window );
           ret = OK;
         }
     }
@@ -601,9 +613,9 @@ static int lpc54_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
  * Name: lpc54_wwdt_initialize
  *
  * Description:
- *   Initialize the WWDT watchdog time.
- *    The watchdog timer is initialized and registers as 'devpath.
- *    The initial state of the watchdog time is disabled.
+ *   Initialize the WWDT watchdog time.  The watchdog timer is initialized and
+ *   registers as 'devpath.  The initial state of the watchdog time is
+ *   disabled.
  *
  * Input Parameters:
  *   devpath - The full path to the watchdog.  This should be of the form
@@ -614,9 +626,9 @@ static int lpc54_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
  *
  ****************************************************************************/
 
-void lpc54_wwdt_initialize(const char *devpath)
+void lpc54_wwdt_initialize(FAR const char *devpath)
 {
-  struct lpc54_lowerhalf_wwdt_s *priv = &g_wdgdev;
+  FAR struct lpc54_lowerhalf_wwdt_s *priv = &g_wdgdev;
 
   wdinfo("Entry: devpath=%s\n", devpath);
 
@@ -658,12 +670,12 @@ void lpc54_wwdt_initialize(const char *devpath)
    * device option bits, the watchdog is automatically enabled at power-on.
    */
 
-  lpc54_settimeout((struct watchdog_lowerhalf_s *)priv,
+  lpc54_settimeout((FAR struct watchdog_lowerhalf_s *)priv,
                    CONFIG_LPC54_WWDT_DEFTIMOUT);
 
   /* Register the watchdog driver as /dev/watchdog0 */
 
-  watchdog_register(devpath, (struct watchdog_lowerhalf_s *)priv);
+  watchdog_register(devpath, (FAR struct watchdog_lowerhalf_s *)priv);
 }
 
 #endif /* CONFIG_WATCHDOG && CONFIG_LPC54_WWDT */

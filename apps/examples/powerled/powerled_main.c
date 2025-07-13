@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/powerled/powerled_main.c
+ * examples/adc/powerled_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Mateusz Szafoni <raiden00@railab.me>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -42,9 +55,23 @@
 
 #include <nuttx/power/powerled.h>
 
+#if defined(CONFIG_EXAMPLES_POWERLED)
+
+#ifndef CONFIG_DRIVERS_POWERLED
+#  error "Powerled example requires powerled support"
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+#ifndef CONFIG_EXAMPLES_POWERLED_CURRENT_LIMIT
+#  error "LED current limit must be set!"
+#endif
+
+#ifndef CONFIG_LIBC_FLOATINGPOINT
+#  error "CONFIG_LIBC_FLOATINGPOINT must be set!"
+#endif
 
 #define DEMO_CONT_BRIGHTNESS_MAX   100.0
 #define DEMO_CONT_BRIGHTNESS_MIN   0.0
@@ -58,7 +85,7 @@
 #define DEMO_FLASH_BRIGHTNESS_SET  100.0
 
 /****************************************************************************
- * Private Types
+ * Private Type Definition
  ****************************************************************************/
 
 /* Example modes */
@@ -180,7 +207,7 @@ static void parse_args(FAR struct args_s *args, int argc, FAR char **argv)
   int i_value;
   float f_value;
 
-  for (index = 1; index < argc; )
+  for (index = 1; index < argc;)
     {
       ptr = argv[index];
       if (ptr[0] != '-')
@@ -449,8 +476,7 @@ int main(int argc, char *argv[])
 
   /* Set LED current limit */
 
-  powerled_limits.current =
-          (((float)CONFIG_EXAMPLES_POWERLED_CURRENT_LIMIT) / 1000.0);
+  powerled_limits.current = (((float)CONFIG_EXAMPLES_POWERLED_CURRENT_LIMIT)/1000.0);
 
   printf("\nStart powerled_main application!\n");
 
@@ -459,8 +485,7 @@ int main(int argc, char *argv[])
   fd = open(CONFIG_EXAMPLES_POWERLED_DEVPATH, 0);
   if (fd <= 0)
     {
-      printf("powerled_main: open %s failed %d\n",
-             CONFIG_EXAMPLES_POWERLED_DEVPATH, errno);
+      printf("powerled_main: open %s failed %d\n", CONFIG_EXAMPLES_POWERLED_DEVPATH, errno);
       goto errout;
     }
 
@@ -495,11 +520,10 @@ int main(int argc, char *argv[])
 
                       /* Set Powerled continuous mode */
 
-                      ret = ioctl(fd, PWRIOC_SET_MODE,
-                                 (unsigned long)powerled_mode);
+                      ret = ioctl(fd, PWRIOC_SET_MODE, (unsigned long)powerled_mode);
                       if (ret < 0)
                         {
-                          printf("failed to set powerled mode %d\n", ret);
+                          printf("failed to set powerled mode %d \n", ret);
                         }
 
                       config = false;
@@ -509,11 +533,10 @@ int main(int argc, char *argv[])
 
                   /* Set Powerled parameters */
 
-                  ret = ioctl(fd, PWRIOC_SET_PARAMS,
-                             (unsigned long)&powerled_params);
+                  ret = ioctl(fd, PWRIOC_SET_PARAMS, (unsigned long)&powerled_params);
                   if (ret < 0)
                     {
-                      printf("failed to set params %d\n", ret);
+                      printf("failed to set params %d \n", ret);
                     }
 
                   /* Start Powerled */
@@ -541,6 +564,7 @@ int main(int argc, char *argv[])
                   sleep(1);
                 }
 
+
               if (demo == POWERLED_OPMODE_FLASH)
                 {
                   /* Flash mode demo */
@@ -557,15 +581,13 @@ int main(int argc, char *argv[])
 
                       /* Set Powerled flash mode */
 
-                      ret = ioctl(fd, PWRIOC_SET_MODE,
-                                 (unsigned long)powerled_mode);
+                      ret = ioctl(fd, PWRIOC_SET_MODE, (unsigned long)powerled_mode);
                       if (ret < 0)
                         {
-                          printf("failed to set powerled mode %d\n", ret);
+                          printf("failed to set powerled mode %d \n", ret);
                         }
 
-                      printf("Brightness is %.2f\n",
-                             powerled_params.brightness);
+                      printf("Brightness is %.2f\n", powerled_params.brightness);
                       printf("Duty is %.2f\n", powerled_params.duty);
 
                       config = false;
@@ -575,11 +597,10 @@ int main(int argc, char *argv[])
 
                   /* Set Powerled parameters */
 
-                  ret = ioctl(fd, PWRIOC_SET_PARAMS,
-                             (unsigned long)&powerled_params);
+                  ret = ioctl(fd, PWRIOC_SET_PARAMS, (unsigned long)&powerled_params);
                   if (ret < 0)
                     {
-                      printf("failed to set params %d\n", ret);
+                      printf("failed to set params %d \n", ret);
                     }
 
                   /* Start Powerled */
@@ -622,11 +643,10 @@ int main(int argc, char *argv[])
 
                   /* Set Powerled continuous mode */
 
-                  ret = ioctl(fd, PWRIOC_SET_MODE,
-                             (unsigned long)powerled_mode);
+                  ret = ioctl(fd, PWRIOC_SET_MODE, (unsigned long)powerled_mode);
                   if (ret < 0)
                     {
-                      printf("failed to set powerled mode %d\n", ret);
+                      printf("failed to set powerled mode %d \n", ret);
                     }
 
                   powerled_params.brightness = args->brightness;
@@ -635,11 +655,10 @@ int main(int argc, char *argv[])
 
                   /* Set Powerled parameters */
 
-                  ret = ioctl(fd, PWRIOC_SET_PARAMS,
-                             (unsigned long)&powerled_params);
+                  ret = ioctl(fd, PWRIOC_SET_PARAMS, (unsigned long)&powerled_params);
                   if (ret < 0)
                     {
-                      printf("failed to set params %d\n", ret);
+                      printf("failed to set params %d \n", ret);
                     }
 
                   /* Start Powerled */
@@ -668,11 +687,10 @@ int main(int argc, char *argv[])
 
                   /* Set Powerled flash mode */
 
-                  ret = ioctl(fd, PWRIOC_SET_MODE,
-                             (unsigned long)powerled_mode);
+                  ret = ioctl(fd, PWRIOC_SET_MODE, (unsigned long)powerled_mode);
                   if (ret < 0)
                     {
-                      printf("failed to set powerled mode %d\n", ret);
+                      printf("failed to set powerled mode %d \n", ret);
                     }
 
                   powerled_params.brightness = args->brightness;
@@ -681,11 +699,10 @@ int main(int argc, char *argv[])
 
                   /* Set Powerled parameters */
 
-                  ret = ioctl(fd, PWRIOC_SET_PARAMS,
-                             (unsigned long)&powerled_params);
+                  ret = ioctl(fd, PWRIOC_SET_PARAMS, (unsigned long)&powerled_params);
                   if (ret < 0)
                     {
-                      printf("failed to set params %d\n", ret);
+                      printf("failed to set params %d \n", ret);
                     }
 
                   /* Start Powerled */
@@ -714,7 +731,7 @@ int main(int argc, char *argv[])
       ret = ioctl(fd, PWRIOC_GET_STATE, (unsigned long)&powerled_state);
       if (ret < 0)
         {
-          printf("Failed to get state %d\n", ret);
+          printf("Failed to get state %d \n", ret);
         }
 
       /* Terminate if fault state */
@@ -741,6 +758,7 @@ int main(int argc, char *argv[])
     }
 
 errout:
+
   fflush(stdout);
   fflush(stderr);
 
@@ -764,3 +782,4 @@ errout:
   return 0;
 }
 
+#endif /* CONFIG_EXAMPLE_POWERLED */

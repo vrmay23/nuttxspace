@@ -1,22 +1,35 @@
 /****************************************************************************
  * include/debug.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2011, 2014, 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,20 +42,12 @@
 
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
-#include <nuttx/streams.h>
 
 #ifdef CONFIG_ARCH_DEBUG_H
-#  include <arch/debug.h>
-#endif
-#ifdef CONFIG_ARCH_CHIP_DEBUG_H
-#  include <arch/chip/debug.h>
-#endif
-#ifdef CONFIG_ARCH_BOARD_DEBUG_H
-#  include <arch/board/debug.h>
+# include <arch/debug.h>
 #endif
 
 #include <syslog.h>
-#include <sys/uio.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -57,7 +62,7 @@
  *    verbose "informational" debug output.  If you enable CONFIG_DEBUG_INFO,
  *    then very chatty (and often annoying) output will be generated.
  *
- *    The first character of the macro name indicates the system
+ *    The first character of the macro name indicates the system system
  *    (e.g., n=network, f=filesystm, etc.).  If the first character is
  *    missing (i.e., _info()), then it is common.  The common _info() macro
  *    is enabled simply with CONFIG_DEBUG_INFO.  Subsystem debug requires an
@@ -65,10 +70,10 @@
  *    for the network, CONFIG_DEBUG_FS for the file system, etc).
  *
  *    In general, error messages and output of importance use [a-z]err().
- *    [a-z]err() is implementation dependent but usually uses file
- *    descriptors. (that is a problem only because the interrupt task may
- *    have redirected stdout).  Therefore [a-z]err() should not be used in
- *    interrupt handlers.
+ *    [a-z]err() is implementation dependent but usually uses file descriptors.
+ *    (that is a problem only because the interrupt task may have re-
+ *    directed stdout).  Therefore [a-z]err() should not be used in interrupt
+ *    handlers.
  *
  * [a-z]warn() -- Identical to [a-z]info() except that it also requires that
  *    CONFIG_DEBUG_WARN be defined.  This is intended for important exception
@@ -76,25 +81,19 @@
  *    fatal consequences).
  *
  * [a-z]err() -- Identical to [a-z]info() except that it also requires that
- *    CONFIG_DEBUG_ERROR be defined.  This is intended for important
- *    error-related information that you probably don't want to suppress
- *    during general debugging.
+ *    CONFIG_DEBUG_ERROR be defined.  This is intended for important error-related
+ *    information that you probably not want to suppress during normal debug
+ *    general debugging.
  *
- * _alert() - is a special, high-priority, unconditional version that is
- *    really intended only for crash error reporting.
+ * _alert() - is a special, high-priority, unconditional version that is really
+ *    intended only for crash error reporting.
  */
 
-#if !defined(EXTRA_FMT) && !defined(EXTRA_ARG) && \
-    defined(CONFIG_HAVE_FUNCTIONNAME) && !defined(CONFIG_DEFAULT_SMALL)
+#ifdef CONFIG_HAVE_FUNCTIONNAME
 #  define EXTRA_FMT "%s: "
 #  define EXTRA_ARG ,__FUNCTION__
-#endif
-
-#ifndef EXTRA_FMT
+#else
 #  define EXTRA_FMT
-#endif
-
-#ifndef EXTRA_ARG
 #  define EXTRA_ARG
 #endif
 
@@ -103,13 +102,8 @@
  */
 
 #ifdef CONFIG_CPP_HAVE_VARARGS
-/* don't call syslog while performing the compiler's format check. */
 
-#  define _none(format, ...) \
-    do { if (0) syslog(LOG_ERR, format, ##__VA_ARGS__); } while (0)
-#else
-#  define _none       (void)
-#endif
+/* C-99 style variadic macros are supported */
 
 /* The actual logger function may be overridden in arch/debug.h if needed.
  * (Currently only if the pre-processor supports variadic macros)
@@ -119,32 +113,630 @@
 #  define __arch_syslog syslog
 #endif
 
-#if !defined(CONFIG_DEBUG_ALERT)
-#  define _alert      _none
-#elif defined(CONFIG_CPP_HAVE_VARARGS)
+#ifdef CONFIG_DEBUG_ALERT
 #  define _alert(format, ...) \
-   __arch_syslog(LOG_ALERT, EXTRA_FMT format EXTRA_ARG, ##__VA_ARGS__)
+   __arch_syslog(LOG_EMERG, EXTRA_FMT format EXTRA_ARG, ##__VA_ARGS__)
+#else /* CONFIG_DEBUG_ERROR */
+#  define _alert(x...)
 #endif
 
-#if !defined(CONFIG_DEBUG_ERROR)
-#  define _err        _none
-#elif defined(CONFIG_CPP_HAVE_VARARGS)
+#ifdef CONFIG_DEBUG_ERROR
 #  define _err(format, ...) \
    __arch_syslog(LOG_ERR, EXTRA_FMT format EXTRA_ARG, ##__VA_ARGS__)
+#else
+#  define _err(x...)
 #endif
 
-#if !defined(CONFIG_DEBUG_WARN)
-#  define _warn       _none
-#elif defined(CONFIG_CPP_HAVE_VARARGS)
+#ifdef CONFIG_DEBUG_WARN
 #  define _warn(format, ...) \
    __arch_syslog(LOG_WARNING, EXTRA_FMT format EXTRA_ARG, ##__VA_ARGS__)
+#else
+#  define _warn(x...)
 #endif
 
-#if !defined(CONFIG_DEBUG_INFO)
-#  define _info       _none
-#elif defined(CONFIG_CPP_HAVE_VARARGS)
+#ifdef CONFIG_DEBUG_INFO
 #  define _info(format, ...) \
    __arch_syslog(LOG_INFO, EXTRA_FMT format EXTRA_ARG, ##__VA_ARGS__)
+#else
+#  define _info(x...)
+#endif
+
+/* Subsystem specific debug */
+
+#ifdef CONFIG_DEBUG_MM_ERROR
+#  define merr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define merr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_MM_WARN
+#  define mwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define mwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_MM_INFO
+#  define minfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define minfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SCHED_ERROR
+#  define serr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define serr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SCHED_WARN
+#  define swarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define swarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SCHED_INFO
+#  define sinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define sinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SYSCALL_ERROR
+#  define svcerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define svcerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SYSCALL_WARN
+#  define svcwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define svcwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SYSCALL_INFO
+#  define svcinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define svcinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_PAGING_ERROR
+#  define pgerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define pgerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_PAGING_WARN
+#  define pgwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define pgwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_PAGING_INFO
+#  define pginfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define pginfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_NET_ERROR
+#  define nerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define nerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_NET_WARN
+#  define nwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define nwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_NET_INFO
+#  define ninfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define ninfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_POWER_ERROR
+#  define pwrerr(format, ...)    _err(format, ##__VA_ARGS__)
+#else
+#  define pwrerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_POWER_WARN
+#  define pwrwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define pwrwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_POWER_INFO
+#  define pwrinfo(format, ...)  _info(format, ##__VA_ARGS__)
+#else
+#  define pwrinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_WIRELESS_ERROR
+#  define wlerr(format, ...)    _err(format, ##__VA_ARGS__)
+#else
+#  define wlerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_WIRELESS_WARN
+#  define wlwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define wlwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_WIRELESS_INFO
+#  define wlinfo(format, ...)  _info(format, ##__VA_ARGS__)
+#else
+#  define wlinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_FS_ERROR
+#  define ferr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define ferr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_FS_WARN
+#  define fwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define fwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_FS_INFO
+#  define finfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define finfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_CONTACTLESS_ERROR
+#  define ctlserr(format, ...)  _err(format, ##__VA_ARGS__)
+#else
+#  define ctlserr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_CONTACTLESS_WARN
+#  define ctlswarn(format, ...) _warn(format, ##__VA_ARGS__)
+#else
+#  define ctlswarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_CONTACTLESS_INFO
+#  define ctlsinfo(format, ...) _info(format, ##__VA_ARGS__)
+#else
+#  define ctlsinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_CRYPTO_ERROR
+#  define crypterr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define crypterr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_CRYPTO_WARN
+#  define cryptwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define cryptwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_CRYPTO_INFO
+#  define cryptinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define cryptinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_INPUT_ERROR
+#  define ierr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define ierr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_INPUT_WARN
+#  define iwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define iwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_INPUT_INFO
+#  define iinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define iinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_ANALOG_ERROR
+#  define aerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define aerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_ANALOG_WARN
+#  define awarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define awarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_ANALOG_INFO
+#  define ainfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define ainfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_CAN_ERROR
+#  define canerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define canerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_CAN_WARN
+#  define canwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define canwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_CAN_INFO
+#  define caninfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define caninfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_GRAPHICS_ERROR
+#  define gerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define gerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_GRAPHICS_WARN
+#  define gwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define gwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_GRAPHICS_INFO
+#  define ginfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define ginfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_BINFMT_ERROR
+#  define berr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define berr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_BINFMT_WARN
+#  define bwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define bwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_BINFMT_INFO
+#  define binfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define binfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_LIB_ERROR
+#  define lerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define lerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_LIB_WARN
+#  define lwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define lwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_LIB_INFO
+#  define linfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define linfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_AUDIO_ERROR
+#  define auderr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define auderr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_AUDIO_WARN
+#  define audwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define audwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_AUDIO_INFO
+#  define audinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define audinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_DMA_ERROR
+#  define dmaerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define dmaerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_DMA_WARN
+#  define dmawarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define dmawarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_DMA_INFO
+#  define dmainfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define dmainfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_IRQ_ERROR
+#  define irqerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define irqerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_IRQ_WARN
+#  define irqwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define irqwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_IRQ_INFO
+#  define irqinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define irqinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_LCD_ERROR
+#  define lcderr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define lcderr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_LCD_WARN
+#  define lcdwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define lcdwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_LCD_INFO
+#  define lcdinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define lcdinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_LEDS_ERROR
+#  define lederr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define lederr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_LEDS_WARN
+#  define ledwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define ledwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_LEDS_INFO
+#  define ledinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define ledinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_GPIO_ERROR
+#  define gpioerr(format, ...)    _err(format, ##__VA_ARGS__)
+#else
+#  define gpioerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_GPIO_WARN
+#  define gpiowarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define gpiowarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_GPIO_INFO
+#  define gpioinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define gpioinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_I2C_ERROR
+#  define i2cerr(format, ...)    _err(format, ##__VA_ARGS__)
+#else
+#  define i2cerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_I2C_WARN
+#  define i2cwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define i2cwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_I2C_INFO
+#  define i2cinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define i2cinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_I2S_ERROR
+#  define i2serr(format, ...)    _err(format, ##__VA_ARGS__)
+#else
+#  define i2serr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_I2S_WARN
+#  define i2swarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define i2swarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_I2S_INFO
+#  define i2sinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define i2sinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_PWM_ERROR
+#  define pwmerr(format, ...)    _err(format, ##__VA_ARGS__)
+#else
+#  define pwmerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_PWM_WARN
+#  define pwmwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define pwmwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_PWM_INFO
+#  define pwminfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define pwminfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_RTC_ERROR
+#  define rtcerr(format, ...)    _err(format, ##__VA_ARGS__)
+#else
+#  define rtcerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_RTC_WARN
+#  define rtcwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define rtcwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_RTC_INFO
+#  define rtcinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define rtcinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_MEMCARD_ERROR
+#  define mcerr(format, ...)    _err(format, ##__VA_ARGS__)
+#else
+#  define mcerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_MEMCARD_WARN
+#  define mcwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define mcwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_MEMCARD_INFO
+#  define mcinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define mcinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SENSORS_ERROR
+#  define snerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define snerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SENSORS_WARN
+#  define snwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define snwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SENSORS_INFO
+#  define sninfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define sninfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SPI_ERROR
+#  define spierr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define spierr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SPI_WARN
+#  define spiwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define spiwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_SPI_INFO
+#  define spiinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define spiinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_TIMER_ERROR
+#  define tmrerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define tmrerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_TIMER_WARN
+#  define tmrwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define tmrwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_TIMER_INFO
+#  define tmrinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define tmrinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_USB_ERROR
+#  define uerr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define uerr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_USB_WARN
+#  define uwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define uwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_USB_INFO
+#  define uinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define uinfo(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_WATCHDOG_ERROR
+#  define wderr(format, ...)     _err(format, ##__VA_ARGS__)
+#else
+#  define wderr(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_WATCHDOG_WARN
+#  define wdwarn(format, ...)   _warn(format, ##__VA_ARGS__)
+#else
+#  define wdwarn(x...)
+#endif
+
+#ifdef CONFIG_DEBUG_WATCHDOG_INFO
+#  define wdinfo(format, ...)   _info(format, ##__VA_ARGS__)
+#else
+#  define wdinfo(x...)
+#endif
+
+#else /* CONFIG_CPP_HAVE_VARARGS */
+
+/* Variadic macros NOT supported */
+
+#ifndef CONFIG_DEBUG_ALERT
+#  define _alert      (void)
+# endif
+
+#ifndef CONFIG_DEBUG_ERROR
+#  define _err        (void)
+#endif
+
+#ifndef CONFIG_DEBUG_WARN
+#  define _warn       (void)
+#endif
+
+#ifndef CONFIG_DEBUG_INFO
+#  define _info       (void)
 #endif
 
 /* Subsystem specific debug */
@@ -152,884 +744,580 @@
 #ifdef CONFIG_DEBUG_MM_ERROR
 #  define merr         _err
 #else
-#  define merr        _none
+#  define merr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_MM_WARN
 #  define mwarn       _warn
 #else
-#  define mwarn       _none
+#  define mwarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_MM_INFO
 #  define minfo       _info
 #else
-#  define minfo       _none
+#  define minfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SCHED_ERROR
 #  define serr         _err
 #else
-#  define serr        _none
+#  define serr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SCHED_WARN
 #  define swarn       _warn
 #else
-#  define swarn       _none
+#  define swarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SCHED_INFO
 #  define sinfo       _info
 #else
-#  define sinfo       _none
+#  define sinfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SYSCALL_ERROR
 #  define svcerr       _err
 #else
-#  define svcerr      _none
+#  define svcerr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SYSCALL_WARN
 #  define svcwarn     _warn
 #else
-#  define svcwarn     _none
+#  define svcwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SYSCALL_INFO
 #  define svcinfo     _info
 #else
-#  define svcinfo     _none
+#  define svcinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_PAGING_ERROR
 #  define pgerr        _err
 #else
-#  define pgerr       _none
+#  define pgerr       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_PAGING_WARN
 #  define pgwarn      _warn
 #else
-#  define pgwarn      _none
+#  define pgwarn      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_PAGING_INFO
 #  define pginfo      _info
 #else
-#  define pginfo      _none
+#  define pginfo      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_NET_ERROR
 #  define nerr         _err
 #else
-#  define nerr        _none
+#  define nerr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_NET_WARN
 #  define nwarn       _warn
 #else
-#  define nwarn       _none
+#  define nwarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_NET_INFO
 #  define ninfo       _info
 #else
-#  define ninfo       _none
+#  define ninfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_POWER_ERROR
 #  define pwrerr       _err
 #else
-#  define pwrerr       _none
+#  define pwrerr       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_POWER_WARN
 #  define pwrwarn      _warn
 #else
-#  define pwrwarn      _none
+#  define pwrwarn      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_POWER_INFO
 #  define pwrinfo      _info
 #else
-#  define pwrinfo      _none
-#endif
-
-#ifdef CONFIG_DEBUG_BATTERY_ERROR
-#  define baterr       _err
-#else
-#  define baterr       _none
-#endif
-
-#ifdef CONFIG_DEBUG_BATTERY_WARN
-#  define batwarn      _warn
-#else
-#  define batwarn      _none
-#endif
-
-#ifdef CONFIG_DEBUG_BATTERY_INFO
-#  define batinfo      _info
-#else
-#  define batinfo      _none
+#  define pwrinfo      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_WIRELESS_ERROR
 #  define wlerr       _err
 #else
-#  define wlerr       _none
+#  define wlerr       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_WIRELESS_WARN
 #  define wlwarn      _warn
 #else
-#  define wlwarn      _none
+#  define wlwarn      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_WIRELESS_INFO
 #  define wlinfo      _info
 #else
-#  define wlinfo      _none
+#  define wlinfo      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_FS_ERROR
 #  define ferr         _err
 #else
-#  define ferr        _none
+#  define ferr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_FS_WARN
 #  define fwarn       _warn
 #else
-#  define fwarn       _none
+#  define fwarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_FS_INFO
 #  define finfo       _info
 #else
-#  define finfo       _none
+#  define finfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_CONTACTLESS_ERROR
 #  define ctlserr     _err
 #else
-#  define ctlserr     _none
+#  define ctlserr     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_CONTACTLESS_WARN
 #  define ctlswarn    _warn
 #else
-#  define ctlswarn    _none
+#  define ctlswarn    (void)
 #endif
 
 #ifdef CONFIG_DEBUG_CONTACTLESS_INFO
 #  define ctlsinfo    _info
 #else
-#  define ctlsinfo    _none
+#  define ctlsinfo    (void)
 #endif
 
 #ifdef CONFIG_DEBUG_CRYPTO_ERROR
 #  define crypterr     _err
 #else
-#  define crypterr    _none
+#  define crypterr    (void)
 #endif
 
 #ifdef CONFIG_DEBUG_CRYPTO_WARN
 #  define cryptwarn   _warn
 #else
-#  define cryptwarn   _none
+#  define cryptwarn   (void)
 #endif
 
 #ifdef CONFIG_DEBUG_CRYPTO_INFO
 #  define cryptinfo   _info
 #else
-#  define cryptinfo   _none
+#  define cryptinfo   (void)
 #endif
 
 #ifdef CONFIG_DEBUG_INPUT_ERROR
 #  define ierr         _err
 #else
-#  define ierr        _none
+#  define ierr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_INPUT_WARN
 #  define iwarn       _warn
 #else
-#  define iwarn       _none
+#  define iwarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_INPUT_INFO
 #  define iinfo       _info
 #else
-#  define iinfo       _none
+#  define iinfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_ANALOG_ERROR
 #  define aerr         _err
 #else
-#  define aerr        _none
+#  define aerr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_ANALOG_WARN
 #  define awarn       _warn
 #else
-#  define awarn       _none
+#  define awarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_ANALOG_INFO
 #  define ainfo       _info
 #else
-#  define ainfo       _none
+#  define ainfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_CAN_ERROR
 #  define canerr       _err
 #else
-#  define canerr      _none
+#  define canerr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_CAN_WARN
 #  define canwarn     _warn
 #else
-#  define canwarn     _none
+#  define canwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_CAN_INFO
 #  define caninfo     _info
 #else
-#  define caninfo     _none
+#  define caninfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_GRAPHICS_ERROR
 #  define gerr         _err
 #else
-#  define gerr        _none
+#  define gerr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_GRAPHICS_WARN
 #  define gwarn       _warn
 #else
-#  define gwarn       _none
+#  define gwarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_GRAPHICS_INFO
 #  define ginfo       _info
 #else
-#  define ginfo       _none
+#  define ginfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_BINFMT_ERROR
 #  define berr         _err
 #else
-#  define berr        _none
+#  define berr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_BINFMT_WARN
 #  define bwarn       _warn
 #else
-#  define bwarn       _none
+#  define bwarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_BINFMT_INFO
 #  define binfo       _info
 #else
-#  define binfo       _none
+#  define binfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_LIB_ERROR
 #  define lerr         _err
 #else
-#  define lerr        _none
+#  define lerr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_LIB_WARN
 #  define lwarn       _warn
 #else
-#  define lwarn       _none
+#  define lwarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_LIB_INFO
 #  define linfo       _info
 #else
-#  define linfo       _none
+#  define linfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_AUDIO_ERROR
 #  define auderr       _err
 #else
-#  define auderr      _none
+#  define auderr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_AUDIO_WARN
 #  define audwarn     _warn
 #else
-#  define audwarn     _none
+#  define audwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_AUDIO_INFO
 #  define audinfo     _info
 #else
-#  define audinfo     _none
+#  define audinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_DMA_ERROR
 #  define dmaerr       _err
 #else
-#  define dmaerr      _none
+#  define dmaerr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_DMA_WARN
 #  define dmawarn     _warn
 #else
-#  define dmawarn     _none
+#  define dmawarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_DMA_INFO
 #  define dmainfo     _info
 #else
-#  define dmainfo     _none
+#  define dmainfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_IRQ_ERROR
 #  define irqerr       _err
 #else
-#  define irqerr      _none
+#  define irqerr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_IRQ_WARN
 #  define irqwarn     _warn
 #else
-#  define irqwarn     _none
+#  define irqwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_IRQ_INFO
 #  define irqinfo     _info
 #else
-#  define irqinfo     _none
+#  define irqinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_LCD_ERROR
 #  define lcderr       _err
 #else
-#  define lcderr      _none
+#  define lcderr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_LCD_WARN
 #  define lcdwarn     _warn
 #else
-#  define lcdwarn     _none
+#  define lcdwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_LCD_INFO
 #  define lcdinfo     _info
 #else
-#  define lcdinfo     _none
+#  define lcdinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_LEDS_ERROR
 #  define lederr       _err
 #else
-#  define lederr      _none
+#  define lederr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_LEDS_WARN
 #  define ledwarn     _warn
 #else
-#  define ledwarn     _none
+#  define ledwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_LEDS_INFO
 #  define ledinfo     _info
 #else
-#  define ledinfo     _none
+#  define ledinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_GPIO_ERROR
 #  define gpioerr      _err
 #else
-#  define gpioerr     _none
+#  define gpioerr     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_GPIO_WARN
 #  define gpiowarn    _warn
 #else
-#  define gpiowarn    _none
+#  define gpiowarn    (void)
 #endif
 
 #ifdef CONFIG_DEBUG_GPIO_INFO
 #  define gpioinfo    _info
 #else
-#  define gpioinfo    _none
+#  define gpioinfo    (void)
 #endif
 
 #ifdef CONFIG_DEBUG_I2C_ERROR
 #  define i2cerr       _err
 #else
-#  define i2cerr      _none
+#  define i2cerr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_I2C_WARN
 #  define i2cwarn     _warn
 #else
-#  define i2cwarn     _none
+#  define i2cwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_I2C_INFO
 #  define i2cinfo     _info
 #else
-#  define i2cinfo     _none
+#  define i2cinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_I2S_ERROR
 #  define i2serr       _err
 #else
-#  define i2serr      _none
+#  define i2serr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_I2S_WARN
 #  define i2swarn     _warn
 #else
-#  define i2swarn     _none
+#  define i2swarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_I2S_INFO
 #  define i2sinfo     _info
 #else
-#  define i2sinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_I3C_ERROR
-#  define i3cerr       _err
-#else
-#  define i3cerr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_I3C_WARN
-#  define i3cwarn     _warn
-#else
-#  define i3cwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_I3C_INFO
-#  define i3cinfo     _info
-#else
-#  define i3cinfo     _none
+#  define i2sinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_PWM_ERROR
 #  define pwmerr       _err
 #else
-#  define pwmerr      _none
+#  define pwmerr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_PWM_WARN
 #  define pwmwarn     _warn
 #else
-#  define pwmwarn     _none
+#  define pwmwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_PWM_INFO
 #  define pwminfo     _info
 #else
-#  define pwminfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_CAPTURE_ERROR
-#  define cperr       _err
-#else
-#  define cperr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_CAPTURE_WARN
-#  define cpwarn     _warn
-#else
-#  define cpwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_CAPTURE_INFO
-#  define cpinfo     _info
-#else
-#  define cpinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_RC_ERROR
-#  define rcerr        _err
-#else
-#  define rcerr       _none
-#endif
-
-#ifdef CONFIG_DEBUG_RC_WARN
-#  define rcwarn      _warn
-#else
-#  define rcwarn      _none
-#endif
-
-#ifdef CONFIG_DEBUG_RC_INFO
-#  define rcinfo      _info
-#else
-#  define rcinfo      _none
-#endif
-
-#ifdef CONFIG_DEBUG_REGMAP_ERROR
-#  define regmaperr       _err
-#else
-#  define regmaperr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_REGMAP_WARN
-#  define regmapwarn     _warn
-#else
-#  define regmapwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_REGMAP_INFO
-#  define regmapinfo     _info
-#else
-#  define regmapinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_RMT_ERROR
-#  define rmterr        _err
-#else
-#  define rmterr       _none
-#endif
-
-#ifdef CONFIG_DEBUG_RMT_WARN
-#  define rmtwarn      _warn
-#else
-#  define rmtwarn      _none
-#endif
-
-#ifdef CONFIG_DEBUG_RMT_INFO
-#  define rmtinfo      _info
-#else
-#  define rmtinfo      _none
+#  define pwminfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_RTC_ERROR
 #  define rtcerr       _err
 #else
-#  define rtcerr      _none
+#  define rtcerr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_RTC_WARN
 #  define rtcwarn     _warn
 #else
-#  define rtcwarn     _none
+#  define rtcwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_RTC_INFO
 #  define rtcinfo     _info
 #else
-#  define rtcinfo     _none
+#  define rtcinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_MEMCARD_ERROR
 #  define mcerr        _err
 #else
-#  define mcerr       _none
+#  define mcerr       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_MEMCARD_WARN
 #  define mcwarn      _warn
 #else
-#  define mcwarn      _none
+#  define mcwarn      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_MEMCARD_INFO
 #  define mcinfo      _info
 #else
-#  define mcinfo      _none
+#  define mcinfo      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SENSORS_ERROR
 #  define snerr        _err
 #else
-#  define snerr       _none
+#  define snerr       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SENSORS_WARN
 #  define snwarn      _warn
 #else
-#  define snwarn      _none
+#  define snwarn      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SENSORS_INFO
 #  define sninfo      _info
 #else
-#  define sninfo      _none
+#  define sninfo      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SPI_ERROR
 #  define spierr       _err
 #else
-#  define spierr      _none
+#  define spierr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SPI_WARN
 #  define spiwarn     _warn
 #else
-#  define spiwarn     _none
+#  define spiwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_SPI_INFO
 #  define spiinfo     _info
 #else
-#  define spiinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_THERMAL_ERROR
-#  define therr         _err
-#else
-#  define therr        _none
-#endif
-
-#ifdef CONFIG_DEBUG_THERMAL_WARN
-#  define thwarn       _warn
-#else
-#  define thwarn       _none
-#endif
-
-#ifdef CONFIG_DEBUG_THERMAL_INFO
-#  define thinfo       _info
-#else
-#  define thinfo       _none
+#  define spiinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_TIMER_ERROR
 #  define tmrerr       _err
 #else
-#  define tmrerr      _none
+#  define tmrerr      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_TIMER_WARN
 #  define tmrwarn     _warn
 #else
-#  define tmrwarn     _none
+#  define tmrwarn     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_TIMER_INFO
 #  define tmrinfo     _info
 #else
-#  define tmrinfo     _none
+#  define tmrinfo     (void)
 #endif
 
 #ifdef CONFIG_DEBUG_USB_ERROR
 #  define uerr         _err
 #else
-#  define uerr        _none
+#  define uerr        (void)
 #endif
 
 #ifdef CONFIG_DEBUG_USB_WARN
 #  define uwarn       _warn
 #else
-#  define uwarn       _none
+#  define uwarn       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_USB_INFO
 #  define uinfo       _info
 #else
-#  define uinfo       _none
+#  define uinfo       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_WATCHDOG_ERROR
 #  define wderr        _err
 #else
-#  define wderr       _none
+#  define wderr       (void)
 #endif
 
 #ifdef CONFIG_DEBUG_WATCHDOG_WARN
 #  define wdwarn      _warn
 #else
-#  define wdwarn      _none
+#  define wdwarn      (void)
 #endif
 
 #ifdef CONFIG_DEBUG_WATCHDOG_INFO
 #  define wdinfo      _info
 #else
-#  define wdinfo      _none
+#  define wdinfo      (void)
 #endif
 
-#ifdef CONFIG_DEBUG_MOTOR_ERROR
-#  define mtrerr      _err
-#else
-#  define mtrerr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_MOTOR_WARN
-#  define mtrwarn     _warn
-#else
-#  define mtrwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_MOTOR_INFO
-#  define mtrinfo     _info
-#else
-#  define mtrinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_STEPPER_ERROR
-#  define stperr      _err
-#else
-#  define stperr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_STEPPER_WARN
-#  define stpwarn     _warn
-#else
-#  define stpwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_STEPPER_INFO
-#  define stpinfo     _info
-#else
-#  define stpinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_VIDEO_ERROR
-#  define verr        _err
-#else
-#  define verr        _none
-#endif
-
-#ifdef CONFIG_DEBUG_VIDEO_WARN
-#  define vwarn       _warn
-#else
-#  define vwarn       _none
-#endif
-
-#ifdef CONFIG_DEBUG_VIDEO_INFO
-#  define vinfo       _info
-#else
-#  define vinfo       _none
-#endif
-
-#ifdef CONFIG_DEBUG_VIRTIO_ERROR
-#  define vrterr      _err
-#else
-#  define vrterr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_VIRTIO_WARN
-#  define vrtwarn     _warn
-#else
-#  define vrtwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_VIRTIO_INFO
-#  define vrtinfo     _info
-#else
-#  define vrtinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_VHOST_ERROR
-#  define vhosterr     _err
-#else
-#  define vhosterr     _none
-#endif
-
-#ifdef CONFIG_DEBUG_VHOST_WARN
-#  define vhostwarn    _warn
-#else
-#  define vhostwarn    _none
-#endif
-
-#ifdef CONFIG_DEBUG_VHOST_INFO
-#  define vhostinfo    _info
-#else
-#  define vhostinfo    _none
-#endif
-
-#ifdef CONFIG_DEBUG_RESET_ERROR
-#  define rsterr       _err
-#else
-#  define rsterr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_RESET_WARN
-#  define rstwarn     _warn
-#else
-#  define rstwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_RESET_INFO
-#  define rstinfo     _info
-#else
-#  define rstinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_IPC_ERROR
-#  define ipcerr       _err
-#else
-#  define ipcerr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_IPC_WARN
-#  define ipcwarn     _warn
-#else
-#  define ipcwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_IPC_INFO
-#  define ipcinfo     _info
-#else
-#  define ipcinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_PCI_ERROR
-#  define pcierr       _err
-#else
-#  define pcierr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_PCI_WARN
-#  define pciwarn     _warn
-#else
-#  define pciwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_PCI_INFO
-#  define pciinfo     _info
-#else
-#  define pciinfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_RPMSG_ERROR
-#  define rpmsgerr       _err
-#else
-#  define rpmsgerr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_RPMSG_WARN
-#  define rpmsgwarn     _warn
-#else
-#  define rpmsgwarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_RPMSG_INFO
-#  define rpmsginfo     _info
-#else
-#  define rpmsginfo     _none
-#endif
-
-#ifdef CONFIG_DEBUG_CORESIGHT_ERROR
-#  define cserr       _err
-#else
-#  define cserr      _none
-#endif
-
-#ifdef CONFIG_DEBUG_CORESIGHT_WARN
-#  define cswarn     _warn
-#else
-#  define cswarn     _none
-#endif
-
-#ifdef CONFIG_DEBUG_CORESIGHT_INFO
-#  define csinfo     _info
-#else
-#  define csinfo     _none
-#endif
+#endif /* CONFIG_CPP_HAVE_VARARGS */
 
 /* Buffer dumping macros do not depend on varargs */
 
@@ -1038,12 +1326,12 @@
 #  ifdef CONFIG_DEBUG_INFO
 #    define infodumpbuffer(m,b,n) lib_dumpbuffer(m,b,n)
 #  else
-#    define infodumpbuffer(m,b,n)
+#   define infodumpbuffer(m,b,n)
 #  endif
 #else
-#    define errdumpbuffer(m,b,n)
-#    define infodumpbuffer(m,b,n)
-#  endif
+#  define errdumpbuffer(m,b,n)
+#  define infodumpbuffer(m,b,n)
+# endif
 
 /* Subsystem specific debug */
 
@@ -1231,14 +1519,6 @@
 #  define i2sinfodumpbuffer(m,b,n)
 #endif
 
-#ifdef CONFIG_DEBUG_I3C
-#  define i3cerrdumpbuffer(m,b,n)  errdumpbuffer(m,b,n)
-#  define i3cinfodumpbuffer(m,b,n) infodumpbuffer(m,b,n)
-#else
-#  define i3cerrdumpbuffer(m,b,n)
-#  define i3cinfodumpbuffer(m,b,n)
-#endif
-
 #ifdef CONFIG_DEBUG_PWM
 #  define pwmerrdumpbuffer(m,b,n)  errdumpbuffer(m,b,n)
 #  define pwminfodumpbuffer(m,b,n) infodumpbuffer(m,b,n)
@@ -1303,41 +1583,13 @@
 #  define wdinfodumpbuffer(m,b,n)
 #endif
 
-#ifdef CONFIG_DEBUG_MOTOR
-#  define mtrerrdumpbuffer(m,b,n)  errdumpbuffer(m,b,n)
-#  define mtrinfodumpbuffer(m,b,n) infodumpbuffer(m,b,n)
-#else
-#  define mtrerrdumpbuffer(m,b,n)
-#  define mtrinfodumpbuffer(m,b,n)
-#endif
-
-#ifdef CONFIG_DEBUG_RESET
-#  define reseterrdumpbuffer(m,b,n)  errdumpbuffer(m,b,n)
-#  define resetinfodumpbuffer(m,b,n) infodumpbuffer(m,b,n)
-#else
-#  define reseterrdumpbuffer(m,b,n)
-#  define resetinfodumpbuffer(m,b,n)
-#endif
-
 /****************************************************************************
- * Name: lowsyslog
- *
- * Description:
- *   lowsyslog() is used for output debug information at early boot-stage.
- *
- *   The NuttX implementation does not support any special formatting
- *   characters beyond those supported by printf.
- *
+ * Public Type Declarations
  ****************************************************************************/
 
-#define lowsyslog(...) \
-  do \
-    { \
-       struct lib_outstream_s stream; \
-       lib_lowoutstream(&stream); \
-       lib_sprintf(&stream, __VA_ARGS__); \
-    } \
-  while (0)
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
 
 /****************************************************************************
  * Public Function Prototypes
@@ -1348,45 +1600,10 @@ extern "C"
 {
 #endif
 
-/* Type of the call out function pointer provided to
- * lib_dumphandler() or lib_dumpvhandler()
- */
-
-typedef CODE void (*lib_dump_handler_t)(FAR void *arg,
-                                        FAR const char *fmt, ...)
-                  printf_like(2, 3);
-
-/* Dump a buffer of data with handler */
-
-void lib_dumphandler(FAR const char *msg, FAR const uint8_t *buffer,
-                     unsigned int buflen, lib_dump_handler_t handler,
-                     FAR void *arg);
-
-/* Do a pretty buffer dump from multiple buffers with handler. */
-
-void lib_dumpvhandler(FAR const char *msg, FAR const struct iovec *iov,
-                      int iovcnt, lib_dump_handler_t handler,
-                      FAR void *arg);
-
 /* Dump a buffer of data */
 
 void lib_dumpbuffer(FAR const char *msg, FAR const uint8_t *buffer,
                     unsigned int buflen);
-
-/* Do a pretty buffer dump from multiple buffers. */
-
-void lib_dumpvbuffer(FAR const char *msg, FAR const struct iovec *iov,
-                     int iovcnt);
-
-/* Dump a buffer of data with fd */
-
-void lib_dumpfile(int fd, FAR const char *msg, FAR const uint8_t *buffer,
-                  unsigned int buflen);
-
-/* Do a pretty buffer dump from multiple buffers with fd. */
-
-void lib_dumpvfile(int fd, FAR const char *msg, FAR const struct iovec *iov,
-                   int iovcnt);
 
 /* The system logging interfaces are normally accessed via the macros
  * provided above.  If the cross-compiler's C pre-processor supports a
@@ -1399,19 +1616,19 @@ void lib_dumpvfile(int fd, FAR const char *msg, FAR const struct iovec *iov,
 
 #ifndef CONFIG_CPP_HAVE_VARARGS
 #ifdef CONFIG_DEBUG_ALERT
-void _alert(FAR const char *format, ...) syslog_like(1, 2);
+void _alert(const char *format, ...);
 #endif
 
 #ifdef CONFIG_DEBUG_ERROR
-void _err(FAR const char *format, ...) syslog_like(1, 2);
+void _err(const char *format, ...);
 #endif
 
 #ifdef CONFIG_DEBUG_WARN
-void _warn(FAR const char *format, ...) syslog_like(1, 2);
+void _warn(const char *format, ...);
 #endif
 
 #ifdef CONFIG_DEBUG_INFO
-void _info(FAR const char *format, ...) syslog_like(1, 2);
+void _info(const char *format, ...);
 #endif
 #endif /* CONFIG_CPP_HAVE_VARARGS */
 

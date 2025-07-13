@@ -1,11 +1,17 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_twi.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016-2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2013-2014 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2011 Atmel Corporation
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.orgr>
+ *   Copyright (C) 2013-2014, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * References:
+ *   SAMA5D3 Series Data Sheet
+ *   Atmel NoOS sample code.
+ *
+ * The Atmel sample code has a BSD compatible license that requires this
+ * copyright notice:
+ *
+ *    Copyright (c) 2011, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,11 +42,6 @@
  *
  ****************************************************************************/
 
-/* References:
- *   SAMA5D3 Series Data Sheet
- *   Atmel NoOS sample code.
- */
-
 /****************************************************************************
  * Included Files
  ****************************************************************************/
@@ -48,39 +49,31 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/wdog.h>
 #include <nuttx/clock.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/i2c/i2c_master.h>
 
 #include <nuttx/irq.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "hardware/sam_pmc.h"
 #include "hardware/sam_pinmap.h"
 
 #include "sam_periphclks.h"
 #include "sam_pio.h"
 #include "sam_twi.h"
-#include "hardware/sam_flexcom.h"
 
 #if defined(CONFIG_SAMA5_TWI0) || defined(CONFIG_SAMA5_TWI1) || \
-    defined(CONFIG_SAMA5_TWI2) || defined(CONFIG_SAMA5_TWI3) || \
-    defined(CONFIG_SAMA5_FLEXCOM0_TWI) || \
-    defined(CONFIG_SAMA5_FLEXCOM1_TWI) || \
-    defined(CONFIG_SAMA5_FLEXCOM2_TWI) || \
-    defined(CONFIG_SAMA5_FLEXCOM3_TWI) || \
-    defined(CONFIG_SAMA5_FLEXCOM4_TWI)
+    defined(CONFIG_SAMA5_TWI2) || defined(CONFIG_SAMA5_TWI3)
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -166,9 +159,9 @@ struct twi_dev_s
   uint32_t            frequency;  /* TWI transfer clock frequency */
   uint8_t             msgc;       /* Number of message in the message list */
 
-  mutex_t             lock;       /* Only one thread can access at a time */
+  sem_t               exclsem;    /* Only one thread can access at a time */
   sem_t               waitsem;    /* Wait for TWI transfer completion */
-  struct wdog_s       timeout;    /* Watchdog to recover from bus hangs */
+  WDOG_ID             timeout;    /* Watchdog to recover from bus hangs */
   volatile int        result;     /* The result of the transfer */
   volatile int        xfrd;       /* Number of bytes transfers */
 
@@ -188,6 +181,9 @@ struct twi_dev_s
 
 /* Low-level helper functions */
 
+static int  twi_takesem(sem_t *sem);
+#define     twi_givesem(sem) (nxsem_post(sem))
+
 #ifdef CONFIG_SAMA5_TWI_REGDEBUG
 static bool twi_checkreg(struct twi_dev_s *priv, bool wr,
               uint32_t value, uintptr_t address);
@@ -195,9 +191,9 @@ static uint32_t twi_getabs(struct twi_dev_s *priv, uintptr_t address);
 static void twi_putabs(struct twi_dev_s *priv, uintptr_t address,
               uint32_t value);
 #else
-#  define   twi_checkreg(priv,wr,value,address) (false)
-#  define   twi_putabs(p,a,v) putreg32(v,a)
-#  define   twi_getabs(p,a) getreg32(a)
+# define    twi_checkreg(priv,wr,value,address) (false)
+# define    twi_putabs(p,a,v) putreg32(v,a)
+# define    twi_getabs(p,a) getreg32(a)
 #endif
 
 static inline uint32_t twi_getrel(struct twi_dev_s *priv,
@@ -209,8 +205,8 @@ static inline void twi_putrel(struct twi_dev_s *priv, unsigned int offset,
 
 static int  twi_wait(struct twi_dev_s *priv, unsigned int size);
 static void twi_wakeup(struct twi_dev_s *priv, int result);
-static int  twi_interrupt(int irq, void *context, void *arg);
-static void twi_timeout(wdparm_t arg);
+static int  twi_interrupt(int irq, FAR void *context, FAR void *arg);
+static void twi_timeout(int argc, uint32_t arg, ...);
 
 static void twi_startread(struct twi_dev_s *priv, struct i2c_msg_s *msg);
 static void twi_startwrite(struct twi_dev_s *priv, struct i2c_msg_s *msg);
@@ -218,10 +214,10 @@ static void twi_startmessage(struct twi_dev_s *priv, struct i2c_msg_s *msg);
 
 /* I2C device operations */
 
-static int twi_transfer(struct i2c_master_s *dev,
-                        struct i2c_msg_s *msgs, int count);
+static int twi_transfer(FAR struct i2c_master_s *dev,
+          FAR struct i2c_msg_s *msgs, int count);
 #ifdef CONFIG_I2C_RESET
-static int twi_reset(struct i2c_master_s *dev);
+static int  twi_reset(FAR struct i2c_master_s * dev);
 #endif
 
 /* Initialization */
@@ -232,14 +228,6 @@ static void twi_hw_initialize(struct twi_dev_s *priv, uint32_t frequency);
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-static const struct i2c_ops_s g_twiops =
-{
-  .transfer = twi_transfer,
-#ifdef CONFIG_I2C_RESET
-  .reset  = twi_reset
-#endif
-};
 
 #ifdef CONFIG_SAMA5_TWI0
 static const struct twi_attr_s g_twi0attr =
@@ -252,16 +240,7 @@ static const struct twi_attr_s g_twi0attr =
   .base    = SAM_TWI0_VBASE,
 };
 
-static struct twi_dev_s g_twi0 =
-{
-  .dev     =
-  {
-    .ops   = &g_twiops,
-  },
-  .attr    = &g_twi0attr,
-  .lock    = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
+static struct twi_dev_s g_twi0;
 #endif
 
 #ifdef CONFIG_SAMA5_TWI1
@@ -275,16 +254,7 @@ static const struct twi_attr_s g_twi1attr =
   .base    = SAM_TWI1_VBASE,
 };
 
-static struct twi_dev_s g_twi1 =
-{
-  .dev     =
-  {
-    .ops   = &g_twiops,
-  },
-  .attr    = &g_twi1attr,
-  .lock    = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
+static struct twi_dev_s g_twi1;
 #endif
 
 #ifdef CONFIG_SAMA5_TWI2
@@ -298,16 +268,7 @@ static const struct twi_attr_s g_twi2attr =
   .base    = SAM_TWI2_VBASE,
 };
 
-static struct twi_dev_s g_twi2 =
-{
-  .dev     =
-  {
-    .ops   = &g_twiops,
-  },
-  .attr    = &g_twi2attr,
-  .lock    = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
+static struct twi_dev_s g_twi2;
 #endif
 
 #ifdef CONFIG_SAMA5_TWI3
@@ -321,132 +282,39 @@ static const struct twi_attr_s g_twi3attr =
   .base    = SAM_TWI3_VBASE,
 };
 
-static struct twi_dev_s g_twi3 =
-{
-  .dev     =
-  {
-    .ops   = &g_twiops,
-  },
-  .attr    = &g_twi3attr,
-  .lock    = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
+static struct twi_dev_s g_twi3;
 #endif
 
-#ifdef CONFIG_SAMA5_FLEXCOM0_TWI
-static const struct twi_attr_s g_twi4attr =
+static const struct i2c_ops_s g_twiops =
 {
-  .twi     = 4,
-  .pid     = SAM_PID_FLEXCOM0,
-  .irq     = SAM_IRQ_FLEXCOM0,
-  .sclcfg  = PIO_TWI4_CK,
-  .sdacfg  = PIO_TWI4_D,
-  .base    = SAM_FLEXCOM0_VBASE + SAM_FLEXCOM_TWI_OFFSET
-};
-
-static struct twi_dev_s g_twi4 =
-{
-  .dev     =
-  {
-    .ops   = &g_twiops,
-  },
-  .attr    = &g_twi4attr,
-  .lock    = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
+  .transfer = twi_transfer
+#ifdef CONFIG_I2C_RESET
+  , .reset  = twi_reset
 #endif
-#ifdef CONFIG_SAMA5_FLEXCOM1_TWI
-static const struct twi_attr_s g_twi5attr =
-{
-  .twi     = 5,
-  .pid     = SAM_PID_FLEXCOM1,
-  .irq     = SAM_IRQ_FLEXCOM1,
-  .sclcfg  = PIO_TWI5_CK,
-  .sdacfg  = PIO_TWI5_D,
-  .base    = SAM_FLEXCOM1_VBASE + SAM_FLEXCOM_TWI_OFFSET
 };
-
-static struct twi_dev_s g_twi4 =
-{
-  .dev     =
-  {
-    .ops   = &g_twiops,
-  },
-  .attr    = &g_twi5attr,
-  .lock    = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
-#endif
-#ifdef CONFIG_SAMA5_FLEXCOM2_TWI
-static const struct twi_attr_s g_twi6attr =
-{
-  .twi     = 6,
-  .pid     = SAM_PID_FLEXCOM2,
-  .irq     = SAM_IRQ_FLEXCOM2,
-  .sclcfg  = PIO_TWI6_CK,
-  .sdacfg  = PIO_TWI6_D,
-  .base    = SAM_FLEXCOM2_VBASE + SAM_FLEXCOM_TWI_OFFSET
-};
-
-static struct twi_dev_s g_twi6 =
-{
-  .dev     =
-  {
-    .ops   = &g_twiops,
-  },
-  .attr    = &g_twi6attr,
-  .lock    = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
-#endif
-#ifdef CONFIG_SAMA5_FLEXCOM3_TWI
-static const struct twi_attr_s g_twi7attr =
-{
-  .twi     = 7,
-  .pid     = SAM_PID_FLEXCOM3,
-  .irq     = SAM_IRQ_FLEXCOM3,
-  .sclcfg  = PIO_TWI7_CK,
-  .sdacfg  = PIO_TWI7_D,
-  .base    = SAM_FLEXCOM3_VBASE + SAM_FLEXCOM_TWI_OFFSET
-};
-
-static struct twi_dev_s g_twi7 =
-{
-  .dev     =
-  {
-    .ops   = &g_twiops,
-  },
-  .attr    = &g_twi7attr,
-  .lock    = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
-#endif
-#ifdef CONFIG_SAMA5_FLEXCOM4_TWI
-static const struct twi_attr_s g_twi8attr =
-{
-  .twi     = 8,
-  .pid     = SAM_PID_FLEXCOM3,
-  .irq     = SAM_IRQ_FLEXCOM3,
-  .sclcfg  = PIO_TWI8_CK,
-  .sdacfg  = PIO_TWI8_D,
-  .base    = SAM_FLEXCOM4_VBASE + SAM_FLEXCOM_TWI_OFFSET
-};
-
-static struct twi_dev_s g_twi8 =
-{
-  .dev     =
-  {
-    .ops   = &g_twiops,
-  },
-  .attr    = &g_twi8attr,
-  .lock    = NXMUTEX_INITIALIZER,
-  .waitsem = SEM_INITIALIZER(0),
-};
-#endif
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: twi_takesem
+ *
+ * Description:
+ *   Take the wait semaphore.  May be interrupted by a signal.
+ *
+ * Input Parameters:
+ *   dev - Instance of the SDIO device driver state structure.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static int twi_takesem(sem_t *sem)
+{
+  return nxsem_wait(sem);
+}
 
 /****************************************************************************
  * Name: twi_checkreg
@@ -463,9 +331,10 @@ static struct twi_dev_s g_twi8 =
  *   false: This is the same as the preceding register access.
  *
  ****************************************************************************/
+
 #ifdef CONFIG_SAMA5_TWI_REGDEBUG
 static bool twi_checkreg(struct twi_dev_s *priv, bool wr, uint32_t value,
-                         uintptr_t address)
+                         uint32_t address)
 {
   if (wr      == priv->wrlast &&   /* Same kind of access? */
       value   == priv->vallast &&  /* Same value? */
@@ -611,20 +480,20 @@ static int twi_wait(struct twi_dev_s *priv, unsigned int size)
    * a TWI transfer stalls.
    */
 
-  wd_start(&priv->timeout, timeout, twi_timeout, (wdparm_t)priv);
+  wd_start(priv->timeout, timeout, twi_timeout, 1, (uint32_t)priv);
 
   /* Wait for either the TWI transfer or the timeout to complete */
 
   do
     {
       i2cinfo("TWI%d Waiting...\n", priv->attr->twi);
-      ret = nxsem_wait(&priv->waitsem);
+      ret = twi_takesem(&priv->waitsem);
       i2cinfo("TWI%d Awakened with result: %d\n",
               priv->attr->twi, priv->result);
 
       if (ret < 0)
         {
-          wd_cancel(&priv->timeout);
+          wd_cancel(priv->timeout);
           return ret;
         }
     }
@@ -649,7 +518,7 @@ static void twi_wakeup(struct twi_dev_s *priv, int result)
 {
   /* Cancel any pending timeout */
 
-  wd_cancel(&priv->timeout);
+  wd_cancel(priv->timeout);
 
   /* Disable any further TWI interrupts */
 
@@ -658,7 +527,7 @@ static void twi_wakeup(struct twi_dev_s *priv, int result)
   /* Wake up the waiting thread with the result of the transfer */
 
   priv->result = result;
-  nxsem_post(&priv->waitsem);
+  twi_givesem(&priv->waitsem);
 }
 
 /****************************************************************************
@@ -669,7 +538,7 @@ static void twi_wakeup(struct twi_dev_s *priv, int result)
  *
  ****************************************************************************/
 
-static int twi_interrupt(int irq, void *context, void *arg)
+static int twi_interrupt(int irq, FAR void *context, FAR void *arg)
 {
   struct twi_dev_s *priv = (struct twi_dev_s *)arg;
   struct i2c_msg_s *msg;
@@ -686,7 +555,7 @@ static int twi_interrupt(int irq, void *context, void *arg)
   imr     = twi_getrel(priv, SAM_TWI_IMR_OFFSET);
   pending = sr & imr;
 
-  i2cinfo("TWI%d pending: %08" PRIx32 "\n", priv->attr->twi, pending);
+  i2cinfo("TWI%d pending: %08x\n", priv->attr->twi, pending);
 
   /* Byte received */
 
@@ -782,8 +651,7 @@ static int twi_interrupt(int irq, void *context, void *arg)
     {
       /* Wake up the thread with an I/O error indication */
 
-      i2cerr("ERROR: TWI%d pending: %08" PRIx32 "\n",
-             priv->attr->twi, pending);
+      i2cerr("ERROR: TWI%d pending: %08x\n", priv->attr->twi, pending);
       twi_wakeup(priv, -EIO);
     }
 
@@ -801,7 +669,7 @@ static int twi_interrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-static void twi_timeout(wdparm_t arg)
+static void twi_timeout(int argc, uint32_t arg, ...)
 {
   struct twi_dev_s *priv = (struct twi_dev_s *)arg;
 
@@ -917,8 +785,8 @@ static void twi_startmessage(struct twi_dev_s *priv, struct i2c_msg_s *msg)
  *
  ****************************************************************************/
 
-static int twi_transfer(struct i2c_master_s *dev,
-                        struct i2c_msg_s *msgs, int count)
+static int twi_transfer(FAR struct i2c_master_s *dev,
+                        FAR struct i2c_msg_s *msgs, int count)
 {
   struct twi_dev_s *priv = (struct twi_dev_s *)dev;
   irqstate_t flags;
@@ -943,7 +811,7 @@ static int twi_transfer(struct i2c_master_s *dev,
 
   /* Get exclusive access to the device */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = twi_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -981,7 +849,7 @@ static int twi_transfer(struct i2c_master_s *dev,
     }
 
   leave_critical_section(flags);
-  nxmutex_unlock(&priv->lock);
+  twi_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -1000,7 +868,7 @@ static int twi_transfer(struct i2c_master_s *dev,
  ****************************************************************************/
 
 #ifdef CONFIG_I2C_RESET
-static int twi_reset(struct i2c_master_s *dev)
+static int twi_reset(FAR struct i2c_master_s *dev)
 {
   struct twi_dev_s *priv = (struct twi_dev_s *)dev;
   unsigned int clockcnt;
@@ -1013,7 +881,7 @@ static int twi_reset(struct i2c_master_s *dev)
 
   /* Get exclusive access to the TWI device */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = twi_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -1118,7 +986,7 @@ errout_with_lock:
 
   /* Release our lock on the bus */
 
-  nxmutex_unlock(&priv->lock);
+  twi_givesem(&priv->exclsem);
   return ret;
 }
 #endif /* CONFIG_I2C_RESET */
@@ -1327,9 +1195,13 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
 #ifdef CONFIG_SAMA5_TWI0
   if (bus == 0)
     {
-      /* Select up TWI0 and the (initial) TWI frequency */
+      /* Select up TWI0 and setup invariant attributes */
 
-      priv      = &g_twi0;
+      priv       = &g_twi0;
+      priv->attr = &g_twi0attr;
+
+      /* Select the (initial) TWI frequency */
+
       frequency = CONFIG_SAMA5_TWI0_FREQUENCY;
     }
   else
@@ -1337,9 +1209,13 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
 #ifdef CONFIG_SAMA5_TWI1
   if (bus == 1)
     {
-      /* Select up TWI1 and the (initial) TWI frequency */
+      /* Select up TWI1 and setup invariant attributes */
 
-      priv      = &g_twi1;
+      priv       = &g_twi1;
+      priv->attr = &g_twi1attr;
+
+      /* Select the (initial) TWI frequency */
+
       frequency = CONFIG_SAMA5_TWI1_FREQUENCY;
     }
   else
@@ -1347,9 +1223,13 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
 #ifdef CONFIG_SAMA5_TWI2
   if (bus == 2)
     {
-      /* Select up TWI2 and the (initial) TWI frequency */
+      /* Select up TWI2 and setup invariant attributes */
 
-      priv      = &g_twi2;
+      priv       = &g_twi2;
+      priv->attr = &g_twi2attr;
+
+      /* Select the (initial) TWI frequency */
+
       frequency = CONFIG_SAMA5_TWI2_FREQUENCY;
     }
   else
@@ -1357,65 +1237,14 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
 #ifdef CONFIG_SAMA5_TWI3
   if (bus == 3)
     {
-      /* Select up TWI3 and the (initial) TWI frequency */
+      /* Select up TWI3 and setup invariant attributes */
 
-      priv      = &g_twi3;
+      priv       = &g_twi3;
+      priv->attr = &g_twi3attr;
+
+      /* Select the (initial) TWI frequency */
+
       frequency = CONFIG_SAMA5_TWI3_FREQUENCY;
-    }
-  else
-#endif
-#ifdef CONFIG_SAMA5_FLEXCOM0_TWI
-  if (bus == 4)
-    {
-      /* Select up TWI4 (Flexcom-0) and the (initial) TWI frequency */
-
-      putreg32(FLEX_MR_OPMODE_TWI, SAM_FLEX0_MR);
-      priv      = &g_twi4;
-      frequency = CONFIG_SAMA5_TWI_FC0_FREQUENCY;
-    }
-  else
-#endif
-#ifdef CONFIG_SAMA5_FLEXCOM1_TWI
-  if (bus == 5)
-    {
-      /* Select up TWI5 (Flexcom-1) and the (initial) TWI frequency */
-
-      putreg32(FLEX_MR_OPMODE_TWI, SAM_FLEX1_MR);
-     priv      = &g_twi5;
-      frequency = CONFIG_SAMA5_TWI_FC1_FREQUENCY;
-    }
-  else
-#endif
-#ifdef CONFIG_SAMA5_FLEXCOM2_TWI
-  if (bus == 6)
-    {
-      /* Select up TWI6 (Flexcom-2) and the (initial) TWI frequency */
-
-      putreg32(FLEX_MR_OPMODE_TWI, SAM_FLEX2_MR);
-      priv      = &g_twi6;
-      frequency = CONFIG_SAMA5_TWI_FC2_FREQUENCY;
-    }
-  else
-#endif
-#ifdef CONFIG_SAMA5_FLEXCOM3_TWI
-  if (bus == 7)
-    {
-      /* Select up TWI7 (Flexcom-3) and the (initial) TWI frequency */
-
-      putreg32(FLEX_MR_OPMODE_TWI, SAM_FLEX3_MR);
-      priv      = &g_twi7;
-      frequency = CONFIG_SAMA5_TWI_FC3_FREQUENCY;
-    }
-  else
-#endif
-#ifdef CONFIG_SAMA5_FLEXCOM4_TWI
-  if (bus == 8)
-    {
-      /* Select up TWI8 (Flexcom-4) and the (initial) TWI frequency */
-
-      putreg32(FLEX_MR_OPMODE_TWI, SAM_FLEX4_MR);
-      priv      = &g_twi8;
-      frequency = CONFIG_SAMA5_TWI_FC4_FREQUENCY;
     }
   else
 #endif
@@ -1428,14 +1257,38 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
 
   flags = enter_critical_section();
 
+  /* Allocate a watchdog timer */
+
+  priv->timeout = wd_create();
+  if (priv->timeout == NULL)
+    {
+      ierr("ERROR: Failed to allocate a timer\n");
+      goto errout_with_irq;
+    }
+
   /* Attach Interrupt Handler */
 
   ret = irq_attach(priv->attr->irq, twi_interrupt, priv);
   if (ret < 0)
     {
       ierr("ERROR: Failed to attach irq %d\n", priv->attr->irq);
-      goto errout_with_lock;
+      goto errout_with_wdog;
     }
+
+  /* Initialize the TWI driver structure */
+
+  priv->dev.ops = &g_twiops;
+
+  /* Initialize semaphores */
+
+  nxsem_init(&priv->exclsem, 0, 1);
+  nxsem_init(&priv->waitsem, 0, 0);
+
+  /* The waitsem semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
+  nxsem_setprotocol(&priv->waitsem, SEM_PRIO_NONE);
 
   /* Perform repeatable TWI hardware initialization */
 
@@ -1443,7 +1296,11 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
   leave_critical_section(flags);
   return &priv->dev;
 
-errout_with_lock:
+errout_with_wdog:
+  wd_delete(priv->timeout);
+  priv->timeout = NULL;
+
+errout_with_irq:
   leave_critical_section(flags);
   return NULL;
 }
@@ -1456,9 +1313,9 @@ errout_with_lock:
  *
  ****************************************************************************/
 
-int sam_i2cbus_uninitialize(struct i2c_master_s *dev)
+int sam_i2cbus_uninitialize(FAR struct i2c_master_s *dev)
 {
-  struct twi_dev_s *priv = (struct twi_dev_s *)dev;
+  struct twi_dev_s *priv = (struct twi_dev_s *) dev;
 
   i2cinfo("TWI%d Un-initializing\n", priv->attr->twi);
 
@@ -1466,9 +1323,15 @@ int sam_i2cbus_uninitialize(struct i2c_master_s *dev)
 
   up_disable_irq(priv->attr->irq);
 
-  /* Cancel the watchdog timer */
+  /* Reset data structures */
 
-  wd_cancel(&priv->timeout);
+  nxsem_destroy(&priv->exclsem);
+  nxsem_destroy(&priv->waitsem);
+
+  /* Free the watchdog timer */
+
+  wd_delete(priv->timeout);
+  priv->timeout = NULL;
 
   /* Detach Interrupt Handler */
 

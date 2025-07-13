@@ -1,35 +1,47 @@
-/****************************************************************************
+/*****************************************************************************
  * boards/arm/stm32/stm32butterfly2/src/stm32_butterfly2.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Michał Łyszczek. All rights reserved.
+ *   Author: Michał Łyszczek <michal.lyszczek@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  ****************************************************************************/
 
 #ifndef __BOARDS_ARM_STM32_STM32_BUTTERFLY2_SRC_STM32_BUTTERFLY2_H
 #define __BOARDS_ARM_STM32_STM32_BUTTERFLY2_SRC_STM32_BUTTERFLY2_H
 
-/****************************************************************************
+/*****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include "stm32_gpio.h"
 
-/****************************************************************************
+/*****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
@@ -45,11 +57,11 @@
 #define GPIO_OTGFS_PWRON (GPIO_OUTPUT | GPIO_CNF_OUTPP | GPIO_MODE_50MHz |\
                           GPIO_OUTPUT_SET | GPIO_PORTD | GPIO_PIN15)
 
-/****************************************************************************
- * Public Functions Definitions
+/*****************************************************************************
+ * Public Functions
  ****************************************************************************/
 
-/****************************************************************************
+/*****************************************************************************
  * Name: stm32_led_initialize
  *
  * Description:
@@ -58,7 +70,7 @@
 
 void stm32_led_initialize(void);
 
-/****************************************************************************
+/*****************************************************************************
  * Name: stm32_spidev_initialize
  *
  * Description:
@@ -72,12 +84,10 @@ void stm32_led_initialize(void);
 #ifdef CONFIG_STM32_SPI1
 void stm32_spidev_initialize(void);
 #else
-static inline void stm32_spidev_initialize(void)
-{
-}
+static inline void stm32_spidev_initialize(void) {}
 #endif
 
-/****************************************************************************
+/*****************************************************************************
  * Name: stm32_mmcsd_initialize
  *
  * Description:
@@ -88,13 +98,10 @@ static inline void stm32_spidev_initialize(void)
 #ifdef CONFIG_MMCSD
 int stm32_mmcsd_initialize(int minor);
 #else
-static inline int stm32_mmcsd_initialize(int minor)
-{
-  return 0;
-}
+static inline int stm32_mmcsd_initialize(int minor) { (void)minor; return 0; }
 #endif
 
-/****************************************************************************
+/*****************************************************************************
  * Name: stm32_usb_initialize
  *
  * Description:
@@ -104,12 +111,10 @@ static inline int stm32_mmcsd_initialize(int minor)
 #ifdef CONFIG_STM32_OTGFS
 void stm32_usb_initialize(void);
 #else
-static inline void stm32_usb_initialize(void)
-{
-}
+static inline void stm32_usb_initialize(void) {}
 #endif
 
-/****************************************************************************
+/*****************************************************************************
  * Name: stm32_usbhost_initialize
  *
  * Description:
@@ -119,10 +124,7 @@ static inline void stm32_usb_initialize(void)
 #ifdef CONFIG_USBHOST
 int stm32_usbhost_initialize(void);
 #else
-static inline int stm32_usbhost_initialize(void)
-{
-  return 0;
-}
+static inline int stm32_usbhost_initialize(void) { return 0; }
 #endif
 
 /****************************************************************************
@@ -136,10 +138,7 @@ static inline int stm32_usbhost_initialize(void)
 #ifdef CONFIG_STM32_ADC
 int stm32_adc_setup(void);
 #else
-static inline int stm32_adc_setup(void)
-{
-  return 0;
-}
+static inline int stm32_adc_setup(void) { return 0; }
 #endif
 
 #endif /* __BOARDS_ARM_STM32_STM32_BUTTERFLY2_SRC_STM32_BUTTERFLY2_H */

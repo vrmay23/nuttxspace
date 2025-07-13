@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/stm32/viewtool-stm32f107/src/stm32_highpri.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,7 +39,6 @@
 
 #include <nuttx/config.h>
 
-#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -37,7 +49,7 @@
 #include <arch/irq.h>
 #include <arch/armv7-m/nvicpri.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
 #include "ram_vectors.h"
 #include "stm32_tim.h"
 
@@ -50,7 +62,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Configuration ************************************************************/
 
 #ifndef CONFIG_ARCH_CHIP_STM32F103VC
@@ -89,7 +100,7 @@
 
 struct highpri_s
 {
-  struct stm32_tim_dev_s *dev;  /* TIM6 driver instance */
+  FAR struct stm32_tim_dev_s *dev;  /* TIM6 driver instance */
   volatile uint64_t basepri[16];
   volatile uint64_t handler;
   volatile uint64_t thread;
@@ -104,11 +115,6 @@ static struct highpri_s g_highpri;
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-static inline_function bool is_nesting_interrupt(void)
-{
-  return up_interrupt_context();
-}
 
 /****************************************************************************
  * Name: tim6_handler
@@ -135,7 +141,7 @@ void tim6_handler(void)
 
   /* Check if we are in an interrupt handle */
 
-  if (is_nesting_interrupt())
+  if (up_interrupt_context())
     {
       g_highpri.handler++;
     }
@@ -159,7 +165,7 @@ void tim6_handler(void)
 
 int highpri_main(int argc, char *argv[])
 {
-  struct stm32_tim_dev_s *dev;
+  FAR struct stm32_tim_dev_s *dev;
   uint64_t basepri[16];
   uint64_t handler;
   uint64_t thread;
@@ -183,22 +189,20 @@ int highpri_main(int argc, char *argv[])
   g_highpri.dev = dev;
 
   prescaler = STM32_TIM_SETCLOCK(dev, CONFIG_VIEWTOOL_TIM6_FREQUENCY);
-  printf("TIM6 CLKIN=%jd Hz, Frequency=%d Hz, prescaler=%d\n",
-         (uintmax_t)STM32_APB1_TIM6_CLKIN, CONFIG_VIEWTOOL_TIM6_FREQUENCY,
-         prescaler);
+  printf("TIM6 CLKIN=%d Hz, Frequency=%d Hz, prescaler=%d\n",
+         STM32_APB1_TIM6_CLKIN, CONFIG_VIEWTOOL_TIM6_FREQUENCY, prescaler);
 
   STM32_TIM_SETPERIOD(dev, CONFIG_VIEWTOOL_TIM6_PERIOD);
-  printf("TIM6 period=%d cycles; interrupt rate=%d Hz\n",
+  printf("TIM6 period=%d cyles; interrupt rate=%d Hz\n",
          CONFIG_VIEWTOOL_TIM6_PERIOD,
-         CONFIG_VIEWTOOL_TIM6_FREQUENCY / CONFIG_VIEWTOOL_TIM6_PERIOD);
+         CONFIG_VIEWTOOL_TIM6_FREQUENCY/CONFIG_VIEWTOOL_TIM6_PERIOD);
 
   /* Attach TIM6 ram vector */
 
-  ret = arm_ramvec_attach(STM32_IRQ_TIM6, tim6_handler);
+  ret = up_ramvec_attach(STM32_IRQ_TIM6, tim6_handler);
   if (ret < 0)
     {
-      fprintf(stderr, "highpri_main: ERROR: arm_ramvec_attach failed: %d\n",
-              ret);
+      fprintf(stderr, "highpri_main: ERROR: up_ramvec_attach failed: %d\n", ret);
       return EXIT_FAILURE;
     }
 
@@ -207,8 +211,7 @@ int highpri_main(int argc, char *argv[])
   ret = up_prioritize_irq(STM32_IRQ_TIM6, NVIC_SYSH_HIGH_PRIORITY);
   if (ret < 0)
     {
-      fprintf(stderr, "highpri_main: ERROR: up_prioritize_irq failed: %d\n",
-              ret);
+      fprintf(stderr, "highpri_main: ERROR: up_prioritize_irq failed: %d\n", ret);
       return EXIT_FAILURE;
     }
 
@@ -220,7 +223,7 @@ int highpri_main(int argc, char *argv[])
   /* Monitor interrupts */
 
   seconds = 0;
-  for (; ; )
+  for (;;)
     {
       /* Flush stdout and wait a bit */
 
@@ -242,7 +245,7 @@ int highpri_main(int argc, char *argv[])
 
       /* Then print out what is happening */
 
-      printf("Elapsed time: %" PRId32 " seconds\n\n", seconds);
+      printf("Elapsed time: %d seconds\n\n", seconds);
       for (i = 0, total = 0; i < 16; i++)
         {
           total += basepri[i];
@@ -256,7 +259,7 @@ int highpri_main(int argc, char *argv[])
                 {
                   printf("  basepri[%02x]: %lld (%d%%)\n",
                          i << 4, basepri[i],
-                         (int)((100 * basepri[i] + (total / 2)) / total));
+                         (int)((100* basepri[i] + (total / 2)) / total));
                 }
             }
         }

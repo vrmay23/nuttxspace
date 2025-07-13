@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/avr/src/atmega/atmega_serial.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011-2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -42,7 +55,8 @@
 
 #include <arch/board/board.h>
 
-#include "avr_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
 #include "atmega.h"
 
 /****************************************************************************
@@ -101,6 +115,7 @@ static int  usart0_attach(struct uart_dev_s *dev);
 static void usart0_detach(struct uart_dev_s *dev);
 static int  usart0_rxinterrupt(int irq, void *context, FAR void *arg);
 static int  usart0_txinterrupt(int irq, void *context, FAR void *arg);
+static int  usart0_ioctl(struct file *filep, int cmd, unsigned long arg);
 static int  usart0_receive(struct uart_dev_s *dev, FAR unsigned int *status);
 static void usart0_rxint(struct uart_dev_s *dev, bool enable);
 static bool usart0_rxavailable(struct uart_dev_s *dev);
@@ -117,6 +132,7 @@ static int  usart1_attach(struct uart_dev_s *dev);
 static void usart1_detach(struct uart_dev_s *dev);
 static int  usart1_rxinterrupt(int irq, void *context, FAR void *arg);
 static int  usart1_txinterrupt(int irq, void *context, FAR void *arg);
+static int  usart1_ioctl(struct file *filep, int cmd, unsigned long arg);
 static int  usart1_receive(struct uart_dev_s *dev, FAR unsigned int *status);
 static void usart1_rxint(struct uart_dev_s *dev, bool enable);
 static bool usart1_rxavailable(struct uart_dev_s *dev);
@@ -139,6 +155,7 @@ struct uart_ops_s g_usart0_ops =
   .shutdown       = usart0_shutdown,
   .attach         = usart0_attach,
   .detach         = usart0_detach,
+  .ioctl          = usart0_ioctl,
   .receive        = usart0_receive,
   .rxint          = usart0_rxint,
   .rxavailable    = usart0_rxavailable,
@@ -183,6 +200,7 @@ struct uart_ops_s g_usart1_ops =
   .shutdown       = usart1_shutdown,
   .attach         = usart1_attach,
   .detach         = usart1_detach,
+  .ioctl          = usart1_ioctl,
   .receive        = usart1_receive,
   .rxint          = usart1_rxint,
   .rxavailable    = usart1_rxavailable,
@@ -210,7 +228,7 @@ static uart_dev_t g_usart1port =
   {
     .size   = CONFIG_USART1_TXBUFSIZE,
     .buffer = g_usart1txbuffer,
-  },
+   },
   .ops      = &g_usart1_ops,
 };
 #endif
@@ -343,15 +361,14 @@ static void usart1_shutdown(struct uart_dev_s *dev)
  * Name: usart0/1_attach
  *
  * Description:
- *   Configure the USART to operation in interrupt driven mode.  This method
- *   is called when the serial port is opened.  Normally, this is just after
- *   the the setup() method is called, however, the serial console may
- *   operate in a non-interrupt driven mode during the boot phase.
+ *   Configure the USART to operation in interrupt driven mode.  This method is
+ *   called when the serial port is opened.  Normally, this is just after the
+ *   the setup() method is called, however, the serial console may operate in
+ *   a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless
- *   the hardware supports multiple levels of interrupt enabling).  The RX
- *   and TX interrupts are not enabled until the txint() and rxint() methods
- *   are called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless the
+ *   hardware supports multiple levels of interrupt enabling).  The RX and TX
+ *   interrupts are not enabled until the txint() and rxint() methods are called.
  *
  ****************************************************************************/
 
@@ -365,16 +382,14 @@ static int usart0_attach(struct uart_dev_s *dev)
    * TX:  USART Transmit Complete.  Set when the entire frame in the Transmit
    *      Shift Register has been shifted out and there are no new data
    *      currently present in the transmit buffer.
-   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is
-   *      ready to receive new data: The buffer is empty, and therefore ready
-   *      to be written.
+   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is ready
+   *      to receive new data: The buffer is empty, and therefore ready to be
+   *      written.
    */
 
   irq_attach(ATMEGA_IRQ_U0RX, usart0_rxinterrupt, NULL);
   irq_attach(ATMEGA_IRQ_U0DRE, usart0_txinterrupt, NULL);
-
-  /* irq_attach(ATMEGA_IRQ_U0TX, usart0_txinterrupt, NULL); */
-
+//(void)irq_attach(ATMEGA_IRQ_U0TX, usart0_txinterrupt, NULL);
   return OK;
 }
 #endif
@@ -389,16 +404,14 @@ static int usart1_attach(struct uart_dev_s *dev)
    * TX:  USART Transmit Complete.  Set when the entire frame in the Transmit
    *      Shift Register has been shifted out and there are no new data
    *      currently present in the transmit buffer.
-   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is
-   *      ready to receive new data: The buffer is empty, and therefore ready
-   *      to be written.
+   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is ready
+   *      to receive new data: The buffer is empty, and therefore ready to be
+   *      written.
    */
 
   irq_attach(ATMEGA_IRQ_U1RX, usart1_rxinterrupt, NULL);
   irq_attach(ATMEGA_IRQ_U1DRE, usart1_txinterrupt, NULL);
-
-  /* irq_attach(ATMEGA_IRQ_U1TX, usart1_txinterrupt, NULL); */
-
+//(void)irq_attach(ATMEGA_IRQ_U1TX, usart1_txinterrupt, NULL);
   return OK;
 }
 #endif
@@ -408,8 +421,8 @@ static int usart1_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach USART interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The
- *   exception is the serial console which is never shutdown.
+ *   closed normally just before the shutdown method is called.  The exception
+ *   is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -424,8 +437,7 @@ static void usart0_detach(struct uart_dev_s *dev)
 
   irq_detach(ATMEGA_IRQ_U0RX);
   irq_detach(ATMEGA_IRQ_U0DRE);
-
-  /* irq_detach(ATMEGA_IRQ_U0TX); */
+//  (void)irq_detach(ATMEGA_IRQ_U0TX);
 }
 #endif
 
@@ -440,8 +452,7 @@ static void usart1_detach(struct uart_dev_s *dev)
 
   irq_detach(ATMEGA_IRQ_U1RX);
   irq_detach(ATMEGA_IRQ_U1DRE);
-
-  /* irq_detach(ATMEGA_IRQ_U1TX); */
+//(void)irq_detach(ATMEGA_IRQ_U1TX);
 }
 #endif
 
@@ -450,7 +461,7 @@ static void usart1_detach(struct uart_dev_s *dev)
  *
  * Description:
  *   This is the USART RX interrupt handler.  It will be invoked when an
- *   RX interrupt received.  It will call uart_recvchars to perform the RX
+ *   RX interrupt received.  It will call uart_receivechar to perform the RX
  *   data transfers.
  *
  ****************************************************************************/
@@ -538,6 +549,62 @@ static int usart1_txinterrupt(int irq, void *context, FAR void *arg)
     }
 
   return OK;
+}
+#endif
+
+/****************************************************************************
+ * Name: usart0/1_ioctl
+ *
+ * Description:
+ *   All ioctl calls will be routed through this method
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_AVR_USART0
+static int usart0_ioctl(struct file *filep, int cmd, unsigned long arg)
+{
+#ifdef CONFIG_SERIAL_TERMIOS
+  int ret = OK;
+
+  switch (cmd)
+    {
+     case TCGETS:
+     case TCSETS:
+      break;
+
+    default:
+      ret = -ENOTTY;
+      break;
+    }
+
+  return ret;
+#else
+  return -ENOTTY;
+#endif
+}
+#endif
+
+#ifdef CONFIG_AVR_USART1
+static int usart1_ioctl(struct file *filep, int cmd, unsigned long arg)
+{
+#ifdef CONFIG_SERIAL_TERMIOS
+  int ret = OK;
+
+  switch (cmd)
+    {
+     case TCGETS:
+     case TCSETS:
+      break;
+
+    default:
+      ret = -ENOTTY;
+      break;
+    }
+
+  return ret;
+#else
+  return -ENOTTY;
+#endif
 }
 #endif
 
@@ -697,9 +764,9 @@ static void usart0_txint(struct uart_dev_s *dev, bool enable)
    * TX:  USART Transmit Complete.  Set when the entire frame in the Transmit
    *      Shift Register has been shifted out and there are no new data
    *      currently present in the transmit buffer.
-   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is
-   *      ready to receive new data: The buffer is empty, and therefore ready
-   *      to be written.
+   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is ready
+   *      to receive new data: The buffer is empty, and therefore ready to be
+   *      written.
    */
 
   flags = enter_critical_section();
@@ -709,8 +776,7 @@ static void usart0_txint(struct uart_dev_s *dev, bool enable)
 
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
       UCSR0B |= (1 << UDRIE0);
-
-      /* UCSR0B |= (1 << TXCIE0); */
+//    UCSR0B |= (1 << TXCIE0);
 
       /* Fake a TX interrupt here by just calling uart_xmitchars() with
        * interrupts disabled (note this may recurse).
@@ -740,9 +806,9 @@ static void usart1_txint(struct uart_dev_s *dev, bool enable)
    * TX:  USART Transmit Complete.  Set when the entire frame in the Transmit
    *      Shift Register has been shifted out and there are no new data
    *      currently present in the transmit buffer.
-   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is
-   *      ready to receive new data: The buffer is empty, and therefore ready
-   *      to be written.
+   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is ready
+   *      to receive new data: The buffer is empty, and therefore ready to be
+   *      written.
    */
 
   flags = enter_critical_section();
@@ -752,8 +818,7 @@ static void usart1_txint(struct uart_dev_s *dev, bool enable)
 
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
       UCSR1B |= (1 << UDRIE1);
-
-      /* UCSR1B |= (1 << TXCIE1); */
+//    UCSR1B |= (1 << TXCIE1);
 
       /* Fake a TX interrupt here by just calling uart_xmitchars() with
        * interrupts disabled (note this may recurse).
@@ -799,7 +864,7 @@ static bool usart1_txready(struct uart_dev_s *dev)
  * Name: usart0/1_txempty
  *
  * Description:
- *   Return true if the tranmsit data register and shift register are both
+ *   Return true if the tranmsit data register and shift reqister are both
  *   empty
  *
  ****************************************************************************/
@@ -825,16 +890,16 @@ static bool usart1_txempty(struct uart_dev_s *dev)
 #ifdef USE_EARLYSERIALINIT
 
 /****************************************************************************
- * Name: avr_earlyserialinit
+ * Name: up_earlyserialinit
  *
  * Description:
  *   Performs the low level USART initialization early in debug so that the
- *   serial console will be available during boot up.  This must be called
- *   before avr_serialinit.
+ *   serial console will be available during bootup.  This must be called
+ *   before up_serialinit.
  *
  ****************************************************************************/
 
-void avr_earlyserialinit(void)
+void up_earlyserialinit(void)
 {
   /* Disable all USARTS */
 
@@ -859,15 +924,15 @@ void avr_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: avr_serialinit
+ * Name: up_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
- *   that avr_earlyserialinit was called previously.
+ *   that up_earlyserialinit was called previously.
  *
  ****************************************************************************/
 
-void avr_serialinit(void)
+void up_serialinit(void)
 {
   /* Register the console */
 
@@ -891,7 +956,7 @@ void avr_serialinit(void)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   uint8_t imr;
@@ -902,7 +967,16 @@ void up_putc(int ch)
   usart1_disableusartint(&imr);
 #endif
 
-  avr_lowputc(ch);
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
 
 #if defined(CONFIG_USART0_SERIAL_CONSOLE)
   usart0_restoreusartint(imr);
@@ -910,6 +984,8 @@ void up_putc(int ch)
   usart1_restoreusartint(imr);
 #endif
 #endif
+
+  return ch;
 }
 
 #else /* USE_SERIALDRIVER */
@@ -922,11 +998,21 @@ void up_putc(int ch)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
-  avr_lowputc(ch);
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
 #endif
+  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */

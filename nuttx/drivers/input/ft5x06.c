@@ -1,29 +1,48 @@
 /****************************************************************************
  * drivers/input/ft5x06.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/* References:
+ * References:
  *   "FT5x06", FocalTech Systems Co., Ltd, D-FT5x06-1212-V4.0, Revised
  *   Dec. 18, 2012
- */
+ *
+ * Some of this driver was developed with input from NXP sample code for
+ * the LPCXpresso-LPC54628 board.  That sample code as a compatible BSD
+ * license:
+ *
+ *   Copyright (c) 2016, Freescale Semiconductor, Inc.
+ *   Copyright 2016-2017 NXP
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************/
 
 /* The FT5x06 Series ICs are single-chip capacitive touch panel controller
  * ICs with a built-in 8 bit Micro-controller unit (MCU).  They adopt the
@@ -57,7 +76,6 @@
 #include <nuttx/arch.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/wdog.h>
@@ -97,7 +115,10 @@
 
 struct ft5x06_dev_s
 {
-  struct ft5x06_config_s config;            /* Board configuration data */
+  uint8_t crefs;                            /* Number of times the device
+                                             * has been opened */
+  uint8_t nwaiters;                         /* Number of threads waiting for
+                                             * FT5x06 data */
   volatile bool valid;                      /* True:  New, valid touch data
                                              * in touchbuf[] */
 #ifdef CONFIG_FT5X06_SINGLEPOINT
@@ -106,20 +127,30 @@ struct ft5x06_dev_s
   int16_t lastx;                            /* Last reported X position */
   int16_t lasty;                            /* Last reported Y position */
 #endif
-  mutex_t devlock;                          /* Manages exclusive access to
+  sem_t devsem;                             /* Manages exclusive access to
                                              * this structure */
+  sem_t waitsem;                            /* Used to wait for the
+                                             * availability of data */
   uint32_t frequency;                       /* Current I2C frequency */
 #ifdef CONFIG_FT5X06_POLLMODE
   uint32_t delay;                           /* Current poll delay */
 #endif
 
+  FAR const struct ft5x06_config_s *config; /* Board configuration data */
   FAR struct i2c_master_s *i2c;             /* Saved I2C driver instance */
   struct work_s work;                       /* Supports the interrupt
                                              * handling "bottom half" */
 #ifdef CONFIG_FT5X06_POLLMODE
-  struct wdog_s polltimer;                  /* Poll timer */
+  WDOG_ID polltimer;                        /* Poll timer */
 #endif
   uint8_t touchbuf[FT5X06_TOUCH_DATA_LEN];  /* Raw touch data */
+
+  /* The following is a list if poll structures of threads waiting for
+   * driver events. The 'struct pollfd' reference for each open is also
+   * retained in the f_priv field of the 'struct file'.
+   */
+
+  struct pollfd *fds[CONFIG_FT5X06_NPOLLWAITERS];
 };
 
 /****************************************************************************
@@ -129,20 +160,47 @@ struct ft5x06_dev_s
 static void ft5x06_notify(FAR struct ft5x06_dev_s *priv);
 static void ft5x06_data_worker(FAR void *arg);
 #ifdef CONFIG_FT5X06_POLLMODE
-static void ft5x06_poll_timeout(wdparm_t arg);
+static void ft5x06_poll_timeout(int argc, wdparm_t arg1, ...);
 #else
 static int  ft5x06_data_interrupt(int irq, FAR void *context, FAR void *arg);
 #endif
 static ssize_t ft5x06_sample(FAR struct ft5x06_dev_s *priv, FAR char *buffer,
                              size_t len);
-static int  ft5x06_bringup(FAR struct touch_lowerhalf_s *lower);
-static int  ft5x06_shutdown(FAR struct touch_lowerhalf_s *lower);
-static int  ft5x06_ioctl(FAR struct touch_lowerhalf_s *lower, int cmd,
+static ssize_t ft5x06_waitsample(FAR struct ft5x06_dev_s *priv,
+                                 FAR char *buffer, size_t len);
+static int  ft5x06_bringup(FAR struct ft5x06_dev_s *priv);
+static void ft5x06_shutdown(FAR struct ft5x06_dev_s *priv);
+
+/* Character driver methods */
+
+static int  ft5x06_open(FAR struct file *filep);
+static int  ft5x06_close(FAR struct file *filep);
+static ssize_t ft5x06_read(FAR struct file *filep, FAR char *buffer,
+                           size_t len);
+static int  ft5x06_ioctl(FAR struct file *filep, int cmd,
                          unsigned long arg);
+static int  ft5x06_poll(FAR struct file *filep, struct pollfd *fds,
+                        bool setup);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
+/* This the vtable that supports the character driver interface */
+
+static const struct file_operations ft5x06_fops =
+{
+  ft5x06_open,    /* open */
+  ft5x06_close,   /* close */
+  ft5x06_read,    /* read */
+  NULL,           /* write */
+  NULL,           /* seek */
+  ft5x06_ioctl,   /* ioctl */
+  ft5x06_poll     /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL          /* unlink */
+#endif
+};
 
 /* Maps FT5x06 touch events into bit encoded representation used by NuttX */
 
@@ -164,12 +222,36 @@ static const uint8_t g_event_map[4] =
 
 static void ft5x06_notify(FAR struct ft5x06_dev_s *priv)
 {
-  struct touch_sample_s sample;
+  int i;
 
-  memset(&sample, 0, sizeof(sample));
-  if (ft5x06_sample(priv, (FAR char *)&sample, sizeof(sample)) > 0)
+  /* If there are threads waiting for read data, then signal one of them
+   * that the read data is available.
+   */
+
+  if (priv->nwaiters > 0)
     {
-      touch_event(priv->config.lower.priv, &sample);
+      /* After posting this semaphore, we need to exit because the FT5x06
+       * is no longer available.
+       */
+
+      nxsem_post(&priv->waitsem);
+    }
+
+  /* If there are threads waiting on poll() for FT5x06 data to become
+   * available, then wake them up now.  NOTE: we wake up all waiting threads
+   * because we do not know that they are going to do.  If they all try to
+   * read the data, then some make end up blocking after all.
+   */
+
+  for (i = 0; i < CONFIG_FT5X06_NPOLLWAITERS; i++)
+    {
+      struct pollfd *fds = priv->fds[i];
+      if (fds)
+        {
+          fds->revents |= POLLIN;
+          iinfo("Report events: %02x\n", fds->revents);
+          nxsem_post(fds->sem);
+        }
     }
 }
 
@@ -188,14 +270,24 @@ static void ft5x06_data_worker(FAR void *arg)
 
   /* Get a pointer the callbacks for convenience */
 
-  DEBUGASSERT(priv != NULL);
-  config = &priv->config;
+  DEBUGASSERT(priv != NULL && priv->config != NULL);
+  config = priv->config;
 
   /* We need to have exclusive access to the touchbuf so that we do not
    * corrupt any read operation that is in place.
    */
 
-  nxmutex_lock(&priv->devlock);
+  do
+    {
+      ret = nxsem_wait_uninterruptible(&priv->devsem);
+
+      /* This would only fail if something canceled the worker thread?
+       * That is not expected.
+       */
+
+      DEBUGASSERT(ret == OK || ret == -ECANCELED);
+    }
+  while (ret < 0);
 
   /* Read touch data */
 
@@ -271,8 +363,7 @@ static void ft5x06_data_worker(FAR void *arg)
 #ifdef CONFIG_FT5X06_POLLMODE
   /* Exit, re-starting the poll. */
 
-  wd_start(&priv->polltimer, priv->delay,
-           ft5x06_poll_timeout, (wdparm_t)priv);
+  wd_start(priv->polltimer, priv->delay, ft5x06_poll_timeout, 1, priv);
 
 #else
   /* Exit, re-enabling FT5x06 interrupts */
@@ -280,7 +371,7 @@ static void ft5x06_data_worker(FAR void *arg)
   config->enable(config, true);
 #endif
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
 }
 
 /****************************************************************************
@@ -288,9 +379,9 @@ static void ft5x06_data_worker(FAR void *arg)
  ****************************************************************************/
 
 #ifdef CONFIG_FT5X06_POLLMODE
-static void ft5x06_poll_timeout(wdparm_t arg)
+static void ft5x06_poll_timeout(int argc, wdparm_t arg1, ...)
 {
-  FAR struct ft5x06_dev_s *priv = (FAR struct ft5x06_dev_s *)arg;
+  FAR struct ft5x06_dev_s *priv = (FAR struct ft5x06_dev_s *)arg1;
   int ret;
 
   /* Transfer processing to the worker thread.  Since FT5x06 poll timer is
@@ -322,7 +413,7 @@ static int ft5x06_data_interrupt(int irq, FAR void *context, FAR void *arg)
    * ugly).
    */
 
-  config = &priv->config;
+  config = priv->config;
   DEBUGASSERT(config != NULL);
 
   /* Disable further interrupts */
@@ -377,8 +468,13 @@ static ssize_t ft5x06_sample(FAR struct ft5x06_dev_s *priv, FAR char *buffer,
 
   /* Get the reported X and Y positions */
 
+  #ifdef CONFIG_FT5X06_SWAPXY
+  y = TOUCH_POINT_GET_X(touch[0]);
+  x = TOUCH_POINT_GET_Y(touch[0]);
+#else
   x = TOUCH_POINT_GET_X(touch[0]);
   y = TOUCH_POINT_GET_Y(touch[0]);
+#endif
 
   /* Get the touch point ID and event */
 
@@ -424,7 +520,7 @@ static ssize_t ft5x06_sample(FAR struct ft5x06_dev_s *priv, FAR char *buffer,
                   deltay = -deltay;
                 }
 
-              if (deltay < CONFIG_FT5X06_THRESHY)
+              if (deltax < CONFIG_FT5X06_THRESHX)
                 {
                   /* Ignore... no significant change in Y either */
 
@@ -525,8 +621,13 @@ static ssize_t ft5x06_sample(FAR struct ft5x06_dev_s *priv, FAR char *buffer,
 
       point[i].id       = TOUCH_POINT_GET_ID(touch[i]);
       point[i].flags    = g_event_map[event];
+#ifdef CONFIG_FT5X06_SWAPXY
+      point[i].y        = TOUCH_POINT_GET_X(touch[i]);
+      point[i].x        = TOUCH_POINT_GET_Y(touch[i]);
+#else
       point[i].x        = TOUCH_POINT_GET_X(touch[i]);
       point[i].y        = TOUCH_POINT_GET_Y(touch[i]);
+#endif
       point[i].h        = 0;
       point[i].w        = 0;
       point[i].pressure = 0;
@@ -538,12 +639,83 @@ static ssize_t ft5x06_sample(FAR struct ft5x06_dev_s *priv, FAR char *buffer,
 #endif /* CONFIG_FT5X06_SINGLEPOINT */
 
 /****************************************************************************
+ * Name: ft5x06_waitsample
+ ****************************************************************************/
+
+static ssize_t ft5x06_waitsample(FAR struct ft5x06_dev_s *priv,
+                                 FAR char *buffer, size_t len)
+{
+  int ret;
+
+  /* Disable pre-emption to prevent other threads from getting control while
+   * we muck with the semaphores.
+   */
+
+  sched_lock();
+
+  /* Now release the semaphore that manages mutually exclusive access to
+   * the device structure.  This may cause other tasks to become ready to
+   * run, but they cannot run yet because pre-emption is disabled.
+   */
+
+  nxsem_post(&priv->devsem);
+
+  /* Try to get the a sample... if we cannot, then wait on the semaphore
+   * that is posted when new sample data is available.
+   */
+
+  while (!priv->valid)
+    {
+      /* Increment the count of waiters */
+
+      priv->nwaiters++;
+
+      /* Wait for a change in the FT5x06 state */
+
+      ret = nxsem_wait(&priv->waitsem);
+      priv->nwaiters--;
+
+      if (ret < 0)
+        {
+          ierr("ERROR: nxsem_wait failed: %d\n", ret);
+          goto errout;
+        }
+    }
+
+  /* Re-acquire the semaphore that manages mutually exclusive access to
+   * the device structure.  We may have to wait here.  But we have our
+   * sample.  Interrupts and pre-emption will be re-enabled while we wait.
+   */
+
+  ret = nxsem_wait(&priv->devsem);
+  if (ret >= 0)
+    {
+      /* Now sample the data.
+       *
+       * REVISIT:  Is it safe to assume that priv->valid will always be
+       * true?  I think that sched_lock() would protect the setting.
+       */
+
+      ret = ft5x06_sample(priv, buffer, len);
+    }
+
+errout:
+  /* Restore pre-emption.  We might get suspended here but that is okay
+   * because we already have our sample.  Note:  this means that if there
+   * were two threads reading from the FT5x06 for some reason, the data
+   * might be read out of order.
+   */
+
+  sched_unlock();
+  return ret;
+}
+
+/****************************************************************************
  * Name: ft5x06_bringup
  ****************************************************************************/
 
-static int ft5x06_bringup(FAR struct touch_lowerhalf_s *lower)
+static int ft5x06_bringup(FAR struct ft5x06_dev_s *priv)
 {
-  FAR struct ft5x06_dev_s *priv = (FAR struct ft5x06_dev_s *)lower;
   FAR const struct ft5x06_config_s *config;
   struct i2c_msg_s msg;
   uint8_t data[2];
@@ -553,7 +725,7 @@ static int ft5x06_bringup(FAR struct touch_lowerhalf_s *lower)
    * ugly).
    */
 
-  config = &priv->config;
+  config = priv->config;
   DEBUGASSERT(config != NULL);
 
   /* Set device mode to normal operation */
@@ -586,45 +758,226 @@ static int ft5x06_bringup(FAR struct touch_lowerhalf_s *lower)
  * Name: ft5x06_shutdown
  ****************************************************************************/
 
-static int ft5x06_shutdown(FAR struct touch_lowerhalf_s *lower)
+static void ft5x06_shutdown(FAR struct ft5x06_dev_s *priv)
 {
-  FAR struct ft5x06_dev_s *priv = (FAR struct ft5x06_dev_s *)lower;
-
 #ifdef CONFIG_FT5X06_POLLMODE
   /* Stop the poll timer */
 
-  wd_cancel(&priv->polltimer);
+  wd_cancel(priv->polltimer);
 
 #else
-  FAR const struct ft5x06_config_s *config = &priv->config;
+  FAR const struct ft5x06_config_s *config = priv->config;
 
   /* Make sure that the FT5x06 interrupt is disabled */
 
   config->clear(config);
   config->enable(config, false);
 #endif
+}
 
-  return 0;
+/****************************************************************************
+ * Name: ft5x06_open
+ ****************************************************************************/
+
+static int ft5x06_open(FAR struct file *filep)
+{
+  FAR struct inode *inode;
+  FAR struct ft5x06_dev_s *priv;
+  uint8_t tmp;
+  int ret;
+
+  DEBUGASSERT(filep);
+  inode = filep->f_inode;
+
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct ft5x06_dev_s *)inode->i_private;
+
+  /* Get exclusive access to the driver data structure */
+
+  ret = nxsem_wait(&priv->devsem);
+  if (ret < 0)
+    {
+      ierr("ERROR: nxsem_wait failed: %d\n", ret);
+      return ret;
+    }
+
+  /* Increment the reference count */
+
+  tmp = priv->crefs + 1;
+  if (tmp == 0)
+    {
+      /* More than 255 opens; uint8_t overflows to zero */
+
+      ret = -EMFILE;
+      goto errout_with_sem;
+    }
+
+  /* When the reference increments to 1, this is the first open event
+   * on the driver.. and the time when we must initialize the driver.
+   */
+
+  if (tmp == 1)
+    {
+      ret = ft5x06_bringup(priv);
+      if (ret < 0)
+        {
+          ierr("ERROR: ft5x06_bringup failed: %d\n", ret);
+          goto errout_with_sem;
+        }
+    }
+
+  /* Save the new open count on success */
+
+  priv->crefs = tmp;
+
+errout_with_sem:
+  nxsem_post(&priv->devsem);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: ft5x06_close
+ ****************************************************************************/
+
+static int ft5x06_close(FAR struct file *filep)
+{
+  FAR struct inode *inode;
+  FAR struct ft5x06_dev_s *priv;
+  int ret;
+
+  DEBUGASSERT(filep);
+  inode = filep->f_inode;
+
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct ft5x06_dev_s *)inode->i_private;
+
+  /* Get exclusive access to the driver data structure */
+
+  ret = nxsem_wait(&priv->devsem);
+  if (ret < 0)
+    {
+      ierr("ERROR: nxsem_wait failed: %d\n", ret);
+      return ret;
+    }
+
+  /* Decrement the reference count unless it would decrement a negative
+   * value.
+   */
+
+  if (priv->crefs >= 1)
+    {
+      priv->crefs--;
+    }
+
+  /* When the count decrements to zero, there are no further open references
+   * to the driver and it can be uninitialized.
+   */
+
+  if (priv->crefs == 0)
+    {
+      ft5x06_shutdown(priv);
+    }
+
+  nxsem_post(&priv->devsem);
+  return OK;
+}
+
+/****************************************************************************
+ * Name: ft5x06_read
+ ****************************************************************************/
+
+static ssize_t ft5x06_read(FAR struct file *filep, FAR char *buffer,
+                           size_t len)
+{
+  FAR struct inode *inode;
+  FAR struct ft5x06_dev_s  *priv;
+  int ret;
+
+  DEBUGASSERT(filep);
+  inode = filep->f_inode;
+
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct ft5x06_dev_s *)inode->i_private;
+
+  /* Verify that the caller has provided a buffer large enough to receive
+   * the touch data.
+   */
+
+  if (len < SIZEOF_TOUCH_SAMPLE_S(1))
+    {
+      /* We could provide logic to break up a touch report into segments and
+       * handle smaller reads... but why?
+       */
+
+      return -ENOSYS;
+    }
+
+  /* Get exclusive access to the driver data structure */
+
+  ret = nxsem_wait(&priv->devsem);
+  if (ret < 0)
+    {
+      ierr("ERROR: nxsem_wait failed: %d\n", ret);
+      return ret;
+    }
+
+  /* Try to read sample data. */
+
+  ret = ft5x06_sample(priv, buffer, len);
+  while (ret == 0)
+    {
+      /* Sample data is not available now.  We would have to wait to receive
+       * sample data.  If the user has specified the O_NONBLOCK option, then
+       * just return an error.
+       */
+
+      if (filep->f_oflags & O_NONBLOCK)
+        {
+          ret = -EAGAIN;
+          goto errout;
+        }
+
+      /* Wait for sample data */
+
+      ret = ft5x06_waitsample(priv, buffer, len);
+      if (ret < 0)
+        {
+          /* We might have been awakened by a signal */
+
+          goto errout;
+        }
+    }
+
+  ret = SIZEOF_TOUCH_SAMPLE_S(1);
+
+errout:
+  nxsem_post(&priv->devsem);
+  return ret;
 }
 
 /****************************************************************************
  * Name: ft5x06_ioctl
  ****************************************************************************/
 
-static int ft5x06_ioctl(FAR struct touch_lowerhalf_s *lower, int cmd,
-                        unsigned long arg)
+static int ft5x06_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
-  FAR struct ft5x06_dev_s *priv = (FAR struct ft5x06_dev_s *)lower;
-  int                      ret;
+  FAR struct inode         *inode;
+  FAR struct ft5x06_dev_s *priv;
+  int                       ret;
 
   iinfo("cmd: %d arg: %ld\n", cmd, arg);
+  DEBUGASSERT(filep);
+  inode = filep->f_inode;
+
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct ft5x06_dev_s *)inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
-      ierr("ERROR: nxmutex_lock failed: %d\n", ret);
+      ierr("ERROR: nxsem_wait failed: %d\n", ret);
       return ret;
     }
 
@@ -635,7 +988,7 @@ static int ft5x06_ioctl(FAR struct touch_lowerhalf_s *lower, int cmd,
       case TSIOC_SETFREQUENCY:  /* arg: Pointer to uint32_t frequency value */
         {
           FAR uint32_t *ptr = (FAR uint32_t *)((uintptr_t)arg);
-          DEBUGASSERT(ptr != NULL);
+          DEBUGASSERT(priv->config != NULL && ptr != NULL);
           priv->frequency = *ptr;
         }
         break;
@@ -643,7 +996,7 @@ static int ft5x06_ioctl(FAR struct touch_lowerhalf_s *lower, int cmd,
       case TSIOC_GETFREQUENCY:  /* arg: Pointer to uint32_t frequency value */
         {
           FAR uint32_t *ptr = (FAR uint32_t *)((uintptr_t)arg);
-          DEBUGASSERT(ptr != NULL);
+          DEBUGASSERT(priv->config != NULL && ptr != NULL);
           *ptr = priv->frequency;
         }
         break;
@@ -653,9 +1006,103 @@ static int ft5x06_ioctl(FAR struct touch_lowerhalf_s *lower, int cmd,
         break;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
+
+/****************************************************************************
+ * Name: ft5x06_poll
+ ****************************************************************************/
+
+static int ft5x06_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                        bool setup)
+{
+  FAR struct inode         *inode;
+  FAR struct ft5x06_dev_s *priv;
+  int                       ret;
+  int                       i;
+
+  iinfo("setup: %d\n", (int)setup);
+  DEBUGASSERT(filep && fds);
+  inode = filep->f_inode;
+
+  DEBUGASSERT(inode && inode->i_private);
+  priv  = (FAR struct ft5x06_dev_s *)inode->i_private;
+
+  /* Are we setting up the poll?  Or tearing it down? */
+
+  ret = nxsem_wait(&priv->devsem);
+  if (ret < 0)
+    {
+      ierr("ERROR: nxsem_wait failed: %d\n", ret);
+      return ret;
+    }
+
+  if (setup)
+    {
+      /* Ignore waits that do not include POLLIN */
+
+      if ((fds->events & POLLIN) == 0)
+        {
+          ierr("ERROR: Missing POLLIN: revents: %08x\n", fds->revents);
+          ret = -EDEADLK;
+          goto errout;
+        }
+
+      /* This is a request to set up the poll.  Find an available
+       * slot for the poll structure reference
+       */
+
+      for (i = 0; i < CONFIG_FT5X06_NPOLLWAITERS; i++)
+        {
+          /* Find an available slot */
+
+          if (!priv->fds[i])
+            {
+              /* Bind the poll structure and this slot */
+
+              priv->fds[i] = fds;
+              fds->priv    = &priv->fds[i];
+              break;
+            }
+        }
+
+      if (i >= CONFIG_FT5X06_NPOLLWAITERS)
+        {
+          ierr("ERROR: No available slot found: %d\n", i);
+          fds->priv    = NULL;
+          ret          = -EBUSY;
+          goto errout;
+        }
+
+      /* Should we immediately notify on any of the requested events? */
+
+      if (priv->valid)
+        {
+          ft5x06_notify(priv);
+        }
+    }
+  else if (fds->priv)
+    {
+      /* This is a request to tear down the poll. */
+
+      struct pollfd **slot = (struct pollfd **)fds->priv;
+      DEBUGASSERT(slot != NULL);
+
+      /* Remove all memory of the poll setup */
+
+      *slot                = NULL;
+      fds->priv            = NULL;
+    }
+
+errout:
+  nxsem_post(&priv->devsem);
+  return ret;
+}
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
 
 /****************************************************************************
  * Public Functions
@@ -692,14 +1139,17 @@ int ft5x06_register(FAR struct i2c_master_s *i2c,
   /* Debug-only sanity checks */
 
   DEBUGASSERT(i2c != NULL && config != NULL && minor >= 0 && minor < 100);
-#ifndef CONFIG_FT5X06_POLLMODE
+#ifdef CONFIG_FT5X06_POLLMODE
+  DEBUGASSERT(config->wakeup != NULL && config->nreset != NULL);
+#else
   DEBUGASSERT(config->attach != NULL && config->enable != NULL &&
-              config->clear  != NULL);
+              config->clear  != NULL && config->wakeup != NULL &&
+              config->nreset != NULL);
 #endif
 
   /* Create and initialize a FT5x06 device driver instance */
 
-  priv = kmm_zalloc(sizeof(struct ft5x06_dev_s));
+  priv = (FAR struct ft5x06_dev_s *)kmm_zalloc(sizeof(struct ft5x06_dev_s));
   if (!priv)
     {
       ierr("ERROR: kmm_zalloc(%d) failed\n", sizeof(struct ft5x06_dev_s));
@@ -709,18 +1159,29 @@ int ft5x06_register(FAR struct i2c_master_s *i2c,
   /* Initialize the FT5x06 device driver instance */
 
   priv->i2c       = i2c;               /* Save the I2C device handle */
+  priv->config    = config;            /* Save the board configuration */
   priv->frequency = config->frequency; /* Set the current I2C frequency */
 
-  /* Save the board configuration */
+  nxsem_init(&priv->devsem,  0, 1);    /* Initialize device structure semaphore */
+  nxsem_init(&priv->waitsem, 0, 0);    /* Initialize pen event wait semaphore */
 
-  memcpy(&priv->config, config, sizeof(priv->config));
+  /* The event wait semaphore is used for signaling and, hence, should not
+   * have priority inheritance enabled.
+   */
 
-  nxmutex_init(&priv->devlock);        /* Initialize device structure mutex */
+  nxsem_setprotocol(&priv->waitsem, SEM_PRIO_NONE);
 
 #ifdef CONFIG_FT5X06_POLLMODE
   /* Allocate a timer for polling the FT5x06 */
 
   priv->delay     = POLL_MAXDELAY;
+  priv->polltimer = wd_create();
+  if (priv->polltimer == NULL)
+    {
+      ierr("ERROR: Failed to allocate polltimer\n");
+      ret = -EBUSY;
+      goto errout_with_priv;
+    }
 #else
   /* Make sure that the FT5x06 interrupt interrupt is disabled */
 
@@ -734,24 +1195,20 @@ int ft5x06_register(FAR struct i2c_master_s *i2c,
   if (ret < 0)
     {
       ierr("ERROR: Failed to attach interrupt\n");
-      goto errout_with_priv;
+      goto errout_with_timer;
     }
 #endif
 
   /* Register the device as an input device */
 
-  priv->config.lower.open = ft5x06_bringup;
-  priv->config.lower.close = ft5x06_shutdown;
-  priv->config.lower.control = ft5x06_ioctl;
-  snprintf(devname, sizeof(devname), DEV_FORMAT, minor);
+  snprintf(devname, DEV_NAMELEN, DEV_FORMAT, minor);
   iinfo("Registering %s\n", devname);
 
-  ret = touch_register(&priv->config.lower, devname,
-                       CONFIG_FT5X06_SAMPLE_NBUFFER);
+  ret = register_driver(devname, &ft5x06_fops, 0666, priv);
   if (ret < 0)
     {
       ierr("ERROR: register_driver() failed: %d\n", ret);
-      goto errout_with_priv;
+      goto errout_with_timer;
     }
 
   /* Schedule work to perform the initial sampling and to set the data
@@ -762,15 +1219,20 @@ int ft5x06_register(FAR struct i2c_master_s *i2c,
   if (ret < 0)
     {
       ierr("ERROR: Failed to queue work: %d\n", ret);
-      goto errout_with_priv;
+      goto errout_with_timer;
     }
 
   /* And return success */
 
   return OK;
 
+errout_with_timer:
+#ifdef CONFIG_FT5X06_POLLMODE
+  wd_delete(priv->polltimer);
+
 errout_with_priv:
-  nxmutex_destroy(&priv->devlock);
+#endif
+  nxsem_destroy(&priv->devsem);
   kmm_free(priv);
   return ret;
 }

@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/ipforward/ipfwd_alloc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -37,7 +50,6 @@
 #include <nuttx/net/icmpv6.h>
 
 #include "ipforward/ipforward.h"
-#include "utils/utils.h"
 
 #ifdef CONFIG_NET_IPFORWARD
 
@@ -67,12 +79,13 @@
  * Private Data
  ****************************************************************************/
 
-/* This is the state of the global forwarding structures */
+/* This is an array of pre-allocating forwarding structures */
 
-NET_BUFPOOL_DECLARE(g_fwdpool, sizeof(struct forward_s),
-                    CONFIG_NET_IPFORWARD_NSTRUCT,
-                    CONFIG_NET_IPFORWARD_ALLOC_STRUCT,
-                    CONFIG_IOB_NBUFFERS - CONFIG_IOB_THROTTLE);
+static struct forward_s g_fwdpool[CONFIG_NET_IPFORWARD_NSTRUCT];
+
+/* This is a list of free forwarding structures */
+
+static FAR struct forward_s *g_fwdfree;
 
 /****************************************************************************
  * Public Functions
@@ -91,11 +104,25 @@ NET_BUFPOOL_DECLARE(g_fwdpool, sizeof(struct forward_s),
 
 void ipfwd_initialize(void)
 {
+  FAR struct forward_s *fwd;
+  int i;
+
   /* The IOB size must be such that the maximum L2 and L3 headers fit into
    * the contiguous memory of the first IOB in the IOB chain.
    */
 
   DEBUGASSERT(MAX_HDRLEN <= CONFIG_IOB_BUFSIZE);
+
+  /* Add all pre-allocated forwarding structures to the free list */
+
+  g_fwdfree = NULL;
+
+  for (i = 0; i < CONFIG_NET_IPFORWARD_NSTRUCT; i++)
+    {
+      fwd          = &g_fwdpool[i];
+      fwd->f_flink = g_fwdfree;
+      g_fwdfree    = fwd;
+    }
 }
 
 /****************************************************************************
@@ -113,7 +140,16 @@ void ipfwd_initialize(void)
 
 FAR struct forward_s *ipfwd_alloc(void)
 {
-  return NET_BUFPOOL_TRYALLOC(g_fwdpool);
+  FAR struct forward_s *fwd;
+
+  fwd = g_fwdfree;
+  if (fwd != NULL)
+    {
+      g_fwdfree = fwd->f_flink;
+      memset (fwd, 0, sizeof(struct forward_s));
+    }
+
+  return fwd;
 }
 
 /****************************************************************************
@@ -130,7 +166,8 @@ FAR struct forward_s *ipfwd_alloc(void)
 
 void ipfwd_free(FAR struct forward_s *fwd)
 {
-  NET_BUFPOOL_FREE(g_fwdpool, fwd);
+  fwd->f_flink = g_fwdfree;
+  g_fwdfree    = fwd;
 }
 
 #endif /* CONFIG_NET_IPFORWARD */

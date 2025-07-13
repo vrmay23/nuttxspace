@@ -1,28 +1,41 @@
-/****************************************************************************
- * arch/arm/src/stm32f7/stm32_capture.c
+/************************************************************************************
+ * arch/arm/src/stm32/stm32_capture.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Bouteville Pierre-Noel. All rights reserved.
+ *   Author: Bouteville Pierre-Noel <pnb990@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 #include <nuttx/arch.h>
@@ -31,49 +44,44 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "stm32_gpio.h"
 #include "stm32_capture.h"
-#include "stm32_rcc.h"
 
-/****************************************************************************
+/************************************************************************************
  * Private Types
- ****************************************************************************/
+ ************************************************************************************/
 
-/* Configuration ************************************************************/
+/* Configuration ********************************************************************/
 
-#if defined(GPIO_TIM1_CH1IN) || defined(GPIO_TIM2_CH1IN) || \
-    defined(GPIO_TIM3_CH1IN) || defined(GPIO_TIM4_CH1IN) || \
-    defined(GPIO_TIM5_CH1IN) || defined(GPIO_TIM8_CH1IN) || \
-    defined(GPIO_TIM9_CH1IN) || defined(GPIO_TIM10_CH1IN) || \
-    defined(GPIO_TIM11_CH1IN) || defined(GPIO_TIM12_CH1IN) || \
-    defined(GPIO_TIM13_CH1IN) || defined(GPIO_TIM14_CH1IN)
+#if defined(GPIO_TIM1_CH1IN) || defined(GPIO_TIM2_CH1IN) || defined(GPIO_TIM3_CH1IN) || \
+    defined(GPIO_TIM4_CH1IN) || defined(GPIO_TIM5_CH1IN) || defined(GPIO_TIM8_CH1IN) || \
+    defined(GPIO_TIM9_CH1IN) || defined(GPIO_TIM10_CH1IN) || defined(GPIO_TIM11_CH1IN) || \
+    defined(GPIO_TIM12_CH1IN) || defined(GPIO_TIM13_CH1IN) || defined(GPIO_TIM14_CH1IN)
 #  define HAVE_CH1IN 1
 #endif
 
-#if defined(GPIO_TIM1_CH2IN) || defined(GPIO_TIM2_CH2IN) || \
-    defined(GPIO_TIM3_CH2IN) || defined(GPIO_TIM4_CH2IN) || \
-    defined(GPIO_TIM5_CH2IN) || defined(GPIO_TIM8_CH2IN) || \
+#if defined(GPIO_TIM1_CH2IN) || defined(GPIO_TIM2_CH2IN) || defined(GPIO_TIM3_CH2IN) || \
+    defined(GPIO_TIM4_CH2IN) || defined(GPIO_TIM5_CH2IN) || defined(GPIO_TIM8_CH2IN) || \
     defined(GPIO_TIM9_CH2IN) || defined(GPIO_TIM12_CH2IN)
 #  define HAVE_CH2IN 1
 #endif
 
-#if defined(GPIO_TIM1_CH3IN) || defined(GPIO_TIM2_CH3IN) || \
-    defined(GPIO_TIM3_CH3IN) || defined(GPIO_TIM4_CH3IN) || \
-    defined(GPIO_TIM5_CH3IN) || defined(GPIO_TIM8_CH3IN)
+#if defined(GPIO_TIM1_CH3IN) || defined(GPIO_TIM2_CH3IN) || defined(GPIO_TIM3_CH3IN) || \
+    defined(GPIO_TIM4_CH3IN) || defined(GPIO_TIM5_CH3IN) || defined(GPIO_TIM8_CH3IN)
 #  define HAVE_CH3IN 1
 #endif
 
-#if defined(GPIO_TIM1_CH4IN) || defined(GPIO_TIM2_CH4IN) || \
-    defined(GPIO_TIM3_CH4IN) || defined(GPIO_TIM4_CH4IN) || \
-    defined(GPIO_TIM5_CH4IN) || defined(GPIO_TIM8_CH4IN)
+#if defined(GPIO_TIM1_CH4IN) || defined(GPIO_TIM2_CH4IN) || defined(GPIO_TIM3_CH4IN) || \
+    defined(GPIO_TIM4_CH4IN) || defined(GPIO_TIM5_CH4IN) || defined(GPIO_TIM8_CH4IN)
 #  define HAVE_CH4IN 1
 #endif
 
@@ -88,26 +96,20 @@
 #  define USE_EXT_CLOCK 1
 #endif
 
-/* This module then only compiles if there are enabled timers that are not
- * intended for some other purpose.
+/* This module then only compiles if there are enabled timers that are not intended
+ * for some other purpose.
  */
 
-#if defined(CONFIG_STM32F7_TIM1_CAP)  || \
-    defined(CONFIG_STM32F7_TIM2_CAP)  || \
-    defined(CONFIG_STM32F7_TIM3_CAP)  || \
-    defined(CONFIG_STM32F7_TIM4_CAP)  || \
-    defined(CONFIG_STM32F7_TIM5_CAP)  || \
-    defined(CONFIG_STM32F7_TIM8_CAP)  || \
-    defined(CONFIG_STM32F7_TIM9_CAP)  || \
-    defined(CONFIG_STM32F7_TIM10_CAP) || \
-    defined(CONFIG_STM32F7_TIM11_CAP) || \
-    defined(CONFIG_STM32F7_TIM12_CAP) || \
-    defined(CONFIG_STM32F7_TIM13_CAP) || \
-    defined(CONFIG_STM32F7_TIM14_CAP)
+#if defined(CONFIG_STM32F7_TIM1_CAP)  || defined(CONFIG_STM32F7_TIM2_CAP)  || \
+    defined(CONFIG_STM32F7_TIM3_CAP)  || defined(CONFIG_STM32F7_TIM4_CAP)  || \
+    defined(CONFIG_STM32F7_TIM5_CAP)  || defined(CONFIG_STM32F7_TIM8_CAP)  || \
+    defined(CONFIG_STM32F7_TIM9_CAP)  || defined(CONFIG_STM32F7_TIM10_CAP) || \
+    defined(CONFIG_STM32F7_TIM11_CAP) || defined(CONFIG_STM32F7_TIM12_CAP) || \
+    defined(CONFIG_STM32F7_TIM13_CAP) || defined(CONFIG_STM32F7_TIM14_CAP)
 
-/****************************************************************************
+/************************************************************************************
  * Private Types
- ****************************************************************************/
+ ************************************************************************************/
 
 /* TIM Device Structure */
 
@@ -124,21 +126,21 @@ struct stm32_cap_priv_s
 #endif
 };
 
-/****************************************************************************
+/************************************************************************************
  * Private Functions
- ****************************************************************************/
+ ************************************************************************************/
 
 /* Get a 16-bit register value by offset */
 
-static inline uint16_t
-stm32_getreg16(const struct stm32_cap_priv_s *priv, uint8_t offset)
+static inline uint16_t stm32_getreg16(FAR const struct stm32_cap_priv_s *priv,
+                                      uint8_t offset)
 {
   return getreg16(priv->base + offset);
 }
 
 /* Put a 16-bit register value by offset */
 
-static inline void stm32_putreg16(const struct stm32_cap_priv_s *priv,
+static inline void stm32_putreg16(FAR const struct stm32_cap_priv_s *priv,
                                   uint8_t offset, uint16_t value)
 {
   putreg16(value, priv->base + offset);
@@ -146,7 +148,7 @@ static inline void stm32_putreg16(const struct stm32_cap_priv_s *priv,
 
 /* Modify a 16-bit register value by offset */
 
-static inline void stm32_modifyreg16(const struct stm32_cap_priv_s *priv,
+static inline void stm32_modifyreg16(FAR const struct stm32_cap_priv_s *priv,
                                      uint8_t offset, uint16_t clearbits,
                                      uint16_t setbits)
 {
@@ -157,8 +159,8 @@ static inline void stm32_modifyreg16(const struct stm32_cap_priv_s *priv,
  * 32-bit registers (CNT, ARR, CRR1-4) in the 32-bit timers TIM2 and TIM5.
  */
 
-static inline uint32_t
-stm32_getreg32(const struct stm32_cap_priv_s *priv, uint8_t offset)
+static inline uint32_t stm32_getreg32(FAR const struct stm32_cap_priv_s *priv,
+                                      uint8_t offset)
 {
   return getreg32(priv->base + offset);
 }
@@ -167,18 +169,18 @@ stm32_getreg32(const struct stm32_cap_priv_s *priv, uint8_t offset)
  * 32-bit registers (CNT, ARR, CRR1-4) in the 32-bit timers TIM2 and TIM5.
  */
 
-static inline void stm32_putreg32(const struct stm32_cap_priv_s *priv,
+static inline void stm32_putreg32(FAR const struct stm32_cap_priv_s *priv,
                                   uint8_t offset, uint32_t value)
 {
   putreg32(value, priv->base + offset);
 }
 
-/****************************************************************************
+/************************************************************************************
  * gpio Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-static inline uint32_t
-stm32_cap_gpio(const struct stm32_cap_priv_s *priv, int channel)
+static inline uint32_t stm32_cap_gpio(FAR const struct stm32_cap_priv_s *priv,
+                                      int channel)
 {
   switch (priv->base)
     {
@@ -318,7 +320,7 @@ stm32_cap_gpio(const struct stm32_cap_priv_s *priv, int channel)
         break;
 #endif
 
-      /* TIM6 and TIM7 cannot be used in capture */
+/* TIM6 and TIM7 cannot be used in capture */
 
 #ifdef CONFIG_STM32F7_TIM8_CAP
       case STM32_TIM8_BASE:
@@ -516,11 +518,10 @@ stm32_cap_gpio(const struct stm32_cap_priv_s *priv, int channel)
         break;
 #endif
     }
-
   return 0;
 }
 
-static inline int stm32_cap_set_rcc(const struct stm32_cap_priv_s *priv,
+static inline int stm32_cap_set_rcc(FAR const struct stm32_cap_priv_s *priv,
                                     bool on)
 {
   uint32_t offset = 0;
@@ -621,14 +622,12 @@ static inline int stm32_cap_set_rcc(const struct stm32_cap_priv_s *priv,
 
   return OK;
 }
-
-/****************************************************************************
+/************************************************************************************
  * Basic Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-static int stm32_cap_setclock(struct stm32_cap_dev_s *dev,
-                              stm32_cap_clk_t clk, uint32_t prescaler,
-                              uint32_t max)
+static int stm32_cap_setclock(FAR struct stm32_cap_dev_s *dev, stm32_cap_clk_t clk,
+                              uint32_t prescaler, uint32_t max)
 {
   const struct stm32_cap_priv_s *priv = (const struct stm32_cap_priv_s *)dev;
   uint16_t regval = 0;
@@ -701,7 +700,7 @@ static int stm32_cap_setclock(struct stm32_cap_dev_s *dev,
   return prescaler;
 }
 
-static int stm32_cap_setisr(struct stm32_cap_dev_s *dev, xcpt_t handler,
+static int stm32_cap_setisr(FAR struct stm32_cap_dev_s *dev, xcpt_t handler,
                             void *arg)
 {
   const struct stm32_cap_priv_s *priv = (const struct stm32_cap_priv_s *)dev;
@@ -731,7 +730,6 @@ static int stm32_cap_setisr(struct stm32_cap_dev_s *dev, xcpt_t handler,
           irq_detach(irq_of);
         }
 #endif
-
       return OK;
     }
 
@@ -751,7 +749,7 @@ static int stm32_cap_setisr(struct stm32_cap_dev_s *dev, xcpt_t handler,
   return OK;
 }
 
-static void stm32_cap_enableint(struct stm32_cap_dev_s *dev,
+static void stm32_cap_enableint(FAR struct stm32_cap_dev_s *dev,
                                 stm32_cap_flags_t src, bool on)
 {
   const struct stm32_cap_priv_s *priv = (const struct stm32_cap_priv_s *)dev;
@@ -796,7 +794,7 @@ static void stm32_cap_enableint(struct stm32_cap_dev_s *dev,
     }
 }
 
-static void stm32_cap_ackflags(struct stm32_cap_dev_s *dev, int flags)
+static void stm32_cap_ackflags(FAR struct stm32_cap_dev_s *dev, int flags)
 {
   const struct stm32_cap_priv_s *priv = (const struct stm32_cap_priv_s *)dev;
   uint16_t mask = 0;
@@ -849,7 +847,7 @@ static void stm32_cap_ackflags(struct stm32_cap_dev_s *dev, int flags)
   stm32_putreg16(priv, STM32_BTIM_SR_OFFSET, ~mask);
 }
 
-static stm32_cap_flags_t stm32_cap_getflags(struct stm32_cap_dev_s *dev)
+static stm32_cap_flags_t stm32_cap_getflags(FAR struct stm32_cap_dev_s *dev)
 {
   const struct stm32_cap_priv_s *priv = (const struct stm32_cap_priv_s *)dev;
   uint16_t regval = 0;
@@ -903,14 +901,15 @@ static stm32_cap_flags_t stm32_cap_getflags(struct stm32_cap_dev_s *dev)
     }
 
   return flags;
+
 }
 
-/****************************************************************************
+/************************************************************************************
  * General Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-static int stm32_cap_setchannel(struct stm32_cap_dev_s *dev,
-                                uint8_t channel, stm32_cap_ch_cfg_t cfg)
+static int stm32_cap_setchannel(FAR struct stm32_cap_dev_s *dev, uint8_t channel,
+                                stm32_cap_ch_cfg_t cfg)
 {
   const struct stm32_cap_priv_s *priv = (const struct stm32_cap_priv_s *)dev;
   uint32_t gpio = 0;
@@ -971,17 +970,16 @@ static int stm32_cap_setchannel(struct stm32_cap_dev_s *dev,
   /* Shift all CCER bits to corresponding channel */
 
   mask = (GTIM_CCER_CC1E | GTIM_CCER_CC1P | GTIM_CCER_CC1NP);
-  mask          <<= GTIM_CCER_CCXBASE(channel);
-  regval        <<= GTIM_CCER_CCXBASE(channel);
-  ccer_en_bit   <<= GTIM_CCER_CCXBASE(channel);
+  mask          <<= (channel << 2);
+  regval        <<= (channel << 2);
+  ccer_en_bit   <<= (channel << 2);
 
   stm32_modifyreg16(priv, STM32_GTIM_CCER_OFFSET, mask, regval);
 
   /* Set ccmr */
 
   regval = cfg;
-  mask = (GTIM_CCMR1_IC1F_MASK | GTIM_CCMR1_IC1PSC_MASK |
-          GTIM_CCMR1_CC1S_MASK);
+  mask = (GTIM_CCMR1_IC1F_MASK | GTIM_CCMR1_IC1PSC_MASK | GTIM_CCMR1_CC1S_MASK);
   regval &= mask;
 
   if (channel & 1)
@@ -1016,8 +1014,7 @@ static int stm32_cap_setchannel(struct stm32_cap_dev_s *dev,
   return OK;
 }
 
-static uint32_t stm32_cap_getcapture(struct stm32_cap_dev_s *dev,
-                                     uint8_t channel)
+static uint32_t stm32_cap_getcapture(FAR struct stm32_cap_dev_s *dev, uint8_t channel)
 {
   const struct stm32_cap_priv_s *priv = (const struct stm32_cap_priv_s *)dev;
   uint32_t offset;
@@ -1061,15 +1058,15 @@ static uint32_t stm32_cap_getcapture(struct stm32_cap_dev_s *dev,
   return stm32_getreg16(priv, offset);
 }
 
-/****************************************************************************
+/************************************************************************************
  * Advanced Functions
- ****************************************************************************/
+ ************************************************************************************/
 
 /* TODO: Advanced functions for the STM32_ATIM */
 
-/****************************************************************************
+/************************************************************************************
  * Device Structures, Instantiation
- ****************************************************************************/
+ ************************************************************************************/
 
 struct stm32_cap_ops_s stm32_cap_ops =
 {
@@ -1288,11 +1285,11 @@ static inline const struct stm32_cap_priv_s * stm32_cap_get_priv(int timer)
   return NULL;
 }
 
-/****************************************************************************
+/************************************************************************************
  * Public Function - Initialization
- ****************************************************************************/
+ ************************************************************************************/
 
-struct stm32_cap_dev_s *stm32_cap_init(int timer)
+FAR struct stm32_cap_dev_s *stm32_cap_init(int timer)
 {
   const struct stm32_cap_priv_s *priv = stm32_cap_get_priv(timer);
   uint32_t gpio;
@@ -1315,7 +1312,7 @@ struct stm32_cap_dev_s *stm32_cap_init(int timer)
   return (struct stm32_cap_dev_s *)priv;
 }
 
-int stm32_cap_deinit(struct stm32_cap_dev_s * dev)
+int stm32_cap_deinit(FAR struct stm32_cap_dev_s * dev)
 {
   const struct stm32_cap_priv_s *priv = (struct stm32_cap_priv_s *)dev;
   uint32_t gpio;

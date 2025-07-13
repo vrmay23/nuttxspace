@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/include/spinlock.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,10 +44,24 @@
 #  include <stdint.h>
 #endif /* __ASSEMBLY__ */
 
-#include <arch/barriers.h>
+/* Include ARM architecture-specific IRQ definitions (including register
+ * save structure and up_irq_save()/up_irq_restore() functions)
+ */
+
+#if defined(CONFIG_ARCH_ARMV7A)
+#  include <arch/armv7-a/spinlock.h>
+#elif defined(CONFIG_ARCH_ARMV7R)
+#  include <arch/armv7-r/spinlock.h>
+#elif defined(CONFIG_ARCH_ARMV7M)
+#  include <arch/armv7-m/spinlock.h>
+#elif defined(CONFIG_ARCH_CORTEXM0)
+#  include <arch/armv6-m/spinlock.h>
+#else
+#  include <arch/arm/spinlock.h>
+#endif
 
 /****************************************************************************
- * Pre-processor Prototypes
+ * Pre-processor Definitions
  ****************************************************************************/
 
 /* Spinlock states */
@@ -42,14 +69,29 @@
 #define SP_UNLOCKED 0  /* The Un-locked state */
 #define SP_LOCKED   1  /* The Locked state */
 
-#ifdef CONFIG_ARM_HAVE_WFE_SEV
-#  ifndef UP_WFE
-#    define UP_WFE() __asm__ __volatile__ ("wfe" : : : "memory")
-#  endif
-#  ifndef UP_SEV
-#    define UP_SEV() __asm__ __volatile__ ("sev" : : : "memory")
-#  endif
-#endif
+/* Memory barriers for use with NuttX spinlock logic
+ *
+ * Data Memory Barrier (DMB) acts as a memory barrier. It ensures that all
+ * explicit memory accesses that appear in program order before the DMB
+ * instruction are observed before any explicit memory accesses that appear
+ * in program order after the DMB instruction. It does not affect the
+ * ordering of any other instructions executing on the processor
+ *
+ *   dmb st - Data memory barrier.  Wait for stores to complete.
+ *
+ * Data Synchronization Barrier (DSB) acts as a special kind of memory
+ * barrier. No instruction in program order after this instruction executes
+ * until this instruction completes. This instruction completes when: (1) All
+ * explicit memory accesses before this instruction complete, and (2) all
+ * Cache, Branch predictor and TLB maintenance operations before this
+ * instruction complete.
+ *
+ *   dsb sy - Data syncrhonization barrier.  Assures that the CPU waits until
+ *            all memory accesses are complete
+ */
+
+#define SP_DSB(n) __asm__ __volatile__ ("dsb sy" : : : "memory")
+#define SP_DMB(n) __asm__ __volatile__ ("dmb st" : : : "memory")
 
 /****************************************************************************
  * Public Types
@@ -75,7 +117,7 @@
 typedef uint8_t spinlock_t;
 
 /****************************************************************************
- * Public Function Prototypes
+ * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
@@ -97,31 +139,6 @@ typedef uint8_t spinlock_t;
  *   (meaning that we successfully obtained the lock)
  *
  ****************************************************************************/
-
-#if defined(CONFIG_ARCH_HAVE_TESTSET) && !defined(CONFIG_ARCH_HAVE_CUSTOM_TESTSET)
-static inline_function spinlock_t up_testset(volatile spinlock_t *lock)
-{
-  spinlock_t ret = SP_UNLOCKED;
-
-  __asm__ __volatile__
-  (
-    "1:                    \n"
-    "ldrexb   %0, [%2]     \n"
-    "cmp      %0, %1       \n"
-    "beq      2f           \n"
-    "strexb   %0, %1, [%2] \n"
-    "cmp      %0, %1       \n"
-    "beq      1b           \n"
-    "dmb                   \n"
-    "2:                    \n"
-    : "+r" (ret)
-    : "r" (SP_LOCKED), "r" (lock)
-    : "memory"
-  );
-
-  return ret;
-}
-#endif
 
 /* See prototype in nuttx/include/nuttx/spinlock.h */
 

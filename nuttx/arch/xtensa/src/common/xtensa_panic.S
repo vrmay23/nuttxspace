@@ -1,10 +1,14 @@
 /****************************************************************************
  * arch/xtensa/src/common/xtensa_panic.S
  *
- * SPDX-License-Identifier: MIT
- * SPDX-FileCopyrightText: 2016 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2006-2015 Cadence Design Systems Inc.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * Adapted from use in NuttX by:
+ *
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Derives from logic originally provided by Cadence Design Systems Inc.
+ *
+ *   Copyright (c) 2006-2015 Cadence Design Systems Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -58,12 +62,9 @@
 
 #include <arch/irq.h>
 #include <arch/xtensa/core.h>
-#include <arch/xtensa/xtensa_abi.h>
 #include <arch/xtensa/xtensa_specregs.h>
 
-#include "xtensa_macros.S"
-
-#include "chip.h"
+#include "chip_macros.h"
 
 /****************************************************************************
  * Public Functions
@@ -105,37 +106,39 @@ _xtensa_panic:
 	 * stack.
 	 */
 
+	mov		a2, sp							/* Address of state save on stack */
 	call0	_xtensa_context_save			/* Save full register state */
 
-	/* Save exception cause and vaddr into the user frame */
+	/* Save exc cause and vaddr into exception frame */
 
 	rsr		a0, EXCCAUSE
 	s32i	a0, sp, (4 * REG_EXCCAUSE)
 	rsr		a0, EXCVADDR
 	s32i	a0, sp, (4 * REG_EXCVADDR)
 
-	/* Dispatch the sycall as with other interrupts. */
-
-	mov		a12, sp							/* a12 = address of register save area */
-
-	/* Switch to an interrupt stack if we have one */
-
-#if CONFIG_ARCH_INTERRUPTSTACK > 15
-	setintstack a13 a14
-#endif
-
 	/* Set up PS for C, re-enable hi-pri interrupts, and clear EXCM. */
 
-	ps_setup XCHAL_EXCM_LEVEL a0
+#ifdef __XTENSA_CALL0_ABI__
+	movi	a0, PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM
+#else
+	movi	a0, PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM | PS_WOE
+#endif
 
-	/* Call C panic handler:
-	 *  Arg1 = Exception code.
-	 *  Arg2 = Start of the register save area.
+	wsr		a0, PS
+
+	/* Call C panic handler:  Arg1 (A2) = Exception code; Arg 2 (A3) = start
+	 * of the register save area.
 	 */
 
-	rsr		ARG1, EXCSAVE_1
-	mov		ARG2, a12
-	CALL	xtensa_panic					/* Call xtensa_panic. Should not return */
+#ifdef __XTENSA_CALL0_ABI__
+	rsr		a2, EXCSAVE_1
+	mov		a3, sp
+	call0	xtensa_panic					/* Call xtensa_panic. Should not return */
+#else
+	rsr		a6, EXCSAVE_1
+	mov		a7, sp
+	call4	xtensa_panic					/* Call xtensa_panic. Should not return */
+#endif
 
 1:	j		1b								/* loop infinitely */
 	retw

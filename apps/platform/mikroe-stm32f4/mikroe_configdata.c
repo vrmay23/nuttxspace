@@ -1,28 +1,41 @@
-/****************************************************************************
+/************************************************************************************
  * apps/platform/mikroe-stm32f4/mikroe_configdata.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013 Ken Pettit. All rights reserved.
+ *   Author: Ken Pettit <pettitkd@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -31,7 +44,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
-#include <unistd.h>
 #include <sys/ioctl.h>
 
 #include "platform/configdata.h"
@@ -40,9 +52,9 @@
 
 #ifdef CONFIG_PLATFORM_CONFIGDATA
 
-/****************************************************************************
+/************************************************************************************
  * Public Functions
- ****************************************************************************/
+ ************************************************************************************/
 
 /****************************************************************************
  * Name: platform_setconfig
@@ -97,10 +109,10 @@ int platform_setconfig(enum config_data_e id, int instance,
 
   config.id         = (enum config_data_e)id;
   config.instance   = instance;
-  config.configdata = (FAR uint8_t *)configdata;
+  config.configdata = (FAR uint8_t *) configdata;
   config.len        = datalen;
 
-  ret = ioctl(fd, CFGDIOC_SETCONFIG, (unsigned long)&config);
+  ret = ioctl(fd, CFGDIOC_SETCONFIG, (unsigned long) &config);
   close(fd);
   return ret;
 
@@ -115,12 +127,11 @@ int platform_setconfig(enum config_data_e id, int instance,
          * the file.
          */
 
-        fd = fopen(CONFIG_MIKROE_STM32F4_CONFIGDATA_FILENAME, "w+");
-        if (fd == NULL)
+        if ((fd = fopen(CONFIG_MIKROE_STM32F4_CONFIGDATA_FILENAME, "w+")) == NULL)
           {
             /* Error opening the file */
 
-            errno = ENOENT;
+            set_errno(ENOENT);
             return -1;
           }
 
@@ -150,7 +161,8 @@ int platform_setconfig(enum config_data_e id, int instance,
         break;
     }
 
-  errno = ENOSYS;
+
+  set_errno(ENOSYS);
   return -1;
 
 #endif /* CONFIG_MIKROE_STM32F4_CONFIGDATA_PART */
@@ -201,11 +213,10 @@ int platform_getconfig(enum config_data_e id, int instance,
       0x00, 0xb8, 0x2d, 0xdb, 0xff
   };
 #endif
-
 #ifdef CONFIG_MIKROE_STM32F4_CONFIGDATA_PART
-  struct config_data_s config;
-  int                  ret;
-  int                  fd;
+  struct config_data_s  config;
+  int                   ret;
+  int                   fd;
 
   /* Try to open the /dev/config device file */
 
@@ -223,7 +234,7 @@ int platform_getconfig(enum config_data_e id, int instance,
   config.configdata = configdata;
   config.len = datalen;
 
-  ret = ioctl(fd, CFGDIOC_GETCONFIG, (unsigned long)&config);
+  ret = ioctl(fd, CFGDIOC_GETCONFIG, (unsigned long) &config);
   close(fd);
   return ret;
 
@@ -237,12 +248,11 @@ int platform_getconfig(enum config_data_e id, int instance,
          * the file.
          */
 
-        fd = fopen(CONFIG_MIKROE_STM32F4_CONFIGDATA_FILENAME, "r");
-        if (fd == NULL)
+        if ((fd = fopen(CONFIG_MIKROE_STM32F4_CONFIGDATA_FILENAME, "r")) == NULL)
           {
             /* Error opening the file */
 
-            errno = ENOENT;
+            set_errno(ENOENT);
             return -1;
           }
 
@@ -257,7 +267,7 @@ int platform_getconfig(enum config_data_e id, int instance,
           {
             /* Error!  Not enough data in the file */
 
-            errno = EINVAL;
+            set_errno(EINVAL);
             fclose(fd);
             return -1;
           }
@@ -279,7 +289,7 @@ int platform_getconfig(enum config_data_e id, int instance,
         break;
     }
 
-  errno = ENOSYS;
+  set_errno(ENOSYS);
   return -1;
 
 #endif /* CONFIG_MIKROE_STM32F4_CONFIGDATA_PART */

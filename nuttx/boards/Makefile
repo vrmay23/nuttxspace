@@ -1,39 +1,76 @@
 ############################################################################
 # boards/Makefile
 #
-# SPDX-License-Identifier: Apache-2.0
+#   Copyright (C) 2015-2016 Gregory Nutt. All rights reserved.
+#   Author: Gregory Nutt <gnutt@nuttx.org>
 #
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.  The
-# ASF licenses this file to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance with the
-# License.  You may obtain a copy of the License at
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the
+#    distribution.
+# 3. Neither the name NuttX nor the names of its contributors may be
+#    used to endorse or promote products derived from this software
+#    without specific prior written permission.
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
-# License for the specific language governing permissions and limitations
-# under the License.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
 
-include $(TOPDIR)/Make.defs
+-include $(TOPDIR)/Make.defs
+
+# Determine if there is a Kconfig file for any custom board configuration
+
+ifeq ($(CONFIG_ARCH_BOARD_CUSTOM),y)
+  CUSTOM_DIR = $(patsubst "%",%,$(CONFIG_ARCH_BOARD_CUSTOM_DIR))
+  ifeq ($(CONFIG_ARCH_BOARD_CUSTOM_DIR_RELPATH),y)
+    CUSTOM_KPATH = $(TOPDIR)$(DELIM)$(CUSTOM_DIR)$(DELIM)Kconfig
+  else
+    CUSTOM_KPATH = $(CUSTOM_DIR)$(DELIM)Kconfig
+  endif
+  CUSTOM_KCONFIG = $(if $(wildcard $(CUSTOM_KPATH)),y,)
+else
+  CUSTOM_KCONFIG =
+endif
+
+ifeq ($(CUSTOM_KCONFIG),y)
+  BOARD_KCONFIG = $(CUSTOM_KPATH)
+else
+  BOARD_KCONFIG = $(TOPDIR)$(DELIM)boards$(DELIM)dummy$(DELIM)dummy_kconfig
+endif
+
+DUMMY_KCONFIG = $(TOPDIR)$(DELIM)boards$(DELIM)dummy$(DELIM)Kconfig
 
 # The board configuration should be installed in the arch/ directory
 
-BOARDDIR = $(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board
-BOARD_INSTALLED = $(if $(wildcard $(BOARDDIR)$(DELIM)Makefile),y,)
+BOARD_DIR = $(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board
+BOARD_INSTALLED = $(if $(wildcard $(BOARD_DIR)$(DELIM)Makefile),y,)
 
 # Basic
 
+CONFIG_ASRCS =
 CONFIG_CSRCS = dummy.c
+CONFIG_CXXSRCS =
 
 # boardctl support
 
-ifeq ($(CONFIG_BOARDCTL),y)
+ifeq ($(CONFIG_LIB_BOARDCTL),y)
 CONFIG_CSRCS += boardctl.c
 endif
 
@@ -66,22 +103,30 @@ $(CXXOBJS): %$(OBJEXT): %.cxx
 $(BIN): $(OBJS)
 	$(call ARCHIVE, $@, $(OBJS))
 
-makedepfile: $(CSRCS:.c=.ddc) $(ASRCS:.S=.dds) $(CXXSRCS:.cxx=.ddx)
-	$(call CATFILE, Make.dep, $^)
-	$(call DELFILE, $^)
-
-.depend: Makefile $(SRCS) $(TOPDIR)$(DELIM).config
-	$(Q) $(MAKE) makedepfile
+.depend: Makefile $(SRCS)
+ifneq ($(SRCS),)
+	$(Q) $(MKDEP) --dep-path . "$(CC)" -- $(CFLAGS) -- $(SRCS) >Make.dep
+endif
+ifneq ($(CXXSRCS),)
+	$(Q) $(MKDEP) --dep-path . "$(CXX)" -- $(CXXFLAGS) -- $(CXXSRCS) >>Make.dep
+endif
 	$(Q) touch $@
 
 depend: .depend
 
-context:
+$(DUMMY_KCONFIG): $(BOARD_KCONFIG)
+	$(call DELFILE, $(DUMMY_KCONFIG))
+	$(call COPYFILE, $(BOARD_KCONFIG), $(DUMMY_KCONFIG))
+
+dirlinks: $(DUMMY_KCONFIG)
+
+context: $(DUMMY_KCONFIG)
 ifeq ($(BOARD_INSTALLED),y)
-	$(Q) $(MAKE) -C $(BOARDDIR) context
+	$(Q) $(MAKE) -C $(BOARD_DIR) TOPDIR="$(TOPDIR)" context
 endif
 
 clean_context:
+	$(call DELFILE, $(DUMMY_KCONFIG))
 
 clean: clean_context
 	$(call DELFILE, $(BIN))

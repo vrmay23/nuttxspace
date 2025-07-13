@@ -1,23 +1,34 @@
 /****************************************************************************
  * apps/netutils/netinit/netinit.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2010-2012, 2014-2016, 2019 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the Institute nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
-
+ * THIS SOFTWARE IS PROVIDED BY THE INSTITUTE AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE INSTITUTE OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  ****************************************************************************/
 
 /****************************************************************************
@@ -35,21 +46,26 @@
 #  define CONFIG_DEBUG_NET 1
 #endif
 
-#include <arpa/inet.h>
-#include <debug.h>
-#include <net/if.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <sched.h>
-#include <semaphore.h>
-#include <string.h>
 #include <sys/ioctl.h>
-#include <unistd.h>
+
+#include <stdint.h>
+#include <string.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <signal.h>
+#include <assert.h>
+#include <debug.h>
+
+#include <net/if.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #include <nuttx/net/mii.h>
-#include <sys/boardctl.h>
 
 #include "netutils/netlib.h"
+#if defined(CONFIG_NETINIT_DHCPC) || defined(CONFIG_NETINIT_DNS)
+#  include "netutils/dhcpc.h"
+#endif
 
 #ifdef CONFIG_NET_6LOWPAN
 #  include <nuttx/net/sixlowpan.h>
@@ -61,10 +77,6 @@
 
 #ifdef CONFIG_NETUTILS_NTPCLIENT
 #  include "netutils/ntpclient.h"
-#endif
-
-#if defined(CONFIG_FSUTILS_IPCFG)
-#  include "fsutils/ipcfg.h"
 #endif
 
 #include "netutils/netinit.h"
@@ -88,7 +100,6 @@
 #  undef CONFIG_NET_LOCAL
 #  undef CONFIG_NET_USRSOCK
 #  undef CONFIG_NET_IEEE802154
-#  undef CONFIG_NET_CAN
 #  undef CONFIG_NET_LOOPBACK
 #elif defined(CONFIG_NET_6LOWPAN)
 #  undef CONFIG_NET_SLIP
@@ -96,34 +107,26 @@
 #  undef CONFIG_NET_LOCAL
 #  undef CONFIG_NET_USRSOCK
 #  undef CONFIG_NET_IEEE802154
-#  undef CONFIG_NET_CAN
 #  undef CONFIG_NET_LOOPBACK
 #elif defined(CONFIG_NET_SLIP)
 #  undef CONFIG_NET_TUN
 #  undef CONFIG_NET_LOCAL
 #  undef CONFIG_NET_USRSOCK
 #  undef CONFIG_NET_IEEE802154
-#  undef CONFIG_NET_CAN
 #  undef CONFIG_NET_LOOPBACK
 #elif defined(CONFIG_NET_TUN)
 #  undef CONFIG_NET_LOCAL
 #  undef CONFIG_NET_USRSOCK
 #  undef CONFIG_NET_IEEE802154
-#  undef CONFIG_NET_CAN
 #  undef CONFIG_NET_LOOPBACK
 #elif defined(CONFIG_NET_LOCAL)
 #  undef CONFIG_NET_USRSOCK
 #  undef CONFIG_NET_IEEE802154
-#  undef CONFIG_NET_CAN
 #  undef CONFIG_NET_LOOPBACK
 #elif defined(CONFIG_NET_USRSOCK)
 #  undef CONFIG_NET_IEEE802154
-#  undef CONFIG_NET_CAN
 #  undef CONFIG_NET_LOOPBACK
 #elif defined(CONFIG_NET_IEEE802154)
-#  undef CONFIG_NET_CAN
-#  undef CONFIG_NET_LOOPBACK
-#elif defined(CONFIG_NET_CAN)
 #  undef CONFIG_NET_LOOPBACK
 #endif
 
@@ -183,11 +186,8 @@
 #elif defined(CONFIG_NET_TUN)
 #  define NET_DEVNAME "tun0"
 #  define NETINIT_HAVE_NETDEV
-#elif defined(CONFIG_NET_LOOPBACK)
+#elif defined(CONFIG_NET_LOCAL)
 #  define NET_DEVNAME "lo"
-#  define NETINIT_HAVE_NETDEV
-#elif defined(CONFIG_NET_CAN)
-#  define NET_DEVNAME "can0"
 #  define NETINIT_HAVE_NETDEV
 #endif
 
@@ -199,18 +199,23 @@
 #  undef CONFIG_NETINIT_MONITOR
 #endif
 
+/* We need a valid IP domain (any domain) to create a socket that we can use
+ * to communicate with the network device.
+ */
+
+#if defined(CONFIG_NET_IPv4)
+#  define AF_INETX AF_INET
+#elif defined(CONFIG_NET_IPv6)
+#  define AF_INETX AF_INET6
+#endif
+
 /* While the network is up, the network monitor really does nothing.  It
  * will wait for a very long time while waiting, it can be awakened by a
  * signal indicating a change in network status.
  */
 
-#ifdef CONFIG_SYSTEM_TIME64
-#  define LONG_TIME_SEC    (60*60)   /* One hour in seconds */
-#else
-#  define LONG_TIME_SEC    (5*60)    /* Five minutes in seconds */
-#endif
-
-#define SHORT_TIME_SEC     (2)       /* 2 seconds */
+#define LONG_TIME_SEC    (60*60) /* One hour in seconds */
+#define SHORT_TIME_SEC   (2)     /* 2 seconds */
 
 /****************************************************************************
  * Private Data
@@ -218,10 +223,6 @@
 
 #ifdef CONFIG_NETINIT_MONITOR
 static sem_t g_notify_sem;
-#endif
-
-#ifdef CONFIG_NETUTILS_DHCPC
-bool g_use_dhcpc;
 #endif
 
 #if defined(CONFIG_NET_IPv6) && !defined(CONFIG_NET_ICMPv6_AUTOCONF) && \
@@ -282,13 +283,10 @@ static const uint16_t g_ipv6_netmask[8] =
  *
  ****************************************************************************/
 
-#if defined(NETINIT_HAVE_NETDEV) && defined(CONFIG_NETINIT_NOMAC) && \
-    defined(HAVE_MAC)
+#if defined(NETINIT_HAVE_NETDEV) && defined(CONFIG_NETINIT_NOMAC) && defined(HAVE_MAC)
 static void netinit_set_macaddr(void)
 {
-#if defined(CONFIG_NETINIT_UIDMAC)
-  uint8_t uid[CONFIG_BOARDCTL_UNIQUEID_SIZE];
-#elif defined(CONFIG_NET_ETHERNET)
+#if defined(CONFIG_NET_ETHERNET)
   uint8_t mac[IFHWADDRLEN];
 #elif defined(HAVE_EADDR)
   uint8_t eaddr[8];
@@ -296,12 +294,7 @@ static void netinit_set_macaddr(void)
 
   /* Many embedded network interfaces must have a software assigned MAC */
 
-#if defined(CONFIG_NETINIT_UIDMAC)
-  boardctl(BOARDIOC_UNIQUEID, (uintptr_t)&uid);
-  uid[0] = (uid[0] & 0b11110000) | 2; /* Locally Administered MAC */
-  netlib_setmacaddr(NET_DEVNAME, uid);
-
-#elif defined(CONFIG_NET_ETHERNET)
+#if defined(CONFIG_NET_ETHERNET)
   /* Use the configured, fixed MAC address */
 
   mac[0] = (CONFIG_NETINIT_MACADDR_2 >> (8 * 1)) & 0xff;
@@ -338,253 +331,6 @@ static void netinit_set_macaddr(void)
 #  define netinit_set_macaddr()
 #endif
 
-#if defined(CONFIG_NETINIT_THREAD) && CONFIG_NETINIT_RETRY_MOUNTPATH > 0
-static inline void netinit_checkpath(void)
-{
-  int retries = CONFIG_NETINIT_RETRY_MOUNTPATH;
-  while (retries > 0)
-    {
-      DIR * dir = opendir(CONFIG_IPCFG_PATH);
-      if (dir)
-        {
-          /* Directory exists. */
-
-          closedir(dir);
-          break;
-        }
-      else
-        {
-        usleep(100000);
-        }
-
-      retries--;
-    }
-}
-#endif
-
-/****************************************************************************
- * Name: netinit_set_ipv4addrs
- *
- * Description:
- *   Setup IPv4 addresses.
- *
- ****************************************************************************/
-
-#if defined(NETINIT_HAVE_NETDEV) && !defined(CONFIG_NET_6LOWPAN) && ! \
-    defined(CONFIG_NET_IEEE802154) && defined(CONFIG_NET_IPv4)
-static inline void netinit_set_ipv4addrs(void)
-{
-  struct in_addr addr;
-#ifdef CONFIG_FSUTILS_IPCFG
-  struct ipv4cfg_s ipv4cfg;
-  int ret;
-
-  /* Attempt to obtain IPv4 address configuration from the IP configuration
-   * file.
-   */
-
-#if defined(CONFIG_NETINIT_THREAD) && CONFIG_NETINIT_RETRY_MOUNTPATH > 0
-  netinit_checkpath();
-#endif
-
-  ret = ipcfg_read(NET_DEVNAME, (FAR struct ipcfg_s *)&ipv4cfg, AF_INET);
-#ifdef CONFIG_NETUTILS_DHCPC
-  if (ret >= 0 && ipv4cfg.proto != IPv4PROTO_NONE)
-#else
-  if (ret >= 0 && IPCFG_HAVE_STATIC(ipv4cfg.proto))
-#endif
-    {
-      /* Check if we are using DHCPC */
-
-#ifdef CONFIG_NETUTILS_DHCPC
-      if (IPCFG_USE_DHCP(ipv4cfg.proto))
-        {
-          g_use_dhcpc = true;
-          addr.s_addr = 0;
-        }
-      else
-#endif
-        {
-          /* We are not using DHCPC.  We need an IP address */
-
-#ifdef CONFIG_NETINIT_IPADDR
-          /* Check if we have a static IP address in the configuration file */
-
-          if (IPCFG_HAVE_STATIC(ipv4cfg.proto))
-            {
-              addr.s_addr = ipv4cfg.ipaddr;
-            }
-          else
-            {
-              /* This is not a good option, but in this case what else can
-               * we do?
-               */
-
-              addr.s_addr = HTONL(CONFIG_NETINIT_IPADDR);
-            }
-#else
-          /* Use whatever was provided in the file (might be zero) */
-
-          addr.s_addr = ipv4cfg.ipaddr;
-#endif
-        }
-
-      netlib_set_ipv4addr(NET_DEVNAME, &addr);
-
-      /* Set up the remaining addresses */
-
-      if (IPCFG_HAVE_STATIC(ipv4cfg.proto))
-        {
-          /* Set up the default router address */
-
-          addr.s_addr = ipv4cfg.router;
-          netlib_set_dripv4addr(NET_DEVNAME, &addr);
-
-          /* Setup the subnet mask */
-
-          addr.s_addr = ipv4cfg.netmask;
-          netlib_set_ipv4netmask(NET_DEVNAME, &addr);
-        }
-
-#ifdef CONFIG_NETUTILS_DHCPC
-      /* No static addresses?  That is fine if we are have addresses
-       * provided by the configuration, or if we are using DHCP.
-       */
-
-      else if (g_use_dhcpc)
-        {
-          /* Set up the default router address and sub-net mask */
-
-          addr.s_addr = 0;
-          netlib_set_dripv4addr(NET_DEVNAME, &addr);
-          netlib_set_ipv4netmask(NET_DEVNAME, &addr);
-        }
-#endif
-      else
-        {
-          /* Otherwise, set up the configured default router address */
-
-          addr.s_addr = HTONL(CONFIG_NETINIT_DRIPADDR);
-          netlib_set_dripv4addr(NET_DEVNAME, &addr);
-
-          /* Setup the subnet mask */
-
-          addr.s_addr = HTONL(CONFIG_NETINIT_NETMASK);
-          netlib_set_ipv4netmask(NET_DEVNAME, &addr);
-        }
-
-#ifdef CONFIG_NETINIT_DNS
-      /* Set up the DNS address.  Was one provided in the configuration? */
-
-      if (ipv4cfg.dnsaddr == 0)
-        {
-          /* No, use the configured default */
-
-          addr.s_addr = HTONL(CONFIG_NETINIT_DNSIPADDR);
-        }
-      else
-        {
-          addr.s_addr = ipv4cfg.dnsaddr;
-        }
-
-      netlib_set_ipv4dnsaddr(&addr);
-#endif
-    }
-  else
-#endif
-    {
-      /* Set up our host address */
-
-#ifdef CONFIG_NETINIT_DHCPC
-      g_use_dhcpc = true;
-      addr.s_addr = 0;
-#else
-      addr.s_addr = HTONL(CONFIG_NETINIT_IPADDR);
-#endif
-      netlib_set_ipv4addr(NET_DEVNAME, &addr);
-
-      /* Set up the default router address */
-
-      addr.s_addr = HTONL(CONFIG_NETINIT_DRIPADDR);
-      netlib_set_dripv4addr(NET_DEVNAME, &addr);
-
-      /* Setup the subnet mask */
-
-      addr.s_addr = HTONL(CONFIG_NETINIT_NETMASK);
-      netlib_set_ipv4netmask(NET_DEVNAME, &addr);
-
-#ifdef CONFIG_NETINIT_DNS
-      addr.s_addr = HTONL(CONFIG_NETINIT_DNSIPADDR);
-      netlib_set_ipv4dnsaddr(&addr);
-#endif
-    }
-}
-#endif
-
-/****************************************************************************
- * Name: netinit_set_ipv6addrs
- *
- * Description:
- *   Setup IPv6 addresses.
- *
- ****************************************************************************/
-
-#if defined(NETINIT_HAVE_NETDEV) && !defined(CONFIG_NET_6LOWPAN) && ! \
-    defined(CONFIG_NET_IEEE802154) && defined(CONFIG_NET_IPv6)
-static inline void netinit_set_ipv6addrs(void)
-{
-#ifndef CONFIG_NET_ICMPv6_AUTOCONF
-#ifdef CONFIG_FSUTILS_IPCFG
-  struct ipv6cfg_s ipv6cfg;
-  int ret;
-#endif
-
-#ifdef CONFIG_FSUTILS_IPCFG
-  /* Attempt to obtain IPv6 address configuration from the IP configuration
-   * file.
-   */
-
-#if defined(CONFIG_NETINIT_THREAD) && CONFIG_NETINIT_RETRY_MOUNTPATH > 0
-  netinit_checkpath();
-#endif
-
-  ret = ipcfg_read(NET_DEVNAME, (FAR struct ipcfg_s *)&ipv6cfg, AF_INET6);
-  if (ret >= 0 && IPCFG_HAVE_STATIC(ipv6cfg.proto))
-    {
-      /* Set up our fixed host address */
-
-      netlib_set_ipv6addr(NET_DEVNAME, &ipv6cfg.ipaddr);
-
-      /* Set up the default router address */
-
-      netlib_set_dripv6addr(NET_DEVNAME, &ipv6cfg.router);
-
-      /* Setup the subnet mask */
-
-      netlib_set_ipv6netmask(NET_DEVNAME, &ipv6cfg.netmask);
-    }
-  else
-#endif
-    {
-      /* Set up our fixed host address */
-
-      netlib_set_ipv6addr(NET_DEVNAME,
-                          (FAR const struct in6_addr *)g_ipv6_hostaddr);
-
-      /* Set up the default router address */
-
-      netlib_set_dripv6addr(NET_DEVNAME,
-                            (FAR const struct in6_addr *)g_ipv6_draddr);
-
-      /* Setup the subnet mask */
-
-      netlib_set_ipv6netmask(NET_DEVNAME,
-                            (FAR const struct in6_addr *)g_ipv6_netmask);
-    }
-#endif /* CONFIG_NET_ICMPv6_AUTOCONF */
-}
-#endif
-
 /****************************************************************************
  * Name: netinit_set_ipaddrs
  *
@@ -601,11 +347,51 @@ static inline void netinit_set_ipv6addrs(void)
 static void netinit_set_ipaddrs(void)
 {
 #ifdef CONFIG_NET_IPv4
-  netinit_set_ipv4addrs();
+  struct in_addr addr;
+
+  /* Set up our host address */
+
+#ifndef CONFIG_NETINIT_DHCPC
+  addr.s_addr = HTONL(CONFIG_NETINIT_IPADDR);
+#else
+  addr.s_addr = 0;
+#endif
+  netlib_set_ipv4addr(NET_DEVNAME, &addr);
+
+  /* Set up the default router address */
+
+  addr.s_addr = HTONL(CONFIG_NETINIT_DRIPADDR);
+  netlib_set_dripv4addr(NET_DEVNAME, &addr);
+
+  /* Setup the subnet mask */
+
+  addr.s_addr = HTONL(CONFIG_NETINIT_NETMASK);
+  netlib_set_ipv4netmask(NET_DEVNAME, &addr);
 #endif
 
 #ifdef CONFIG_NET_IPv6
-  netinit_set_ipv6addrs();
+#ifndef CONFIG_NET_ICMPv6_AUTOCONF
+  /* Set up our fixed host address */
+
+  netlib_set_ipv6addr(NET_DEVNAME,
+                      (FAR const struct in6_addr *)g_ipv6_hostaddr);
+
+  /* Set up the default router address */
+
+  netlib_set_dripv6addr(NET_DEVNAME,
+                        (FAR const struct in6_addr *)g_ipv6_draddr);
+
+  /* Setup the subnet mask */
+
+  netlib_set_ipv6netmask(NET_DEVNAME,
+                        (FAR const struct in6_addr *)g_ipv6_netmask);
+
+#endif /* CONFIG_NET_ICMPv6_AUTOCONF */
+#endif /* CONFIG_NET_IPv6 */
+
+#ifdef CONFIG_NETINIT_DNS
+  addr.s_addr = HTONL(CONFIG_NETINIT_DNSIPADDR);
+  netlib_set_ipv4dnsaddr(&addr);
 #endif
 }
 #else
@@ -623,6 +409,12 @@ static void netinit_set_ipaddrs(void)
 #if defined(NETINIT_HAVE_NETDEV) && !defined(CONFIG_NETINIT_NETLOCAL)
 static void netinit_net_bringup(void)
 {
+#ifdef CONFIG_NETINIT_DHCPC
+  uint8_t mac[IFHWADDRLEN];
+  struct dhcpc_state ds;
+  FAR void *handle;
+#endif
+
   /* Bring the network up. */
 
   if (netlib_ifup(NET_DEVNAME) < 0)
@@ -630,7 +422,7 @@ static void netinit_net_bringup(void)
       return;
     }
 
-#if defined(CONFIG_WIRELESS_WAPI) && defined(CONFIG_DRIVERS_IEEE80211)
+#ifdef CONFIG_WIRELESS_WAPI
   /* Associate the wlan with an access point. */
 
   if (netinit_associate(NET_DEVNAME) < 0)
@@ -645,14 +437,45 @@ static void netinit_net_bringup(void)
   netlib_icmpv6_autoconfiguration(NET_DEVNAME);
 #endif
 
-#ifdef CONFIG_NETUTILS_DHCPC
-  if (g_use_dhcpc)
+#ifdef CONFIG_NETINIT_DHCPC
+  /* Get the MAC address of the NIC */
+
+  netlib_getmacaddr(NET_DEVNAME, mac);
+
+  /* Set up the DHCPC modules */
+
+  handle = dhcpc_open(NET_DEVNAME, &mac, IFHWADDRLEN);
+  if (handle == NULL)
     {
-      if (netlib_obtain_ipv4addr(NET_DEVNAME) < 0)
+      return;
+    }
+
+  /* Get an IP address.  Note that there is no logic for renewing the
+   * IP address in this example. The address should be renewed in
+   * (ds.lease_time / 2) seconds.
+   */
+
+  if (dhcpc_request(handle, &ds) == OK)
+    {
+      netlib_set_ipv4addr(NET_DEVNAME, &ds.ipaddr);
+
+      if (ds.netmask.s_addr != 0)
         {
-          return;
+          netlib_set_ipv4netmask(NET_DEVNAME, &ds.netmask);
+        }
+
+      if (ds.default_router.s_addr != 0)
+        {
+          netlib_set_dripv4addr(NET_DEVNAME, &ds.default_router);
+        }
+
+      if (ds.dnsaddr.s_addr != 0)
+        {
+          netlib_set_ipv4dnsaddr(&ds.dnsaddr);
         }
     }
+
+  dhcpc_close(handle);
 #endif
 
 #ifdef CONFIG_NETUTILS_NTPCLIENT
@@ -704,7 +527,7 @@ static void netinit_configure(void)
 
 #ifdef CONFIG_NETINIT_MONITOR
 static void netinit_signal(int signo, FAR siginfo_t *siginfo,
-                           FAR void *context)
+                               FAR void * context)
 {
   int semcount;
   int ret;
@@ -754,7 +577,7 @@ static int netinit_monitor(void)
    * interface driver.
    */
 
-  sd = socket(NET_SOCK_FAMILY, NET_SOCK_TYPE, NET_SOCK_PROTOCOL);
+  sd = socket(AF_INETX, SOCK_DGRAM, 0);
   if (sd < 0)
     {
       ret = -errno;
@@ -786,7 +609,7 @@ static int netinit_monitor(void)
       /* Configure to receive a signal on changes in link status */
 
       memset(&ifr, 0, sizeof(struct ifreq));
-      strlcpy(ifr.ifr_name, NET_DEVNAME, IFNAMSIZ);
+      strncpy(ifr.ifr_name, NET_DEVNAME, IFNAMSIZ);
 
       ifr.ifr_mii_notify_event.sigev_notify = SIGEV_SIGNAL;
       ifr.ifr_mii_notify_event.sigev_signo  = CONFIG_NETINIT_SIGNO;
@@ -874,11 +697,6 @@ static int netinit_monitor(void)
                   goto errout_with_notification;
                 }
 
-#ifdef CONFIG_NET_ICMPv6_AUTOCONF
-              /* Perform ICMPv6 auto-configuration */
-
-              netlib_icmpv6_autoconfiguration(ifr.ifr_name);
-#endif
               /* And wait for a short delay.  We will want to recheck the
                * link status again soon.
                */
@@ -906,7 +724,7 @@ static int netinit_monitor(void)
 
               ninfo("Taking the link down\n");
 
-              ifr.ifr_flags = 0;
+              ifr.ifr_flags = IFF_DOWN;
               ret = ioctl(sd, SIOCSIFFLAGS, (unsigned long)&ifr);
               if (ret < 0)
                 {
@@ -1001,10 +819,10 @@ static pthread_addr_t netinit_thread(pthread_addr_t arg)
 int netinit_bringup(void)
 {
 #ifdef CONFIG_NETINIT_THREAD
-  struct sched_param sparam;
-  pthread_attr_t     attr;
-  pthread_t          tid;
-  int                ret;
+  struct sched_param  sparam;
+  pthread_attr_t      attr;
+  pthread_t           tid;
+  int                 ret;
 
   /* Start the network initialization thread to perform the network bring-up
    * asynchronously.

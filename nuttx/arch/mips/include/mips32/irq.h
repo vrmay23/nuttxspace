@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/mips/include/mips32/irq.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011, 2013, 2015, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -37,9 +50,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Configuration ************************************************************/
-
 /* The global pointer (GP) does not need to be saved in the "normal," flat
  * NuttX build.  However, it would be necessary to save the GP if this is
  * a KERNEL build or if NXFLAT is supported.
@@ -50,16 +61,13 @@
 #  define MIPS32_SAVE_GP 1
 #endif
 
-/* If this is a kernel build,
- * how many nested system calls should we support?
- */
+/* If this is a kernel build, how many nested system calls should we support? */
 
 #ifndef CONFIG_SYS_NNEST
 #  define CONFIG_SYS_NNEST 2
 #endif
 
 /* Register save state structure ********************************************/
-
 /* Co processor registers */
 
 #define REG_MFLO_NDX        0
@@ -67,10 +75,8 @@
 #define REG_EPC_NDX         2
 #define REG_STATUS_NDX      3
 
-/* General purpose registers */
-
+/* General pupose registers */
 /* $0: Zero register does not need to be saved */
-
 /* $1: at_reg, assembler temporary */
 
 #define REG_R1_NDX          4
@@ -323,6 +329,12 @@ struct xcpt_syscall_s
 
 struct xcptcontext
 {
+  /* The following function pointer is non-NULL if there are pending signals
+   * to be processed.
+   */
+
+  void *sigdeliver; /* Actual type is sig_deliver_t */
+
   /* These additional register save locations are used to implement the
    * signal delivery trampoline.
    *
@@ -377,7 +389,7 @@ struct xcptcontext
  *
  ****************************************************************************/
 
-static inline_function irqstate_t cp0_getstatus(void)
+static inline irqstate_t cp0_getstatus(void)
 {
   register irqstate_t status;
   __asm__ __volatile__
@@ -408,7 +420,7 @@ static inline_function irqstate_t cp0_getstatus(void)
  *
  ****************************************************************************/
 
-static inline_function void cp0_putstatus(irqstate_t status)
+static inline void cp0_putstatus(irqstate_t status)
 {
   __asm__ __volatile__
     (
@@ -441,7 +453,7 @@ static inline_function void cp0_putstatus(irqstate_t status)
  *
  ****************************************************************************/
 
-static inline_function uint32_t cp0_getcause(void)
+static inline uint32_t cp0_getcause(void)
 {
   register uint32_t cause;
   __asm__ __volatile__
@@ -472,7 +484,7 @@ static inline_function uint32_t cp0_getcause(void)
  *
  ****************************************************************************/
 
-static inline_function void cp0_putcause(uint32_t cause)
+static inline void cp0_putcause(uint32_t cause)
 {
   __asm__ __volatile__
     (
@@ -511,8 +523,7 @@ extern "C"
  *
  *   NOTE: This function should never be called from application code and,
  *   as a general rule unless you really know what you are doing, this
- *   function should not be called directly from operation system code
- *   either:
+ *   function should not be called directly from operation system code either:
  *   Typically, the wrapper functions, enter_critical_section() is probably
  *   what you really want.
  *
@@ -535,8 +546,7 @@ irqstate_t up_irq_save(void);
  *
  *   NOTE: This function should never be called from application code and,
  *   as a general rule unless you really know what you are doing, this
- *   function should not be called directly from operation system code
- *   either:
+ *   function should not be called directly from operation system code either:
  *   Typically, the wrapper functions, leave_critical_section() is probably
  *   what you really want.
  *

@@ -1,22 +1,38 @@
 /****************************************************************************
  * include/elf32.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Reference: System V Application Binary Interface, Edition 4.1, March 18,
+ * 1997, The Santa Cruz Operation, Inc.
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,27 +52,17 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define ELF_CLASS              ELFCLASS32
-
-#define ELF32_ST_BIND(i)       ((i) >> 4)
-#define ELF32_ST_TYPE(i)       ((i) & 0xf)
-#define ELF32_ST_INFO(b,t)     (((b) << 4) | ((t) & 0xf))
-#define ELF32_ST_VISIBILITY(o) ((o) & 0x3)
-
-/* Generic macro to abstract ELF32/ELF64 type/bind */
-
-#define ELF_ST_TYPE(a)         ELF32_ST_TYPE(a)
-#define ELF_ST_BIND(a)         ELF32_ST_BIND(a)
-#define ELF_ST_VISIBILITY(o)   ELF32_ST_VISIBILITY(o)
+#define ELF32_ST_BIND(i)   ((i) >> 4)
+#define ELF32_ST_TYPE(i)   ((i) & 0xf)
+#define ELF32_ST_INFO(b,t) (((b) << 4) | ((t) & 0xf))
 
 /* Definitions for Elf32_Rel*::r_info */
 
-#define ELF32_R_SYM(i)         ((i) >> 8)
-#define ELF32_R_TYPE(i)        ((i) & 0xff)
-#define ELF32_R_INFO(s,t)      (((s)<< 8) | ((t) & 0xff))
+#define ELF32_R_SYM(i)    ((i) >> 8)
+#define ELF32_R_TYPE(i)   ((i) & 0xff)
+#define ELF32_R_INFO(s,t) (((s)<< 8) | ((t) & 0xff))
 
-#define ELF_R_SYM(i)           ELF32_R_SYM(i)
-#define ELF_R_TYPE(i)          ELF32_R_TYPE(i)
+#define ELF_R_SYM(i)      ELF32_R_SYM(i)
 
 /****************************************************************************
  * Public Type Definitions
@@ -64,11 +70,11 @@
 
 /* Figure 4.2: 32-Bit Data Types */
 
-typedef uint32_t Elf32_Addr;  /* Unsigned program address */
-typedef uint16_t Elf32_Half;  /* Unsigned medium integer */
-typedef uint32_t Elf32_Off;   /* Unsigned file offset */
-typedef int32_t  Elf32_Sword; /* Signed large integer */
-typedef uint32_t Elf32_Word;  /* Unsigned large integer */
+typedef uint32_t  Elf32_Addr;  /* Unsigned program address */
+typedef uint16_t  Elf32_Half;  /* Unsigned medium integer */
+typedef uint32_t  Elf32_Off;   /* Unsigned file offset */
+typedef int32_t   Elf32_Sword; /* Signed large integer */
+typedef uint32_t  Elf32_Word;  /* Unsigned large integer */
 
 /* Figure 4-3: ELF Header */
 
@@ -122,62 +128,48 @@ typedef struct
 
 typedef struct
 {
-  Elf32_Addr    r_offset;
-  Elf32_Word    r_info;
+  Elf32_Addr   r_offset;
+  Elf32_Word   r_info;
 } Elf32_Rel;
 
 typedef struct
 {
-  Elf32_Addr    r_offset;
-  Elf32_Word    r_info;
-  Elf32_Sword   r_addend;
+  Elf32_Addr   r_offset;
+  Elf32_Word   r_info;
+  Elf32_Sword  r_addend;
 } Elf32_Rela;
 
 /* Figure 5-1: Program Header */
 
 typedef struct
 {
-  Elf32_Word    p_type;
-  Elf32_Off     p_offset;
-  Elf32_Addr    p_vaddr;
-  Elf32_Addr    p_paddr;
-  Elf32_Word    p_filesz;
-  Elf32_Word    p_memsz;
-  Elf32_Word    p_flags;
-  Elf32_Word    p_align;
+  Elf32_Word   p_type;
+  Elf32_Off    p_offset;
+  Elf32_Addr   p_vaddr;
+  Elf32_Addr   p_paddr;
+  Elf32_Word   p_filesz;
+  Elf32_Word   p_memsz;
+  Elf32_Word   p_flags;
+  Elf32_Word   p_align;
 } Elf32_Phdr;
-
-/* Figure 5-7: Note Information */
-
-typedef struct
-{
-  Elf32_Word    n_namesz; /* Length of the note's name.  */
-  Elf32_Word    n_descsz; /* Length of the note's descriptor.  */
-  Elf32_Word    n_type;   /* Type of the note.  */
-} Elf32_Nhdr;
 
 /* Figure 5-9: Dynamic Structure */
 
 typedef struct
 {
-  Elf32_Sword   d_tag;
+  Elf32_Sword  d_tag;
   union
   {
-    Elf32_Word  d_val;
-    Elf32_Addr  d_ptr;
+    Elf32_Word d_val;
+    Elf32_Addr d_ptr;
   } d_un;
 } Elf32_Dyn;
 
-typedef Elf32_Addr Elf_Addr;
-typedef Elf32_Ehdr Elf_Ehdr;
-typedef Elf32_Rel  Elf_Rel;
-typedef Elf32_Rela Elf_Rela;
-typedef Elf32_Nhdr Elf_Nhdr;
-typedef Elf32_Phdr Elf_Phdr;
-typedef Elf32_Sym  Elf_Sym;
-typedef Elf32_Shdr Elf_Shdr;
-typedef Elf32_Off  Elf_Off;
-typedef Elf32_Word Elf_Word;
-typedef Elf32_Dyn  Elf_Dyn;
+typedef Elf32_Ehdr  Elf_Ehdr;
+typedef Elf32_Rel   Elf_Rel;
+typedef Elf32_Rela  Elf_Rela;
+typedef Elf32_Sym   Elf_Sym;
+typedef Elf32_Shdr  Elf_Shdr;
+typedef Elf32_Word  Elf_Word;
 
 #endif /* __INCLUDE_ELF32_H */

@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/nrf52/nrf52_rng.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Levin Li <levin.li@outlook.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,15 +47,15 @@
 #include <nuttx/fs/fs.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/drivers/drivers.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "chip.h"
 #include "hardware/nrf52_utils.h"
 #include "hardware/nrf52_rng.h"
+#include "up_internal.h"
 
 #if defined(CONFIG_NRF52_RNG)
 #if defined(CONFIG_DEV_RANDOM) || defined(CONFIG_DEV_URANDOM_ARCH)
@@ -52,10 +65,10 @@
  ****************************************************************************/
 
 static int nrf52_rng_initialize(void);
-static int nrf52_rng_irqhandler(int irq, void *context, void *arg);
-static ssize_t nrf52_rng_read(struct file *filep, char *buffer,
+static int nrf52_rng_irqhandler(int irq, void *context, FAR void *arg);
+static ssize_t nrf52_rng_read(FAR struct file *filep, FAR char *buffer,
                               size_t buflen);
-static int nrf52_rng_open(struct file *filep);
+static int nrf52_rng_open(FAR struct file *filep);
 
 /****************************************************************************
  * Private Types
@@ -67,18 +80,14 @@ struct rng_dev_s
   size_t   rd_count;
   size_t   buflen;
   sem_t    rd_sem;         /* semaphore for read RNG data */
-  mutex_t  lock;           /* mutex for access RNG dev */
+  sem_t    excl_sem;       /* semaphore for access RNG dev */
 };
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static struct rng_dev_s g_rngdev =
-{
-  .rd_sem = SEM_INITIALIZER(0),
-  .lock   = NXMUTEX_INITIALIZER,
-};
+static struct rng_dev_s g_rngdev;
 
 static const struct file_operations g_rngops =
 {
@@ -130,6 +139,16 @@ static int nrf52_rng_initialize(void)
 
   first_flag = false;
 
+  _info("Initializing RNG\n");
+
+  memset(&g_rngdev, 0, sizeof(struct rng_dev_s));
+
+  nxsem_init(&g_rngdev.rd_sem, 0, 0);
+  nxsem_setprotocol(&g_rngdev.rd_sem, SEM_PRIO_NONE);
+
+  nxsem_init(&g_rngdev.excl_sem, 0, 1);
+  nxsem_setprotocol(&g_rngdev.excl_sem, SEM_PRIO_NONE);
+
   _info("Ready to stop\n");
   nrf52_rng_stop();
 
@@ -145,9 +164,9 @@ static int nrf52_rng_initialize(void)
   return OK;
 }
 
-static int nrf52_rng_irqhandler(int irq, void *context, void *arg)
+static int nrf52_rng_irqhandler(int irq, FAR void *context, FAR void *arg)
 {
-  struct rng_dev_s *priv = (struct rng_dev_s *)&g_rngdev;
+  FAR struct rng_dev_s *priv = (struct rng_dev_s *) &g_rngdev;
   uint8_t *addr;
 
   if (getreg32(NRF52_RNG_EVENTS_RDY) == RNG_INT_RDY)
@@ -174,7 +193,7 @@ static int nrf52_rng_irqhandler(int irq, void *context, void *arg)
  * Name: nrf52_rng_open
  ****************************************************************************/
 
-static int nrf52_rng_open(struct file *filep)
+static int nrf52_rng_open(FAR struct file *filep)
 {
   /* O_NONBLOCK is not supported */
 
@@ -191,18 +210,18 @@ static int nrf52_rng_open(struct file *filep)
  * Name: nrf52_rng_read
  ****************************************************************************/
 
-static ssize_t nrf52_rng_read(struct file *filep, char *buffer,
+static ssize_t nrf52_rng_read(FAR struct file *filep, FAR char *buffer,
                               size_t buflen)
 {
-  struct rng_dev_s *priv = (struct rng_dev_s *)&g_rngdev;
+  FAR struct rng_dev_s *priv = (struct rng_dev_s *)&g_rngdev;
   ssize_t read_len;
 
-  if (nxmutex_lock(&priv->lock) != OK)
+  if (nxsem_wait(&priv->excl_sem) != OK)
     {
       return -EBUSY;
     }
 
-  priv->rd_buf = (uint8_t *)buffer;
+  priv->rd_buf = (uint8_t *) buffer;
   priv->buflen = buflen;
   priv->rd_count = 0;
 
@@ -221,7 +240,8 @@ static ssize_t nrf52_rng_read(struct file *filep, char *buffer,
 
   /* Now , got data, and release rd_sem for next read */
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->excl_sem);
+
   return read_len;
 }
 
@@ -248,7 +268,7 @@ static ssize_t nrf52_rng_read(struct file *filep, char *buffer,
 void devrandom_register(void)
 {
   nrf52_rng_initialize();
-  register_driver("/dev/random", &g_rngops, 0444, NULL);
+  register_driver("/dev/random", FAR & g_rngops, 0444, NULL);
 }
 #endif
 
@@ -272,7 +292,7 @@ void devurandom_register(void)
 #ifndef CONFIG_DEV_RANDOM
   nrf52_rng_initialize();
 #endif
-  register_driver("dev/urandom", &g_rngops, 0444, NULL);
+  register_driver("dev/urandom", FAR & g_rngops, 0444, NULL);
 }
 #endif
 

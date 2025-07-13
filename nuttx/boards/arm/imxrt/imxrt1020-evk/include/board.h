@@ -1,22 +1,37 @@
-/****************************************************************************
+/*****************************************************************************
  * boards/arm/imxrt/imxrt1020-evk/include/board.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018-2019 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            David Sidrane <david_s5@nscdg.com>
+ *            Dave Marples <dave@marples.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -41,10 +56,8 @@
 
 #define IMXRT_VDD_SOC (0x12)
 
-/* Set Sys PLL (PLL2) to  fOut    = (24Mhz * SYS_PLL_DIV_SELECT) /
- *                                   ARM_PODF_DIVISOR
- *                        528Mhz  = (24Mhz * SYS_PLL_DIV_SELECT) /
- *                                   ARM_PODF_DIVISOR
+/* Set Sys PLL (PLL2) to  fOut    = (24Mhz * SYS_PLL_DIV_SELECT) / ARM_PODF_DIVISOR
+ *                        528Mhz  = (24Mhz * SYS_PLL_DIV_SELECT) / ARM_PODF_DIVISOR
  *                        SYS_PLL_DIV_SELECT = 22
  *                        SYS_PODF_DIVISOR   = 1
  *                        528Mhz  = (24Mhz * 22) / 1
@@ -61,8 +74,7 @@
  *                       IMXRT_IPG_PODF_DIVIDER = 4
  *                       125Mhz = 500Mhz / 4
  *
- *     PERCLK_CLOCK_ROOT          = IPG_CLOCK_ROOT /
- *                                  IMXRT_PERCLK_PODF_DIVIDER
+ *     PERCLK_CLOCK_ROOT          = IPG_CLOCK_ROOT / IMXRT_PERCLK_PODF_DIVIDER
  *                       IMXRT_PERCLK_PODF_DIVIDER = 2
  *                        62.5Mhz = 125Mhz / 2
  *
@@ -122,7 +134,7 @@
 #  define IMXRT_TRACE_CLK_SELECT   CCM_CBCMR_TRACE_CLK_SEL_PLL2_PFD0
 #endif
 
-/* LED definitions **********************************************************/
+/* LED definitions ***********************************************************/
 
 /* There is one user accessible LED status indicator located on the 1020-EVK.
  * The function of the LEDs include:
@@ -170,7 +182,7 @@
 
 #define BOARD_USDHC_SD_ID               (0)
 
-/* Button definitions *******************************************************/
+/* Button definitions ********************************************************/
 
 /* The IMXRT board has three external buttons
  *
@@ -224,10 +236,10 @@
 
 /* LPI2Cs *******************************************************************/
 
-#define GPIO_LPI2C1_SDA   GPIO_LPI2C1_SDA_1|IOMUX_LPI2C_DEFAULT /* AD_B1_15 */
-#define GPIO_LPI2C1_SCL   GPIO_LPI2C1_SCL_1|IOMUX_LPI2C_DEFAULT /* AD_B1_14 */
-#define GPIO_LPI2C4_SDA   GPIO_LPI2C4_SDA_1|IOMUX_LPI2C_DEFAULT /* SD_B1_02 */
-#define GPIO_LPI2C4_SCL   GPIO_LPI2C4_SCL_1|IOMUX_LPI2C_DEFAULT /* SD_B1_03 */
+#define GPIO_LPI2C1_SDA   GPIO_LPI2C1_SDA_1|IOMUX_I2C_DEFAULT /* AD_B1_15 */
+#define GPIO_LPI2C1_SCL   GPIO_LPI2C1_SCL_1|IOMUX_I2C_DEFAULT /* AD_B1_14 */
+#define GPIO_LPI2C4_SDA   GPIO_LPI2C4_SDA_1|IOMUX_I2C_DEFAULT /* SD_B1_02 */
+#define GPIO_LPI2C4_SCL   GPIO_LPI2C4_SCL_1|IOMUX_I2C_DEFAULT /* SD_B1_03 */
 
 /* LPSPI ********************************************************************/
 
@@ -259,13 +271,13 @@
 #define PIN_USDHC1_CD_GPIO  (IOMUX_VSD_DEFAULT | \
                              GPIO_PORT3 | GPIO_PIN19 )                        /* SD_B0_06 */
 
-/****************************************************************************
+/*****************************************************************************
  * Public Types
- ****************************************************************************/
+ *****************************************************************************/
 
-/****************************************************************************
+/*****************************************************************************
  * Public Data
- ****************************************************************************/
+ *****************************************************************************/
 
 #ifndef __ASSEMBLY__
 
@@ -278,9 +290,9 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/****************************************************************************
+/************************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ************************************************************************************/
 
 #undef EXTERN
 #if defined(__cplusplus)

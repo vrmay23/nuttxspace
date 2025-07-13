@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/cxd56xx/common/src/cxd56_isx012.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -39,7 +52,6 @@
 #include "cxd56_i2c.h"
 
 #include <arch/board/board.h>
-#include <arch/chip/pm.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -54,21 +66,20 @@
 #  error "IMAGER_SLEEP must be defined in board.h !!"
 #endif
 
-#define STANDBY_TIME                (600 * 1000) /* TODO: (max100ms/30fps)*/
-#define DEVICE_STARTUP_TIME         (6 * 1000)   /* ms */
-#define SLEEP_CANCEL_TIME           (13 * 1000)  /* ms */
-#define POWER_CHECK_TIME            (1 * 1000)   /* ms */
-#define POWER_OFF_TIME              (50 * 1000)  /* ms */
+#define STANDBY_TIME                (600*1000) /* TODO: (max100ms/30fps)*/
+#define DEVICE_STARTUP_TIME           (6*1000) /* ms */
+#define SLEEP_CANCEL_TIME            (13*1000) /* ms */
+#define POWER_CHECK_TIME             (1*1000)  /* ms */
 
+#define ALL_POWERON                 (7)
+#define ALL_POWEROFF                (0)
 #define POWER_CHECK_RETRY           (10)
 
 /****************************************************************************
- *  Private Data
+ * Private Data
  ****************************************************************************/
 
-static struct pm_cpu_freqlock_s g_hv_lock =
-  PM_CPUFREQLOCK_INIT(PM_CPUFREQLOCK_TAG('I', 'S', 0),
-                      PM_CPUFREQLOCK_FLAG_HV);
+FAR struct i2c_master_s *i2c;
 
 /****************************************************************************
  * Public Functions
@@ -77,7 +88,10 @@ static struct pm_cpu_freqlock_s g_hv_lock =
 int board_isx012_power_on(void)
 {
   int ret;
+  uint32_t stat;
   int i;
+
+  /* 'POWER_IMAGE_SENSOR==PMIC_GPO(4/5/7)' */
 
   ret = board_power_control(POWER_IMAGE_SENSOR, true);
   if (ret)
@@ -89,15 +103,17 @@ int board_isx012_power_on(void)
   ret = -ETIMEDOUT;
   for (i = 0; i < POWER_CHECK_RETRY; i++)
     {
-      /* Need to wait for a while after power-on */
-
-      nxsig_usleep(POWER_CHECK_TIME);
-
-      if (true == board_power_monitor(POWER_IMAGE_SENSOR))
+      stat = 0;
+      stat |= (uint32_t)board_power_monitor(PMIC_GPO(4)) << 0;
+      stat |= (uint32_t)board_power_monitor(PMIC_GPO(5)) << 1;
+      stat |= (uint32_t)board_power_monitor(PMIC_GPO(7)) << 2;
+      if (stat == ALL_POWERON)
         {
           ret = OK;
           break;
         }
+
+      nxsig_usleep(POWER_CHECK_TIME);
     }
 
   return ret;
@@ -106,7 +122,10 @@ int board_isx012_power_on(void)
 int board_isx012_power_off(void)
 {
   int ret;
+  uint32_t stat;
   int i;
+
+  /* POWER_IMAGE_SENSOR==PMIC_GPO(4/5/7) */
 
   ret = board_power_control(POWER_IMAGE_SENSOR, false);
   if (ret)
@@ -115,14 +134,14 @@ int board_isx012_power_off(void)
       return -ENODEV;
     }
 
-  /* Need to wait for power-off to be reflected */
-
-  nxsig_usleep(POWER_OFF_TIME);
-
   ret = -ETIMEDOUT;
   for (i = 0; i < POWER_CHECK_RETRY; i++)
     {
-      if (false == board_power_monitor(POWER_IMAGE_SENSOR))
+      stat = 0;
+      stat |= (uint32_t)board_power_monitor(PMIC_GPO(4)) << 0;
+      stat |= (uint32_t)board_power_monitor(PMIC_GPO(5)) << 1;
+      stat |= (uint32_t)board_power_monitor(PMIC_GPO(7)) << 2;
+      if (stat == ALL_POWEROFF)
         {
           ret = OK;
           break;
@@ -167,16 +186,14 @@ void board_isx012_release_sleep(void)
   nxsig_usleep(SLEEP_CANCEL_TIME);
 }
 
-int isx012_register(struct i2c_master_s *i2c);
+int isx012_register(FAR struct i2c_master_s *i2c);
 int isx012_unregister(void);
 
-struct i2c_master_s *board_isx012_initialize(void)
+int board_isx012_initialize(int i2c_bus_num)
 {
+  int ret;
+
   _info("Initializing ISX012...\n");
-
-  /* Fix system clock to HV mode */
-
-  up_pm_acquire_freqlock(&g_hv_lock);
 
 #ifdef IMAGER_ALERT
   cxd56_gpio_config(IMAGER_ALERT, true);
@@ -190,25 +207,33 @@ struct i2c_master_s *board_isx012_initialize(void)
 
   /* Initialize i2c device */
 
-  return cxd56_i2cbus_initialize(IMAGER_I2C);
+  i2c = cxd56_i2cbus_initialize(i2c_bus_num);
+  if (!i2c)
+    {
+      return -ENODEV;
+    }
+
+  ret = isx012_register(i2c);
+  if (ret < 0)
+    {
+      _err("Error registering ISX012.\n");
+    }
+
+  return ret;
 }
 
-int board_isx012_uninitialize(struct i2c_master_s *i2c)
+int board_isx012_uninitialize(void)
 {
   int ret;
 
   _info("Uninitializing ISX012...\n");
 
-  /* Release system clock */
-
-  up_pm_release_freqlock(&g_hv_lock);
-
   /* Initialize i2c device */
 
-  ret = isx012_uninitialize();
+  ret = isx012_unregister();
   if (ret < 0)
     {
-      _err("Failed to uninitialize ISX012.\n");
+      _err("Error unregistering ISX012.\n");
     }
 
   if (!i2c)

@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/syslog/syslog_chardev.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,10 +44,9 @@
 #include <string.h>
 #include <poll.h>
 #include <errno.h>
-#include <syslog.h>
 
 #include <nuttx/fs/fs.h>
-#include <nuttx/syslog/syslog.h>
+#include <syslog.h>
 
 #include "syslog.h"
 
@@ -46,24 +58,22 @@
 
 static ssize_t syslog_chardev_write(FAR struct file *filep,
                                     FAR const char *buffer, size_t buflen);
-#ifdef CONFIG_SYSLOG_IOCTL
-static int syslog_chardev_ioctl(FAR struct file *filep,
-                                int cmd, unsigned long arg);
-#endif
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations g_syslog_fops =
+static const struct file_operations syslog_fops =
 {
-  NULL,                 /* open */
-  NULL,                 /* close */
-  NULL,                 /* read */
+  NULL,          /* open */
+  NULL,          /* close */
+  NULL,          /* read */
   syslog_chardev_write, /* write */
-  NULL,                 /* seek */
-#ifdef CONFIG_SYSLOG_IOCTL
-  syslog_chardev_ioctl, /* ioctl */
+  NULL,          /* seek */
+  NULL,          /* ioctl */
+  NULL           /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL         /* unlink */
 #endif
 };
 
@@ -82,65 +92,6 @@ static ssize_t syslog_chardev_write(FAR struct file *filep,
   return len;
 }
 
-#ifdef CONFIG_SYSLOG_IOCTL
-static int syslog_chardev_ioctl(FAR struct file *filep,
-                                int cmd, unsigned long arg)
-{
-  FAR struct syslog_channel_info_s *info;
-  FAR syslog_channel_t *channel = NULL;
-  int i;
-
-  if (arg == 0)
-    {
-      return -EINVAL;
-    }
-
-  if (cmd == SYSLOGIOC_GETCHANNELS)
-    {
-      info = (FAR struct syslog_channel_info_s *)arg;
-
-      for (i = 0; i < CONFIG_SYSLOG_MAX_CHANNELS; i++)
-        {
-          channel = g_syslog_channel[i];
-          if (channel == NULL || channel->sc_name[0] == '\0')
-            {
-              break;
-            }
-
-          strlcpy(info[i].sc_name, channel->sc_name,
-                  sizeof(info[i].sc_name));
-          info[i].sc_disable =
-                  channel->sc_state & SYSLOG_CHANNEL_DISABLE;
-        }
-    }
-  else if (cmd == SYSLOGIOC_SETFILTER)
-    {
-      info = (FAR struct syslog_channel_info_s *)arg;
-
-      for (i = 0; i < CONFIG_SYSLOG_MAX_CHANNELS; i++)
-        {
-          if (strncmp(g_syslog_channel[i]->sc_name, info->sc_name,
-                      sizeof(info->sc_name)) == 0)
-            {
-              channel = g_syslog_channel[i];
-              break;
-            }
-        }
-
-      if (channel == NULL)
-        {
-          return -ENOENT;
-        }
-
-      channel->sc_state = info->sc_disable ?
-                          channel->sc_state | SYSLOG_CHANNEL_DISABLE :
-                          channel->sc_state & ~SYSLOG_CHANNEL_DISABLE;
-    }
-
-  return OK;
-}
-#endif
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -149,7 +100,7 @@ static int syslog_chardev_ioctl(FAR struct file *filep,
  * Name: syslog_register
  *
  * Description:
- *   Register a simple character driver at /dev/log whose write() method
+ *   Register a simple character driver at /dev/syslog whose write() method
  *   will transfer data to the SYSLOG device.  This can be useful if, for
  *   example, you want to redirect the output of a program to the SYSLOG.
  *
@@ -161,7 +112,7 @@ static int syslog_chardev_ioctl(FAR struct file *filep,
 
 void syslog_register(void)
 {
-  register_driver("/dev/log", &g_syslog_fops, 0222, NULL);
+  register_driver("/dev/syslog", &syslog_fops, 0222, NULL);
 }
 
 #endif /* CONFIG_SYSLOG_CHARDEV */

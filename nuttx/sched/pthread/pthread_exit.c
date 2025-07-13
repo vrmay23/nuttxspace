@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/pthread/pthread_exit.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2009, 2011-2013, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <unistd.h>
 #include <signal.h>
 #include <pthread.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -53,7 +65,7 @@
  *   Terminate execution of a thread started with pthread_create.
  *
  * Input Parameters:
- *   exit_value
+ *   exit_valie
  *
  * Returned Value:
  *   None
@@ -62,56 +74,70 @@
  *
  ****************************************************************************/
 
-void nx_pthread_exit(FAR void *exit_value)
+void pthread_exit(FAR void *exit_value)
 {
   FAR struct tcb_s *tcb = this_task();
-  sigset_t set;
+  sigset_t set = ALL_SIGNAL_SET;
   int status;
 
   sinfo("exit_value=%p\n", exit_value);
 
   DEBUGASSERT(tcb != NULL);
+  DEBUGASSERT((tcb->flags & TCB_FLAG_TTYPE_MASK) == TCB_FLAG_TTYPE_PTHREAD);
 
   /* Block any signal actions that would awaken us while were
    * are performing the JOIN handshake.
    */
 
-  sigfillset(&set);
   nxsig_procmask(SIG_SETMASK, &set, NULL);
+
+#ifdef CONFIG_CANCELLATION_POINTS
+  /* Mark the pthread as non-cancelable to avoid additional calls to
+   * pthread_exit() due to any cancellation point logic that might get
+   * kicked off by actions taken during pthread_exit processing.
+   */
+
+  tcb->flags  |=  TCB_FLAG_NONCANCELABLE;
+  tcb->flags  &= ~TCB_FLAG_CANCEL_PENDING;
+  tcb->cpcount = 0;
+#endif
+
+#ifdef CONFIG_PTHREAD_CLEANUP
+  /* Perform any stack pthread clean-up callbacks */
+
+  pthread_cleanup_popall((FAR struct pthread_tcb_s *)tcb);
+#endif
 
   /* Complete pending join operations */
 
-  status = pthread_completejoin(nxsched_gettid(), exit_value);
+  status = pthread_completejoin(getpid(), exit_value);
   if (status != OK)
     {
-      /* Assume that the join completion failed because this is
+      /* Assume that the join completion failured because this
        * not really a pthread.  Exit by calling exit().
        */
 
-      _exit(EXIT_FAILURE);
+      exit(EXIT_FAILURE);
     }
 
-  /* Make sure that we are in a critical section with local interrupts.
-   * The IRQ state will be restored when the next task is started.
-   */
+#ifndef CONFIG_PTHREAD_MUTEX_UNSAFE
+  /* Recover any mutexes still held by the canceled thread */
 
-  enter_critical_section();
+  pthread_mutex_inconsistent((FAR struct pthread_tcb_s *)tcb);
+#endif
 
   /* Perform common task termination logic.  This will get called again later
-   * through logic kicked off by up_exit().
-   *
-   * REVISIT: Tt should not be necessary to call this here, but releasing the
-   * task group (especially the group file list) requires that it is done
-   * here.
-   *
-   * The reason? up_exit removes the current process from the ready-to-run
-   * list and trying to execute code that depends on this_task() crashes at
-   * once, or does something very naughty.
+   * through logic kicked off by _exit().  However, we need to call it before
+   * calling _exit() in order certain operations if this is the last thread
+   * of a task group:  (2) To handle atexit() and on_exit() callbacks and
+   * (2) so that we can flush buffered I/O (which may required suspending).
    */
 
-  tcb->flags |= TCB_FLAG_EXIT_PROCESSING;
+  nxtask_exithook(tcb, EXIT_SUCCESS, false);
 
-  nxtask_exithook(tcb, status);
+  /* Then just exit, retaining all file descriptors and without
+   * calling atexit() functions.
+   */
 
-  up_exit(EXIT_SUCCESS);
+  _exit(EXIT_SUCCESS);
 }

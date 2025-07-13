@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/hc/src/m9s12/m9s12_ethernet.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011, 2014-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <stdbool.h>
 #include <time.h>
 #include <string.h>
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -40,7 +52,7 @@
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
 #include <nuttx/wdog.h>
-#include <nuttx/net/ip.h>
+#include <nuttx/net/arp.h>
 #include <nuttx/net/netdev.h>
 
 #ifdef CONFIG_NET_PKT
@@ -56,16 +68,20 @@
  */
 
 #ifndef CONFIG_HCS12_NINTERFACES
-#  define CONFIG_HCS12_NINTERFACES 1
+# define CONFIG_HCS12_NINTERFACES 1
 #endif
+
+/* TX poll deley = 1 seconds. CLK_TCK is the number of clock ticks per second */
+
+#define HCS12_WDDELAY   (1*CLK_TCK)
 
 /* TX timeout = 1 minute */
 
 #define HCS12_TXTIMEOUT (60*CLK_TCK)
 
-/* This is a helper pointer for accessing the contents of Ethernet header */
+/* This is a helper pointer for accessing the contents of the Ethernet header */
 
-#define BUF ((FAR struct eth_hdr_s *)priv->d_dev.d_buf)
+#define BUF ((struct eth_hdr_s *)priv->d_dev.d_buf)
 
 /****************************************************************************
  * Private Types
@@ -78,7 +94,8 @@
 struct emac_driver_s
 {
   bool    d_bifup;            /* true:ifup false:ifdown */
-  struct wdog_s d_txtimeout;  /* TX timeout timer */
+  WDOG_ID d_txpoll;           /* TX poll timer */
+  WDOG_ID d_txtimeout;        /* TX timeout timer */
 
   /* This holds the information visible to the NuttX network */
 
@@ -91,8 +108,7 @@ struct emac_driver_s
 
 /* A single packet buffer is used */
 
-static uint8_t g_pktbuf[CONFIG_HCS12_NINTERFACES]
-                       [MAX_NETDEV_PKTSIZE + CONFIG_NET_GUARDSIZE];
+static uint8_t g_pktbuf[MAX_NETDEV_PKTSIZE + CONFIG_NET_GUARDSIZE];
 
 /* Driver state structure */
 
@@ -115,7 +131,8 @@ static int  emac_interrupt(int irq, FAR void *context, FAR void *arg);
 
 /* Watchdog timer expirations */
 
-static void emac_txtimeout(wdparm_t arg);
+static void emac_polltimer(int argc, uint32_t arg, ...);
+static void emac_txtimeout(int argc, uint32_t arg, ...);
 
 /* NuttX callback functions */
 
@@ -166,8 +183,7 @@ static int emac_transmit(FAR struct emac_driver_s *priv)
 
   /* Setup the TX timeout watchdog (perhaps restarting the timer) */
 
-  wd_start(&priv->d_txtimeout, HCS12_TXTIMEOUT,
-           emac_txtimeout, (wdparm_t)priv);
+  wd_start(priv->d_txtimeout, HCS12_TXTIMEOUT, emac_txtimeout, 1, (uint32_t)priv);
   return OK;
 }
 
@@ -198,15 +214,50 @@ static int emac_transmit(FAR struct emac_driver_s *priv)
 
 static int emac_txpoll(struct net_driver_s *dev)
 {
-  FAR struct emac_driver_s *priv =
-    (FAR struct emac_driver_s *)dev->d_private;
+  FAR struct emac_driver_s *priv = (FAR struct emac_driver_s *)dev->d_private;
 
-  /* Send the packet */
+  /* If the polling resulted in data that should be sent out on the network,
+   * the field d_len is set to a value > 0.
+   */
 
-  emac_transmit(priv);
+  if (priv->d_dev.d_len > 0)
+    {
+      /* Look up the destination MAC address and add it to the Ethernet
+       * header.
+       */
 
-  /* If zero is returned, the polling will continue until all connections
-   * have been examined.
+#ifdef CONFIG_NET_IPv4
+#ifdef CONFIG_NET_IPv6
+      if (IFF_IS_IPv4(priv->d_dev.d_flags))
+#endif
+        {
+          arp_out(&priv->d_dev);
+        }
+#endif /* CONFIG_NET_IPv4 */
+
+#ifdef CONFIG_NET_IPv6
+#ifdef CONFIG_NET_IPv4
+      else
+#endif
+        {
+          neighbor_out(&priv->d_dev);
+        }
+#endif /* CONFIG_NET_IPv6 */
+
+      if (!devif_loopback(&priv->d_dev))
+        {
+          /* Send the packet */
+
+          emac_transmit(priv);
+
+          /* Check if there is room in the device to hold another packet. If not,
+           * return a non-zero value to terminate the poll.
+           */
+        }
+    }
+
+  /* If zero is returned, the polling will continue until all connections have
+   * been examined.
    */
 
   return 0;
@@ -235,16 +286,14 @@ static void emac_receive(FAR struct emac_driver_s *priv)
     {
       /* Check for errors and update statistics */
 
-      /* Check if the packet is a valid size for the network buffer
-       * configuration
-       */
+      /* Check if the packet is a valid size for the network buffer configuration */
 
       /* Copy the data data from the hardware to priv->d_dev.d_buf.  Set
        * amount of data in priv->d_dev.d_len
        */
 
 #ifdef CONFIG_NET_PKT
-      /* When packet sockets are enabled, feed the frame into the tap */
+      /* When packet sockets are enabled, feed the frame into the packet tap */
 
       pkt_input(&priv->d_dev);
 #endif
@@ -256,16 +305,34 @@ static void emac_receive(FAR struct emac_driver_s *priv)
         {
           ninfo("IPv4 frame\n");
 
-          /* Receive an IPv4 packet from the network device */
+          /* Handle ARP on input then give the IPv4 packet to the network
+           * layer
+           */
 
+          arp_ipin(&priv->d_dev);
           ipv4_input(&priv->d_dev);
 
           /* If the above function invocation resulted in data that should be
-           * sent out on the network, d_len field will set to a value > 0.
+           * sent out on the network, the field  d_len will set to a value > 0.
            */
 
           if (priv->d_dev.d_len > 0)
             {
+              /* Update the Ethernet header with the correct MAC address */
+
+#ifdef CONFIG_NET_IPv6
+              if (IFF_IS_IPv4(priv->d_dev.d_flags))
+#endif
+                {
+                  arp_out(&priv->d_dev);
+                }
+#ifdef CONFIG_NET_IPv6
+              else
+                {
+                  neighbor_out(&priv->d_dev);
+                }
+#endif
+
               /* And send the packet */
 
               emac_transmit(priv);
@@ -283,11 +350,26 @@ static void emac_receive(FAR struct emac_driver_s *priv)
           ipv6_input(&priv->d_dev);
 
           /* If the above function invocation resulted in data that should be
-           * sent out on the network, d_len field will set to a value > 0.
+           * sent out on the network, the field  d_len will set to a value > 0.
            */
 
           if (priv->d_dev.d_len > 0)
-            {
+           {
+              /* Update the Ethernet header with the correct MAC address */
+
+#ifdef CONFIG_NET_IPv4
+              if (IFF_IS_IPv4(priv->d_dev.d_flags))
+                {
+                  arp_out(&priv->d_dev);
+                }
+              else
+#endif
+#ifdef CONFIG_NET_IPv6
+                {
+                  neighbor_out(&priv->d_dev);
+                }
+#endif
+
               /* And send the packet */
 
               emac_transmit(priv);
@@ -296,12 +378,12 @@ static void emac_receive(FAR struct emac_driver_s *priv)
       else
 #endif
 #ifdef CONFIG_NET_ARP
-      if (BUF->type == HTONS(ETHTYPE_ARP))
+      if (BUF->type == htons(ETHTYPE_ARP))
         {
-          arp_input(&priv->d_dev);
+          arp_arpin(&priv->d_dev);
 
           /* If the above function invocation resulted in data that should be
-           * sent out on the network, d_len field will set to a value > 0.
+           * sent out on the network, the field  d_len will set to a value > 0.
            */
 
           if (priv->d_dev.d_len > 0)
@@ -339,7 +421,7 @@ static void emac_txdone(FAR struct emac_driver_s *priv)
    * disable further Tx interrupts.
    */
 
-  wd_cancel(&priv->d_txtimeout);
+  wd_cancel(priv->d_txtimeout);
 
   /* Then poll the network for new XMIT data */
 
@@ -393,7 +475,8 @@ static int emac_interrupt(int irq, FAR void *context, FAR void *arg)
  *   The last TX never completed.  Reset the hardware and start again.
  *
  * Input Parameters:
- *   arg  - The argument
+ *   argc - The number of available arguments
+ *   arg  - The first argument
  *
  * Returned Value:
  *   None
@@ -403,7 +486,7 @@ static int emac_interrupt(int irq, FAR void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-static void emac_txtimeout(wdparm_t arg)
+static void emac_txtimeout(int argc, uint32_t arg, ...)
 {
   FAR struct emac_driver_s *priv = (FAR struct emac_driver_s *)arg;
 
@@ -414,6 +497,44 @@ static void emac_txtimeout(wdparm_t arg)
   /* Then poll the network for new XMIT data */
 
   devif_poll(&priv->d_dev, emac_txpoll);
+}
+
+/****************************************************************************
+ * Function: emac_polltimer
+ *
+ * Description:
+ *   Periodic timer handler.  Called from the timer interrupt handler.
+ *
+ * Input Parameters:
+ *   argc - The number of available arguments
+ *   arg  - The first argument
+ *
+ * Returned Value:
+ *   None
+ *
+ * Assumptions:
+ *   Global interrupts are disabled by the watchdog logic.
+ *
+ ****************************************************************************/
+
+static void emac_polltimer(int argc, uint32_t arg, ...)
+{
+  FAR struct emac_driver_s *priv = (FAR struct emac_driver_s *)arg;
+
+  /* Check if there is room in the send another TX packet.  We cannot perform
+   * the TX poll if he are unable to accept another packet for transmission.
+   */
+
+  /* If so, update TCP timing states and poll the network for new XMIT data. Hmmm..
+   * might be bug here.  Does this mean if there is a transmit in progress,
+   * we will missing TCP time state updates?
+   */
+
+  devif_timer(&priv->d_dev, HCS12_WDDELAY, emac_txpoll);
+
+  /* Setup the watchdog poll timer again */
+
+  wd_start(priv->d_txpoll, HCS12_WDDELAY, emac_polltimer, 1, arg);
 }
 
 /****************************************************************************
@@ -435,14 +556,17 @@ static void emac_txtimeout(wdparm_t arg)
 
 static int emac_ifup(struct net_driver_s *dev)
 {
-  FAR struct emac_driver_s *priv =
-    (FAR struct emac_driver_s *)dev->d_private;
+  FAR struct emac_driver_s *priv = (FAR struct emac_driver_s *)dev->d_private;
 
-  ninfo("Bringing up: %u.%u.%u.%u\n",
-        ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
-        ip4_addr3(dev->d_ipaddr), ip4_addr4(dev->d_ipaddr));
+  ninfo("Bringing up: %d.%d.%d.%d\n",
+        dev->d_ipaddr & 0xff, (dev->d_ipaddr >> 8) & 0xff,
+        (dev->d_ipaddr >> 16) & 0xff, dev->d_ipaddr >> 24 );
 
-  /* Initialize PHYs, Ethernet interface, and setup up Ethernet interrupts */
+  /* Initialize PHYs, the Ethernet interface, and setup up Ethernet interrupts */
+
+  /* Set and activate a timer process */
+
+  wd_start(priv->d_txpoll, HCS12_WDDELAY, emac_polltimer, 1, (uint32_t)priv);
 
   /* Enable the Ethernet interrupt */
 
@@ -469,8 +593,7 @@ static int emac_ifup(struct net_driver_s *dev)
 
 static int emac_ifdown(struct net_driver_s *dev)
 {
-  FAR struct emac_driver_s *priv =
-    (FAR struct emac_driver_s *)dev->d_private;
+  FAR struct emac_driver_s *priv = (FAR struct emac_driver_s *)dev->d_private;
   irqstate_t flags;
 
   /* Disable the Ethernet interrupt */
@@ -478,9 +601,10 @@ static int emac_ifdown(struct net_driver_s *dev)
   flags = enter_critical_section();
   up_disable_irq(CONFIG_HCS12_IRQ);
 
-  /* Cancel the TX timeout timers */
+  /* Cancel the TX poll timer and TX timeout timers */
 
-  wd_cancel(&priv->d_txtimeout);
+  wd_cancel(priv->d_txpoll);
+  wd_cancel(priv->d_txtimeout);
 
   /* Put the EMAC is its reset, non-operational state.  This should be
    * a known configuration that will guarantee the emac_ifup() always
@@ -515,8 +639,7 @@ static int emac_ifdown(struct net_driver_s *dev)
 
 static int emac_txavail(struct net_driver_s *dev)
 {
-  FAR struct emac_driver_s *priv =
-    (FAR struct emac_driver_s *)dev->d_private;
+  FAR struct emac_driver_s *priv = (FAR struct emac_driver_s *)dev->d_private;
   irqstate_t flags;
 
   /* Disable interrupts because this function may be called from interrupt
@@ -529,7 +652,7 @@ static int emac_txavail(struct net_driver_s *dev)
 
   if (priv->d_bifup)
     {
-      /* Check if there is room in the hardware to hold another packet. */
+      /* Check if there is room in the hardware to hold another outgoing packet. */
 
       /* If so, then poll the network for new XMIT data */
 
@@ -561,8 +684,7 @@ static int emac_txavail(struct net_driver_s *dev)
 #ifdef CONFIG_NET_MCASTGROUP
 static int emac_addmac(struct net_driver_s *dev, FAR const uint8_t *mac)
 {
-  FAR struct emac_driver_s *priv =
-    (FAR struct emac_driver_s *)dev->d_private;
+  FAR struct emac_driver_s *priv = (FAR struct emac_driver_s *)dev->d_private;
 
   /* Add the MAC address to the hardware multicast routing table */
 
@@ -574,8 +696,8 @@ static int emac_addmac(struct net_driver_s *dev, FAR const uint8_t *mac)
  * Function: emac_rmmac
  *
  * Description:
- *   NuttX Callback: Remove the specified MAC address from the hardware
- *   multicast address filtering
+ *   NuttX Callback: Remove the specified MAC address from the hardware multicast
+ *   address filtering
  *
  * Input Parameters:
  *   dev  - Reference to the NuttX driver state structure
@@ -591,8 +713,7 @@ static int emac_addmac(struct net_driver_s *dev, FAR const uint8_t *mac)
 #ifdef CONFIG_NET_MCASTGROUP
 static int emac_rmmac(struct net_driver_s *dev, FAR const uint8_t *mac)
 {
-  FAR struct emac_driver_s *priv =
-    (FAR struct emac_driver_s *)dev->d_private;
+  FAR struct emac_driver_s *priv = (FAR struct emac_driver_s *)dev->d_private;
 
   /* Add the MAC address to the hardware multicast routing table */
 
@@ -627,10 +748,10 @@ int emac_initialize(int intf)
 
   /* Get the interface structure associated with this interface number. */
 
-  DEBUGASSERT(inf < CONFIG_HCS12_NINTERFACES);
+  DEBUGASSERT(inf <  CONFIG_HCS12_NINTERFACES);
   priv = &g_emac[intf];
 
-  /* Check if a Ethernet chip is recognized at its I/O base */
+   /* Check if a Ethernet chip is recognized at its I/O base */
 
   /* Attach the IRQ to the driver */
 
@@ -644,7 +765,7 @@ int emac_initialize(int intf)
   /* Initialize the driver structure */
 
   memset(priv, 0, sizeof(struct emac_driver_s));
-  priv->d_dev.d_buf     = g_pktbuf[inf]; /* Single packet buffer */
+  priv->d_dev.d_buf     = g_pktbuf;      /* Single packet buffer */
   priv->d_dev.d_ifup    = emac_ifup;     /* I/F down callback */
   priv->d_dev.d_ifdown  = emac_ifdown;   /* I/F up (new IP address) callback */
   priv->d_dev.d_txavail = emac_txavail;  /* New TX data callback */
@@ -654,13 +775,16 @@ int emac_initialize(int intf)
 #endif
   priv->d_dev.d_private = priv;          /* Used to recover private state from dev */
 
+  /* Create a watchdog for timing polling for and timing of transmissions */
+
+  priv->d_txpoll       = wd_create();    /* Create periodic poll timer */
+  priv->d_txtimeout    = wd_create();    /* Create TX timeout timer */
+
   /* Put the interface in the down state.  This usually amounts to resetting
    * the device and/or calling emac_ifdown().
    */
 
-  /* Read the MAC address from the hardware into
-   * priv->d_dev.d_mac.ether.ether_addr_octet
-   */
+  /* Read the MAC address from the hardware into priv->d_dev.d_mac.ether.ether_addr_octet */
 
   /* Register the device with the OS so that socket IOCTLs can be performed */
 

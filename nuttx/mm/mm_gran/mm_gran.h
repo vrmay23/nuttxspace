@@ -1,22 +1,35 @@
 /****************************************************************************
  * mm/mm_gran/mm_gran.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,8 +46,7 @@
 
 #include <arch/types.h>
 #include <nuttx/mm/gran.h>
-#include <nuttx/mutex.h>
-#include <nuttx/spinlock.h>
+#include <nuttx/semaphore.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -49,14 +61,26 @@
 
 /* Debug */
 
-#ifdef CONFIG_DEBUG_GRAN
-#  define granerr                    _err
-#  define granwarn                   _warn
-#  define graninfo                   _info
+#ifdef CONFIG_CPP_HAVE_VARARGS
+#  ifdef CONFIG_DEBUG_GRAM
+#    define granerr(format, ...)       _err(format, ##__VA_ARGS__)
+#    define granwarn(format, ...)      _warn(format, ##__VA_ARGS__)
+#    define graninfo(format, ...)      _info(format, ##__VA_ARGS__)
+#  else
+#    define granerr(format, ...)       merr(format, ##__VA_ARGS__)
+#    define granwarn(format, ...)      mwarn(format, ##__VA_ARGS__)
+#    define graninfo(format, ...)      minfo(format, ##__VA_ARGS__)
+#  endif
 #else
-#  define granerr                    merr
-#  define granwarn                   mwarn
-#  define graninfo                   minfo
+#  ifdef CONFIG_DEBUG_GRAM
+#    define granerr                    _err
+#    define granwarn                   _warn
+#    define graninfo                   _info
+#  else
+#    define granerr                    merr
+#    define granwarn                   mwarn
+#    define graninfo                   minfo
+#  endif
 #endif
 
 /****************************************************************************
@@ -68,13 +92,11 @@
 struct gran_s
 {
   uint8_t    log2gran;  /* Log base 2 of the size of one granule */
-  uint8_t    log2align; /* Log base 2 of required alignment */
   uint16_t   ngranules; /* The total number of (aligned) granules in the heap */
 #ifdef CONFIG_GRAN_INTR
   irqstate_t irqstate;  /* For exclusive access to the GAT */
-  spinlock_t lock;
 #else
-  mutex_t    lock;       /* For exclusive access to the GAT */
+  sem_t      exclsem;   /* For exclusive access to the GAT */
 #endif
   uintptr_t  heapstart; /* The aligned start of the granule heap */
   uint32_t   gat[1];    /* Start of the granule allocation table */
@@ -114,12 +136,11 @@ void gran_leave_critical(FAR struct gran_s *priv);
  *   ngranules - The number of granules allocated
  *
  * Returned Value:
- *   On success, a non-NULL pointer to the allocated memory is returned;
- *   NULL is returned on failure.
+ *   None
  *
  ****************************************************************************/
 
-FAR void *gran_mark_allocated(FAR struct gran_s *priv, uintptr_t alloc,
-                              unsigned int ngranules);
+void gran_mark_allocated(FAR struct gran_s *priv, uintptr_t alloc,
+                         unsigned int ngranules);
 
 #endif /* __MM_MM_GRAN_MM_GRAN_H */

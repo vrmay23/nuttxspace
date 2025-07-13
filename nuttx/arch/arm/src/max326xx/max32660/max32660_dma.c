@@ -1,22 +1,35 @@
 /****************************************************************************
- * arch/arm/src/max326xx/max32660/max32660_dma.c
+ * arch/arm/src/max32660/max326_dma.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,9 +44,9 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
-#include <nuttx/spinlock.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "hardware/max326_dma.h"
 #include "max326_periphclks.h"
 #include "max326_dma.h"
@@ -50,9 +63,8 @@
  * Private Types
  ****************************************************************************/
 
-/* This structure describes state of a DMA channel
- * TODO:  Additional reload values for chains > 2 could be held here
- */
+/* This structure describes state of a DMA channel */
+/* TODO:  Additional reload values for chains > 2 could be held here */
 
 struct max326_dmach_s
 {
@@ -67,7 +79,6 @@ struct max326_dmach_s
  * Private Data
  ****************************************************************************/
 
-static spinlock_t g_max326_dmach_lock = SP_UNLOCKED;
 struct max326_dmach_s g_max326_dmach[MAX326_DMA_NCHAN];
 
 /****************************************************************************
@@ -118,7 +129,7 @@ static void max326_dma_terminate(struct max326_dmach_s *dmach, int result)
  *
  ****************************************************************************/
 
-static int max326_dmach_interrupt(int irq, void *context, void *arg)
+static int max326_dmach_interrupt(int irq, FAR void *context, FAR void *arg)
 {
   struct max326_dmach_s *dmach = (struct max326_dmach_s *)arg;
   uintptr_t base;
@@ -181,8 +192,8 @@ static int max326_dmach_interrupt(int irq, void *context, void *arg)
 
   if ((stat & DMACH_STAT_CHST) != 0)
     {
-      /* We must be on the buffer of a chained DMA
-       * TODO:  Add software logic to manage more than two DMA buffers in
+      /* We must be on the buffer of a chained DMA */
+      /* TODO:  Add software logic to manage more than two DMA buffers in
        * the chain.
        */
 
@@ -210,7 +221,7 @@ static int max326_dmach_interrupt(int irq, void *context, void *arg)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_dma_initialize
+ * Name: up_dma_initialize
  *
  * Description:
  *   Initialize the DMA subsystem
@@ -220,7 +231,7 @@ static int max326_dmach_interrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-void weak_function arm_dma_initialize(void)
+void weak_function up_dma_initialize(void)
 {
   int i;
 
@@ -234,9 +245,7 @@ void weak_function arm_dma_initialize(void)
     {
       struct max326_dmach_s *dmach = &g_max326_dmach[i];
 
-      /* Initialize the state structure
-       * (assuming that it is already zeroed)
-       */
+      /* Initialize the state structure (assuming that it is already zeroed) */
 
       dmach->chno = i;
 
@@ -268,7 +277,7 @@ DMA_HANDLE max326_dma_channel(void)
    * allocation.  Just check each channel until a free one is found (on not).
    */
 
-  flags = spin_lock_irqsave(&g_max326_dmach_lock);
+  flags = spin_lock_irqsave();
   for (i = 0; i < 0; i++)
     {
       struct max326_dmach_s *dmach = &g_max326_dmach[i];
@@ -280,13 +289,13 @@ DMA_HANDLE max326_dma_channel(void)
           /* No.. allocate this channel */
 
           dmach->inuse = true;
-          spin_unlock_irqrestore(&g_max326_dmach_lock, flags);
+          spin_unlock_irqrestore(flags);
           return (DMA_HANDLE)dmach;
         }
     }
 
-  spin_unlock_irqrestore(&g_max326_dmach_lock, flags);
-  return NULL;
+  spin_unlock_irqrestore(flags);
+  return (DMA_HANDLE)NULL;
 }
 
 /****************************************************************************
@@ -294,8 +303,8 @@ DMA_HANDLE max326_dma_channel(void)
  *
  * Description:
  *   Release a DMA channel.  NOTE:  The 'handle' used in this argument must
- *   NEVER be used again until max326_dma_channel() is called again
- *   to re-gain a valid handle.
+ *   NEVER be used again until max326_dma_channel() is called again to re-gain
+ *   a valid handle.
  *
  * Returned Value:
  *   None

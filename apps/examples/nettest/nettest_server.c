@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/nettest/nettest_server.c
+ * examples/nettest/nettest-server.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2011-2012, 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name Gregory Nutt nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -69,7 +82,7 @@ void nettest_server(void)
 
   /* Allocate a BIG buffer */
 
-  buffer = malloc(2*SENDSIZE);
+  buffer = (char*)malloc(2*SENDSIZE);
   if (!buffer)
     {
       printf("server: failed to allocate buffer\n");
@@ -88,8 +101,7 @@ void nettest_server(void)
   /* Set socket to reuse address */
 
   optval = 1;
-  if (setsockopt(listensd, SOL_SOCKET, SO_REUSEADDR,
-                 &optval, sizeof(int)) < 0)
+  if (setsockopt(listensd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int)) < 0)
     {
       printf("server: setsockopt SO_REUSEADDR failure: %d\n", errno);
       goto errout_with_listensd;
@@ -99,29 +111,28 @@ void nettest_server(void)
 
 #ifdef CONFIG_EXAMPLES_NETTEST_IPv6
 
-  myaddr.sin6_family     = AF_INET6;
-  myaddr.sin6_port       = HTONS(CONFIG_EXAMPLES_NETTEST_SERVER_PORTNO);
+  myaddr.sin6_family            = AF_INET6;
+  myaddr.sin6_port              = HTONS(CONFIG_EXAMPLES_NETTEST_SERVER_PORTNO);
 #if defined(CONFIG_EXAMPLES_NETTEST_LOOPBACK) && !defined(NET_LOOPBACK)
-  memcpy(myaddr.sin6_addr.s6_addr16,
-         g_nettestserver_ipv6, 8 * sizeof(uint16_t));
+  memcpy(myaddr.sin6_addr.s6_addr16, g_nettestserver_ipv6, 8 * sizeof(uint16_t));
 #else
   memset(myaddr.sin6_addr.s6_addr16, 0, 8 * sizeof(uint16_t));
 #endif
   addrlen = sizeof(struct sockaddr_in6);
 
-  printf("Binding to Address: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+  printf("Binding to IPv6 Address: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
          myaddr.sin6_addr.s6_addr16[0], myaddr.sin6_addr.s6_addr16[1],
          myaddr.sin6_addr.s6_addr16[2], myaddr.sin6_addr.s6_addr16[3],
          myaddr.sin6_addr.s6_addr16[4], myaddr.sin6_addr.s6_addr16[5],
          myaddr.sin6_addr.s6_addr16[6], myaddr.sin6_addr.s6_addr16[7]);
 #else
-  myaddr.sin_family      = AF_INET;
-  myaddr.sin_port        = HTONS(CONFIG_EXAMPLES_NETTEST_SERVER_PORTNO);
+  myaddr.sin_family             = AF_INET;
+  myaddr.sin_port               = HTONS(CONFIG_EXAMPLES_NETTEST_SERVER_PORTNO);
 
 #if defined(CONFIG_EXAMPLES_NETTEST_LOOPBACK) && !defined(NET_LOOPBACK)
-  myaddr.sin_addr.s_addr = (in_addr_t)g_nettestserver_ipv4;
+  myaddr.sin_addr.s_addr        = (in_addr_t)g_nettestserver_ipv4;
 #else
-  myaddr.sin_addr.s_addr = INADDR_ANY;
+  myaddr.sin_addr.s_addr        = INADDR_ANY;
 #endif
   addrlen = sizeof(struct sockaddr_in);
 
@@ -129,7 +140,7 @@ void nettest_server(void)
          (unsigned long)myaddr.sin_addr.s_addr);
 #endif
 
-  if (bind(listensd, (struct sockaddr *)&myaddr, addrlen) < 0)
+  if (bind(listensd, (struct sockaddr*)&myaddr, addrlen) < 0)
     {
       printf("server: bind failure: %d\n", errno);
       goto errout_with_listensd;
@@ -147,12 +158,7 @@ void nettest_server(void)
 
   printf("server: Accepting connections on port %d\n",
          CONFIG_EXAMPLES_NETTEST_SERVER_PORTNO);
-#ifdef __NuttX__
-  acceptsd = accept4(listensd, (struct sockaddr *)&myaddr, &addrlen,
-                     SOCK_CLOEXEC);
-#else
-  acceptsd = accept(listensd, (struct sockaddr *)&myaddr, &addrlen);
-#endif
+  acceptsd = accept(listensd, (struct sockaddr*)&myaddr, &addrlen);
   if (acceptsd < 0)
     {
       printf("server: accept failure: %d\n", errno);
@@ -167,8 +173,7 @@ void nettest_server(void)
   ling.l_onoff  = 1;
   ling.l_linger = 30;     /* timeout is seconds */
 
-  if (setsockopt(acceptsd, SOL_SOCKET, SO_LINGER,
-                 &ling, sizeof(struct linger)) < 0)
+  if (setsockopt(acceptsd, SOL_SOCKET, SO_LINGER, &ling, sizeof(struct linger)) < 0)
     {
       printf("server: setsockopt SO_LINGER failure: %d\n", errno);
       goto errout_with_acceptsd;
@@ -178,7 +183,7 @@ void nettest_server(void)
 #ifdef CONFIG_EXAMPLES_NETTEST_PERFORMANCE
   /* Then receive data forever */
 
-  for (; ; )
+  for (;;)
     {
       nbytesread = recv(acceptsd, buffer, 2*SENDSIZE, 0);
       if (nbytesread < 0)
@@ -202,8 +207,7 @@ void nettest_server(void)
   while (totalbytesread < SENDSIZE)
     {
       printf("server: Reading...\n");
-      nbytesread = recv(acceptsd, &buffer[totalbytesread],
-                        2 * SENDSIZE - totalbytesread, 0);
+      nbytesread = recv(acceptsd, &buffer[totalbytesread], 2*SENDSIZE - totalbytesread, 0);
       if (nbytesread < 0)
         {
           printf("server: recv failed: %d\n", errno);
@@ -223,8 +227,7 @@ void nettest_server(void)
 
   if (totalbytesread != SENDSIZE)
     {
-      printf("server: Received %d / Expected %d bytes\n",
-             totalbytesread, SENDSIZE);
+      printf("server: Received %d / Expected %d bytes\n", totalbytesread, SENDSIZE);
       goto errout_with_acceptsd;
     }
 
@@ -233,8 +236,7 @@ void nettest_server(void)
     {
       if (buffer[i] != ch)
         {
-          printf("server: Byte %d is %02x / Expected %02x\n",
-                 i, buffer[i], ch);
+          printf("server: Byte %d is %02x / Expected %02x\n", i, buffer[i], ch);
           goto errout_with_acceptsd;
         }
 
@@ -256,8 +258,8 @@ void nettest_server(void)
 
   printf("server: Sent %d bytes\n", nbytessent);
 
-  /* If this platform only does abortive disconnects, then wait a bit to get
-   * the client side a change to receive the data.
+  /* If this platform only does abortive disconnects, then wait a bit to get the
+   * client side a change to receive the data.
    */
 
 #if 1 /* Do it for all platforms */

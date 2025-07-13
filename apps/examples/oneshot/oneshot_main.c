@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/oneshot/oneshot_main.c
+ * examples/oneshot/oneshot_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,9 +47,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <errno.h>
-#include <unistd.h>
 
-#include <nuttx/clock.h>
 #include <nuttx/timers/oneshot.h>
 
 /****************************************************************************
@@ -52,7 +63,7 @@
 #endif
 
 #ifndef CONFIG_EXAMPLES_ONESHOT_SIGNO
-#  define CONFIG_EXAMPLES_ONESHOT_SIGNO 32
+#  define CONFIG_EXAMPLES_ONESHOT_SIGNO 13
 #endif
 
 /* For long delays that have to be broken into segments, some loss of
@@ -79,10 +90,10 @@ static void show_usage(FAR const char *progname)
   fprintf(stderr, "USAGE: %s [-d <usecs>] [<devname>]\n", progname);
   fprintf(stderr, "Where:\n");
   fprintf(stderr, "\t-d <usecs>:\n");
-  fprintf(stderr, "\tSpecifies the oneshot delay in microseconds."
-          " Default %ld\n", (unsigned long)CONFIG_EXAMPLES_ONESHOT_DELAY);
+  fprintf(stderr, "\tSpecifies the oneshot delay in microseconds.  Default %ld\n",
+          (unsigned long)CONFIG_EXAMPLES_ONESHOT_DELAY);
   fprintf(stderr, "\t<devname>:\n");
-  fprintf(stderr, "\tSpecifies the path to the oneshot driver. Default %s\n",
+  fprintf(stderr, "\tSpecifies the path to the oneshot driver.  Default %s\n",
           CONFIG_EXAMPLES_ONESHOT_DEVNAME);
   exit(EXIT_FAILURE);
 }
@@ -138,8 +149,7 @@ int main(int argc, FAR char *argv[])
         }
       else
         {
-          fprintf(stderr, "ERROR: Unsupported number of arguments: %d\n",
-                  argc);
+          fprintf(stderr, "ERROR: Unsupported number of arguments: %d\n", argc);
           show_usage(argv[0]);
         }
     }
@@ -167,14 +177,9 @@ int main(int argc, FAR char *argv[])
       return EXIT_FAILURE;
     }
 
-  maxus = (uint64_t)ts.tv_sec * USEC_PER_SEC +
-          (uint64_t)ts.tv_nsec / NSEC_PER_USEC;
+  maxus = (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000;
 
-  printf("Maximum delay is %" PRIu64 "\n", maxus);
-
-  /* Ignore the default signal action */
-
-  signal(CONFIG_EXAMPLES_ONESHOT_SIGNO, SIG_IGN);
+  printf("Maximum delay is %llu\n", maxus);
 
   /* Loop waiting until the full delay expires */
 
@@ -192,12 +197,13 @@ int main(int argc, FAR char *argv[])
           printf("Starting oneshot timer with delay %lu microseconds\n",
                  usecs);
 
-          start.pid  = 0;
-          secs       = usecs / USEC_PER_SEC;
-          usecs     -= USEC_PER_SEC * secs;
+          start.pid        = 0;
+
+          secs             = usecs / 1000000;
+          usecs           -= 1000000 * secs;
 
           start.ts.tv_sec  = secs;
-          start.ts.tv_nsec = usecs * NSEC_PER_USEC;
+          start.ts.tv_nsec = usecs * 1000;
 
           start.event.sigev_notify = SIGEV_SIGNAL;
           start.event.sigev_signo  = CONFIG_EXAMPLES_ONESHOT_SIGNO;
@@ -211,22 +217,22 @@ int main(int argc, FAR char *argv[])
         {
           /* Wait for the maximum */
 
-          printf("Starting oneshot timer with delay %" PRId64
-                 " microseconds\n", maxus);
+          printf("Starting oneshot timer with delay %llu microseconds\n",
+                 maxus);
 
           start.ts.tv_sec  = ts.tv_sec;
           start.ts.tv_nsec = ts.tv_nsec;
 
-          usecs -= maxus;
+          usecs           -= maxus;
 
 #if FUDGE_FACTOR > 0
           if (usecs > FUDGE_FACTOR)
             {
-              usecs -= FUDGE_FACTOR;
+              usecs      -= FUDGE_FACTOR;
             }
           else
             {
-              usecs = 0;
+              usecs       = 0;
             }
 #endif
         }
@@ -234,7 +240,7 @@ int main(int argc, FAR char *argv[])
       ret = ioctl(fd, OSIOC_START, (unsigned long)((uintptr_t)&start));
       if (ret < 0)
         {
-          fprintf(stderr, "ERROR: Failed to start the oneshot: %d\n",
+          fprintf(stderr, "ERROR: Failed to start the oneshot interval: %d\n",
                  errno);
           close(fd);
           return EXIT_FAILURE;

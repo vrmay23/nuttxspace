@@ -1,45 +1,58 @@
-/****************************************************************************
+/************************************************************************************
  * arch/renesas/src/m16c/m16c_uart.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_RENESAS_SRC_M16C_M16C_UART_H
 #define __ARCH_RENESAS_SRC_M16C_M16C_UART_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
-/* UART Register Block Base Addresses ***************************************/
+/* UART Register Block Base Addresses ***********************************************/
 
 #define M16C_UART0_BASE    0x003a0    /* First UART0 register */
 #define M16C_UART1_BASE    0x003a8    /* First UART1 register */
 #define M16C_UART2_BASE    0x00378    /* First UART2 register (ignoring special regs) */
 
-/* UART Register Offsets ****************************************************/
+/* UART Register Offsets ************************************************************/
 
 #define M16C_UART_MR       0x00       /*  8-bit UART transmit/receive mode  */
 #define M16C_UART_BRG      0x01       /*  8-bit UART bit rate generator    */
@@ -48,7 +61,7 @@
 #define M16C_UART_C1       0x05       /*  8-bit UART transmit/receive control 1  */
 #define M16C_UART_RB       0x06       /* 16-bit UART receive buffer  */
 
-/* UART Register Bit Definitions ********************************************/
+/* UART Register Bit Definitions ****************************************************/
 
 /* UART transmit/receive mode */
 
@@ -113,7 +126,6 @@
 #define UART_CON_CLKMD1     0x20       /* Bit 5: CLK/CLKS select bit  */
 #define UART_CON_RCSP       0x40       /* Bit 6: Separate CTS/RTS bit */
                                        /* Bit 7: Reserved */
-
 /* UART2 special mode register 1 (to be provided) */
 
 /* UART2 special mode register 2 (to be provided) */
@@ -122,9 +134,9 @@
 
 /* UART2 special mode register 4 (to be provided) */
 
-/****************************************************************************
+/************************************************************************************
  * Public Data
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ASSEMBLY__
 

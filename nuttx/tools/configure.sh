@@ -1,57 +1,58 @@
 #!/usr/bin/env bash
 # tools/configure.sh
 #
-# SPDX-License-Identifier: Apache-2.0
+#   Copyright (C) 2007, 2008, 2011, 2015, 2017-2019 Gregory Nutt. All rights
+#     reserved.
+#   Author: Gregory Nutt <gnutt@nuttx.org>
 #
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.  The
-# ASF licenses this file to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance with the
-# License.  You may obtain a copy of the License at
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the
+#    distribution.
+# 3. Neither the name NuttX nor the names of its contributors may be
+#    used to endorse or promote products derived from this software
+#    without specific prior written permission.
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
-# License for the specific language governing permissions and limitations
-# under the License.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 #
-
-set -e
 
 WD=`test -d ${0%/*} && cd ${0%/*}; pwd`
 TOPDIR="${WD}/.."
-WSDIR=`cd "${TOPDIR}/.." && pwd -P`
-MAKECMD="make"
 USAGE="
 
-USAGE: ${0} [-E] [-e] [-S] [-l|m|c|g|n|B] [-L [boardname]] [-a <app-dir>] <board-selection> [make-opts]
+USAGE: ${0} [-e] [-l|m|c|u|g|n] [-a <app-dir>] <board-name>:<config-name> [make-opts]
 
 Where:
-  -E enforces distclean if already configured.
-  -e performs distclean if configuration changed.
-  -S adds the nxtmpdir folder for third-party packages.
+  -e enforce distclean if already configured
   -l selects the Linux (l) host environment.
   -m selects the macOS (m) host environment.
   -c selects the Windows host and Cygwin (c) environment.
+  -u selects the Windows host and Ubuntu under Windows 10 (u) environment.
   -g selects the Windows host and MinGW/MSYS environment.
   -n selects the Windows host and Windows native (n) environment.
-  -B selects the *BSD (B) host environment.
   Default: Use host setup in the defconfig file
   Default Windows: Cygwin
-  -L lists available configurations for given boards, or all boards if no
-     board is given. board name can be partial here.
   -a <app-dir> is the path to the apps/ directory, relative to the nuttx
      directory
-  <board-selection> is either:
-    For in-tree boards: a <board-name>:<config-name> pair where <board-name> is
-    the name of the board in the boards directory and <config-name> is the name
-    of the board configuration sub-directory (e.g. boardname:nsh), or: For
-    out-of-tree custom boards: a path to the board's configuration directory,
-    either relative to TOPDIR (e.g. ../mycustomboards/myboardname/config/nsh)
-    or an absolute path.
+  <board-name> is the name of the board in the boards directory
+  configs/<config-name> is the name of the board configuration sub-directory
   make-opts directly pass to make
 
 "
@@ -70,26 +71,7 @@ unset boardconfig
 unset winnative
 unset appdir
 unset host
-unset enforce_distclean
-unset distclean
-unset store_nxtmpdir
-
-function dumpcfgs
-{
-  if [ -n "$1" ]; then
-    local boards=$(find ${TOPDIR}/boards -mindepth 3 -maxdepth 3 -type d -name "*$1*")
-    [ -z "$boards" ] && { echo board "$1" not found; return ;}
-    configlist=$(find $boards -name defconfig -type f)
-  else
-    configlist=$(find ${TOPDIR}/boards -name defconfig -type f)
-  fi
-  for defconfig in ${configlist}; do
-    config=`dirname ${defconfig} | sed -e "s,${TOPDIR}/boards/,,g"`
-    boardname=`echo ${config} | cut -d'/' -f3`
-    configname=`echo ${config} | cut -d'/' -f5`
-    echo "  ${boardname}:${configname}"
-  done
-}
+unset enforce
 
 while [ ! -z "$1" ]; do
   case "$1" in
@@ -97,7 +79,7 @@ while [ ! -z "$1" ]; do
     shift
     appdir=$1
     ;;
-  -c | -g | -l | -m )
+  -c | -g | -l | -m | -u )
     winnative=n
     host+=" $1"
     ;;
@@ -105,28 +87,12 @@ while [ ! -z "$1" ]; do
     winnative=y
     host+=" $1"
     ;;
-  -B )
-    winnative=n
-    host+=" $1"
-    MAKECMD="gmake"
-    ;;
-  -E )
-    enforce_distclean=y
-    ;;
   -e )
-    distclean=y
+    enforce=y
     ;;
   -h )
     echo "$USAGE"
     exit 0
-    ;;
-  -L )
-    shift
-    dumpcfgs $1
-    exit 0
-    ;;
-  -S )
-    store_nxtmpdir=y
     ;;
   *)
     boardconfig=$1
@@ -140,9 +106,9 @@ done
 # Sanity checking
 
 if [ -z "${boardconfig}" ]; then
-  echo "" 1>&2
-  echo "Missing <board/config> argument" 1>&2
-  echo "$USAGE" 1>&2
+  echo ""
+  echo "Missing <board/config> argument"
+  echo "$USAGE"
   exit 2
 fi
 
@@ -160,14 +126,19 @@ if [ ! -d ${configpath} ]; then
 
   configpath=${TOPDIR}/${boardconfig}
   if [ ! -d ${configpath} ]; then
-    configpath=${boardconfig}
-    if [ ! -d ${configpath} ]; then
-      echo "Directory for ${boardconfig} does not exist." 1>&2
-      echo "" 1>&2
-      echo "Run tools/configure.sh -L to list available configurations." 1>&2
-      echo "$USAGE" 1>&2
-      exit 3
-    fi
+    echo "Directory for ${boardconfig} does not exist.  Options are:"
+    echo ""
+    echo "Select one of the following options for <board-name>:"
+    configlist=`find ${TOPDIR}/boards -name defconfig`
+    for defconfig in ${configlist}; do
+      config=`dirname ${defconfig} | sed -e "s,${TOPDIR}/boards/,,g"`
+      boardname=`echo ${config} | cut -d'/' -f3`
+      configname=`echo ${config} | cut -d'/' -f5`
+      echo "  ${boardname}:${configname}"
+    done
+    echo ""
+    echo "$USAGE"
+    exit 3
   fi
 fi
 
@@ -178,25 +149,16 @@ if [ ! -r ${src_makedefs} ]; then
   src_makedefs=${TOPDIR}/boards/*/*/${boarddir}/scripts/Make.defs
 
   if [ ! -r ${src_makedefs} ]; then
-    src_makedefs=${configpath}/Make.defs
+    src_makedefs=${TOPDIR}/${boardconfig}/Make.defs
     if [ ! -r ${src_makedefs} ]; then
-      src_makedefs=${configpath}/../../scripts/Make.defs
-
-      if [ ! -r ${src_makedefs} ]; then
-        src_makedefs=${configpath}/../../../common/scripts/Make.defs
-
-        if [ ! -r ${src_makedefs} ]; then
-          echo "File Make.defs could not be found"
-          exit 4
-        fi
-      fi
+      echo "File Make.defs could not be found"
+      exit 4
     fi
   fi
 fi
 
 src_config=${configpath}/defconfig
 dest_config="${TOPDIR}/.config"
-original_config="${TOPDIR}/.config.orig"
 backup_config="${TOPDIR}/defconfig"
 
 if [ ! -r ${src_config} ]; then
@@ -205,52 +167,19 @@ if [ ! -r ${src_config} ]; then
 fi
 
 if [ -r ${dest_config} ]; then
-  if [ "X${enforce_distclean}" = "Xy" ]; then
-    ${MAKECMD} -C ${TOPDIR} distclean
+  if cmp -s ${src_config} ${backup_config}; then
+    echo "No configuration change."
+    exit 0
+  fi
+
+  if [ "X${enforce}" = "Xy" ]; then
+    make -C ${TOPDIR} distclean $*
   else
-    if cmp -s ${src_config} ${backup_config}; then
-      echo "No configuration change."
-      exit 0
-    fi
-
-    if [ "X${distclean}" = "Xy" ]; then
-      ${MAKECMD} -C ${TOPDIR} distclean
-    else
-      echo "Already configured!"
-      echo "Please 'make distclean' and try again."
-      exit 6
-    fi
+    echo "Already configured!"
+    echo "Do 'make distclean' and try again."
+    exit 6
   fi
 fi
-
-if [ "X${store_nxtmpdir}" = "Xy" ]; then
-  if [ ! -d "${WSDIR}/nxtmpdir" ]; then
-    mkdir -p "${WSDIR}/nxtmpdir"
-    echo "Folder ${WSDIR}/nxtmpdir created."
-  fi
-else
-  if [ -d "${WSDIR}/nxtmpdir" ]; then
-    rm -rf "${WSDIR}/nxtmpdir"
-    echo "Folder ${WSDIR}/nxtmpdir clean."
-  fi
-fi
-
-
-# Okay... Everything looks good.  Setup the configuration
-
-echo "  Copy files"
-ln -sf ${src_makedefs} ${dest_makedefs} || \
-  { echo "Failed to symlink ${src_makedefs}" ; exit 8 ; }
-${TOPDIR}/tools/process_config.sh -I ${configpath}/../../common/configs \
-  -I ${configpath}/../common -I ${configpath} -o ${dest_config} ${src_config}
-install -m 644 ${src_config} "${backup_config}" || \
-  { echo "Failed to backup ${src_config}" ; exit 10 ; }
-
-# Install any optional files
-
-for opt in ${OPTFILES}; do
-  test -f ${configpath}/${opt} && install ${configpath}/${opt} "${TOPDIR}/"
-done
 
 # Extract values needed from the defconfig file.  We need:
 # (1) The CONFIG_WINDOWS_NATIVE setting to know it this is target for a
@@ -275,7 +204,7 @@ fi
 # not be in a usable form.
 
 defappdir=y
-if [ -z "${appdir}" -a "X$oldnative" = "X$winnative" ]; then
+if [ -z "${appdir}" -a "X$oldnative" = "$winnative" ]; then
   quoted=`grep "^CONFIG_APPS_DIR=" ${src_config} | cut -d'=' -f2`
   if [ ! -z "${quoted}" ]; then
     appdir=`echo ${quoted} | sed -e "s/\"//g"`
@@ -298,18 +227,11 @@ if [ -z "${appdir}" ]; then
 
   if [ -d "${TOPDIR}/../apps" ]; then
     appdir="../apps"
-  elif [ -d "${TOPDIR}/../nuttx-apps" ]; then
-    appdir="../nuttx-apps"
-  elif [ -d "${TOPDIR}/../nuttx-apps.git" ]; then
-    appdir="../nuttx-apps.git"
   else
     # Check for a versioned apps/ directory
 
     if [ -d "${TOPDIR}/../apps-${CONFIG_VERSION_STRING}" ]; then
       appdir="../apps-${CONFIG_VERSION_STRING}"
-    else
-      echo "ERROR: Could not find the path to the appdir"
-      exit 7
     fi
   fi
 fi
@@ -327,6 +249,21 @@ if [ ! -z "${appdir}" -a ! -d "${TOPDIR}/${posappdir}" ]; then
   exit 7
 fi
 
+# Okay... Everything looks good.  Setup the configuration
+
+echo "  Copy files"
+install -m 644 ${src_makedefs} "${dest_makedefs}" || \
+  { echo "Failed to copy ${src_makedefs}" ; exit 8 ; }
+install -m 644 ${src_config} "${dest_config}" || \
+  { echo "Failed to copy ${src_config}" ; exit 9 ; }
+install -m 644 ${src_config} "${backup_config}" || \
+  { echo "Failed to backup ${src_config}" ; exit 10 ; }
+
+# Install any optional files
+
+for opt in ${OPTFILES}; do
+  test -f ${configpath}/${opt} && install ${configpath}/${opt} "${TOPDIR}/"
+done
 
 # If we did not use the CONFIG_APPS_DIR that was in the defconfig config file,
 # then append the correct application information to the tail of the .config
@@ -334,7 +271,7 @@ fi
 
 if [ "X${defappdir}" = "Xy" ]; then
   # In-place edit can mess up permissions on Windows
-  # sed -i.bak -e "/^CONFIG_APPS_DIR/d" "${dest_config}"
+  # sed -i -e "/^CONFIG_APPS_DIR/d" "${dest_config}"
   sed -e "/^CONFIG_APPS_DIR/d" "${dest_config}" > "${dest_config}-temp"
   mv "${dest_config}-temp" "${dest_config}"
 
@@ -345,17 +282,7 @@ if [ "X${defappdir}" = "Xy" ]; then
   fi
 fi
 
-# Update the CONFIG_BASE_DEFCONFIG setting
-
-posboardconfig=`echo "${boardconfig}" | sed -e 's/\\\\/\\//g'`
-echo "CONFIG_BASE_DEFCONFIG=\"$posboardconfig\"" >> "${dest_config}"
-
 # The saved defconfig files are all in compressed format and must be
 # reconstitued before they can be used.
 
 ${TOPDIR}/tools/sethost.sh $host $*
-
-# Save the original configuration file without CONFIG_BASE_DEFCONFIG
-# for later comparison
-
-grep -v "CONFIG_BASE_DEFCONFIG" "${dest_config}" > "${original_config}"

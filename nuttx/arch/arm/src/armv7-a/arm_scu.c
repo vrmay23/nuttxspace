@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/armv7-a/arm_scu.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,14 +41,101 @@
 
 #include <stdint.h>
 
-#include <arch/barriers.h>
-#include <arch/irq.h>
-#include <sched/sched.h>
-
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "cp15_cacheops.h"
+#include "barriers.h"
 #include "sctlr.h"
 #include "scu.h"
+
+#ifdef CONFIG_SMP
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: arm_get_sctlr
+ *
+ * Description:
+ *   Get the contents of the SCTLR register
+ *
+ ****************************************************************************/
+
+static inline uint32_t arm_get_sctlr(void)
+{
+  uint32_t sctlr;
+
+  __asm__ __volatile__
+  (
+    "\tmrc   p15, 0, %0, c1, c0, 0\n"  /* Read SCTLR */
+    : "=r"(sctlr)
+    :
+    :
+  );
+
+  return sctlr;
+}
+
+/****************************************************************************
+ * Name: arm_set_sctlr
+ *
+ * Description:
+ *   Set the contents of the SCTLR register
+ *
+ ****************************************************************************/
+
+static inline void arm_set_sctlr(uint32_t sctlr)
+{
+  __asm__ __volatile__
+  (
+    "\tmcr  p15, 0, %0, c1, c0, 0\n" /* Write SCTLR */
+    :
+    : "r"(sctlr)
+    :
+  );
+}
+
+/****************************************************************************
+ * Name: arm_get_actlr
+ *
+ * Description:
+ *   Get the contents of the ACTLR register
+ *
+ ****************************************************************************/
+
+static inline uint32_t arm_get_actlr(void)
+{
+  uint32_t actlr;
+
+  __asm__ __volatile__
+  (
+    "\tmrc  p15, 0, %0, c1, c0, 1\n"  /* Read ACTLR */
+    : "=r"(actlr)
+    :
+    :
+  );
+
+  return actlr;
+}
+
+/****************************************************************************
+ * Name: arm_set_actlr
+ *
+ * Description:
+ *   Set the contents of the ACTLR register
+ *
+ ****************************************************************************/
+
+static inline void arm_set_actlr(uint32_t actlr)
+{
+  __asm__ __volatile__
+  (
+    "\tmcr p15, 0, %0, c1, c0, 1\n" /* Write ACTLR */
+    :
+    : "r"(actlr)
+    :
+  );
+}
 
 /****************************************************************************
  * Public Functions
@@ -75,7 +175,7 @@ void arm_enable_smp(int cpu)
        */
 
       cp15_invalidate_dcache_all();
-      UP_DSB();
+      ARM_DSB();
 
       /* Invalidate the L2C-310 -- Missing logic. */
 
@@ -84,10 +184,6 @@ void arm_enable_smp(int cpu)
       regval  = getreg32(SCU_CTRL);
       regval |= SCU_CTRL_ENABLE;
       putreg32(regval, SCU_CTRL);
-
-      /* Initialize done, kick other cpus which waiting on __start */
-
-      UP_SEV();
     }
 
   /* Actions for other CPUs */
@@ -98,20 +194,12 @@ void arm_enable_smp(int cpu)
        * coherent L2.
        */
 
-      cp15_dcache_op_level(0, CP15_CACHE_INVALIDATE);
-      UP_DSB();
+      cp15_invalidate_dcache_all();
+      ARM_DSB();
 
       /* Wait for the SCU to be enabled by the primary processor -- should
        * not be necessary.
        */
-
-      /* We need to confirm that current_task has been initialized. */
-
-      while (!current_task(this_cpu()));
-
-      /* Init idle task to percpu reg */
-
-      up_update_task(current_task(cpu));
     }
 
   /* Enable the data cache, set the SMP mode with ACTLR.SMP=1.
@@ -124,14 +212,16 @@ void arm_enable_smp(int cpu)
    *   FW  - Cache and TLB maintenance broadcast.
    */
 
-  regval  = CP15_GET(ACTLR);
+  regval  = arm_get_actlr();
   regval |= ACTLR_SMP;
 #ifdef CONFIG_ARCH_CORTEXA9
   regval |= ACTLR_FW;
 #endif
-  CP15_SET(ACTLR, regval);
+  arm_set_actlr(regval);
 
-  regval  = CP15_GET(SCTLR);
-  regval |= SCTLR_C | SCTLR_I | SCTLR_M;
-  CP15_SET(SCTLR, regval);
+  regval  = arm_get_sctlr();
+  regval |= SCTLR_C;
+  arm_set_sctlr(regval);
 }
+
+#endif

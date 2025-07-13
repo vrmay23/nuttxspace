@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/task/task_spawnparms.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,17 +26,25 @@
 
 #include <fcntl.h>
 #include <spawn.h>
-#include <assert.h>
 #include <debug.h>
-#include <errno.h>
 
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/signal.h>
 #include <nuttx/spawn.h>
 #include <nuttx/fs/fs.h>
 
 #include "task/spawn.h"
 #include "task/task.h"
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+sem_t g_spawn_parmsem = SEM_INITIALIZER(1);
+#ifndef CONFIG_SCHED_WAITPID
+sem_t g_spawn_execsem = SEM_INITIALIZER(0);
+#endif
+struct spawn_parms_s g_spawn_parms;
 
 /****************************************************************************
  * Private Functions
@@ -60,57 +66,72 @@
  *
  ****************************************************************************/
 
-static inline void
-nxspawn_close(FAR struct tcb_s *tcb,
-              FAR struct spawn_close_file_action_s *action)
+static inline int nxspawn_close(FAR struct spawn_close_file_action_s *action)
 {
-  /* The return value from nx_close() is ignored */
+  /* The return value from close() is ignored */
 
   sinfo("Closing fd=%d\n", action->fd);
 
-  fdlist_close(nxsched_get_fdlist_from_tcb(tcb), action->fd);
+  close(action->fd);
+  return OK;
 }
 
-static inline int nxspawn_dup2(FAR struct tcb_s *tcb,
-                               FAR struct spawn_dup2_file_action_s *action)
+static inline int nxspawn_dup2(FAR struct spawn_dup2_file_action_s *action)
 {
+  int ret;
+
   /* Perform the dup */
 
   sinfo("Dup'ing %d->%d\n", action->fd1, action->fd2);
 
-  return fdlist_dup2(nxsched_get_fdlist_from_tcb(tcb),
-                     action->fd1, action->fd2);
+  ret = dup2(action->fd1, action->fd2);
+  if (ret < 0)
+    {
+      int errcode = get_errno();
+
+      serr("ERROR: dup2 failed: %d\n", errcode);
+      return -errcode;
+    }
+
+  return OK;
 }
 
-static inline int nxspawn_open(FAR struct tcb_s *tcb,
-                               FAR struct spawn_open_file_action_s *action)
+static inline int nxspawn_open(FAR struct spawn_open_file_action_s *action)
 {
-  FAR struct fdlist *list;
-  int ret = OK;
   int fd;
+  int ret = OK;
 
   /* Open the file */
 
   sinfo("Open'ing path=%s oflags=%04x mode=%04x\n",
         action->path, action->oflags, action->mode);
 
-  list = nxsched_get_fdlist_from_tcb(tcb);
-  fdlist_close(list, action->fd);
-
-  fd = fdlist_open(list, action->path, action->oflags, action->mode);
+  fd = nx_open(action->path, action->oflags, action->mode);
   if (fd < 0)
     {
       ret = fd;
+      serr("ERROR: open failed: %d\n", ret);
     }
+
+  /* Does the return file descriptor happen to match the required file
+   * descriptor number?
+   */
+
   else if (fd != action->fd)
     {
-      ret = fdlist_dup2(list, fd, action->fd);
-      if (ret >= 0)
+      /* No.. dup2 to get the correct file number */
+
+      sinfo("Dup'ing %d->%d\n", fd, action->fd);
+
+      ret = dup2(fd, action->fd);
+      if (ret < 0)
         {
-          ret = OK;
+          ret = get_errno();
+          serr("ERROR: dup2 failed: %d\n", ret);
         }
 
-      fdlist_close(list, fd);
+      sinfo("Closing fd=%d\n", fd);
+      close(fd);
     }
 
   return ret;
@@ -119,6 +140,26 @@ static inline int nxspawn_open(FAR struct tcb_s *tcb,
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: spawn_semtake and spawn_semgive
+ *
+ * Description:
+ *   Give and take semaphores
+ *
+ * Input Parameters:
+ *
+ *   sem - The semaphore to act on.
+ *
+ * Returned Value:
+ *   See nxsem_wait_uninterruptible
+ *
+ ****************************************************************************/
+
+int spawn_semtake(FAR sem_t *sem)
+{
+  return nxsem_wait_uninterruptible(sem);
+}
 
 /****************************************************************************
  * Name: spawn_execattrs
@@ -155,17 +196,6 @@ int spawn_execattrs(pid_t pid, FAR const posix_spawnattr_t *attr)
    * return an error value, then we would also have to stop the task.
    */
 
-  /* Firstly, set the signal mask if requested to do so */
-
-  if ((attr->flags & POSIX_SPAWN_SETSIGMASK) != 0)
-    {
-      FAR struct tcb_s *tcb = nxsched_get_tcb(pid);
-      if (tcb)
-        {
-          tcb->sigprocmask = attr->sigmask;
-        }
-    }
-
   /* If we are only setting the priority, then call sched_setparm()
    * to set the priority of the of the new task.
    */
@@ -177,7 +207,7 @@ int spawn_execattrs(pid_t pid, FAR const posix_spawnattr_t *attr)
        * modified.
        */
 
-      ret = nxsched_get_param(pid, &param);
+      ret = nxsched_getparam(pid, &param);
       if (ret < 0)
         {
           return ret;
@@ -189,7 +219,7 @@ int spawn_execattrs(pid_t pid, FAR const posix_spawnattr_t *attr)
       param.sched_priority = attr->priority;
 
       /* If we are setting *both* the priority and the scheduler,
-       * then we will call nxsched_set_scheduler() below.
+       * then we will call nxsched_setscheduler() below.
        */
 
       if ((attr->flags & POSIX_SPAWN_SETSCHEDULER) == 0)
@@ -197,7 +227,7 @@ int spawn_execattrs(pid_t pid, FAR const posix_spawnattr_t *attr)
           sinfo("Setting priority=%d for pid=%d\n",
                 param.sched_priority, pid);
 
-          ret = nxsched_set_param(pid, &param);
+          ret = nxsched_setparam(pid, &param);
           if (ret < 0)
             {
               return ret;
@@ -207,12 +237,12 @@ int spawn_execattrs(pid_t pid, FAR const posix_spawnattr_t *attr)
 
   /* If we are only changing the scheduling policy, then reset
    * the priority to the default value (the same as this thread) in
-   * preparation for the nxsched_set_scheduler() call below.
+   * preparation for the nxsched_setscheduler() call below.
    */
 
   else if ((attr->flags & POSIX_SPAWN_SETSCHEDULER) != 0)
     {
-      ret = nxsched_get_param(0, &param);
+      ret = nxsched_getparam(0, &param);
       if (ret < 0)
         {
           return ret;
@@ -238,140 +268,78 @@ int spawn_execattrs(pid_t pid, FAR const posix_spawnattr_t *attr)
       param.sched_ss_init_budget.tv_sec  = attr->budget.tv_sec;
       param.sched_ss_init_budget.tv_nsec = attr->budget.tv_nsec;
 #endif
-      nxsched_set_scheduler(pid, attr->policy, &param);
+      nxsched_setscheduler(pid, attr->policy, &param);
     }
 
   return OK;
 }
 
 /****************************************************************************
- * Name: spawn_file_actions
+ * Name: spawn_proxyattrs
  *
  * Description:
- *   Perform Spawn file object that specifies file-related actions
+ *   Set attributes of the proxy task before it has started the new child
+ *   task.
  *
  * Input Parameters:
  *
- *   actions - The spawn file actions
+ *   pid - The pid of the new task.
+ *   attr - The attributes to use
+ *   file_actions - The attributes to use
  *
  * Returned Value:
  *   0 (OK) on success; A negated errno value is returned on failure.
  *
  ****************************************************************************/
 
-int spawn_file_actions(FAR struct tcb_s *tcb,
-                       FAR const posix_spawn_file_actions_t *actions)
+int spawn_proxyattrs(FAR const posix_spawnattr_t *attr,
+                     FAR const posix_spawn_file_actions_t *file_actions)
 {
   FAR struct spawn_general_file_action_s *entry;
   int ret = OK;
 
-  /* Execute each file action */
+  /* Check if we need to change the signal mask */
 
-  for (entry = (FAR struct spawn_general_file_action_s *)actions;
-       entry && ret >= 0;
-       entry = entry->flink)
+  if (attr != NULL && (attr->flags & POSIX_SPAWN_SETSIGMASK) != 0)
     {
-      switch (entry->action)
+      nxsig_procmask(SIG_SETMASK, &attr->sigmask, NULL);
+    }
+
+  /* Were we also requested to perform file actions? */
+
+  if (file_actions != NULL)
+    {
+      /* Yes.. Execute each file action */
+
+      for (entry = (FAR struct spawn_general_file_action_s *)file_actions;
+           entry && ret == OK;
+           entry = entry->flink)
         {
-          case SPAWN_FILE_ACTION_CLOSE:
+          switch (entry->action)
+            {
+              case SPAWN_FILE_ACTION_CLOSE:
+                ret = nxspawn_close((FAR struct spawn_close_file_action_s *)
+                                    entry);
+                break;
 
-            /* Ignore return value of nxspawn_close(),
-             * Closing an invalid file descriptor will
-             * not cause the action fail.
-             */
+              case SPAWN_FILE_ACTION_DUP2:
+                ret = nxspawn_dup2((FAR struct spawn_dup2_file_action_s *)
+                                   entry);
+                break;
 
-            nxspawn_close(tcb, (FAR void *)entry);
-            break;
+              case SPAWN_FILE_ACTION_OPEN:
+                ret = nxspawn_open((FAR struct spawn_open_file_action_s *)
+                                   entry);
+                break;
 
-          case SPAWN_FILE_ACTION_DUP2:
-            ret = nxspawn_dup2(tcb, (FAR void *)entry);
-            break;
-
-          case SPAWN_FILE_ACTION_OPEN:
-            ret = nxspawn_open(tcb, (FAR void *)entry);
-            break;
-
-          case SPAWN_FILE_ACTION_NONE:
-          default:
-            serr("ERROR: Unknown action: %d\n", entry->action);
-            ret = -EINVAL;
-            break;
+              case SPAWN_FILE_ACTION_NONE:
+              default:
+                serr("ERROR: Unknown action: %d\n", entry->action);
+                ret = EINVAL;
+                break;
+            }
         }
     }
 
   return ret;
-}
-
-/****************************************************************************
- * Name: spawn_file_is_duplicateable
- *
- * Description:
- *   Check the input file descriptor is duplicateable from spawn actions
- *
- * Input Parameters:
- *
- *   actions - The spawn file actions
- *   fd      - file descriptor
- *
- * Returned Value:
- *   True is returned if file descriptor is duplicate able
- *
- ****************************************************************************/
-
-bool
-spawn_file_is_duplicateable(FAR const posix_spawn_file_actions_t *actions,
-                            int fd, bool cloexec)
-{
-  FAR struct spawn_general_file_action_s *entry;
-  FAR struct spawn_close_file_action_s *close;
-  FAR struct spawn_open_file_action_s *open;
-  FAR struct spawn_dup2_file_action_s *dup2;
-
-  /* check each file action */
-
-  for (entry = (FAR struct spawn_general_file_action_s *)actions;
-       entry != NULL;
-       entry = entry->flink)
-    {
-      switch (entry->action)
-        {
-          case SPAWN_FILE_ACTION_CLOSE:
-            close = (FAR struct spawn_close_file_action_s *)entry;
-            if (close->fd == fd)
-              {
-                return false;
-              }
-            break;
-
-          case SPAWN_FILE_ACTION_DUP2:
-            dup2 = (FAR struct spawn_dup2_file_action_s *)entry;
-            if (dup2->fd1 == fd)
-              {
-                return true;
-              }
-            else if (dup2->fd2 == fd)
-              {
-                return false;
-              }
-            break;
-
-          case SPAWN_FILE_ACTION_OPEN:
-            open = (FAR struct spawn_open_file_action_s *)entry;
-            if (open->fd == fd)
-              {
-                return false;
-              }
-            break;
-
-          default:
-            break;
-        }
-    }
-
-  if (cloexec)
-    {
-      return false;
-    }
-
-  return true;
 }

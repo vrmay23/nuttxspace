@@ -1,27 +1,42 @@
 /****************************************************************************
- * apps/graphics/pdcurs34/pdcurses/pdc_panel.c
+ * apps/graphics/pdcurses/pdc_panel.c
+ * Public Domain Curses
+ * RCSID("$Id: panel.c,v 1.8 2008/07/14 12:35:23 wmcbrine Exp $")
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Original Author: Warren Tucker <wht@n4hgf.mt-park.ga.us>
+ *   Adapted by: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Adapted from the original public domain pdcurses by Gregory Nutt and
+ * released as part of NuttX under the 3-clause BSD license:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- ****************************************************************************/
-
-/****************************************************************************
- * Adapted from the original public domain pdcurses by Gregory Nutt
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
  ****************************************************************************/
 
 /* Name: panel
@@ -151,12 +166,9 @@
  ****************************************************************************/
 
 #ifndef CONFIG_PDCURSES_MULTITHREAD
-PANEL *_bottom_panel = (PANEL *)0;
-PANEL *_top_panel = (PANEL *)0;
-PANEL _stdscr_pseudo_panel =
-{
-  (WINDOW *)0
-};
+PANEL *_bottom_panel = (PANEL *) 0;
+PANEL *_top_panel = (PANEL *) 0;
+PANEL _stdscr_pseudo_panel = { (WINDOW *) 0 };
 #else
 typedef struct panel_ctx_s
 {
@@ -169,7 +181,7 @@ typedef struct panel_ctx_s
 #ifdef CONFIG_PDCURSES_MULTITHREAD
 void *pdc_alloc_panel_ctx()
 {
-  return zalloc(sizeof(struct panel_ctx_s));
+  return (void *) zalloc(sizeof(struct panel_ctx_s));
 }
 #endif
 
@@ -182,15 +194,14 @@ static void dpanel(char *text, PANEL *pan)
 {
   PDC_LOG(("%s id=%s b=%s a=%s y=%d x=%d", text, pan->user,
            pan->below ? pan->below->user : "--",
-           pan->above ? pan->above->user : "--",
-           pan->wstarty, pan->wstartx));
+           pan->above ? pan->above->user : "--", pan->wstarty, pan->wstartx));
 }
 
 static void dstack(char *fmt, int num, PANEL *pan)
 {
   char s80[80];
 
-  snprintf(s80, sizeof(s80), fmt, num, pan);
+  sprintf(s80, fmt, num, pan);
   PDC_LOG(("%s b=%s t=%s", s80, _bottom_panel ? _bottom_panel->user : "--",
            _top_panel ? _top_panel->user : "--"));
 
@@ -226,7 +237,7 @@ static void dtouchline(PANEL *pan, int start, int count)
 {
   char s80[80];
 
-  snprintf(s80, sizeof(s80), "dtouchline s=%d c=%d", start, count);
+  sprintf(s80, "dtouchline s=%d c=%d", start, count);
   dpanel(s80, pan);
   touchline(pan->win, start, count);
 }
@@ -692,8 +703,7 @@ WINDOW *panel_window(const PANEL *pan)
 
 int replace_panel(PANEL *pan, WINDOW *win)
 {
-  int maxy;
-  int maxx;
+  int maxy, maxx;
 
   if (!pan)
     {

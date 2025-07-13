@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/armv7-a/pgalloc.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -43,10 +56,6 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef CONFIG_ARCH_PGPOOL_MAPPING
-#  error "ARMv7-A needs CONFIG_ARCH_PGPOOL_MAPPING"
-#endif
-
 /****************************************************************************
  * Public Data
  ****************************************************************************/
@@ -54,6 +63,39 @@
 /****************************************************************************
  * Inline Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: arm_pgmap
+ *
+ * Description:
+ *   Map one page to a temporary, scratch virtual memory address
+ *
+ ****************************************************************************/
+
+#if !defined(CONFIG_ARCH_PGPOOL_MAPPING) && defined(CONFIG_ARCH_USE_MMU)
+static inline uintptr_t arm_tmpmap(uintptr_t paddr, FAR uint32_t *l1save)
+{
+  *l1save = mmu_l1_getentry(ARCH_SCRATCH_VBASE);
+  mmu_l1_setentry(paddr & ~SECTION_MASK, ARCH_SCRATCH_VBASE, MMU_MEMFLAGS);
+  return ((uintptr_t)ARCH_SCRATCH_VBASE | (paddr & SECTION_MASK));
+}
+#endif
+
+/****************************************************************************
+ * Name: arm_pgrestore
+ *
+ * Description:
+ *  Restore any previous L1 page table mapping that was in place when
+ *  arm_tmpmap() was called
+ *
+ ****************************************************************************/
+
+#if !defined(CONFIG_ARCH_PGPOOL_MAPPING) && defined(CONFIG_ARCH_USE_MMU)
+static inline void arm_tmprestore(uint32_t l1save)
+{
+  mmu_l1_restore(ARCH_SCRATCH_VBASE, l1save);
+}
+#endif
 
 /****************************************************************************
  * Name: arm_pgvaddr
@@ -65,6 +107,7 @@
  *
  ****************************************************************************/
 
+#ifdef CONFIG_ARCH_PGPOOL_MAPPING
 static inline uintptr_t arm_pgvaddr(uintptr_t paddr)
 {
   DEBUGASSERT(paddr >= CONFIG_ARCH_PGPOOL_PBASE &&
@@ -72,6 +115,7 @@ static inline uintptr_t arm_pgvaddr(uintptr_t paddr)
 
   return paddr - CONFIG_ARCH_PGPOOL_PBASE + CONFIG_ARCH_PGPOOL_VBASE;
 }
+#endif
 
 /****************************************************************************
  * Name: arm_uservaddr
@@ -94,7 +138,7 @@ static inline bool arm_uservaddr(uintptr_t vaddr)
 #ifdef CONFIG_ARCH_STACK_DYNAMIC
        || (vaddr >= CONFIG_ARCH_STACK_VBASE && vaddr < ARCH_STACK_VEND)
 #endif
-#ifdef CONFIG_ARCH_VMA_MAPPING
+#ifdef CONFIG_MM_SHM
        || (vaddr >= CONFIG_ARCH_SHM_VBASE && vaddr < ARCH_SHM_VEND)
 #endif
       );
@@ -109,7 +153,7 @@ static inline bool arm_uservaddr(uintptr_t vaddr)
  *
  ****************************************************************************/
 
-static inline void set_l2_entry(uintptr_t *l2table, uintptr_t paddr,
+static inline void set_l2_entry(FAR uint32_t *l2table, uintptr_t paddr,
                                 uintptr_t vaddr, uint32_t mmuflags)
 {
   uint32_t index;
@@ -134,7 +178,7 @@ static inline void set_l2_entry(uintptr_t *l2table, uintptr_t paddr,
  *
  ****************************************************************************/
 
-static inline void clr_l2_entry(uintptr_t *l2table, uintptr_t vaddr)
+static inline void clr_l2_entry(FAR uint32_t *l2table, uintptr_t vaddr)
 {
   uint32_t index;
 
@@ -159,7 +203,7 @@ static inline void clr_l2_entry(uintptr_t *l2table, uintptr_t vaddr)
  *
  ****************************************************************************/
 
-static inline uintptr_t get_l2_entry(uintptr_t *l2table, uintptr_t vaddr)
+static inline uintptr_t get_l2_entry(FAR uint32_t *l2table, uintptr_t vaddr)
 {
   uint32_t index;
 
@@ -176,8 +220,32 @@ static inline uintptr_t get_l2_entry(uintptr_t *l2table, uintptr_t vaddr)
 }
 
 /****************************************************************************
- * Public Functions Prototypes
+ * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: arm_physpgaddr
+ *
+ * Description:
+ *   Check if the virtual address lies in the user data area and, if so
+ *   get the mapping to the physical address in the page pool.
+ *
+ ****************************************************************************/
+
+uintptr_t arm_physpgaddr(uintptr_t vaddr);
+
+/****************************************************************************
+ * Name: arm_virtpgaddr
+ *
+ * Description:
+ *   Check if the physical address lies in the page pool and, if so
+ *   get the mapping to the virtual address in the user data area.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ARCH_PGPOOL_MAPPING
+uintptr_t arm_virtpgaddr(uintptr_t paddr);
+#endif
 
 #endif /* CONFIG_MM_PGALLOC */
 #endif /* __ARCH_ARM_SRC_ARMV7_A_PGALLOC_H */

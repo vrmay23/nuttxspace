@@ -6,8 +6,7 @@
 config NETUTILS_DHCPC
 	bool "DHCP client"
 	default n
-	depends on NET_UDP
-	select NET_BINDTODEVICE if !NET_UDP_NO_STACK
+	depends on NET_UDP && NET_BROADCAST && NET_IPv4
 	---help---
 		Enable support for the DHCP client.
 
@@ -17,9 +16,9 @@ config NETUTILS_DHCPC_HOST_NAME
 	string "DHCP client host name"
 	default "nuttx"
 
-config NETUTILS_DHCPC_RECV_TIMEOUT_MS
-	int "Number of receive timeout in millisecond"
-	default 3000
+config NETUTILS_DHCPC_RECV_TIMEOUT
+	int "Number of receive timeout in second"
+	default 3
 	---help---
 		This is the timeout value when dhcp client receives response
 
@@ -29,18 +28,5 @@ config NETUTILS_DHCPC_RETRIES
 	---help---
 		This setting determines how many times resolver retries request
 		until failing.
-
-config NETUTILS_DHCPC_BOOTP_FLAGS
-	hex "Flags of Bootstrap"
-	default 0x0000 if !NET_IPFORWARD
-	default 0x8000 if NET_IPFORWARD
-	---help---
-		This setting to set the BOOTP broadcast flags.
-		Reference RFC1542: Clarifications and Extensions for the
-		Bootstrap Protocol.
-
-		Note: We're not always able to receive unicast traffic before
-		being fully configured, e.g. with forward enabled. Then we need
-		to enable the broadcast flag under these situations.
 
 endif

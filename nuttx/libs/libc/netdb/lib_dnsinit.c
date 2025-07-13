@@ -1,22 +1,36 @@
 /****************************************************************************
  * libs/libc/netdb/lib_dnsinit.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2009, 2012, 2014-2017 Gregory Nutt.
+ *   All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -32,69 +46,137 @@
 
 #include <arpa/inet.h>
 
-#include <nuttx/sched.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
+
 #include "netdb/lib_dns.h"
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-/* Protects DNS cache, nameserver list and notify list. */
+/* Protects g_seqno, DNS cache and notify */
 
-static rmutex_t g_dns_lock = NXRMUTEX_INITIALIZER;
+static sem_t g_dns_sem = SEM_INITIALIZER(1);
 
 /****************************************************************************
- * Public Functions
+ * Public Data
+ ****************************************************************************/
+
+#if defined(CONFIG_NETDB_DNSSERVER_IPv6) && !defined(CONFIG_NETDB_RESOLVCONF)
+
+/* This is the default IPv6 DNS server address */
+
+static const uint16_t g_ipv6_hostaddr[8] =
+{
+  HTONS(CONFIG_NETDB_DNSSERVER_IPv6ADDR_1),
+  HTONS(CONFIG_NETDB_DNSSERVER_IPv6ADDR_2),
+  HTONS(CONFIG_NETDB_DNSSERVER_IPv6ADDR_3),
+  HTONS(CONFIG_NETDB_DNSSERVER_IPv6ADDR_4),
+  HTONS(CONFIG_NETDB_DNSSERVER_IPv6ADDR_5),
+  HTONS(CONFIG_NETDB_DNSSERVER_IPv6ADDR_6),
+  HTONS(CONFIG_NETDB_DNSSERVER_IPv6ADDR_7),
+  HTONS(CONFIG_NETDB_DNSSERVER_IPv6ADDR_8)
+};
+#endif
+
+/****************************************************************************
+ * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: dns_lock
+ * Name: dns_initialize
  *
  * Description:
- *   Take the DNS lock, ignoring errors due to the receipt of signals.
+ *   Make sure that the DNS client has been properly initialized for use.
  *
  ****************************************************************************/
 
-void dns_lock(void)
+bool dns_initialize(void)
 {
-  nxrmutex_lock(&g_dns_lock);
+#ifndef CONFIG_NETDB_RESOLVCONF
+  /* Has the DNS server IP address been assigned? */
+
+  if (!g_dns_address)
+    {
+#if defined(CONFIG_NETDB_DNSSERVER_IPv4)
+      struct sockaddr_in addr4;
+      int ret;
+
+      /* No, configure the default IPv4 DNS server address */
+
+      addr4.sin_family      = AF_INET;
+      addr4.sin_port        = HTONS(DNS_DEFAULT_PORT);
+      addr4.sin_addr.s_addr = HTONL(CONFIG_NETDB_DNSSERVER_IPv4ADDR);
+
+      ret = dns_add_nameserver((FAR struct sockaddr *)&addr4,
+                               sizeof(struct sockaddr_in));
+      if (ret < 0)
+        {
+          return false;
+        }
+
+#elif defined(CONFIG_NETDB_DNSSERVER_IPv6)
+      struct sockaddr_in6 addr6;
+      int ret;
+
+      /* No, configure the default IPv6 DNS server address */
+
+      addr6.sin6_family = AF_INET6;
+      addr6.sin6_port   = HTONS(DNS_DEFAULT_PORT);
+      memcpy(addr6.sin6_addr.s6_addr, g_ipv6_hostaddr, 16);
+
+      ret = dns_add_nameserver((FAR struct sockaddr *)&addr6,
+                               sizeof(struct sockaddr_in6));
+      if (ret < 0)
+        {
+          return false;
+        }
+
+#else
+      /* Then we are not ready to perform DNS queries */
+
+      return false;
+#endif
+    }
+#endif /* !CONFIG_NETDB_RESOLVCONF */
+
+  return true;
 }
 
 /****************************************************************************
- * Name: dns_unlock
+ * Name: dns_semtake
  *
  * Description:
- *   Release the DNS lock
+ *   Take the DNS semaphore, ignoring errors do to the receipt of signals.
  *
  ****************************************************************************/
 
-void dns_unlock(void)
+void dns_semtake(void)
 {
-  nxrmutex_unlock(&g_dns_lock);
+  int errcode = 0;
+  int ret;
+
+  do
+    {
+      ret = _SEM_WAIT(&g_dns_sem);
+      if (ret < 0)
+        {
+          errcode = _SEM_ERRNO(ret);
+          DEBUGASSERT(errcode == EINTR || errcode == ECANCELED);
+        }
+    }
+  while (ret < 0 && errcode == EINTR);
 }
 
 /****************************************************************************
- * Name: dns_breaklock
+ * Name: dns_semgive
  *
  * Description:
- *   Break the DNS lock
- ****************************************************************************/
-
-void dns_breaklock(FAR unsigned int *count)
-{
-  nxrmutex_breaklock(&g_dns_lock, count);
-}
-
-/****************************************************************************
- * Name: dns_restorelock
- *
- * Description:
- *   Restore the DNS lock
+ *   Release the DNS semaphore
  *
  ****************************************************************************/
 
-void dns_restorelock(unsigned int count)
+void dns_semgive(void)
 {
-  nxrmutex_restorelock(&g_dns_lock, count);
+  DEBUGVERIFY(_SEM_POST(&g_dns_sem));
 }

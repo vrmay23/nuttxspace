@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/stm32/nucleo-f429zi/src/stm32_dma_alloc.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * boards/arm/stm32f4/nucleo-f429zi/stc/stm32_dma_alloc.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -62,7 +60,7 @@ static GRAN_HANDLE dma_allocator;
  */
 
 static uint8_t g_dma_heap[BOARD_DMA_ALLOC_POOL_SIZE]
-                aligned_data(64);
+                __attribute__((aligned(64)));
 
 /****************************************************************************
  * Public Functions
@@ -99,7 +97,7 @@ void *fat_dma_alloc(size_t size)
   return gran_alloc(dma_allocator, size);
 }
 
-void fat_dma_free(void *memory, size_t size)
+void fat_dma_free(FAR void *memory, size_t size)
 {
   gran_free(dma_allocator, memory, size);
 }

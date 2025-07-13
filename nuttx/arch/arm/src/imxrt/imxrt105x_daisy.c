@@ -1,58 +1,43 @@
 /****************************************************************************
  * arch/arm/src/imxrt/imxrt105x_daisy.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: David Sidrane <david_s5@nscdg.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
 /* Based on chip selection this file is included in imxrt_daisy.c */
 
 /****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define DAISY_INDEX_INVALID     255
-#define DAISY_SEL_INVALID       255
-#define ALT0                    0
-#define ALT1                    1
-#define ALT2                    2
-#define ALT3                    3
-#define ALT4                    4
-#define ALT5                    5
-#define ALT6                    6
-#define ALT7                    7
-#define ALT8                    8
-#define ALT9                    9
-
-/****************************************************************************
  * Private Data
  ****************************************************************************/
-
-struct imxrt_daisy_entry_t
-{
-  uint8_t   index;
-  uint8_t   sel;
-};
-
-struct imxrt_daisy_t
-{
-  struct imxrt_daisy_entry_t alts[10];
-};
 
 static const struct imxrt_daisy_t g_daisy_select[] =
 {
@@ -67,8 +52,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:0 Alt:1  GPIO EMC 00 FLEXPWM4 PWMA00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA0_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:0 Alt:2  GPIO EMC 00 LPSPI2 SCK */
@@ -129,8 +113,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:1 Alt:2  GPIO EMC 01 LPSPI2 PCS0 */
 
-      [ALT2].index =
-                IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI2_PCS0_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI2_PCS0_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:1 Alt:3  GPIO EMC 01 XBAR1 IN03 */
@@ -181,8 +164,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:2 Alt:1  GPIO EMC 02 FLEXPWM4 PWMA01 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA1_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:2 Alt:2  GPIO EMC 02 LPSPI2 SDO */
@@ -294,8 +276,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:4 Alt:1  GPIO EMC 04 FLEXPWM4 PWMA02 */
 
-      [ALT1].index =
-                IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA2_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:4 Alt:2 No input selection */
@@ -356,8 +337,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:5 Alt:2  GPIO EMC 05 SAI2 TX SYNC */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_TX_SYNC_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_TX_SYNC_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:5 Alt:3  GPIO EMC 05 XBAR1 INOUT07 */
@@ -408,14 +388,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:6 Alt:1  GPIO EMC 06 FLEXPWM2 PWMA00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA0_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:6 Alt:2  GPIO EMC 06 SAI2 TX BCLK */
 
-      [ALT2].index =
-                   IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_TX_BCLK_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_TX_BCLK_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:6 Alt:3  GPIO EMC 06 XBAR1 INOUT08 */
@@ -466,8 +444,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:7 Alt:1  GPIO EMC 07 FLEXPWM2 PWMB00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB0_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:7 Alt:2  GPIO EMC 07 SAI2 MCLK */
@@ -523,14 +500,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:8 Alt:1  GPIO EMC 08 FLEXPWM2 PWMA01 */
 
-      [ALT1].index =
-                IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA1_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:8 Alt:2  GPIO EMC 08 SAI2 RX DATA */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_DATA0_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_DATA0_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:8 Alt:3  GPIO EMC 08 XBAR1 INOUT17 */
@@ -581,14 +556,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:9 Alt:1  GPIO EMC 09 FLEXPWM2 PWMB01 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB1_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:9 Alt:2  GPIO EMC 09 SAI2 RX SYNC */
 
-      [ALT2].index =
-                  IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_SYNC_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_SYNC_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:9 Alt:3 No input selection */
@@ -639,20 +612,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:10 Alt:1  GPIO EMC 10 FLEXPWM2 PWMA02 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA2_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:10 Alt:2  GPIO EMC 10 SAI2 RX BCLK */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_BCLK_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_BCLK_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:10 Alt:3  GPIO EMC 10 FLEXCAN2 RX */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN2_RX_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN2_RX_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:10 Alt:4 No input selection */
@@ -698,8 +668,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:11 Alt:1  GPIO EMC 11 FLEXPWM2 PWMB02 */
 
-      [ALT1].index =
-                IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB2_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:11 Alt:2  GPIO EMC 11 LPI2C4 SDA */
@@ -770,8 +739,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:12 Alt:4  GPIO EMC 12 FLEXPWM1 PWMA03 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:12 Alt:5 No input selection */
@@ -827,8 +795,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:13 Alt:4  GPIO EMC 13 FLEXPWM1 PWMB03 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:13 Alt:5 No input selection */
@@ -925,14 +892,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:15 Alt:1  GPIO EMC 15 XBAR1 IN20 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN20_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN20_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:15 Alt:2  GPIO EMC 15 LPUART3 CTS B */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_CTS_B_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_CTS_B_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:15 Alt:3 No input selection */
@@ -942,8 +907,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:15 Alt:4  GPIO EMC 15 QTIMER3 TIMER0 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER0_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER0_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:15 Alt:5 No input selection */
@@ -984,8 +948,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:16 Alt:1  GPIO EMC 16 XBAR1 IN21 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN21_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN21_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:16 Alt:2 No input selection */
@@ -995,14 +958,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:16 Alt:3  GPIO EMC 16 SPDIF IN */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SPDIF_IN_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SPDIF_IN_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:16 Alt:4  GPIO EMC 16 QTIMER3 TIMER1 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER1_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER1_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:16 Alt:5 No input selection */
@@ -1043,8 +1004,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:17 Alt:1  GPIO EMC 17 FLEXPWM4 PWMA03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA3_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:17 Alt:2 No input selection */
@@ -1059,8 +1019,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:17 Alt:4  GPIO EMC 17 QTIMER3 TIMER2 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER2_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER2_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:17 Alt:5 No input selection */
@@ -1111,14 +1070,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:18 Alt:3  GPIO EMC 18 FLEXCAN1 RX */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN1_RX_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN1_RX_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:18 Alt:4  GPIO EMC 18 QTIMER3 TIMER3 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER3_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER3_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:18 Alt:5 No input selection */
@@ -1159,26 +1116,22 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:19 Alt:1  GPIO EMC 19 FLEXPWM2 PWMA03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:19 Alt:2  GPIO EMC 19 LPUART4 TX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART4_TX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART4_TX_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:19 Alt:3  GPIO EMC 19 ENET RDATA01 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET1_RXDATA_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET1_RXDATA_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:19 Alt:4  GPIO EMC 19 QTIMER2 TIMER0 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER0_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER0_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:19 Alt:5 No input selection */
@@ -1219,8 +1172,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:20 Alt:1  GPIO EMC 20 FLEXPWM2 PWMB03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB3_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:20 Alt:2  GPIO EMC 20 LPUART4 RX */
@@ -1230,14 +1182,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:20 Alt:3  GPIO EMC 20 ENET RDATA00 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_RXDATA_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_RXDATA_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:20 Alt:4  GPIO EMC 20 QTIMER2 TIMER1 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER1_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER1_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:20 Alt:5 No input selection */
@@ -1293,8 +1243,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:21 Alt:4  GPIO EMC 21 QTIMER2 TIMER2 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER2_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER2_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:21 Alt:5 No input selection */
@@ -1350,8 +1299,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:22 Alt:4  GPIO EMC 22 QTIMER2 TIMER3 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER3_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER3_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:22 Alt:5 No input selection */
@@ -1392,8 +1340,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:23 Alt:1  GPIO EMC 23 FLEXPWM1 PWMA00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA0_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:23 Alt:2  GPIO EMC 23 LPUART5 TX */
@@ -1449,8 +1396,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:24 Alt:1  GPIO EMC 24 FLEXPWM1 PWMB00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB0_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:24 Alt:2  GPIO EMC 24 LPUART5 RX */
@@ -1506,8 +1452,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:25 Alt:1  GPIO EMC 25 FLEXPWM1 PWMA01 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA1_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:25 Alt:2  GPIO EMC 25 LPUART6 TX */
@@ -1522,8 +1467,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:25 Alt:4  GPIO EMC 25 ENET REF CLK */
 
-      [ALT4].index =
-             IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_IPG_CLK_RMII_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_IPG_CLK_RMII_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:25 Alt:5 No input selection */
@@ -1564,8 +1508,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:26 Alt:1  GPIO EMC 26 FLEXPWM1 PWMB01 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB1_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:26 Alt:2  GPIO EMC 26 LPUART6 RX */
@@ -1575,8 +1518,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:26 Alt:3  GPIO EMC 26 ENET RX ER */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_RXERR_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_RXERR_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:26 Alt:4 No input selection */
@@ -1622,8 +1564,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:27 Alt:1  GPIO EMC 27 FLEXPWM1 PWMA02 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA2_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:27 Alt:2 No input selection */
@@ -1679,8 +1620,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:28 Alt:1  GPIO EMC 28 FLEXPWM1 PWMB02 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB2_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:28 Alt:2 No input selection */
@@ -1802,8 +1742,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:30 Alt:3  GPIO EMC 30 LPSPI1 PCS0 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_PCS0_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_PCS0_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:30 Alt:4 No input selection */
@@ -1910,14 +1849,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:32 Alt:2  GPIO EMC 32 LPUART7 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART7_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART7_RX_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:32 Alt:3  GPIO EMC 32 CCM PMIC RDY */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
       [ALT3].sel   = 4,
 
       /* Index:32 Alt:4 No input selection */
@@ -2100,8 +2037,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:35 Alt:6  GPIO EMC 35 USDHC1 CD B */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_CD_B_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_CD_B_OFFSET),
       [ALT6].sel   = 0,
 
       /* Index:35 Alt:7 No input selection */
@@ -2188,8 +2124,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:37 Alt:1  GPIO EMC 37 XBAR1 IN23 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN23_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN23_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:37 Alt:2 No input selection */
@@ -2214,8 +2149,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:37 Alt:6  GPIO EMC 37 USDHC2 WP */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_WP_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_WP_OFFSET),
       [ALT6].sel   = 0,
 
       /* Index:37 Alt:7 No input selection */
@@ -2246,14 +2180,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:38 Alt:1  GPIO EMC 38 FLEXPWM1 PWMA03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
       [ALT1].sel   = 2,
 
       /* Index:38 Alt:2  GPIO EMC 38 LPUART8 TX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_TX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_TX_OFFSET),
       [ALT2].sel   = 2,
 
       /* Index:38 Alt:3 No input selection */
@@ -2304,14 +2236,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:39 Alt:1  GPIO EMC 39 FLEXPWM1 PWMB03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
       [ALT1].sel   = 2,
 
       /* Index:39 Alt:2  GPIO EMC 39 LPUART8 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_RX_OFFSET),
       [ALT2].sel   = 2,
 
       /* Index:39 Alt:3 No input selection */
@@ -2331,8 +2261,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:39 Alt:6  GPIO EMC 39 USDHC2 CD B */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CD_B_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CD_B_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:39 Alt:7 No input selection */
@@ -2373,8 +2302,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:40 Alt:3  GPIO EMC 40 USB OTG2 OC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USB_OTG2_OC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USB_OTG2_OC_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:40 Alt:4 No input selection */
@@ -2471,14 +2399,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:42 Alt:0  GPIO AD B0 00 FLEXPWM2 PWMA03 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
       [ALT0].sel   = 2,
 
       /* Index:42 Alt:1  GPIO AD B0 00 XBAR1 INOUT14 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN14_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN14_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:42 Alt:2 No input selection */
@@ -2488,8 +2414,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:42 Alt:3  GPIO AD B0 00 USB OTG2 ID */
 
-      [ALT3].index =
-             IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ANATOP_USB_OTG2_ID_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ANATOP_USB_OTG2_ID_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:42 Alt:4 No input selection */
@@ -2509,8 +2434,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:42 Alt:7  GPIO AD B0 00 LPSPI3 SCK */
 
-      [ALT7].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SCK_OFFSET),
+      [ALT7].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SCK_OFFSET),
       [ALT7].sel   = 0,
 
       /* Index:42 Alt:8 No input selection */
@@ -2531,14 +2455,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:43 Alt:0  GPIO AD B0 01 FLEXPWM2 PWMB03 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB3_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB3_OFFSET),
       [ALT0].sel   = 2,
 
       /* Index:43 Alt:1  GPIO AD B0 01 XBAR1 INOUT15 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN15_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN15_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:43 Alt:2 No input selection */
@@ -2548,8 +2470,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:43 Alt:3  GPIO AD B0 01 USB OTG1 ID */
 
-      [ALT3].index =
-             IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ANATOP_USB_OTG1_ID_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ANATOP_USB_OTG1_ID_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:43 Alt:4 No input selection */
@@ -2569,8 +2490,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:43 Alt:7  GPIO AD B0 01 LPSPI3 SDO */
 
-      [ALT7].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SDO_OFFSET),
+      [ALT7].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SDO_OFFSET),
       [ALT7].sel   = 0,
 
       /* Index:43 Alt:8 No input selection */
@@ -2596,14 +2516,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:44 Alt:1  GPIO AD B0 02 XBAR1 INOUT16 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN16_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN16_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:44 Alt:2  GPIO AD B0 02 LPUART6 TX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART6_TX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART6_TX_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:44 Alt:3 No input selection */
@@ -2628,8 +2546,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:44 Alt:7  GPIO AD B0 02 LPSPI3 SDI */
 
-      [ALT7].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SDI_OFFSET),
+      [ALT7].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SDI_OFFSET),
       [ALT7].sel   = 0,
 
       /* Index:44 Alt:8 No input selection */
@@ -2650,26 +2567,22 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:45 Alt:0  GPIO AD B0 03 FLEXCAN2 RX */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN2_RX_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN2_RX_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:45 Alt:1  GPIO AD B0 03 XBAR1 INOUT17 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN17_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN17_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:45 Alt:2  GPIO AD B0 03 LPUART6 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART6_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART6_RX_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:45 Alt:3  GPIO AD B0 03 USB OTG1 OC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USB_OTG1_OC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USB_OTG1_OC_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:45 Alt:4 No input selection */
@@ -2689,8 +2602,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:45 Alt:7  GPIO AD B0 03 LPSPI3 PCS0 */
 
-      [ALT7].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_PCS0_OFFSET),
+      [ALT7].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_PCS0_OFFSET),
       [ALT7].sel   = 0,
 
       /* Index:45 Alt:8 No input selection */
@@ -2726,14 +2638,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:46 Alt:3  GPIO AD B0 04 SAI2 TX SYNC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_TX_SYNC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_TX_SYNC_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:46 Alt:4  GPIO AD B0 04 CSI DATA09 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA09_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA09_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:46 Alt:5 No input selection */
@@ -2784,14 +2694,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:47 Alt:3  GPIO AD B0 05 SAI2 TX BCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_TX_BCLK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_TX_BCLK_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:47 Alt:4  GPIO AD B0 05 CSI DATA08 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA08_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA08_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:47 Alt:5 No input selection */
@@ -2801,8 +2709,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:47 Alt:6  GPIO AD B0 05 XBAR1 INOUT17 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN17_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN17_OFFSET),
       [ALT6].sel   = 2,
 
       /* Index:47 Alt:7 No input selection */
@@ -2843,14 +2750,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:48 Alt:3  GPIO AD B0 06 SAI2 RX BCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_BCLK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_BCLK_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:48 Alt:4  GPIO AD B0 06 CSI DATA07 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA07_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA07_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:48 Alt:5 No input selection */
@@ -2860,8 +2765,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:48 Alt:6  GPIO AD B0 06 XBAR1 INOUT18 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN18_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN18_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:48 Alt:7 No input selection */
@@ -2902,14 +2806,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:49 Alt:3  GPIO AD B0 07 SAI2 RX SYNC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_SYNC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_SYNC_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:49 Alt:4  GPIO AD B0 07 CSI DATA06 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA06_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA06_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:49 Alt:5 No input selection */
@@ -2919,8 +2821,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:49 Alt:6  GPIO AD B0 07 XBAR1 INOUT19 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN19_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN19_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:49 Alt:7 No input selection */
@@ -2961,14 +2862,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:50 Alt:3  GPIO AD B0 08 SAI2 RX DATA */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_DATA0_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_RX_DATA0_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:50 Alt:4  GPIO AD B0 08 CSI DATA05 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA05_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA05_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:50 Alt:5 No input selection */
@@ -2978,8 +2877,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:50 Alt:6  GPIO AD B0 08 XBAR1 IN20 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN20_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN20_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:50 Alt:7 No input selection */
@@ -3010,8 +2908,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:51 Alt:1  GPIO AD B0 09 FLEXPWM2 PWMA03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
       [ALT1].sel   = 3,
 
       /* Index:51 Alt:2 No input selection */
@@ -3026,8 +2923,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:51 Alt:4  GPIO AD B0 09 CSI DATA04 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA04_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA04_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:51 Alt:5 No input selection */
@@ -3037,8 +2933,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:51 Alt:6  GPIO AD B0 09 XBAR1 IN21 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN21_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN21_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:51 Alt:7 No input selection */
@@ -3069,8 +2964,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:52 Alt:1  GPIO AD B0 10 FLEXPWM1 PWMA03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
       [ALT1].sel   = 3,
 
       /* Index:52 Alt:2 No input selection */
@@ -3080,14 +2974,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:52 Alt:3  GPIO AD B0 10 SAI2 MCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_MCLK2_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI2_MCLK2_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:52 Alt:4  GPIO AD B0 10 CSI DATA03 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA03_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA03_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:52 Alt:5 No input selection */
@@ -3097,8 +2989,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:52 Alt:6  GPIO AD B0 10 XBAR1 IN22 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN22_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN22_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:52 Alt:7 No input selection */
@@ -3129,8 +3020,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:53 Alt:1  GPIO AD B0 11 FLEXPWM1 PWMB03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
       [ALT1].sel   = 3,
 
       /* Index:53 Alt:2 No input selection */
@@ -3145,8 +3035,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:53 Alt:4  GPIO AD B0 11 CSI DATA02 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA02_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA02_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:53 Alt:5 No input selection */
@@ -3156,14 +3045,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:53 Alt:6  GPIO AD B0 11 XBAR1 IN23 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN23_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN23_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:53 Alt:7  GPIO AD B0 11 ENET 1588 EVENT0 IN */
 
-      [ALT7].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_TIMER_OFFSET),
+      [ALT7].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_TIMER_OFFSET),
       [ALT7].sel   = 1,
 
       /* Index:53 Alt:8 No input selection */
@@ -3184,14 +3071,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:54 Alt:0  GPIO AD B0 12 LPI2C4 SCL */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C4_SCL_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C4_SCL_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:54 Alt:1  GPIO AD B0 12 CCM PMIC READY */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:54 Alt:2 No input selection */
@@ -3221,8 +3106,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:54 Alt:7  GPIO AD B0 12 NMI GLUE NMI */
 
-      [ALT7].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_NMI_GLUE_NMI_OFFSET),
+      [ALT7].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_NMI_GLUE_NMI_OFFSET),
       [ALT7].sel   = 0,
 
       /* Index:54 Alt:8 No input selection */
@@ -3243,8 +3127,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:55 Alt:0  GPIO AD B0 13 LPI2C4 SDA */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C4_SDA_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C4_SDA_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:55 Alt:1 No input selection */
@@ -3300,14 +3183,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:56 Alt:0  GPIO AD B0 14 USB OTG2 OC */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USB_OTG2_OC_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USB_OTG2_OC_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:56 Alt:1  GPIO AD B0 14 XBAR1 IN24 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN24_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN24_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:56 Alt:2 No input selection */
@@ -3322,8 +3203,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:56 Alt:4  GPIO AD B0 14 CSI VSYNC */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_VSYNC_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_VSYNC_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:56 Alt:5 No input selection */
@@ -3364,8 +3244,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:57 Alt:1  GPIO AD B0 15 XBAR1 IN25 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN25_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN25_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:57 Alt:2 No input selection */
@@ -3375,14 +3254,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:57 Alt:3  GPIO AD B0 15 ENET 1588 EVENT0 IN */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_TIMER_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_TIMER_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:57 Alt:4  GPIO AD B0 15 CSI HSYNC */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_HSYNC_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_HSYNC_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:57 Alt:5 No input selection */
@@ -3392,8 +3269,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:57 Alt:6  GPIO AD B0 15 FLEXCAN2 RX */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN2_RX_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN2_RX_OFFSET),
       [ALT6].sel   = 2,
 
       /* Index:57 Alt:7 No input selection */
@@ -3419,14 +3295,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:58 Alt:0  GPIO AD B1 00 USB OTG2 ID */
 
-      [ALT0].index =
-             IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ANATOP_USB_OTG2_ID_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ANATOP_USB_OTG2_ID_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:58 Alt:1  GPIO AD B1 00 QTIMER3 TIMER0 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER0_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:58 Alt:2 No input selection */
@@ -3436,8 +3310,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:58 Alt:3  GPIO AD B1 00 LPI2C1 SCL */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C1_SCL_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C1_SCL_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:58 Alt:4 No input selection */
@@ -3452,8 +3325,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:58 Alt:6  GPIO AD B1 00 USDHC1 WP */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_WP_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_WP_OFFSET),
       [ALT6].sel   = 2,
 
       /* Index:58 Alt:7 No input selection */
@@ -3484,8 +3356,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:59 Alt:1  GPIO AD B1 01 QTIMER3 TIMER1 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER1_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:59 Alt:2 No input selection */
@@ -3495,14 +3366,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:59 Alt:3  GPIO AD B1 01 LPI2C1 SDA */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C1_SDA_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C1_SDA_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:59 Alt:4  GPIO AD B1 01 CCM PMIC READY */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
       [ALT4].sel   = 2,
 
       /* Index:59 Alt:5 No input selection */
@@ -3538,20 +3407,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:60 Alt:0  GPIO AD B1 02 USB OTG1 ID */
 
-      [ALT0].index =
-             IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ANATOP_USB_OTG1_ID_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ANATOP_USB_OTG1_ID_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:60 Alt:1  GPIO AD B1 02 QTIMER3 TIMER2 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER2_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:60 Alt:2  GPIO AD B1 02 LPUART2 TX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART2_TX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART2_TX_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:60 Alt:3 No input selection */
@@ -3571,8 +3437,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:60 Alt:6  GPIO AD B1 02 USDHC1 CD B */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_CD_B_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_CD_B_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:60 Alt:7 No input selection */
@@ -3598,26 +3463,22 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:61 Alt:0  GPIO AD B1 03 USB OTG1 OC */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USB_OTG1_OC_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USB_OTG1_OC_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:61 Alt:1  GPIO AD B1 03 QTIMER3 TIMER3 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER3_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:61 Alt:2  GPIO AD B1 03 LPUART2 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART2_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART2_RX_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:61 Alt:3  GPIO AD B1 03 SPDIF IN */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SPDIF_IN_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SPDIF_IN_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:61 Alt:4 No input selection */
@@ -3632,8 +3493,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:61 Alt:6  GPIO AD B1 03 USDHC2 CD B */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CD_B_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CD_B_OFFSET),
       [ALT6].sel   = 0,
 
       /* Index:61 Alt:7 No input selection */
@@ -3659,8 +3519,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:62 Alt:0  GPIO AD B1 04 FLEXSPIB DATA03 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA3_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA3_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:62 Alt:1 No input selection */
@@ -3670,8 +3529,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:62 Alt:2  GPIO AD B1 04 LPUART3 CTS B */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_CTS_B_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_CTS_B_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:62 Alt:3 No input selection */
@@ -3681,8 +3539,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:62 Alt:4  GPIO AD B1 04 CSI PIXCLK */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_PIXCLK_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_PIXCLK_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:62 Alt:5 No input selection */
@@ -3692,8 +3549,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:62 Alt:6  GPIO AD B1 04 USDHC2 DATA0 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA0_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA0_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:62 Alt:7 No input selection */
@@ -3719,14 +3575,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:63 Alt:0  GPIO AD B1 05 FLEXSPIB DATA02 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA2_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA2_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:63 Alt:1  GPIO AD B1 05 ENET MDIO */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_MDIO_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_MDIO_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:63 Alt:2 No input selection */
@@ -3751,8 +3605,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:63 Alt:6  GPIO AD B1 05 USDHC2 DATA1 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA1_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA1_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:63 Alt:7 No input selection */
@@ -3778,20 +3631,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:64 Alt:0  GPIO AD B1 06 FLEXSPIB DATA01 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA1_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA1_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:64 Alt:1  GPIO AD B1 06 LPI2C3 SDA */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C3_SDA_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C3_SDA_OFFSET),
       [ALT1].sel   = 2,
 
       /* Index:64 Alt:2  GPIO AD B1 06 LPUART3 TX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_TX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_TX_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:64 Alt:3 No input selection */
@@ -3801,8 +3651,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:64 Alt:4  GPIO AD B1 06 CSI VSYNC */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_VSYNC_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_VSYNC_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:64 Alt:5 No input selection */
@@ -3812,8 +3661,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:64 Alt:6  GPIO AD B1 06 USDHC2 DATA2 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA2_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA2_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:64 Alt:7 No input selection */
@@ -3839,20 +3687,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:65 Alt:0  GPIO AD B1 07 FLEXSPIB DATA00 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA0_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA0_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:65 Alt:1  GPIO AD B1 07 LPI2C3 SCL */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C3_SCL_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C3_SCL_OFFSET),
       [ALT1].sel   = 2,
 
       /* Index:65 Alt:2  GPIO AD B1 07 LPUART3 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_RX_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:65 Alt:3 No input selection */
@@ -3862,8 +3707,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:65 Alt:4  GPIO AD B1 07 CSI HSYNC */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_HSYNC_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_HSYNC_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:65 Alt:5 No input selection */
@@ -3873,8 +3717,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:65 Alt:6  GPIO AD B1 07 USDHC2 DATA3 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA3_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA3_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:65 Alt:7 No input selection */
@@ -3905,8 +3748,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:66 Alt:1  GPIO AD B1 08 FLEXPWM4 PWMA00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA0_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:66 Alt:2 No input selection */
@@ -3916,14 +3758,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:66 Alt:3  GPIO AD B1 08 CCM PMIC READY */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
       [ALT3].sel   = 3,
 
       /* Index:66 Alt:4  GPIO AD B1 08 CSI DATA09 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA09_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA09_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:66 Alt:5 No input selection */
@@ -3933,8 +3773,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:66 Alt:6  GPIO AD B1 08 USDHC2 CMD */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CMD_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CMD_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:66 Alt:7 No input selection */
@@ -3960,32 +3799,27 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:67 Alt:0  GPIO AD B1 09 FLEXSPIA DQS */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DQS_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DQS_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:67 Alt:1  GPIO AD B1 09 FLEXPWM4 PWMA01 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA1_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:67 Alt:2  GPIO AD B1 09 FLEXCAN1 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN1_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN1_RX_OFFSET),
       [ALT2].sel   = 2,
 
       /* Index:67 Alt:3  GPIO AD B1 09 SAI1 MCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_MCLK2_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_MCLK2_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:67 Alt:4  GPIO AD B1 09 CSI DATA08 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA08_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA08_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:67 Alt:5 No input selection */
@@ -3995,8 +3829,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:67 Alt:6  GPIO AD B1 09 USDHC2 CLK */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CLK_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CLK_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:67 Alt:7 No input selection */
@@ -4022,8 +3855,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:68 Alt:0  GPIO AD B1 10 FLEXSPIA DATA03 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA3_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA3_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:68 Alt:1 No input selection */
@@ -4033,20 +3865,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:68 Alt:2  GPIO AD B1 10 LPUART8 TX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_TX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_TX_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:68 Alt:3  GPIO AD B1 10 SAI1 RX SYNC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_SYNC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_SYNC_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:68 Alt:4  GPIO AD B1 10 CSI DATA07 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA07_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA07_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:68 Alt:5 No input selection */
@@ -4056,8 +3885,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:68 Alt:6  GPIO AD B1 10 USDHC2 WP */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_WP_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_WP_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:68 Alt:7 No input selection */
@@ -4083,8 +3911,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:69 Alt:0  GPIO AD B1 11 FLEXSPIA DATA02 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA2_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA2_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:69 Alt:1 No input selection */
@@ -4094,20 +3921,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:69 Alt:2  GPIO AD B1 11 LPUART8 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_RX_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:69 Alt:3  GPIO AD B1 11 SAI1 RX BCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_BCLK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_BCLK_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:69 Alt:4  GPIO AD B1 11 CSI DATA06 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA06_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA06_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:69 Alt:5 No input selection */
@@ -4143,8 +3967,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:70 Alt:0  GPIO AD B1 12 FLEXSPIA DATA01 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA1_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA1_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:70 Alt:1 No input selection */
@@ -4154,20 +3977,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:70 Alt:2  GPIO AD B1 12 LPSPI3 PCS0 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_PCS0_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_PCS0_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:70 Alt:3  GPIO AD B1 12 SAI1 RX DATA00 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA0_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA0_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:70 Alt:4  GPIO AD B1 12 CSI DATA05 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA05_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA05_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:70 Alt:5 No input selection */
@@ -4177,8 +3997,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:70 Alt:6  GPIO AD B1 12 USDHC2 DATA4 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA4_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA4_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:70 Alt:7 No input selection */
@@ -4204,8 +4023,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:71 Alt:0  GPIO AD B1 13 FLEXSPIA DATA00 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA0_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA0_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:71 Alt:1 No input selection */
@@ -4215,8 +4033,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:71 Alt:2  GPIO AD B1 13 LPSPI3 SDI */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SDI_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SDI_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:71 Alt:3 No input selection */
@@ -4226,8 +4043,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:71 Alt:4  GPIO AD B1 13 CSI DATA04 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA04_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA04_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:71 Alt:5 No input selection */
@@ -4237,8 +4053,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:71 Alt:6  GPIO AD B1 13 USDHC2 DATA5 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA5_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA5_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:71 Alt:7 No input selection */
@@ -4264,8 +4079,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:72 Alt:0  GPIO AD B1 14 FLEXSPIA SCLK */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_SCK_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_SCK_OFFSET),
       [ALT0].sel   = 1,
 
       /* Index:72 Alt:1 No input selection */
@@ -4275,20 +4089,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:72 Alt:2  GPIO AD B1 14 LPSPI3 SDO */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SDO_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI3_SDO_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:72 Alt:3  GPIO AD B1 14 SAI1 TX BCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_BCLK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_BCLK_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:72 Alt:4  GPIO AD B1 14 CSI DATA03 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA03_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA03_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:72 Alt:5 No input selection */
@@ -4298,8 +4109,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:72 Alt:6  GPIO AD B1 14 USDHC2 DATA6 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA6_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA6_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:72 Alt:7 No input selection */
@@ -4340,14 +4150,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:73 Alt:3  GPIO AD B1 15 SAI1 TX SYNC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_SYNC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_SYNC_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:73 Alt:4  GPIO AD B1 15 CSI DATA02 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA02_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_DATA02_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:73 Alt:5 No input selection */
@@ -4357,8 +4165,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:73 Alt:6  GPIO AD B1 15 USDHC2 DATA7 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA7_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA7_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:73 Alt:7 No input selection */
@@ -4399,8 +4206,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:74 Alt:3  GPIO B0 00 LPSPI4 PCS0 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_PCS0_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_PCS0_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:74 Alt:4 No input selection */
@@ -4456,8 +4262,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:75 Alt:3  GPIO B0 01 LPSPI4 SDI */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SDI_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SDI_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:75 Alt:4 No input selection */
@@ -4513,8 +4318,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:76 Alt:3  GPIO B0 02 LPSPI4 SDO */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SDO_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SDO_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:76 Alt:4 No input selection */
@@ -4560,20 +4364,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:77 Alt:1  GPIO B0 03 QTIMER2 TIMER0 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER0_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:77 Alt:2  GPIO B0 03 FLEXCAN1 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN1_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN1_RX_OFFSET),
       [ALT2].sel   = 3,
 
       /* Index:77 Alt:3  GPIO B0 03 LPSPI4 SCK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SCK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SCK_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:77 Alt:4 No input selection */
@@ -4619,14 +4420,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:78 Alt:1  GPIO B0 04 QTIMER2 TIMER1 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER1_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:78 Alt:2  GPIO B0 04 LPI2C2 SCL */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C2_SCL_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C2_SCL_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:78 Alt:3 No input selection */
@@ -4677,14 +4476,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:79 Alt:1  GPIO B0 05 QTIMER2 TIMER2 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER2_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:79 Alt:2  GPIO B0 05 LPI2C2 SDA */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C2_SDA_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C2_SDA_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:79 Alt:3 No input selection */
@@ -4735,14 +4532,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:80 Alt:1  GPIO B0 06 QTIMER3 TIMER0 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER0_OFFSET),
       [ALT1].sel   = 2,
 
       /* Index:80 Alt:2  GPIO B0 06 FLEXPWM2 PWMA00 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA0_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA0_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:80 Alt:3 No input selection */
@@ -4793,14 +4588,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:81 Alt:1  GPIO B0 07 QTIMER3 TIMER1 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER1_OFFSET),
       [ALT1].sel   = 2,
 
       /* Index:81 Alt:2  GPIO B0 07 FLEXPWM2 PWMB00 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB0_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB0_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:81 Alt:3 No input selection */
@@ -4851,20 +4644,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:82 Alt:1  GPIO B0 08 QTIMER3 TIMER2 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER2_OFFSET),
       [ALT1].sel   = 2,
 
       /* Index:82 Alt:2  GPIO B0 08 FLEXPWM2 PWMA01 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA1_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA1_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:82 Alt:3  GPIO B0 08 LPUART3 TX */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_TX_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_TX_OFFSET),
       [ALT3].sel   = 2,
 
       /* Index:82 Alt:4 No input selection */
@@ -4915,14 +4705,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:83 Alt:2  GPIO B0 09 FLEXPWM2 PWMB01 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB1_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB1_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:83 Alt:3  GPIO B0 09 LPUART3 RX */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_RX_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART3_RX_OFFSET),
       [ALT3].sel   = 2,
 
       /* Index:83 Alt:4 No input selection */
@@ -4973,14 +4761,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:84 Alt:2  GPIO B0 10 FLEXPWM2 PWMA02 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA2_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA2_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:84 Alt:3  GPIO B0 10 SAI1 TX DATA03 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA1_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA1_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:84 Alt:4 No input selection */
@@ -5031,14 +4817,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:85 Alt:2  GPIO B0 11 FLEXPWM2 PWMB02 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB2_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB2_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:85 Alt:3  GPIO B0 11 SAI1 TX DATA02 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA2_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA2_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:85 Alt:4 No input selection */
@@ -5094,8 +4878,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:86 Alt:3  GPIO B0 12 SAI1 TX DATA01 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA3_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA3_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:86 Alt:4 No input selection */
@@ -5151,8 +4934,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:87 Alt:3  GPIO B0 13 SAI1 MCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_MCLK2_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_MCLK2_OFFSET),
       [ALT3].sel   = 2,
 
       /* Index:87 Alt:4 No input selection */
@@ -5208,8 +4990,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:88 Alt:3  GPIO B0 14 SAI1 RX SYNC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_SYNC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_SYNC_OFFSET),
       [ALT3].sel   = 2,
 
       /* Index:88 Alt:4 No input selection */
@@ -5265,8 +5046,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:89 Alt:3  GPIO B0 15 SAI1 RX BCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_BCLK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_BCLK_OFFSET),
       [ALT3].sel   = 2,
 
       /* Index:89 Alt:4 No input selection */
@@ -5312,20 +5092,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:90 Alt:1  GPIO B1 00 XBAR1 INOUT14 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN14_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN14_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:90 Alt:2  GPIO B1 00 LPUART4 TX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART4_TX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART4_TX_OFFSET),
       [ALT2].sel   = 2,
 
       /* Index:90 Alt:3  GPIO B1 00 SAI1 RX DATA00 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA0_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA0_OFFSET),
       [ALT3].sel   = 2,
 
       /* Index:90 Alt:4 No input selection */
@@ -5340,8 +5117,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:90 Alt:6  GPIO B1 00 FLEXPWM1 PWMA03 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
       [ALT6].sel   = 4,
 
       /* Index:90 Alt:7 No input selection */
@@ -5372,14 +5148,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:91 Alt:1  GPIO B1 01 XBAR1 INOUT15 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN15_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN15_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:91 Alt:2  GPIO B1 01 LPUART4 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART4_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART4_RX_OFFSET),
       [ALT2].sel   = 2,
 
       /* Index:91 Alt:3 No input selection */
@@ -5399,8 +5173,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:91 Alt:6  GPIO B1 01 FLEXPWM1 PWMB03 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
       [ALT6].sel   = 4,
 
       /* Index:91 Alt:7 No input selection */
@@ -5431,8 +5204,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:92 Alt:1  GPIO B1 02 XBAR1 INOUT16 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN16_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN16_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:92 Alt:2 No input selection */
@@ -5442,8 +5214,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:92 Alt:3  GPIO B1 02 SAI1 TX BCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_BCLK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_BCLK_OFFSET),
       [ALT3].sel   = 2,
 
       /* Index:92 Alt:4 No input selection */
@@ -5458,8 +5229,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:92 Alt:6  GPIO B1 02 FLEXPWM2 PWMA03 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
       [ALT6].sel   = 4,
 
       /* Index:92 Alt:7 No input selection */
@@ -5490,8 +5260,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:93 Alt:1  GPIO B1 03 XBAR1 INOUT17 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN17_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN17_OFFSET),
       [ALT1].sel   = 3,
 
       /* Index:93 Alt:2 No input selection */
@@ -5501,8 +5270,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:93 Alt:3  GPIO B1 03 SAI1 TX SYNC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_SYNC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_SYNC_OFFSET),
       [ALT3].sel   = 2,
 
       /* Index:93 Alt:4 No input selection */
@@ -5517,8 +5285,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:93 Alt:6  GPIO B1 03 FLEXPWM2 PWMB03 */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB3_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB3_OFFSET),
       [ALT6].sel   = 3,
 
       /* Index:93 Alt:7 No input selection */
@@ -5549,8 +5316,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:94 Alt:1  GPIO B1 04 LPSPI4 PCS0 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_PCS0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_PCS0_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:94 Alt:2 No input selection */
@@ -5560,8 +5326,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:94 Alt:3  GPIO B1 04 ENET RX DATA00 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_RXDATA_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_RXDATA_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:94 Alt:4 No input selection */
@@ -5607,8 +5372,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:95 Alt:1  GPIO B1 05 LPSPI4 SDI */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SDI_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SDI_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:95 Alt:2 No input selection */
@@ -5618,8 +5382,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:95 Alt:3  GPIO B1 05 ENET RX DATA01 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET1_RXDATA_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET1_RXDATA_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:95 Alt:4 No input selection */
@@ -5665,8 +5428,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:96 Alt:1  GPIO B1 06 LPSPI4 SDO */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SDO_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SDO_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:96 Alt:2 No input selection */
@@ -5676,8 +5438,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:96 Alt:3  GPIO B1 06 ENET RX EN */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_RXEN_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_RXEN_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:96 Alt:4 No input selection */
@@ -5723,8 +5484,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:97 Alt:1  GPIO B1 07 LPSPI4 SCK */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SCK_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI4_SCK_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:97 Alt:2 No input selection */
@@ -5836,8 +5596,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:99 Alt:1  GPIO B1 09 QTIMER2 TIMER3 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER2_TIMER3_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:99 Alt:2 No input selection */
@@ -5862,8 +5621,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:99 Alt:6  GPIO B1 09 FLEXCAN2 RX */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN2_RX_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN2_RX_OFFSET),
       [ALT6].sel   = 3,
 
       /* Index:99 Alt:7 No input selection */
@@ -5894,8 +5652,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:100 Alt:1  GPIO B1 10 QTIMER3 TIMER3 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_QTIMER3_TIMER3_OFFSET),
       [ALT1].sel   = 2,
 
       /* Index:100 Alt:2 No input selection */
@@ -5905,8 +5662,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:100 Alt:3  GPIO B1 10 ENET TX CLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_TXCLK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_TXCLK_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:100 Alt:4 No input selection */
@@ -5921,8 +5677,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:100 Alt:6  GPIO B1 10 ENET REF CLK */
 
-      [ALT6].index =
-            IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_IPG_CLK_RMII_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_IPG_CLK_RMII_OFFSET),
       [ALT6].sel   = 1,
 
       /* Index:100 Alt:7 No input selection */
@@ -5963,8 +5718,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:101 Alt:3  GPIO B1 11 ENET RX ER */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_RXERR_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_RXERR_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:101 Alt:4 No input selection */
@@ -6010,20 +5764,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:102 Alt:1  GPIO B1 12 LPUART5 TX */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART5_TX_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART5_TX_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:102 Alt:2  GPIO B1 12 CSI PIXCLK */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_PIXCLK_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_PIXCLK_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:102 Alt:3  GPIO B1 12 ENET 1588 EVENT0 IN */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_TIMER_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET0_TIMER_OFFSET),
       [ALT3].sel   = 2,
 
       /* Index:102 Alt:4 No input selection */
@@ -6038,8 +5789,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:102 Alt:6  GPIO B1 12 USDHC1 CD B */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_CD_B_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_CD_B_OFFSET),
       [ALT6].sel   = 2,
 
       /* Index:102 Alt:7 No input selection */
@@ -6070,14 +5820,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:103 Alt:1  GPIO B1 13 LPUART5 RX */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART5_RX_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART5_RX_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:103 Alt:2  GPIO B1 13 CSI VSYNC */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_VSYNC_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_VSYNC_OFFSET),
       [ALT2].sel   = 2,
 
       /* Index:103 Alt:3 No input selection */
@@ -6097,8 +5845,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:103 Alt:6  GPIO B1 13 USDHC1 WP */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_WP_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC1_WP_OFFSET),
       [ALT6].sel   = 3,
 
       /* Index:103 Alt:7 No input selection */
@@ -6129,20 +5876,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:104 Alt:1  GPIO B1 14 FLEXPWM4 PWMA02 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA2_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:104 Alt:2  GPIO B1 14 CSI HSYNC */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_HSYNC_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CSI_HSYNC_OFFSET),
       [ALT2].sel   = 2,
 
       /* Index:104 Alt:3  GPIO B1 14 XBAR1 IN02 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN02_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN02_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:104 Alt:4 No input selection */
@@ -6183,14 +5927,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:105 Alt:0  GPIO B1 15 ENET MDIO */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_MDIO_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_ENET_MDIO_OFFSET),
       [ALT0].sel   = 2,
 
       /* Index:105 Alt:1  GPIO B1 15 FLEXPWM4 PWMA03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM4_PWMA3_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:105 Alt:2 No input selection */
@@ -6200,8 +5942,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:105 Alt:3  GPIO B1 15 XBAR1 IN03 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN03_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN03_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:105 Alt:4 No input selection */
@@ -6247,26 +5988,22 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:106 Alt:1  GPIO SD B0 00 FLEXPWM1 PWMA00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA0_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:106 Alt:2  GPIO SD B0 00 LPI2C3 SCL */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C3_SCL_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C3_SCL_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:106 Alt:3  GPIO SD B0 00 XBAR1 INOUT04 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN04_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN04_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:106 Alt:4  GPIO SD B0 00 LPSPI1 SCK */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_SCK_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_SCK_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:106 Alt:5 No input selection */
@@ -6307,26 +6044,22 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:107 Alt:1  GPIO SD B0 01 FLEXPWM1 PWMB00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB0_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:107 Alt:2  GPIO SD B0 01 LPI2C3 SDA */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C3_SDA_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C3_SDA_OFFSET),
       [ALT2].sel   = 1,
 
       /* Index:107 Alt:3  GPIO SD B0 01 XBAR1 INOUT05 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN05_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN05_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:107 Alt:4  GPIO SD B0 01 LPSPI1 PCS0 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_PCS0_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_PCS0_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:107 Alt:5 No input selection */
@@ -6367,8 +6100,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:108 Alt:1  GPIO SD B0 02 FLEXPWM1 PWMA01 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA1_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:108 Alt:2 No input selection */
@@ -6378,14 +6110,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:108 Alt:3  GPIO SD B0 02 XBAR1 INOUT06 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN06_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN06_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:108 Alt:4  GPIO SD B0 02 LPSPI1 SDO */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_SDO_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_SDO_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:108 Alt:5 No input selection */
@@ -6426,8 +6156,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:109 Alt:1  GPIO SD B0 03 FLEXPWM1 PWMB01 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB1_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:109 Alt:2 No input selection */
@@ -6437,14 +6166,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:109 Alt:3  GPIO SD B0 03 XBAR1 INOUT07 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN07_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN07_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:109 Alt:4  GPIO SD B0 03 LPSPI1 SDI */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_SDI_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI1_SDI_OFFSET),
       [ALT4].sel   = 1,
 
       /* Index:109 Alt:5 No input selection */
@@ -6485,20 +6212,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:110 Alt:1  GPIO SD B0 04 FLEXPWM1 PWMA02 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA2_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:110 Alt:2  GPIO SD B0 04 LPUART8 TX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_TX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_TX_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:110 Alt:3  GPIO SD B0 04 XBAR1 INOUT08 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN08_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN08_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:110 Alt:4 No input selection */
@@ -6544,20 +6268,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:111 Alt:1  GPIO SD B0 05 FLEXPWM1 PWMB02 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB2_OFFSET),
       [ALT1].sel   = 1,
 
       /* Index:111 Alt:2  GPIO SD B0 05 LPUART8 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART8_RX_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:111 Alt:3  GPIO SD B0 05 XBAR1 INOUT09 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN09_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_XBAR1_IN09_OFFSET),
       [ALT3].sel   = 1,
 
       /* Index:111 Alt:4 No input selection */
@@ -6598,32 +6319,27 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:112 Alt:0  GPIO SD B1 00 USDHC2 DATA3 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA3_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA3_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:112 Alt:1  GPIO SD B1 00 FLEXSPIB DATA03 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA3_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:112 Alt:2  GPIO SD B1 00 FLEXPWM1 PWMA03 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMA3_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:112 Alt:3  GPIO SD B1 00 SAI1 TX DATA03 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA1_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA1_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:112 Alt:4  GPIO SD B1 00 LPUART4 TX */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART4_TX_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART4_TX_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:112 Alt:5 No input selection */
@@ -6659,26 +6375,22 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:113 Alt:0  GPIO SD B1 01 USDHC2 DATA2 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA2_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA2_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:113 Alt:1  GPIO SD B1 01 FLEXSPIB DATA02 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA2_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:113 Alt:2  GPIO SD B1 01 FLEXPWM1 PWMB03 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM1_PWMB3_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:113 Alt:3  GPIO SD B1 01 SAI1 TX DATA02 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA2_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA2_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:113 Alt:4  GPIO SD B1 01 LPUART4 RX */
@@ -6719,26 +6431,22 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:114 Alt:0  GPIO SD B1 02 USDHC2 DATA1 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA1_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA1_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:114 Alt:1  GPIO SD B1 02 FLEXSPIB DATA01 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA1_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:114 Alt:2  GPIO SD B1 02 FLEXPWM2 PWMA03 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMA3_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:114 Alt:3  GPIO SD B1 02 SAI1 TX DATA01 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA3_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA3_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:114 Alt:4 No input selection */
@@ -6779,20 +6487,17 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:115 Alt:0  GPIO SD B1 03 USDHC2 DATA0 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA0_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA0_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:115 Alt:1  GPIO SD B1 03 FLEXSPIB DATA00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIB_DATA0_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:115 Alt:2  GPIO SD B1 03 FLEXPWM2 PWMB03 */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB3_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXPWM2_PWMB3_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:115 Alt:3  GPIO SD B1 03 SAI1 MCLK */
@@ -6802,8 +6507,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:115 Alt:4  GPIO SD B1 03 FLEXCAN1 RX */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN1_RX_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXCAN1_RX_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:115 Alt:5 No input selection */
@@ -6813,8 +6517,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:115 Alt:6  GPIO SD B1 03 CCM PMIC READY */
 
-      [ALT6].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
+      [ALT6].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_CCM_PMIC_READY_OFFSET),
       [ALT6].sel   = 0,
 
       /* Index:115 Alt:7 No input selection */
@@ -6840,8 +6543,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:116 Alt:0  GPIO SD B1 04 USDHC2 CLK */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CLK_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CLK_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:116 Alt:1 No input selection */
@@ -6856,8 +6558,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:116 Alt:3  GPIO SD B1 04 SAI1 RX SYNC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_SYNC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_SYNC_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:116 Alt:4 No input selection */
@@ -6898,26 +6599,22 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:117 Alt:0  GPIO SD B1 05 USDHC2 CMD */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CMD_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_CMD_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:117 Alt:1  GPIO SD B1 05 FLEXSPIA DQS */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DQS_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DQS_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:117 Alt:2  GPIO SD B1 05 LPI2C1 SDA */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C1_SDA_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPI2C1_SDA_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:117 Alt:3  GPIO SD B1 05 SAI1 RX BCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_BCLK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_BCLK_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:117 Alt:4 No input selection */
@@ -6973,14 +6670,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:118 Alt:3  GPIO SD B1 06 SAI1 RX DATA00 */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA0_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_RX_DATA0_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:118 Alt:4  GPIO SD B1 06 LPSPI2 PCS0 */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI2_PCS0_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI2_PCS0_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:118 Alt:5 No input selection */
@@ -7021,8 +6716,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:119 Alt:1  GPIO SD B1 07 FLEXSPIA SCLK */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_SCK_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_SCK_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:119 Alt:2 No input selection */
@@ -7037,8 +6731,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:119 Alt:4  GPIO SD B1 07 LPSPI2 SCK */
 
-      [ALT4].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI2_SCK_OFFSET),
+      [ALT4].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPSPI2_SCK_OFFSET),
       [ALT4].sel   = 0,
 
       /* Index:119 Alt:5 No input selection */
@@ -7074,14 +6767,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:120 Alt:0  GPIO SD B1 08 USDHC2 DATA4 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA4_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA4_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:120 Alt:1  GPIO SD B1 08 FLEXSPIA DATA00 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA0_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA0_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:120 Alt:2  GPIO SD B1 08 LPUART7 TX */
@@ -7091,8 +6782,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:120 Alt:3  GPIO SD B1 08 SAI1 TX BCLK */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_BCLK_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_BCLK_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:120 Alt:4  GPIO SD B1 08 LPSPI2 SD0 */
@@ -7133,26 +6823,22 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:121 Alt:0  GPIO SD B1 09 USDHC2 DATA5 */
 
-      [ALT0].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA5_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA5_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:121 Alt:1  GPIO SD B1 09 FLEXSPIA DATA01 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA1_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA1_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:121 Alt:2  GPIO SD B1 09 LPUART7 RX */
 
-      [ALT2].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART7_RX_OFFSET),
+      [ALT2].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_LPUART7_RX_OFFSET),
       [ALT2].sel   = 0,
 
       /* Index:121 Alt:3  GPIO SD B1 09 SAI1 TX SYNC */
 
-      [ALT3].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_SYNC_OFFSET),
+      [ALT3].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_SAI1_TX_SYNC_OFFSET),
       [ALT3].sel   = 0,
 
       /* Index:121 Alt:4  GPIO SD B1 09 LPSPI2 SDI */
@@ -7193,14 +6879,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:122 Alt:0  GPIO SD B1 10 USDHC2 DATA6 */
 
-      [ALT0].index =
-                   IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA6_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA6_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:122 Alt:1  GPIO SD B1 10 FLEXSPIA DATA02 */
 
-      [ALT1].index =
-                 IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA2_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA2_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:122 Alt:2  GPIO SD B1 10 LPUART2 RX */
@@ -7251,14 +6935,12 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     {
       /* Index:123 Alt:0  GPIO SD B1 11 USDHC2 DATA7 */
 
-      [ALT0].index =
-                  IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA7_OFFSET),
+      [ALT0].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_USDHC2_DATA7_OFFSET),
       [ALT0].sel   = 0,
 
       /* Index:123 Alt:1  GPIO SD B1 11 FLEXSPIA DATA03 */
 
-      [ALT1].index =
-                IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA3_OFFSET),
+      [ALT1].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_FLEXSPIA_DATA3_OFFSET),
       [ALT1].sel   = 0,
 
       /* Index:123 Alt:2  GPIO SD B1 11 LPUART2 TX */
@@ -7344,8 +7026,7 @@ static const struct imxrt_daisy_t g_daisy_select[] =
 
       /* Index:124 Alt:7  SNVS WAKEUP NMI GLUE NMI */
 
-      [ALT7].index =
-                   IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_NMI_GLUE_NMI_OFFSET),
+      [ALT7].index = IMXRT_INPUT_OFFSET2INDEX(IMXRT_INPUT_NMI_GLUE_NMI_OFFSET),
       [ALT7].sel   = 1,
 
       /* Index:124 Alt:8 No input selection */
@@ -7416,8 +7097,3 @@ static const struct imxrt_daisy_t g_daisy_select[] =
     },
   },
 };
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-

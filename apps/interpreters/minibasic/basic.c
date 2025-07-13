@@ -1,31 +1,39 @@
 /****************************************************************************
  * apps/interpreters/minibasic/basic.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/****************************************************************************
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
  *
  * This file was taken from Mini Basic, versino 1.0 developed by Malcolm
  * McLean, Leeds University.  Mini Basic version 1.0 was released the
  * Creative Commons Attribution license which, from my reading, appears to
- * be compatible with the NuttX license:
+ * be compatible with the NuttX BSD-style license:
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -45,7 +53,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Configuration */
 
 #ifndef CONFIG_INTERPRETER_MINIBASIC_IOBUFSIZE
@@ -368,19 +375,17 @@ static int setup(FAR const char *script)
     }
 
   for (i = 1; i < nlines; i++)
-    {
-      if (g_lines[i].no <= g_lines[i - 1].no)
-        {
-          if (g_fperr)
-            {
-              fprintf(g_fperr, "program lines %d and %d not in order\n",
-                      g_lines[i - 1].no, g_lines[i].no);
-            }
+    if (g_lines[i].no <= g_lines[i - 1].no)
+      {
+        if (g_fperr)
+          {
+            fprintf(g_fperr, "program lines %d and %d not in order\n",
+                    g_lines[i - 1].no, g_lines[i].no);
+          }
 
-          free(g_lines);
-          return -1;
-        }
-    }
+        free(g_lines);
+        return -1;
+      }
 
   g_nvariables = 0;
   g_variables = 0;
@@ -446,6 +451,7 @@ static void cleanup(void)
         }
       else if (g_dimvariables[i].dval)
         {
+
           free(g_dimvariables[i].dval);
         }
     }
@@ -695,7 +701,6 @@ static int line(void)
   if (g_token != EOS)
     {
       /* match(VALUE); */
-
       /* check for a newline */
 
       str = g_string;
@@ -869,8 +874,7 @@ static void dodim(void)
           break;
 
         case 3:
-          dimvar = dimension(name, 3, (int)dims[0],
-                             (int)dims[1], (int)dims[2]);
+          dimvar = dimension(name, 3, (int)dims[0], (int)dims[1], (int)dims[2]);
           break;
 
         case 4:
@@ -1088,7 +1092,7 @@ static int dofor(void)
     }
   else
     {
-      strlcpy(g_forstack[nfors].id, id, sizeof(g_forstack[nfors].id));
+      strcpy(g_forstack[nfors].id, id);
       g_forstack[nfors].nextline = getnextline(g_string);
       g_forstack[nfors].step = stepval;
       g_forstack[nfors].toval = toval;
@@ -1173,7 +1177,7 @@ static void doinput(void)
          * or comma is detected.
          */
 
-        for (nch = 0, ptr = g_iobuffer; nch < (IOBUFSIZE - 1); nch++)
+        for (nch = 0, ptr = g_iobuffer; nch < (IOBUFSIZE-1); nch++)
           {
             int ch = fgetc(g_fpin);
             if (ch == EOF)
@@ -1252,6 +1256,7 @@ static void doinput(void)
 static void dorem(void)
 {
   match(REM);
+  return;
 }
 
 /****************************************************************************
@@ -1367,8 +1372,7 @@ static void lvalue(FAR struct mb_lvalue_s *lv)
                   index[2] = integer(expr());
                   if (g_errorflag == 0)
                     {
-                      valptr = getdimvar(dimvar, index[0],
-                                         index[1], index[2]);
+                      valptr = getdimvar(dimvar, index[0], index[1], index[2]);
                     }
                 }
                 break;
@@ -1384,8 +1388,8 @@ static void lvalue(FAR struct mb_lvalue_s *lv)
                   index[3] = integer(expr());
                   if (g_errorflag == 0)
                     {
-                      valptr = getdimvar(dimvar, index[0],
-                                         index[1], index[2], index[3]);
+                      valptr =
+                        getdimvar(dimvar, index[0], index[1], index[2], index[3]);
                     }
                 }
                 break;
@@ -1403,8 +1407,8 @@ static void lvalue(FAR struct mb_lvalue_s *lv)
                   index[4] = integer(expr());
                   if (g_errorflag == 0)
                     {
-                      valptr = getdimvar(dimvar, index[0],
-                                         index[1], index[2], index[3]);
+                      valptr =
+                        getdimvar(dimvar, index[0], index[1], index[2], index[3]);
                     }
                 }
                 break;
@@ -1526,7 +1530,6 @@ static int boolfactor(void)
 
               return 0;
             }
-
           cmp = strcmp(strleft, strright);
           switch (op)
             {
@@ -1957,7 +1960,6 @@ static double factor(void)
             {
               srand((unsigned)-answer);
             }
-
           answer = 0;
         }
       break;
@@ -2177,8 +2179,8 @@ static double dimvariable(void)
           index[3] = integer(expr());
           match(COMMA);
           index[4] = integer(expr());
-          answer = getdimvar(dimvar, index[0], index[1],
-                             index[2], index[3], index[4]);
+          answer =
+            getdimvar(dimvar, index[0], index[1], index[2], index[3], index[4]);
           break;
         }
 
@@ -2499,8 +2501,7 @@ static FAR struct mb_variable_s *addfloat(FAR const char *id)
   if (vars)
     {
       g_variables = vars;
-      strlcpy(g_variables[g_nvariables].id, id,
-              sizeof(g_variables[g_nvariables].id));
+      strcpy(g_variables[g_nvariables].id, id);
       g_variables[g_nvariables].dval = 0.0;
       g_variables[g_nvariables].sval = NULL;
       g_nvariables++;
@@ -2533,8 +2534,7 @@ static FAR struct mb_variable_s *addstring(FAR const char *id)
   if (vars)
     {
       g_variables = vars;
-      strlcpy(g_variables[g_nvariables].id, id,
-              sizeof(g_variables[g_nvariables].id));
+      strcpy(g_variables[g_nvariables].id, id);
       g_variables[g_nvariables].sval = NULL;
       g_variables[g_nvariables].dval = 0.0;
       g_nvariables++;
@@ -2562,17 +2562,16 @@ static FAR struct mb_dimvar_s *adddimvar(FAR const char *id)
 {
   FAR struct mb_dimvar_s *vars;
 
-  vars = realloc(g_dimvariables,
-                 (g_ndimvariables + 1) * sizeof(struct mb_dimvar_s));
+  vars =
+    realloc(g_dimvariables, (g_ndimvariables + 1) * sizeof(struct mb_dimvar_s));
   if (vars)
     {
       g_dimvariables = vars;
-      strlcpy(g_dimvariables[g_ndimvariables].id, id,
-              sizeof(g_dimvariables[g_ndimvariables].id));
+      strcpy(g_dimvariables[g_ndimvariables].id, id);
       g_dimvariables[g_ndimvariables].dval  = NULL;
       g_dimvariables[g_ndimvariables].str   = NULL;
       g_dimvariables[g_ndimvariables].ndims = 0;
-      g_dimvariables[g_ndimvariables].type = strchr(id, '$') ? STRID : FLTID;
+      g_dimvariables[g_ndimvariables].type  = strchr(id, '$') ? STRID : FLTID;
       g_ndimvariables++;
       return &g_dimvariables[g_ndimvariables - 1];
     }
@@ -2738,7 +2737,7 @@ static FAR char *strstring(void)
   x = expr();
   match(CPAREN);
 
-  snprintf(g_iobuffer, sizeof(g_iobuffer), "%g", x);
+  sprintf(g_iobuffer, "%g", x);
   answer = mystrdup(g_iobuffer);
   if (!answer)
     {
@@ -2905,7 +2904,8 @@ static FAR char *midstring(void)
       return str;
     }
 
-  strlcpy(answer, temp, len + 1);
+  strncpy(answer, temp, len);
+  answer[len] = 0;
   free(str);
   return answer;
 }
@@ -2964,7 +2964,7 @@ static FAR char *stringstring(void)
 
   for (i = 0; i < N; i++)
     {
-      strlcpy(answer + len * i, str, (N - i) * len + 1);
+      strcpy(answer + len * i, str);
     }
 
   free(str);
@@ -3039,8 +3039,7 @@ static FAR char *stringdimvar(void)
           match(COMMA);
           index[4] = integer(expr());
           answer =
-            getdimvar(dimvar, index[0], index[1],
-                      index[2], index[3], index[4]);
+            getdimvar(dimvar, index[0], index[1], index[2], index[3], index[4]);
           break;
         }
 
@@ -3190,7 +3189,7 @@ static int integer(double x)
  * Name: match
  *
  * Description:
- *   Check that we have a token of the passed type (if not set g_errorflag)
+ *   Check that we have a token of the passed type (if not set the g_errorflag)
  *   Move parser on to next token. Sets token and string.
  *
  ****************************************************************************/
@@ -3945,10 +3944,7 @@ static FAR char *mystrend(FAR const char *str, char quote)
       while (*str != quote)
         {
           if (*str == '\n' || *str == 0)
-            {
-              return 0;
-            }
-
+            return 0;
           str++;
         }
 
@@ -4003,7 +3999,15 @@ static int mystrcount(FAR const char *str, char ch)
 
 static FAR char *mystrdup(FAR const char *str)
 {
-  return strdup(str);
+  FAR char *answer;
+
+  answer = malloc(strlen(str) + 1);
+  if (answer)
+    {
+      strcpy(answer, str);
+    }
+
+  return answer;
 }
 
 /****************************************************************************
@@ -4022,12 +4026,12 @@ static FAR char *mystrconcat(FAR const char *str, FAR const char *cat)
   int len;
   FAR char *answer;
 
-  len = strlen(str) + strlen(cat) + 1;
-  answer = malloc(len);
+  len = strlen(str) + strlen(cat);
+  answer = malloc(len + 1);
   if (answer)
     {
-      strlcpy(answer, str, len);
-      strlcat(answer, cat, len);
+      strcpy(answer, str);
+      strcat(answer, cat);
     }
 
   return answer;
@@ -4129,7 +4133,6 @@ int basic(FAR const char *script, FILE * in, FILE * out, FILE * err)
                 {
                   fprintf(g_fperr, "line %d not found\n", nextline);
                 }
-
               answer = 1;
               break;
             }

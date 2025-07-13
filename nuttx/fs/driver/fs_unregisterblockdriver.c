@@ -1,8 +1,6 @@
 /****************************************************************************
  * fs/driver/fs_unregisterblockdriver.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -29,7 +27,6 @@
 #include <nuttx/fs/fs.h>
 
 #include "inode/inode.h"
-#include "vfs/vfs.h"
 
 /****************************************************************************
  * Public Functions
@@ -47,11 +44,12 @@ int unregister_blockdriver(FAR const char *path)
 {
   int ret;
 
-  inode_lock();
-  ret = inode_remove(path);
-  inode_unlock();
-#ifdef CONFIG_FS_NOTIFY
-  notify_unlink(path);
-#endif
+  ret = inode_semtake();
+  if (ret >= 0)
+    {
+      ret = inode_remove(path);
+      inode_semgive();
+    }
+
   return ret;
 }

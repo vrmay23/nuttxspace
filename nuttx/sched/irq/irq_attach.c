@@ -1,22 +1,36 @@
 /****************************************************************************
  * sched/irq/irq_attach.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2008, 2010, 2012, 2017-2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,51 +47,8 @@
 #include "irq/irq.h"
 
 /****************************************************************************
- * Private Data
- ****************************************************************************/
-
-static spinlock_t g_irqlock = SP_UNLOCKED;
-#ifdef CONFIG_ARCH_MINIMAL_VECTORTABLE_DYNAMIC
-static int g_irqmap_count = 1;
-#endif
-
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-#ifdef CONFIG_ARCH_MINIMAL_VECTORTABLE_DYNAMIC
-
-/* This is the interrupt vector mapping table.  This must be provided by
- * architecture specific logic if CONFIG_ARCH_MINIMAL_VECTORTABLE is define
- * in the configuration.
- *
- * REVISIT: This should be declared in include/nuttx/irq.h.  The declaration
- * at that location, however, introduces a circular include dependency so the
- * declaration is here for the time being.
- */
-
-irq_mapped_t g_irqmap[NR_IRQS];
-#endif
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
-
-#ifdef CONFIG_ARCH_MINIMAL_VECTORTABLE_DYNAMIC
-int irq_to_ndx(int irq)
-{
-  DEBUGASSERT(g_irqmap_count < CONFIG_ARCH_NUSER_INTERRUPTS);
-
-  irqstate_t flags = spin_lock_irqsave(&g_irqlock);
-  if (g_irqmap[irq] == 0)
-    {
-      g_irqmap[irq] = g_irqmap_count++;
-    }
-
-  spin_unlock_irqrestore(&g_irqlock, flags);
-  return g_irqmap[irq];
-}
-#endif
 
 /****************************************************************************
  * Name: irq_attach
@@ -95,28 +66,37 @@ int irq_attach(int irq, xcpt_t isr, FAR void *arg)
 
   if ((unsigned)irq < NR_IRQS)
     {
-      int ndx = IRQ_TO_NDX(irq);
       irqstate_t flags;
+      int ndx;
 
-      if (ndx < 0)
+#ifdef CONFIG_ARCH_MINIMAL_VECTORTABLE
+      /* Is there a mapping for this IRQ number? */
+
+      ndx = g_irqmap[irq];
+      if ((unsigned)ndx >= CONFIG_ARCH_NUSER_INTERRUPTS)
         {
-          return ndx;
+          /* No.. then return failure. */
+
+          return ret;
         }
+#else
+      ndx = irq;
+#endif
 
       /* If the new ISR is NULL, then the ISR is being detached.
        * In this case, disable the ISR and direct any interrupts
        * to the unexpected interrupt handler.
        */
 
-      flags = spin_lock_irqsave(&g_irqlock);
+      flags = enter_critical_section();
       if (isr == NULL)
         {
           /* Disable the interrupt if we can before detaching it.  We might
            * not be able to do this if:  (1) the device does not have a
            * centralized interrupt controller (so up_disable_irq() is not
-           * supported). Or (2) if the device has different number for vector
+           * supported).  Or (2) if the device has different number for vector
            * numbers and IRQ numbers (in that case, we don't know the correct
-           * IRQ number to use to disable the interrupt). In those cases, the
+           * IRQ number to use to disable the interrupt).  In those cases, the
            * code will just need to be careful that it disables all interrupt
            * sources before detaching from the interrupt vector.
            */
@@ -142,7 +122,7 @@ int irq_attach(int irq, xcpt_t isr, FAR void *arg)
       if (is_irqchain(ndx, isr))
         {
           ret = irqchain_attach(ndx, isr, arg);
-          spin_unlock_irqrestore(&g_irqlock, flags);
+          leave_critical_section(flags);
           return ret;
         }
 #endif
@@ -152,12 +132,16 @@ int irq_attach(int irq, xcpt_t isr, FAR void *arg)
       g_irqvector[ndx].handler = isr;
       g_irqvector[ndx].arg     = arg;
 #ifdef CONFIG_SCHED_IRQMONITOR
-      g_irqvector[ndx].start   = clock_systime_ticks();
-      g_irqvector[ndx].time    = 0;
+      g_irqvector[ndx].start   = clock_systimer();
+#ifdef CONFIG_HAVE_LONG_LONG
       g_irqvector[ndx].count   = 0;
+#else
+      g_irqvector[ndx].mscount = 0;
+      g_irqvector[ndx].lscount = 0;
+#endif
 #endif
 
-      spin_unlock_irqrestore(&g_irqlock, flags);
+      leave_critical_section(flags);
       ret = OK;
     }
 

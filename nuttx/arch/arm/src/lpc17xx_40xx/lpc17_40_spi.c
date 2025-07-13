@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/arm/src/lpc17xx_40xx/lpc17_40_spi.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2010, 2012-2013, 2016-2017 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,20 +41,20 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <arch/board/board.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 #include "hardware/lpc17_40_syscon.h"
 #include "lpc17_40_gpio.h"
@@ -86,7 +100,7 @@
 struct lpc17_40_spidev_s
 {
   struct spi_dev_s spidev;     /* Externally visible part of the SPI interface */
-  mutex_t          lock;       /* Held while chip is selected for mutual exclusion */
+  sem_t            exclsem;    /* Held while chip is selected for mutual exclusion */
   uint32_t         frequency;  /* Requested clock frequency */
   uint32_t         actual;     /* Actual clock frequency */
   uint8_t          nbits;      /* Width of word in bits (8 to 16) */
@@ -99,15 +113,15 @@ struct lpc17_40_spidev_s
 
 /* SPI methods */
 
-static int      spi_lock(struct spi_dev_s *dev, bool lock);
-static uint32_t spi_setfrequency(struct spi_dev_s *dev,
+static int      spi_lock(FAR struct spi_dev_s *dev, bool lock);
+static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
                                  uint32_t frequency);
-static void     spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode);
-static void     spi_setbits(struct spi_dev_s *dev, int nbits);
-static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd);
-static void     spi_sndblock(struct spi_dev_s *dev,
-                             const void *buffer, size_t nwords);
-static void     spi_recvblock(struct spi_dev_s *dev, void *buffer,
+static void     spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode);
+static void     spi_setbits(FAR struct spi_dev_s *dev, int nbits);
+static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd);
+static void     spi_sndblock(FAR struct spi_dev_s *dev,
+                             FAR const void *buffer, size_t nwords);
+static void     spi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
                               size_t nwords);
 
 /****************************************************************************
@@ -141,10 +155,9 @@ static const struct spi_ops_s g_spiops =
 static struct lpc17_40_spidev_s g_spidev =
 {
   .spidev            =
-  {
-    .ops             = &g_spiops,
-  },
-  .lock              = NXMUTEX_INITIALIZER,
+    {
+      &g_spiops
+    },
 };
 
 /****************************************************************************
@@ -176,18 +189,18 @@ static struct lpc17_40_spidev_s g_spidev =
  *
  ****************************************************************************/
 
-static int spi_lock(struct spi_dev_s *dev, bool lock)
+static int spi_lock(FAR struct spi_dev_s *dev, bool lock)
 {
-  struct lpc17_40_spidev_s *priv = (struct lpc17_40_spidev_s *)dev;
+  FAR struct lpc17_40_spidev_s *priv = (FAR struct lpc17_40_spidev_s *)dev;
   int ret;
 
   if (lock)
     {
-      ret = nxmutex_lock(&priv->lock);
+      ret = nxsem_wait_uninterruptible(&priv->exclsem);
     }
   else
     {
-      ret = nxmutex_unlock(&priv->lock);
+      ret = nxsem_post(&priv->exclsem);
     }
 
   return ret;
@@ -208,18 +221,16 @@ static int spi_lock(struct spi_dev_s *dev, bool lock)
  *
  ****************************************************************************/
 
-static uint32_t spi_setfrequency(struct spi_dev_s *dev,
+static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
                                  uint32_t frequency)
 {
-  struct lpc17_40_spidev_s *priv = (struct lpc17_40_spidev_s *)dev;
+  FAR struct lpc17_40_spidev_s *priv = (FAR struct lpc17_40_spidev_s *)dev;
   uint32_t divisor;
   uint32_t actual;
 
-  DEBUGASSERT(priv && frequency <= SPI_CLOCK / 2);
+  /* Check if the requested frequence is the same as the frequency selection */
 
-  /* Check if the requested frequency is the same as the frequency
-   * selection.
-   */
+  DEBUGASSERT(priv && frequency <= SPI_CLOCK / 2);
 
   if (priv->frequency == frequency)
     {
@@ -260,7 +271,7 @@ static uint32_t spi_setfrequency(struct spi_dev_s *dev,
   priv->frequency = frequency;
   priv->actual    = actual;
 
-  spiinfo("Frequency %" PRId32 "->%" PRId32 "\n", frequency, actual);
+  spiinfo("Frequency %d->%d\n", frequency, actual);
   return actual;
 }
 
@@ -279,9 +290,9 @@ static uint32_t spi_setfrequency(struct spi_dev_s *dev,
  *
  ****************************************************************************/
 
-static void spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
+static void spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
 {
-  struct lpc17_40_spidev_s *priv = (struct lpc17_40_spidev_s *)dev;
+  FAR struct lpc17_40_spidev_s *priv = (FAR struct lpc17_40_spidev_s *)dev;
   uint32_t regval;
 
   /* Has the mode changed? */
@@ -317,7 +328,7 @@ static void spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
 
       putreg32(regval, LPC17_40_SPI_CR);
 
-      /* Save the mode so that subsequent re-configurations will be faster */
+      /* Save the mode so that subsequent re-configuratins will be faster */
 
       priv->mode = mode;
     }
@@ -331,16 +342,16 @@ static void spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
  *
  * Input Parameters:
  *   dev -  Device-specific state data
- *   nbits - The number of bits requested
+ *   nbits - The number of bits requests
  *
  * Returned Value:
  *   none
  *
  ****************************************************************************/
 
-static void spi_setbits(struct spi_dev_s *dev, int nbits)
+static void spi_setbits(FAR struct spi_dev_s *dev, int nbits)
 {
-  struct lpc17_40_spidev_s *priv = (struct lpc17_40_spidev_s *)dev;
+  FAR struct lpc17_40_spidev_s *priv = (FAR struct lpc17_40_spidev_s *)dev;
   uint32_t regval;
 
   /* Has the number of bits changed? */
@@ -355,11 +366,9 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
       regval &= ~SPI_CR_BITS_MASK;
       regval |= (nbits << SPI_CR_BITS_SHIFT) & SPI_CR_BITS_MASK;
       regval |= SPI_CR_BITENABLE;
-      putreg32(regval, LPC17_40_SPI_CR);
+      regval = getreg32(LPC17_40_SPI_CR);
 
-      /* Save the selection so that subsequent re-configurations will be
-       * faster.
-       */
+      /* Save the selection so the subsequence re-configurations will be faster */
 
       priv->nbits = nbits;
     }
@@ -381,7 +390,7 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
  *
  ****************************************************************************/
 
-static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd)
+static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd)
 {
   /* Write the data to transmitted to the SPI Data Register */
 
@@ -420,10 +429,10 @@ static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd)
  *
  ****************************************************************************/
 
-static void spi_sndblock(struct spi_dev_s *dev,
-                         const void *buffer, size_t nwords)
+static void spi_sndblock(FAR struct spi_dev_s *dev,
+                         FAR const void *buffer, size_t nwords)
 {
-  uint8_t *ptr = (uint8_t *)buffer;
+  FAR uint8_t *ptr = (FAR uint8_t *)buffer;
   uint8_t data;
 
   spiinfo("nwords: %d\n", nwords);
@@ -468,10 +477,10 @@ static void spi_sndblock(struct spi_dev_s *dev,
  *
  ****************************************************************************/
 
-static void spi_recvblock(struct spi_dev_s *dev, void *buffer,
+static void spi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
                           size_t nwords)
 {
-  uint8_t *ptr = (uint8_t *)buffer;
+  FAR uint8_t *ptr = (FAR uint8_t *)buffer;
 
   spiinfo("nwords: %d\n", nwords);
   while (nwords)
@@ -518,9 +527,9 @@ static void spi_recvblock(struct spi_dev_s *dev, void *buffer,
  *
  ****************************************************************************/
 
-struct spi_dev_s *lpc17_40_spibus_initialize(int port)
+FAR struct spi_dev_s *lpc17_40_spibus_initialize(int port)
 {
-  struct lpc17_40_spidev_s *priv = &g_spidev;
+  FAR struct lpc17_40_spidev_s *priv = &g_spidev;
   irqstate_t flags;
   uint32_t regval;
 
@@ -565,7 +574,11 @@ struct spi_dev_s *lpc17_40_spibus_initialize(int port)
 
   /* Select a default frequency of approx. 400KHz */
 
-  spi_setfrequency((struct spi_dev_s *)priv, 400000);
+  spi_setfrequency((FAR struct spi_dev_s *)priv, 400000);
+
+  /* Initialize the SPI semaphore that enforces mutually exclusive access */
+
+  nxsem_init(&priv->exclsem, 0, 1);
   return &priv->spidev;
 }
 

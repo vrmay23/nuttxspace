@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/task/task_posixspawn.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,9 +26,7 @@
 
 #include <sys/wait.h>
 #include <spawn.h>
-#include <assert.h>
 #include <debug.h>
-#include <errno.h>
 
 #include <nuttx/sched.h>
 #include <nuttx/kthread.h>
@@ -58,10 +54,8 @@
  *     child task in the variable pointed to by a non-NULL 'pid' argument.|
  *
  *   path - The 'path' argument identifies the file to execute.  If
- *     CONFIG_LIBC_ENVPATH is defined, this may be either a relative or
+ *     CONFIG_LIB_ENVPATH is defined, this may be either a relative or
  *     or an absolute path.  Otherwise, it must be an absolute path.
- *
- *   actions - The spawn file actions
  *
  *   attr - If the value of the 'attr' parameter is NULL, the all default
  *     values for the POSIX spawn attributes will be used.  Otherwise, the
@@ -88,10 +82,8 @@
  ****************************************************************************/
 
 static int nxposix_spawn_exec(FAR pid_t *pidp, FAR const char *path,
-                              FAR const posix_spawn_file_actions_t *actions,
                               FAR const posix_spawnattr_t *attr,
-                              FAR char * const argv[],
-                              FAR char * const envp[])
+                              FAR char * const argv[])
 {
   FAR const struct symtab_s *symtab;
   int nsymbols;
@@ -104,14 +96,21 @@ static int nxposix_spawn_exec(FAR pid_t *pidp, FAR const char *path,
 
   exec_getsymtab(&symtab, &nsymbols);
 
+  /* Disable pre-emption so that we can modify the task parameters after
+   * we start the new task; the new task will not actually begin execution
+   * until we re-enable pre-emption.
+   */
+
+  sched_lock();
+
   /* Start the task */
 
-  pid = exec_spawn(path, argv, envp, symtab, nsymbols, actions, attr);
+  pid = exec_spawn(path, (FAR char * const *)argv, symtab, nsymbols, attr);
   if (pid < 0)
     {
-      ret = -pid;
+      ret = get_errno();
       serr("ERROR: exec failed: %d\n", ret);
-      return ret;
+      goto errout;
     }
 
   /* Return the task ID to the caller */
@@ -121,7 +120,95 @@ static int nxposix_spawn_exec(FAR pid_t *pidp, FAR const char *path,
       *pidp = pid;
     }
 
+  /* Now set the attributes.  Note that we ignore all of the return values
+   * here because we have already successfully started the task.  If we
+   * return an error value, then we would also have to stop the task.
+   */
+
+  if (attr)
+    {
+      spawn_execattrs(pid, attr);
+    }
+
+  /* Re-enable pre-emption and return */
+
+errout:
+  sched_unlock();
   return ret;
+}
+
+/****************************************************************************
+ * Name: nxposix_spawn_proxy
+ *
+ * Description:
+ *   Perform file_actions, then execute the task from the file system.
+ *
+ *   Do we really need this proxy task?  Isn't that wasteful?
+ *
+ *   Q: Why not use a starthook so that there is callout from nxtask_start()
+ *      to perform these operations after the file is loaded from
+ *      the file system?
+ *   A: That existing nxtask_starthook() implementation cannot be used in
+ *      this context; any of nxtask_starthook() will also conflict with
+ *      binfmt's use of the start hook to call C++ static initializers.
+ *      task_restart() would also be an issue.
+ *
+ * Input Parameters:
+ *   Standard task start-up parameters
+ *
+ * Returned Value:
+ *   Standard task return value.
+ *
+ ****************************************************************************/
+
+static int nxposix_spawn_proxy(int argc, FAR char *argv[])
+{
+  int ret;
+
+  /* Perform file actions and/or set a custom signal mask.  We get here only
+   * if the file_actions parameter to posix_spawn[p] was non-NULL and/or the
+   * option to change the signal mask was selected.
+   */
+
+  DEBUGASSERT(g_spawn_parms.file_actions ||
+              (g_spawn_parms.attr &&
+               (g_spawn_parms.attr->flags & POSIX_SPAWN_SETSIGMASK) != 0));
+
+  /* Set the attributes and perform the file actions as appropriate */
+
+  ret = spawn_proxyattrs(g_spawn_parms.attr, g_spawn_parms.file_actions);
+  if (ret == OK)
+    {
+      /* Start the task */
+
+      ret = nxposix_spawn_exec(g_spawn_parms.pid, g_spawn_parms.u.posix.path,
+                               g_spawn_parms.attr, g_spawn_parms.argv);
+
+#ifdef CONFIG_SCHED_HAVE_PARENT
+      if (ret == OK)
+        {
+          /* Change of the parent of the task we just spawned to our parent.
+           * What should we do in the event of a failure?
+           */
+
+          int tmp = task_reparent(0, *g_spawn_parms.pid);
+          if (tmp < 0)
+            {
+              serr("ERROR: task_reparent() failed: %d\n", tmp);
+            }
+        }
+#endif
+    }
+
+  /* Post the semaphore to inform the parent task that we have completed
+   * what we need to do.
+   */
+
+  g_spawn_parms.result = ret;
+#ifndef CONFIG_SCHED_WAITPID
+  spawn_semgive(&g_spawn_execsem);
+#endif
+  return OK;
 }
 
 /****************************************************************************
@@ -151,7 +238,7 @@ static int nxposix_spawn_exec(FAR pid_t *pidp, FAR const char *path,
  *     directories passed as the environment variable PATH.
  *
  *     NOTE: NuttX provides only one implementation:  If
- *     CONFIG_LIBC_ENVPATH is defined, then only posix_spawnp() behavior
+ *     CONFIG_LIB_ENVPATH is defined, then only posix_spawnp() behavior
  *     is supported; otherwise, only posix_spawn behavior is supported.
  *
  *   file_actions - If 'file_actions' is a null pointer, then file
@@ -185,8 +272,12 @@ static int nxposix_spawn_exec(FAR pid_t *pidp, FAR const char *path,
  *     array of pointers to null-terminated strings. The list is terminated
  *     with a null pointer.
  *
- *   envp - envp[] is an array of character pointers to null-terminated
- *     strings that provide the environment for the new process image.
+ *   envp - The envp[] argument is not used by NuttX and may be NULL.  In
+ *     standard implementations, envp[] is an array of character pointers to
+ *     null-terminated strings that provide the environment for the new
+ *     process image. The environment array is terminated by a null pointer.
+ *     In NuttX, the envp[] argument is ignored and the new task will simply
+ *     inherit the environment of the parent task.
  *
  * Returned Value:
  *   posix_spawn() and posix_spawnp() will return zero on success.
@@ -199,9 +290,11 @@ static int nxposix_spawn_exec(FAR pid_t *pidp, FAR const char *path,
  *
  * Assumptions/Limitations:
  *   - NuttX provides only posix_spawn() or posix_spawnp() behavior
- *     depending upon the setting of CONFIG_LIBC_ENVPATH: If
- *     CONFIG_LIBC_ENVPATH is defined, then only posix_spawnp() behavior
+ *     depending upon the setting of CONFIG_LIB_ENVPATH: If
+ *     CONFIG_LIB_ENVPATH is defined, then only posix_spawnp() behavior
  *     is supported; otherwise, only posix_spawn behavior is supported.
+ *   - The 'envp' argument is not used and the 'environ' variable is not
+ *     altered (NuttX does not support the 'environ' variable).
  *   - Process groups are not supported (POSIX_SPAWN_SETPGROUP).
  *   - Effective user IDs are not supported (POSIX_SPAWN_RESETIDS).
  *   - Signal default actions cannot be modified in the newly task executed
@@ -215,12 +308,137 @@ static int nxposix_spawn_exec(FAR pid_t *pidp, FAR const char *path,
  *
  ****************************************************************************/
 
+#ifdef CONFIG_LIB_ENVPATH
+int posix_spawnp(FAR pid_t *pid, FAR const char *path,
+                 FAR const posix_spawn_file_actions_t *file_actions,
+                 FAR const posix_spawnattr_t *attr,
+                 FAR char *const argv[], FAR char *const envp[])
+#else
 int posix_spawn(FAR pid_t *pid, FAR const char *path,
                 FAR const posix_spawn_file_actions_t *file_actions,
                 FAR const posix_spawnattr_t *attr,
-                FAR char * const argv[], FAR char * const envp[])
+                FAR char *const argv[], FAR char *const envp[])
+#endif
 {
-  return nxposix_spawn_exec(pid, path,
-                            file_actions != NULL ?
-                            *file_actions : NULL, attr, argv, envp);
+  struct sched_param param;
+  pid_t proxy;
+#ifdef CONFIG_SCHED_WAITPID
+  int status;
+#endif
+  int ret;
+
+  DEBUGASSERT(path);
+
+  sinfo("pid=%p path=%s file_actions=%p attr=%p argv=%p\n",
+        pid, path, file_actions, attr, argv);
+
+  /* If there are no file actions to be performed and there is no change to
+   * the signal mask, then start the new child task directly from the parent
+   * task.
+   */
+
+  if ((file_actions == NULL || *file_actions == NULL) &&
+      (attr == NULL || (attr->flags & POSIX_SPAWN_SETSIGMASK) == 0))
+    {
+      return nxposix_spawn_exec(pid, path, attr, argv);
+    }
+
+  /* Otherwise, we will have to go through an intermediary/proxy task in
+   * order to perform the I/O redirection.  This would be a natural place
+   * to fork().  However, true fork() behavior requires an MMU and most
+   * implementations of vfork() are not capable of these operations.
+   *
+   * Even without fork(), we can still do the job, but parameter passing is
+   * messier.  Unfortunately, there is no (clean) way to pass binary values
+   * as a task parameter, so we will use a semaphore-protected global
+   * structure.
+   */
+
+  /* Get exclusive access to the global parameter structure */
+
+  ret = spawn_semtake(&g_spawn_parmsem);
+  if (ret < 0)
+    {
+      serr("ERROR: spawn_semtake failed: %d\n", ret);
+      return -ret;
+    }
+
+  /* Populate the parameter structure */
+
+  g_spawn_parms.result       = ENOSYS;
+  g_spawn_parms.pid          = pid;
+  g_spawn_parms.file_actions = file_actions ? *file_actions : NULL;
+  g_spawn_parms.attr         = attr;
+  g_spawn_parms.argv         = argv;
+  g_spawn_parms.u.posix.path = path;
+
+  /* Get the priority of this (parent) task */
+
+  ret = nxsched_getparam(0, &param);
+  if (ret < 0)
+    {
+      serr("ERROR: nxsched_getparam failed: %d\n", ret);
+      spawn_semgive(&g_spawn_parmsem);
+      return -ret;
+    }
+
+  /* Disable pre-emption so that the proxy does not run until waitpid
+   * is called.  This is probably unnecessary since the nxposix_spawn_proxy
+   * has the same priority as this thread; it should be schedule behind
+   * this task in the ready-to-run list.
+   */
+
+#ifdef CONFIG_SCHED_WAITPID
+  sched_lock();
+#endif
+
+  /* Start the intermediary/proxy task at the same priority as the parent
+   * task.
+   */
+
+  proxy = kthread_create("nxposix_spawn_proxy", param.sched_priority,
+                         CONFIG_POSIX_SPAWN_PROXY_STACKSIZE,
+                         (main_t)nxposix_spawn_proxy,
+                         (FAR char * const *)NULL);
+  if (proxy < 0)
+    {
+      ret = -proxy;
+      serr("ERROR: Failed to start nxposix_spawn_proxy: %d\n", ret);
+      goto errout_with_lock;
+    }
+
+  /* Wait for the proxy to complete its job */
+
+#ifdef CONFIG_SCHED_WAITPID
+  /* REVISIT: This should not call waitpid() directly.  waitpid is a
+   * cancellation point and modifies the errno value.  It is inappropriate
+   * for use within the OS.
+   */
+
+  ret = waitpid(proxy, &status, 0);
+  if (ret < 0)
+    {
+      ret = -get_errno();
+      serr("ERROR: waitpid() failed: %d\n", ret);
+      goto errout_with_lock;
+    }
+#else
+  ret = spawn_semtake(&g_spawn_execsem);
+  if (ret < 0)
+    {
+      serr("ERROR: spawn_semtake() failed: %d\n", ret);
+      goto errout_with_lock;
+    }
+#endif
+
+  /* Get the result and relinquish our access to the parameter structure */
+
+  ret = g_spawn_parms.result;
+
+errout_with_lock:
+#ifdef CONFIG_SCHED_WAITPID
+  sched_unlock();
+#endif
+  spawn_semgive(&g_spawn_parmsem);
+  return ret;
 }

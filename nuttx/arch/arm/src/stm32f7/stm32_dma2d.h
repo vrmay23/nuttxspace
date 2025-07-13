@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/stm32f7/stm32_dma2d.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2015, 2018 Marco Krahl. All rights reserved.
+ *   Author: Marco Krahl <ocram.lhark@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -40,11 +53,11 @@
 
 struct stm32_dma2d_overlay_s
 {
-  uint8_t    fmt;                 /* DMA2D pixel format */
-  uint8_t    transp_mode;         /* DMA2D transparency mode */
-  fb_coord_t xres;                /* X-resolution overlay */
-  fb_coord_t yres;                /* Y-resolution overlay */
-  struct fb_overlayinfo_s *oinfo; /* Framebuffer overlay information */
+  uint8_t    fmt;                         /* DMA2D pixel format */
+  uint8_t    transp_mode;                 /* DMA2D transparency mode */
+  fb_coord_t xres;                        /* X-resolution overlay */
+  fb_coord_t yres;                        /* Y-resolution overlay */
+  FAR struct fb_overlayinfo_s *oinfo;     /* Framebuffer overlay information */
 };
 
 /* DMA2D is controlled by the following interface */
@@ -66,14 +79,15 @@ struct dma2d_layer_s
    */
 
 #ifdef CONFIG_STM32F7_FB_CMAP
-  int (*setclut)(const struct fb_cmap_s * cmap);
+  int (*setclut)(FAR const struct fb_cmap_s * cmap);
 #endif
 
   /* Name: fillcolor
    *
    * Description:
-   *   Fill a specific memory region with a color. The caller must ensure
-   *   that the memory region (area) is within the entire overlay.
+   *   Fill a specific memory region with a color.
+   *   The caller must ensure that the memory region (area) is within the entire
+   *   overlay.
    *
    * Parameter:
    *   oinfo  - Reference to overlay information
@@ -85,16 +99,16 @@ struct dma2d_layer_s
    *   On error   - -EINVAL
    */
 
-  int (*fillcolor)(struct stm32_dma2d_overlay_s *oinfo,
-                   const struct fb_area_s *area, uint32_t argb);
+  int (*fillcolor)(FAR struct stm32_dma2d_overlay_s *oinfo,
+                   FAR const struct fb_area_s *area, uint32_t argb);
 
   /* Name: blit
    *
    * Description:
    *   Copies memory from a source overlay (defined by sarea) to destination
-   *   overlay position (defined by destxpos and destypos) without
-   *   pixelformat conversion. The caller must ensure that the memory region
-   *   (area) is within the entire overlay.
+   *   overlay position (defined by destxpos and destypos) without pixelformat
+   *   conversion. The caller must ensure that the memory region (area) is
+   *   within the entire overlay.
    *
    * Parameter:
    *   doverlay - Reference destination overlay
@@ -108,10 +122,10 @@ struct dma2d_layer_s
    *   On error   - -EINVAL
    */
 
-  int (*blit)(struct stm32_dma2d_overlay_s *doverlay,
+  int (*blit)(FAR struct stm32_dma2d_overlay_s *doverlay,
               uint32_t destxpos, uint32_t destypos,
-              struct stm32_dma2d_overlay_s *soverlay,
-              const struct fb_area_s *sarea);
+              FAR struct stm32_dma2d_overlay_s *soverlay,
+              FAR const struct fb_area_s *sarea);
 
   /* Name: blend
    *
@@ -136,16 +150,16 @@ struct dma2d_layer_s
    *   On error   - -EINVAL or -ECANCELED
    */
 
-  int (*blend)(struct stm32_dma2d_overlay_s *doverlay,
+  int (*blend)(FAR struct stm32_dma2d_overlay_s *doverlay,
                uint32_t destxpos, uint32_t destypos,
-               struct stm32_dma2d_overlay_s *foverlay,
+               FAR struct stm32_dma2d_overlay_s *foverlay,
                uint32_t forexpos, uint32_t foreypos,
-               struct stm32_dma2d_overlay_s *boverlay,
-               const struct fb_area_s *barea);
+               FAR struct stm32_dma2d_overlay_s *boverlay,
+               FAR const struct fb_area_s *barea);
 };
 
 /****************************************************************************
- * Public Function Prototypes
+ * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
@@ -161,7 +175,7 @@ struct dma2d_layer_s
  *
  ****************************************************************************/
 
-struct dma2d_layer_s *stm32_dma2ddev(void);
+FAR struct dma2d_layer_s *stm32_dma2ddev(void);
 
 /****************************************************************************
  * Name: up_dma2dinitialize

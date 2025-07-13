@@ -1,9 +1,10 @@
 /****************************************************************************
  * apps/modbus/nuttx/portevent_m.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2006 Christian Walter <wolti@sil.at>
- * SPDX-FileCopyrightText: 2016 Vytautas Lukenskas <lukevyta@gmail.com>
+ * FreeModbus Library: NuttX Modbus Master Port
+ * Original work (c) 2006 Christian Walter <wolti@sil.at>
+ * Modified work (c) 2016 Vytautas Lukenskas <lukevyta@gmail.com>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -93,7 +94,7 @@ bool xMBMasterPortEventPost(eMBMasterEventType eEvent)
   return true;
 }
 
-bool xMBMasterPortEventGet(eMBMasterEventType *eEvent)
+bool xMBMasterPortEventGet(eMBMasterEventType * eEvent)
 {
   bool xEventHappened = false;
 
@@ -101,6 +102,7 @@ bool xMBMasterPortEventGet(eMBMasterEventType *eEvent)
 
   if (eQueuedEvent & ~(WAITER_EVENTS))
     {
+
       /* Fetch events by priority */
 
       if (eQueuedEvent & EV_MASTER_READY)
@@ -134,9 +136,9 @@ bool xMBMasterPortEventGet(eMBMasterEventType *eEvent)
   else
     {
       /* Poll the serial device. The serial device timeouts if no characters
-       * have been received within for t3.5 during an active transmission or
-       * if nothing happens within a specified amount of time. Both timeouts
-       * are configured from the timer init functions.
+       * have been received within for t3.5 during an active transmission or if
+       * nothing happens within a specified amount of time. Both timeouts are
+       * configured from the timer init functions.
        */
 
       xMBMasterPortSerialPoll();
@@ -186,7 +188,6 @@ bool xMBMasterRunResTake(int32_t lTimeOut)
         {
           return false;
         }
-
       return true;
     }
   else
@@ -197,7 +198,6 @@ bool xMBMasterRunResTake(int32_t lTimeOut)
         {
           return false;
         }
-
       return true;
     }
 }
@@ -227,7 +227,7 @@ void vMBMasterRunResRelease(void)
  */
 
 void vMBMasterErrorCBRespondTimeout(uint8_t ucDestAddress,
-                                    const uint8_t *pucPDUData,
+                                    const uint8_t * pucPDUData,
                                     uint16_t usPDULength)
 {
   xMBMasterPortEventPost(EV_MASTER_ERROR_RESPOND_TIMEOUT);
@@ -243,7 +243,7 @@ void vMBMasterErrorCBRespondTimeout(uint8_t ucDestAddress,
  */
 
 void vMBMasterErrorCBReceiveData(uint8_t ucDestAddress,
-                                 const uint8_t *pudPDUData,
+                                 const uint8_t * pudPDUData,
                                  uint16_t usPDULength)
 {
   xMBMasterPortEventPost(EV_MASTER_ERROR_RECEIVE_DATA);
@@ -259,7 +259,7 @@ void vMBMasterErrorCBReceiveData(uint8_t ucDestAddress,
  */
 
 void vMBMasterErrorCBExecuteFunction(uint8_t ucDestAddress,
-                                     const uint8_t *pucPDUData,
+                                     const uint8_t * pucPDUData,
                                      uint16_t usPDULength)
 {
   xMBMasterPortEventPost(EV_MASTER_ERROR_EXECUTE_FUNCTION);
@@ -274,8 +274,7 @@ void vMBMasterCBRequestSuccess(void)
   xMBMasterPortEventPost(EV_MASTER_PROCESS_SUCCESS);
 }
 
-/* This function will wait for Modbus Master request finish
- * and return result.
+/* This function will wait for Modbus Master request finish and return result.
  */
 
 eMBMasterReqErrCode eMBMasterWaitRequestFinish(void)
@@ -304,7 +303,6 @@ eMBMasterReqErrCode eMBMasterWaitRequestFinish(void)
         {
           eErrStatus = MB_MRE_EXE_FUN;
         }
-
       eQueuedEvent &= ~WAITER_EVENTS;
     }
 

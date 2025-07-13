@@ -1,22 +1,37 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_sdhci.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -221,7 +236,7 @@ extern "C"
 #define SDHCI_SYSCTL_ICLKEN              (1 << 0)  /* Bit 0:  Internal Clock Enable */
 #define SDHCI_SYSCTL_ICLKSTA             (1 << 1)  /* Bit 1:  Internal Clock Stable */
 #define SDHCI_SYSCTL_SDCLKEN             (1 << 2)  /* Bit 2:  SD Clock Enable */
-#define SDHCI_SYSCTL_GENSEL              (1 << 5)  /* Bit 5:  Clock Generator Select */
+#define SDHCI_SYSCTL_GENSEL              (1 << 5)  /* Bit 5:  Clock Generetor Select */
 #define SDHCI_SYSCTL_SDCLKFSUP_SHIFT     (6)       /* Bits 6-7: Divisor */
 #define SDHCI_SYSCTL_SDCLKFSUP_MASK      (3 << SDHCI_SYSCTL_SDCLKFSUP_SHIFT)
 #define SDHCI_SYSCTL_SDCLKFS_SHIFT       (8)       /* Bits 8-15: SDCLK Frequency Select */
@@ -426,7 +441,7 @@ struct sdio_dev_s;
  *
  ****************************************************************************/
 
-struct sdio_dev_s *cxd56_sdhci_initialize(int slotno);
+FAR struct sdio_dev_s *cxd56_sdhci_initialize(int slotno);
 
 /****************************************************************************
  * Name: cxd56_sdhci_finalize
@@ -443,7 +458,7 @@ struct sdio_dev_s *cxd56_sdhci_initialize(int slotno);
  *
  ****************************************************************************/
 
-struct sdio_dev_s *cxd56_sdhci_finalize(int slotno);
+FAR struct sdio_dev_s *cxd56_sdhci_finalize(int slotno);
 
 /****************************************************************************
  * Name: cxd56_sdhci_mediachange
@@ -461,7 +476,7 @@ struct sdio_dev_s *cxd56_sdhci_finalize(int slotno);
  *
  ****************************************************************************/
 
-void cxd56_sdhci_mediachange(struct sdio_dev_s *dev);
+void cxd56_sdhci_mediachange(FAR struct sdio_dev_s *dev);
 
 /****************************************************************************
  * Name: sdio_wrprotect
@@ -479,20 +494,7 @@ void cxd56_sdhci_mediachange(struct sdio_dev_s *dev);
  *
  ****************************************************************************/
 
-void cxd56_sdhci_wrprotect(struct sdio_dev_s *dev, bool wrprotect);
-
-/****************************************************************************
- * Name: cxd56_sdio_resetstatus
- *
- * Description:
- *   Reset SDIO status.
- *
- * Input Parameters:
- *   dev   - Device-specific state data
- *
- ****************************************************************************/
-
-void cxd56_sdio_resetstatus(struct sdio_dev_s *dev);
+void cxd56_sdhci_wrprotect(FAR struct sdio_dev_s *dev, bool wrprotect);
 
 #undef EXTERN
 #ifdef __cplusplus

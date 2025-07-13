@@ -1,37 +1,41 @@
 /****************************************************************************
  * wireless/bluetooth/bt_gatt.c
+ * Generic Attribute Profile handling.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Ported from the Intel/Zephyr arduino101_firmware_source-v1.tar package
+ * where the code was released with a compatible 3-clause BSD license:
  *
  *   Copyright (c) 2016, Intel Corporation
  *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
  *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
  * 3. Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
+ *    contributors may be used to endorse or promote products derived from this
+ *    software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS
- * ; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -152,9 +156,9 @@ int bt_gatt_attr_read_service(FAR struct bt_conn_s *conn,
                            sizeof(uuid->u.u128));
 }
 
-int bt_gatt_attr_read_included(FAR struct bt_conn_s *conn,
-                               FAR const struct bt_gatt_attr_s *attr,
-                               FAR void *buf, uint8_t len, uint16_t offset)
+int bt_gatt_attr_read_include(FAR struct bt_conn_s *conn,
+                              FAR const struct bt_gatt_attr_s *attr,
+                              FAR void *buf, uint8_t len, uint16_t offset)
 {
   FAR struct bt_gatt_include_s *incl = attr->user_data;
   struct gatt_incl_s pdu;
@@ -743,9 +747,7 @@ int bt_gatt_discover(FAR struct bt_conn_s *conn,
 
       case BT_UUID_128:
         bt_buf_extend(buf, sizeof(params->uuid->u.u128));
-        memcpy(req->value,
-               params->uuid->u.u128,
-               sizeof(params->uuid->u.u128));
+        memcpy(req->value, params->uuid->u.u128, sizeof(params->uuid->u.u128));
         break;
 
       default:
@@ -809,8 +811,8 @@ static void att_read_type_rsp(FAR struct bt_conn_s *conn, uint8_t err,
           goto done;
         }
 
-      /* Convert characteristic data, bt_gatt_chrc and gatt_chrc_s have
-       * different formats so the conversion have to be done field by field.
+      /* Convert characteristic data, bt_gatt_chrc and gatt_chrc_s have different
+       * formats so the conversion have to be done field by field.
        */
 
       value.properties   = chrc->properties;
@@ -838,8 +840,7 @@ static void att_read_type_rsp(FAR struct bt_conn_s *conn, uint8_t err,
           continue;
         }
 
-      attr = (&(struct bt_gatt_attr_s)BT_GATT_CHARACTERISTIC(handle,
-                                                             &value));
+      attr = (&(struct bt_gatt_attr_s)BT_GATT_CHARACTERISTIC(handle, &value));
 
       if (params->func(attr, params) == BT_GATT_ITER_STOP)
         {
@@ -893,8 +894,7 @@ done:
  ****************************************************************************/
 
 int bt_gatt_discover_characteristic(FAR struct bt_conn_s *conn,
-                                    FAR struct bt_gatt_discover_params_s
-                                               *params)
+                                    FAR struct bt_gatt_discover_params_s *params)
 {
   FAR struct bt_buf_s *buf;
   FAR struct bt_att_read_type_req_s *req;
@@ -1222,7 +1222,7 @@ int bt_gatt_read_multiple(FAR struct bt_conn_s *conn,
   FAR struct bt_buf_s *buf;
   uint8_t i;
 
-  if (!conn || conn->state != BT_CONN_CONNECTED)
+  if (!conn && conn->state != BT_CONN_CONNECTED)
     {
       return -ENOTCONN;
     }

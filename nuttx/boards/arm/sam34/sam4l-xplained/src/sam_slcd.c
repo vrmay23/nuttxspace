@@ -1,22 +1,35 @@
 /****************************************************************************
- * boards/arm/sam34/sam4l-xplained/src/sam_slcd.c
+ * boards/arm/sam34/sam4l-xlplained/src/sam_slcd.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,13 +43,11 @@
 
 #include <nuttx/config.h>
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 #include <poll.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -47,7 +58,7 @@
 #include <nuttx/lcd/slcd_codec.h>
 #include <nuttx/semaphore.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "sam_gpio.h"
 #include "sam4l_periphclks.h"
 #include "hardware/sam4l_lcdca.h"
@@ -62,13 +73,23 @@
 
 /* Configuration ************************************************************/
 
-#ifndef CONFIG_LIBC_SLCDCODEC
-#  error This SLCD driver requires CONFIG_LIBC_SLCDCODEC
+#ifndef CONFIG_LIB_SLCDCODEC
+#  error This SLCD driver requires CONFIG_LIB_SLCDCODEC
 #endif
 
 #if !defined(CONFIG_SAM34_OSC32K) && !defined(CONFIG_SAM34_RC32K)
 #  error This SLCD driver requires that either CONFIG_SAM34_OSC32K or
 #  error CONFIG_SAM34_RC32K be selected in the board configuration
+#endif
+
+/* The ever-present MIN/MAX macros ******************************************/
+
+#ifndef MIN
+#  define MIN(a,b) (a < b ? a : b)
+#endif
+
+#ifndef MAX
+#  define MAX(a,b) (a > b ? a : b)
 #endif
 
 /* LCD **********************************************************************/
@@ -216,8 +237,17 @@
 #define SLCD_AM          (&g_einfo[7])
 
 /****************************************************************************
- * Private Types
+ * Private Type Definition
  ****************************************************************************/
+
+/* SLCD incoming stream structure */
+
+struct slcd_instream_s
+{
+  struct lib_instream_s stream;
+  FAR const char *buffer;
+  ssize_t nbytes;
+};
 
 /* Global SLCD state */
 
@@ -244,8 +274,8 @@ struct slcd_pixel_s
 /* Debug */
 
 #ifdef CONFIG_DEBUG_LCD_INFO
-static void slcd_dumpstate(const char *msg);
-static void slcd_dumpslcd(const char *msg);
+static void slcd_dumpstate(FAR const char *msg);
+static void slcd_dumpslcd(FAR const char *msg);
 #else
 #  define slcd_dumpstate(msg)
 #  define slcd_dumpslcd(msg)
@@ -256,10 +286,11 @@ static void slcd_dumpslcd(const char *msg);
 #if 0 /* Not used */
 static void slcd_clear(void);
 #endif
-static void slcd_setpixel(const struct slcd_pixel_s *info);
-static void slcd_clrpixel(const struct slcd_pixel_s *info);
+static void slcd_setpixel(FAR const struct slcd_pixel_s *info);
+static void slcd_clrpixel(FAR const struct slcd_pixel_s *info);
 static inline void slcd_setdp(uint8_t curpos);
 static inline void slcd_clrdp(uint8_t curpos);
+static int slcd_getstream(FAR struct lib_instream_s *instream);
 static uint8_t slcd_getcontrast(void);
 static int slcd_setcontrast(unsigned int contrast);
 static void slcd_writech(uint8_t ch, uint8_t curpos, uint8_t options);
@@ -267,10 +298,10 @@ static void slcd_action(enum slcdcode_e code, uint8_t count);
 
 /* Character driver methods */
 
-static ssize_t slcd_read(struct file *, char *, size_t);
-static ssize_t slcd_write(struct file *, const char *, size_t);
-static int slcd_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int slcd_poll(struct file *filep, struct pollfd *fds,
+static ssize_t slcd_read(FAR struct file *, FAR char *, size_t);
+static ssize_t slcd_write(FAR struct file *, FAR const char *, size_t);
+static int slcd_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
+static int slcd_poll(FAR struct file *filep, FAR struct pollfd *fds,
                      bool setup);
 
 /****************************************************************************
@@ -283,14 +314,12 @@ static int slcd_poll(struct file *filep, struct pollfd *fds,
 
 static const struct file_operations g_slcdops =
 {
-  NULL,          /* open */
-  NULL,          /* close */
+  0,             /* open */
+  0,             /* close */
   slcd_read,     /* read */
   slcd_write,    /* write */
-  NULL,          /* seek */
+  0,             /* seek */
   slcd_ioctl,    /* ioctl */
-  NULL,          /* mmap */
-  NULL,          /* truncate */
   slcd_poll      /* poll */
 };
 
@@ -326,44 +355,24 @@ static const uint8_t g_startseg[SLCD_NCHARS] =
 
 static const struct slcd_pixel_s g_binfo[SLCD_NB] =
 {
-  {17, 0},
-  {13, 0},
-  {9, 0},
-  {5, 0},
-  {6, 3},
-  {10, 3},
-  {14, 3},
-  {18, 3},
-  {21, 0},
-  {22, 3}
+  {17, 0}, {13, 0}, {9, 0},  {5, 0},  {6, 3},
+  {10, 3}, {14, 3}, {18, 3}, {21, 0}, {22, 3}
 };
 
 /* Pixel position for each 'G' segment */
 
 static const struct slcd_pixel_s g_ginfo[SLCD_NG] =
 {
-  {1, 0},
-  {0, 0},
-  {0, 1},
-  {0, 3},
-  {0, 2},
-  {1, 3},
-  {1, 1},
-  {1, 2}
+  {1, 0},  {0, 0},  {0, 1},  {0, 3},  {0, 2},
+  {1, 3},  {1, 1},  {1, 2}
 };
 
 /* Pixel position for each 'E' segment */
 
 static const struct slcd_pixel_s g_einfo[SLCD_NE] =
 {
-  {3, 3},
-  {2, 3},
-  {3, 2},
-  {2, 2},
-  {3, 1},
-  {2, 1},
-  {3, 0},
-  {2, 0}
+  {3, 3},  {2, 3},  {3, 2},  {2, 2},  {3, 1},
+  {2, 1},  {3, 0},  {2, 0}
 };
 
 /****************************************************************************
@@ -375,7 +384,7 @@ static const struct slcd_pixel_s g_einfo[SLCD_NE] =
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_LCD_INFO
-static void slcd_dumpstate(const char *msg)
+static void slcd_dumpstate(FAR const char *msg)
 {
   lcdinfo("%s:\n", msg);
   lcdinfo("  curpos: %d\n",
@@ -400,7 +409,7 @@ static void slcd_dumpstate(const char *msg)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_LCD_INFO
-static void slcd_dumpslcd(const char *msg)
+static void slcd_dumpslcd(FAR const char *msg)
 {
   lcdinfo("%s:\n", msg);
   lcdinfo("    CFG: %08x    TIM: %08x    SR: %08x\n",
@@ -440,7 +449,7 @@ static void slcd_clear(void)
  * Name: slcd_setpixel
  ****************************************************************************/
 
-static void slcd_setpixel(const struct slcd_pixel_s *info)
+static void slcd_setpixel(FAR const struct slcd_pixel_s *info)
 {
   uintptr_t regaddr;
   uint32_t regval;
@@ -455,7 +464,7 @@ static void slcd_setpixel(const struct slcd_pixel_s *info)
  * Name: slcd_clrpixel
  ****************************************************************************/
 
-static void slcd_clrpixel(const struct slcd_pixel_s *info)
+static void slcd_clrpixel(FAR const struct slcd_pixel_s *info)
 {
   uintptr_t regaddr;
   uint32_t regval;
@@ -494,6 +503,29 @@ static inline void slcd_clrdp(uint8_t curpos)
    */
 
   slcd_clrpixel(&g_binfo[curpos + 3]);
+}
+
+/****************************************************************************
+ * Name: slcd_getstream
+ *
+ * Description:
+ *   Get one character from the keyboard.
+ *
+ ****************************************************************************/
+
+static int slcd_getstream(FAR struct lib_instream_s *instream)
+{
+  FAR struct slcd_instream_s *slcdstream = (FAR struct slcd_instream_s *)instream;
+
+  DEBUGASSERT(slcdstream && slcdstream->buffer);
+  if (slcdstream->nbytes > 0)
+    {
+      slcdstream->nbytes--;
+      slcdstream->stream.nget++;
+      return (int)*slcdstream->buffer++;
+    }
+
+  return EOF;
 }
 
 /****************************************************************************
@@ -816,8 +848,7 @@ static void slcd_action(enum slcdcode_e code, uint8_t count)
  * Name: slcd_read
  ****************************************************************************/
 
-static ssize_t slcd_read(struct file *filep,
-                         char *buffer, size_t len)
+static ssize_t slcd_read(FAR struct file *filep, FAR char *buffer, size_t len)
 {
   int ret = 0;
   int i;
@@ -854,10 +885,10 @@ static ssize_t slcd_read(struct file *filep,
  * Name: slcd_write
  ****************************************************************************/
 
-static ssize_t slcd_write(struct file *filep,
-                          const char *buffer, size_t len)
+static ssize_t slcd_write(FAR struct file *filep,
+                          FAR const char *buffer, size_t len)
 {
-  struct lib_meminstream_s instream;
+  struct slcd_instream_s instream;
   struct slcdstate_s state;
   enum slcdret_e result;
   uint8_t ch;
@@ -866,7 +897,10 @@ static ssize_t slcd_write(struct file *filep,
 
   /* Initialize the stream for use with the SLCD CODEC */
 
-  lib_meminstream(&instream, buffer, len);
+  instream.stream.get  = slcd_getstream;
+  instream.stream.nget = 0;
+  instream.buffer      = buffer;
+  instream.nbytes      = len;
 
   /* Initialize the SLCD decode state buffer */
 
@@ -875,8 +909,7 @@ static ssize_t slcd_write(struct file *filep,
   /* Decode and process every byte in the input buffer */
 
   options = 0;
-  while ((result = slcd_decode(&instream.common,
-                               &state, &ch, &count)) != SLCDRET_EOF)
+  while ((result = slcd_decode(&instream.stream, &state, &ch, &count)) != SLCDRET_EOF)
     {
       lcdinfo("slcd_decode returned result=%d char=%d count=%d\n",
               result, ch, count);
@@ -966,7 +999,7 @@ static ssize_t slcd_write(struct file *filep,
  * Name: slcd_poll
  ****************************************************************************/
 
-static int slcd_ioctl(struct file *filep, int cmd, unsigned long arg)
+static int slcd_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
   switch (cmd)
     {
@@ -978,8 +1011,7 @@ static int slcd_ioctl(struct file *filep, int cmd, unsigned long arg)
 
       case SLCDIOC_GETATTRIBUTES:
         {
-          struct slcd_attributes_s *attr =
-                            (struct slcd_attributes_s *)((uintptr_t)arg);
+          FAR struct slcd_attributes_s *attr = (FAR struct slcd_attributes_s *)((uintptr_t)arg);
 
           lcdinfo("SLCDIOC_GETATTRIBUTES:\n");
 
@@ -1004,8 +1036,7 @@ static int slcd_ioctl(struct file *filep, int cmd, unsigned long arg)
 
       case SLCDIOC_CURPOS:
         {
-          struct slcd_curpos_s *curpos =
-                                (struct slcd_curpos_s *)((uintptr_t)arg);
+          FAR struct slcd_curpos_s *curpos = (FAR struct slcd_curpos_s *)((uintptr_t)arg);
 
           lcdinfo("SLCDIOC_CURPOS: row=0 column=%d\n", g_slcdstate.curpos);
 
@@ -1074,7 +1105,7 @@ static int slcd_ioctl(struct file *filep, int cmd, unsigned long arg)
 
       case SLCDIOC_GETCONTRAST:
         {
-          int *contrast = (int *)((uintptr_t)arg);
+          FAR int *contrast = (FAR int *)((uintptr_t)arg);
           if (!contrast)
             {
               return -EINVAL;
@@ -1116,14 +1147,18 @@ static int slcd_ioctl(struct file *filep, int cmd, unsigned long arg)
  * Name: slcd_poll
  ****************************************************************************/
 
-static int slcd_poll(struct file *filep, struct pollfd *fds,
-                     bool setup)
+static int slcd_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                        bool setup)
 {
   if (setup)
     {
       /* Data is always available to be read / Data can always be written */
 
-      poll_notify(&fds, 1, POLLIN | POLLOUT);
+      fds->revents |= (fds->events & (POLLIN | POLLOUT));
+      if (fds->revents != 0)
+        {
+          nxsem_post(fds->sem);
+        }
     }
 
   return OK;
@@ -1137,8 +1172,8 @@ static int slcd_poll(struct file *filep, struct pollfd *fds,
  * Name: sam_slcd_initialize
  *
  * Description:
- *   Initialize the SAM4L Xplained Pro LCD hardware and register the
- *   character driver as /dev/slcd0.
+ *   Initialize the SAM4L Xplained Pro LCD hardware and register the character
+ *   driver as /dev/slcd0.
  *
  ****************************************************************************/
 

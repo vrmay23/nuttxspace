@@ -1,22 +1,33 @@
 /****************************************************************************
  * net/icmp/icmp_conn.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote
+ *    products derived from this software without specific prior
+ *    written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,25 +44,15 @@
 
 #include <arch/irq.h>
 
-#include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/net/netconfig.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
 
 #include "devif/devif.h"
 #include "icmp/icmp.h"
-#include "utils/utils.h"
 
 #ifdef CONFIG_NET_ICMP_SOCKET
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifndef CONFIG_NET_ICMP_MAX_CONNS
-#  define CONFIG_NET_ICMP_MAX_CONNS 0
-#endif
 
 /****************************************************************************
  * Private Data
@@ -59,10 +60,12 @@
 
 /* The array containing all IPPROTO_ICMP socket connections */
 
-NET_BUFPOOL_DECLARE(g_icmp_connections, sizeof(struct icmp_conn_s),
-                    CONFIG_NET_ICMP_PREALLOC_CONNS,
-                    CONFIG_NET_ICMP_ALLOC_CONNS, CONFIG_NET_ICMP_MAX_CONNS);
-static mutex_t g_free_lock = NXMUTEX_INITIALIZER;
+static struct icmp_conn_s g_icmp_connections[CONFIG_NET_ICMP_NCONNS];
+
+/* A list of all free IPPROTO_ICMP socket connections */
+
+static dq_queue_t g_free_icmp_connections;
+static sem_t g_free_sem;
 
 /* A list of all allocated IPPROTO_ICMP socket connections */
 
@@ -71,6 +74,33 @@ static dq_queue_t g_active_icmp_connections;
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: icmp_sock_initialize
+ *
+ * Description:
+ *   Initialize the IPPROTO_ICMP socket connection structures.  Called once
+ *   and only from the network initialization layer.
+ *
+ ****************************************************************************/
+
+void icmp_sock_initialize(void)
+{
+  int i;
+
+  /* Initialize the queues */
+
+  dq_init(&g_free_icmp_connections);
+  dq_init(&g_active_icmp_connections);
+  nxsem_init(&g_free_sem, 0, 1);
+
+  for (i = 0; i < CONFIG_NET_ICMP_NCONNS; i++)
+    {
+      /* Move the connection structure to the free list */
+
+      dq_addlast(&g_icmp_connections[i].node, &g_free_icmp_connections);
+    }
+}
 
 /****************************************************************************
  * Name: icmp_alloc
@@ -87,20 +117,24 @@ FAR struct icmp_conn_s *icmp_alloc(void)
   FAR struct icmp_conn_s *conn = NULL;
   int ret;
 
-  /* The free list is protected by a mutex. */
+  /* The free list is protected by a semaphore (that behaves like a mutex). */
 
-  ret = nxmutex_lock(&g_free_lock);
+  ret = net_lockedwait(&g_free_sem);
   if (ret >= 0)
     {
-      conn = NET_BUFPOOL_TRYALLOC(g_icmp_connections);
+      conn = (FAR struct icmp_conn_s *)dq_remfirst(&g_free_icmp_connections);
       if (conn != NULL)
         {
+          /* Clear the connection structure */
+
+          memset(conn, 0, sizeof(struct icmp_conn_s));
+
           /* Enqueue the connection into the active list */
 
-          dq_addlast(&conn->sconn.node, &g_active_icmp_connections);
+          dq_addlast(&conn->node, &g_active_icmp_connections);
         }
 
-      nxmutex_unlock(&g_free_lock);
+      nxsem_post(&g_free_sem);
     }
 
   return conn;
@@ -117,13 +151,13 @@ FAR struct icmp_conn_s *icmp_alloc(void)
 
 void icmp_free(FAR struct icmp_conn_s *conn)
 {
-  /* The free list is protected by a mutex. */
+  /* The free list is protected by a semaphore (that behaves like a mutex). */
 
   DEBUGASSERT(conn->crefs == 0);
 
-  /* Take the mutex (perhaps waiting) */
+  /* Take the semaphore (perhaps waiting) */
 
-  nxmutex_lock(&g_free_lock);
+  net_lockedwait_uninterruptible(&g_free_sem);
 
   /* Is this the last reference on the connection?  It might not be if the
    * socket was cloned.
@@ -139,14 +173,13 @@ void icmp_free(FAR struct icmp_conn_s *conn)
     {
       /* Remove the connection from the active list */
 
-      dq_rem(&conn->sconn.node, &g_active_icmp_connections);
+      dq_rem(&conn->node, &g_active_icmp_connections);
 
-      /* Free the connection. */
+      /* Free the connection */
 
-      NET_BUFPOOL_FREE(g_icmp_connections, conn);
+      dq_addlast(&conn->node, &g_free_icmp_connections);
+      nxsem_post(&g_free_sem);
     }
-
-  nxmutex_unlock(&g_free_lock);
 }
 
 /****************************************************************************
@@ -179,7 +212,7 @@ FAR struct icmp_conn_s *icmp_active(uint16_t id)
 
       /* Look at the next active connection */
 
-      conn = (FAR struct icmp_conn_s *)conn->sconn.node.flink;
+      conn = (FAR struct icmp_conn_s *)conn->node.flink;
     }
 
   return conn;
@@ -204,7 +237,7 @@ FAR struct icmp_conn_s *icmp_nextconn(FAR struct icmp_conn_s *conn)
     }
   else
     {
-      return (FAR struct icmp_conn_s *)conn->sconn.node.flink;
+      return (FAR struct icmp_conn_s *)conn->node.flink;
     }
 }
 
@@ -227,46 +260,12 @@ FAR struct icmp_conn_s *icmp_findconn(FAR struct net_driver_s *dev,
 
   for (conn = icmp_nextconn(NULL); conn != NULL; conn = icmp_nextconn(conn))
     {
-      if (conn->id == id && conn->dev == dev)
+      if (conn->id == id && conn->dev == dev && conn->nreqs > 0)
         {
           return conn;
         }
     }
 
   return conn;
-}
-
-/****************************************************************************
- * Name: icmp_foreach
- *
- * Description:
- *   Enumerate each ICMP connection structure. This function will terminate
- *   when either (1) all connection have been enumerated or (2) when a
- *   callback returns any non-zero value.
- *
- * Assumptions:
- *   This function is called from network logic at with the network locked.
- *
- ****************************************************************************/
-
-int icmp_foreach(icmp_callback_t callback, FAR void *arg)
-{
-  FAR struct icmp_conn_s *conn;
-  int ret = 0;
-
-  if (callback != NULL)
-    {
-      for (conn = icmp_nextconn(NULL); conn != NULL;
-           conn = icmp_nextconn(conn))
-        {
-          ret = callback(conn, arg);
-          if (ret != 0)
-            {
-              break;
-            }
-        }
-    }
-
-  return ret;
 }
 #endif /* CONFIG_NET_ICMP */

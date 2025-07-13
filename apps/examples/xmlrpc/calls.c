@@ -1,10 +1,14 @@
 /****************************************************************************
  * apps/examples/xmlrpc/calls.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2012 Max Holtzberg. All rights reserved.
- * SPDX-FileCopyrightText: 2002 Cogito LLC.  All rights reserved.
- * SPDX-FileContributor: Max Holtzberg <mh@uvc.de>
+ *   Copyright (C) 2012 Max Holtzberg. All rights reserved.
+ *   Author: Max Holtzberg <mh@uvc.de>
+ *
+ * Based on the embeddable lightweight XML-RPC server code discussed
+ * in the article at: http://www.drdobbs.com/web-development/\
+ *    an-embeddable-lightweight-xml-rpc-server/184405364
+ *
+ *  Copyright (c) 2002 Cogito LLC.  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or
  *  without modification, is hereby granted without fee provided
@@ -36,11 +40,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  ****************************************************************************/
 
-/* Based on the embeddable lightweight XML-RPC server code discussed
- * in the article at: http://www.drdobbs.com/web-development/\
- *    an-embeddable-lightweight-xml-rpc-server/184405364
- */
-
 /****************************************************************************
  * Included Files
  ****************************************************************************/
@@ -70,13 +69,9 @@ struct xmlrpc_entry_s get_device_stats =
 
 static int calls_get_device_stats(struct xmlrpc_s *xmlcall)
 {
-  char username[CONFIG_XMLRPC_STRINGSIZE + 1];
-  char password[CONFIG_XMLRPC_STRINGSIZE + 1];
-  char lastcmd[CONFIG_XMLRPC_STRINGSIZE + 1];
-  char curstate[CONFIG_XMLRPC_STRINGSIZE + 1];
-  int request = 0;
-  int status;
-  int ret;
+  char username[80], password[80];
+  char lastCommand[80], curState[80];
+  int request = 0, status, ret;
 
   do
     {
@@ -105,13 +100,13 @@ static int calls_get_device_stats(struct xmlrpc_s *xmlcall)
       /* Dummy up some data... */
 
       status = 1;
-      strlcpy(lastcmd, "reboot", sizeof(lastcmd));
-      strlcpy(curstate, "Normal Operation", sizeof(curstate));
+      strcpy(lastCommand, "reboot");
+      strcpy(curState, "Normal Operation");
 
       ret = xmlrpc_buildresponse(xmlcall, "{iss}",
                                  "status", status,
-                                 "lastCommand", lastcmd,
-                                 "currentState", curstate);
+                                 "lastCommand", lastCommand,
+                                 "currentState", curState);
     }
 
   return ret;

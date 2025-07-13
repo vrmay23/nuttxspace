@@ -50,24 +50,17 @@ config ARCH_CHIP_EZ80F93
 
 endchoice
 
-choice
-	prompt "Toolchain Selection"
-	default EZ80_TOOLCHAIN_ZDSII
+# The ZiLOG ZDS-II Windows toolchain is the only toolchain available for
+# the ez80.
+#
 
 config EZ80_TOOLCHAIN_ZDSII
-	bool "ZDS-II for Windows"
-	depends on TOOLCHAIN_WINDOWS
-
-config EZ80_TOOLCHAIN_CLANG
-	bool "Clang for Linux, macOS, or Cygwin"
-	depends on EXPERIMENTAL
-
-endchoice
+	bool
+	default y
 
 choice
 	prompt "ZDS-II Toolchain version"
 	default EZ80_ZDSII_V533
-	depends on EZ80_TOOLCHAIN_ZDSII
 
 config EZ80_ZDSII_V511
 	bool "ZDS-II 5.1.1"
@@ -88,7 +81,7 @@ endchoice # ZDS-II Toolchain version
 config EZ80_BOOTLOADER
 	bool
 	default n
-	depends on BOOT_RUNFROMFLASH
+	select BOOT_RUNFROMFLASH
 	---help---
 		Binary image is a bootloader that may require special properties
 		such as re-direction of interrupts (eZ80F92)
@@ -96,7 +89,7 @@ config EZ80_BOOTLOADER
 config EZ80_PROGRAM
 	bool
 	default n
-	depends on BOOT_RUNFROMEXTSRAM
+	select CONFIG_BOOT_RUNFROMEXTSRAM
 	---help---
 		Binary image is a RAM-resident program loaded by a bootloader and
 		may require special properties such as re-direction of interrupts

@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/mmcsd/mmcsd.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/sdio.h>
 #include <stdint.h>
 #include <debug.h>
 
@@ -43,8 +55,6 @@
 #if !defined(CONFIG_DEBUG_INFO) || !defined(CONFIG_DEBUG_FS)
 #  undef CONFIG_MMCSD_DUMPALL
 #endif
-
-#define MMCSD_PART_COUNT             8
 
 /* Card type */
 
@@ -64,54 +74,8 @@
  * Public Types
  ****************************************************************************/
 
-struct mmcsd_part_s
-{
-  FAR struct mmcsd_state_s *priv;
-  blkcnt_t nblocks; /* Number of blocks */
-};
-
-/* This structure is contains the unique state of the MMC/SD block driver */
-
-struct mmcsd_state_s
-{
-  FAR struct sdio_dev_s *dev;                  /* The SDIO device bound to this instance */
-  uint8_t  crefs;                              /* Open references on the driver */
-  mutex_t  lock;                               /* Assures mutually exclusive access to the slot */
-  int      minor;                              /* Device number */
-  struct mmcsd_part_s part[MMCSD_PART_COUNT];  /* Partition data */
-  uint32_t partnum;                            /* Partition number */
-
-  /* Status flags */
-
-  uint8_t probed:1;                /* true: mmcsd_probe() discovered a card */
-  uint8_t widebus:1;               /* true: Wide 4-bit bus selected */
-  uint8_t mediachanged:1;          /* true: Media changed since last check */
-  uint8_t wrbusy:1;                /* true: Last transfer was a write, card may be busy */
-  uint8_t wrprotect:1;             /* true: Card is write protected (from CSD) */
-  uint8_t locked:1;                /* true: Media is locked (from R1) */
-  uint8_t dsrimp:1;                /* true: card supports CMD4/DSR setting (from CSD) */
-#ifdef CONFIG_SDIO_DMA
-  uint8_t dma:1;                   /* true: hardware supports DMA */
-#endif
-
-  uint8_t mode:4;                  /* (See MMCSDMODE_* definitions) */
-  uint8_t type:4;                  /* Card type (See MMCSD_CARDTYPE_* definitions) */
-  uint8_t buswidth:4;              /* Bus widths supported (SD only) */
-  uint8_t cmd23support:1;          /* CMD23 supported (SD only) */
-  sdio_capset_t caps;              /* SDIO driver capabilities/limitations */
-  uint32_t cid[4];                 /* CID register */
-  uint32_t csd[4];                 /* CSD register */
-  uint16_t selblocklen;            /* The currently selected block length */
-  uint16_t rca;                    /* Relative Card Address (RCS) register */
-
-  /* Memory card geometry (extracted from the CSD) */
-
-  uint8_t  blockshift;             /* Log2 of blocksize */
-  uint16_t blocksize;              /* Read block length (== block size) */
-};
-
 /****************************************************************************
- * Public Functions Definitions
+ * Public Functions
  ****************************************************************************/
 
 #undef EXTERN
@@ -121,10 +85,6 @@ extern "C"
 {
 #else
 #define EXTERN extern
-#endif
-
-#ifdef CONFIG_MMCSD_PROCFS
-void mmcsd_initialize_procfs(void);
 #endif
 
 #ifdef CONFIG_MMCSD_DUMPALL

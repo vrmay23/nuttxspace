@@ -1,7 +1,5 @@
 /****************************************************************************
- * sched/mqueue/mq_msgfree.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  sched/mqueue/mq_msgfree.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -26,12 +24,11 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
+#include <queue.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/spinlock.h>
 
 #include "mqueue/mqueue.h"
 
@@ -69,9 +66,9 @@ void nxmq_free_msg(FAR struct mqueue_msg_s *mqmsg)
        * list from interrupt handlers.
        */
 
-      flags = spin_lock_irqsave(&g_msgfreelock);
-      list_add_tail(&g_msgfree, &mqmsg->node);
-      spin_unlock_irqrestore(&g_msgfreelock, flags);
+      flags = enter_critical_section();
+      sq_addlast((FAR sq_entry_t *)mqmsg, &g_msgfree);
+      leave_critical_section(flags);
     }
 
   /* If this is a message pre-allocated for interrupts,
@@ -84,9 +81,9 @@ void nxmq_free_msg(FAR struct mqueue_msg_s *mqmsg)
        * list from interrupt handlers.
        */
 
-      flags = spin_lock_irqsave(&g_msgfreelock);
-      list_add_tail(&g_msgfreeirq, &mqmsg->node);
-      spin_unlock_irqrestore(&g_msgfreelock, flags);
+      flags = enter_critical_section();
+      sq_addlast((FAR sq_entry_t *)mqmsg, &g_msgfreeirq);
+      leave_critical_section(flags);
     }
 
   /* Otherwise, deallocate it.  Note:  interrupt handlers

@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/tiva/tm4c1294-launchpad/include/board.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -192,52 +205,19 @@
 #define GPIO_EN0_LED1     GPIO_EN0_LED1_1
 #define GPIO_EN0_LED2     GPIO_EN0_LED2_1
 
-#if CONFIG_TM4C1294_LAUNCHPAD_UART2_RX_D4
-#define GPIO_UART2_RX     GPIO_UART2_RX_2
-#elif CONFIG_TM4C1294_LAUNCHPAD_UART2_RX_A6
-#define GPIO_UART2_RX     GPIO_UART2_RX_1
-#endif
-
-#if CONFIG_TM4C1294_LAUNCHPAD_UART2_TX_D5
-#define GPIO_UART2_TX     GPIO_UART2_TX_2
-#elif CONFIG_TM4C1294_LAUNCHPAD_UART2_TX_A7
-#define GPIO_UART2_TX     GPIO_UART2_TX_1
-#endif
-
-/* Control pins for BOOST-CC2564MODA plugged into BoosterPack 1 or 2.
+/* Control pins for BOOST-CC2564MODA plugged into BoosterPack1
  *
- *   BoosterPack1            BoosterPack2
- *
- *   --- ------------        --- ------------
- *   Pin Pin Function        Pin Pin Function
- *   --- ------------        --- ------------
- *   PM3 NSHUTD              PM7 NSHUTD
- *   PG0 RTS                 PM0 RTS
- *   PL4 CTS                 PM1 CTS
- *   --- ------------        --- ------------
+ *   --- ------------
+ *   Pin Pin Function
+ *   --- ------------
+ *   PM3 NSHUTD
+ *   PG0 RTS
+ *   PL4 CTS
+ *   --- ------------
  */
 
 #define UART7_GPIO_NSHUTD (GPIO_FUNC_OUTPUT | GPIO_PORTM | GPIO_PIN_3)
 #define UART7_GPIO_RTS    (GPIO_FUNC_OUTPUT | GPIO_PORTG | GPIO_PIN_0)
 #define UART7_GPIO_CTS    (GPIO_FUNC_INPUT | GPIO_PORTL | GPIO_PIN_4)
-
-#define UART6_GPIO_NSHUTD (GPIO_FUNC_OUTPUT | GPIO_PORTM | GPIO_PIN_7)
-#define UART6_GPIO_RTS    (GPIO_FUNC_OUTPUT | GPIO_PORTM | GPIO_PIN_0)
-#define UART6_GPIO_CTS    (GPIO_FUNC_INPUT | GPIO_PORTM | GPIO_PIN_1)
-
-/* Pins for I2C.
- *
- *   BoosterPack1 I2C0       BoosterPack2 I2C2
- *
- *   --- ------------        --- ------------
- *   Pin Pin Function        Pin Pin Function
- *   --- ------------        --- ------------
- *   PB2 SCL                 PN5 SCL
- *   PB3 SDA                 PN4 SDA
- *   --- ------------        --- ------------
- */
-
-#define GPIO_I2C2_SCL  GPIO_I2C2_SCL_3
-#define GPIO_I2C2_SDA  GPIO_I2C2_SDA_2
 
 #endif /* __BOARDS_ARM_TIVA_TM4C1294_LAUNCHPAD_INCLUDE_BOARD_H */

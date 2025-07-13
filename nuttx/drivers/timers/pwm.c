@@ -1,8 +1,6 @@
 /****************************************************************************
  * drivers/timers/pwm.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,7 +25,6 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -40,7 +37,6 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/timers/pwm.h>
@@ -50,7 +46,7 @@
 #ifdef CONFIG_PWM
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
 /* This structure describes the state of the upper half driver */
@@ -65,7 +61,7 @@ struct pwm_upperhalf_s
   volatile bool     waiting;        /* True: Caller is waiting for the pulse
                                      * count to expire */
 #endif
-  mutex_t           lock;           /* Supports mutual exclusion */
+  sem_t             exclsem;        /* Supports mutual exclusion */
 #ifdef CONFIG_PWM_PULSECOUNT
   sem_t             waitsem;        /* Used to wait for the pulse count to
                                      * expire */
@@ -103,6 +99,7 @@ static const struct file_operations g_pwmops =
   pwm_write, /* write */
   NULL,      /* seek */
   pwm_ioctl, /* ioctl */
+  NULL       /* poll */
 };
 
 /****************************************************************************
@@ -120,20 +117,20 @@ static void pwm_dump(FAR const char *msg, FAR const struct pwm_info_s *info,
   int i;
 #endif
 
-  pwminfo("%s: frequency: %" PRId32 "\n", msg, info->frequency);
+  pwminfo("%s: frequency: %d", msg, info->frequency);
 
 #ifdef CONFIG_PWM_MULTICHAN
   for (i = 0; i < CONFIG_PWM_NCHANNELS; i++)
     {
-      pwminfo(" channel: %d duty: %08" PRIx32 "\n",
+      pwminfo(" channel: %d duty: %08x",
               info->channels[i].channel, info->channels[i].duty);
     }
 #else
-  pwminfo(" duty: %08" PRIx32 "\n", info->duty);
+  pwminfo(" duty: %08x", info->duty);
 #endif
 
 #ifdef CONFIG_PWM_PULSECOUNT
-  pwminfo(" count: %" PRIx32 "\n", info->count);
+  pwminfo(" count: %d\n", info->count);
 #endif
 
   pwminfo(" started: %d\n", started);
@@ -158,7 +155,7 @@ static int pwm_open(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&upper->lock);
+  ret = nxsem_wait(&upper->exclsem);
   if (ret < 0)
     {
       goto errout;
@@ -175,7 +172,7 @@ static int pwm_open(FAR struct file *filep)
       /* More than 255 opens; uint8_t overflows to zero */
 
       ret = -EMFILE;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* Check if this is the first time that the driver has been opened. */
@@ -192,7 +189,7 @@ static int pwm_open(FAR struct file *filep)
       ret = lower->ops->setup(lower);
       if (ret < 0)
         {
-          goto errout_with_lock;
+          goto errout_with_sem;
         }
     }
 
@@ -201,8 +198,8 @@ static int pwm_open(FAR struct file *filep)
   upper->crefs = tmp;
   ret = OK;
 
-errout_with_lock:
-  nxmutex_unlock(&upper->lock);
+errout_with_sem:
+  nxsem_post(&upper->exclsem);
 
 errout:
   return ret;
@@ -226,7 +223,7 @@ static int pwm_close(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&upper->lock);
+  ret = nxsem_wait(&upper->exclsem);
   if (ret < 0)
     {
       goto errout;
@@ -251,13 +248,13 @@ static int pwm_close(FAR struct file *filep)
       /* Disable the PWM device */
 
       DEBUGASSERT(lower->ops->shutdown != NULL);
-      pwminfo("calling shutdown\n");
+      pwminfo("calling shutdown: %d\n");
 
       lower->ops->shutdown(lower);
     }
 
   ret = OK;
-  nxmutex_unlock(&upper->lock);
+  nxsem_post(&upper->exclsem);
 
 errout:
   return ret;
@@ -428,7 +425,7 @@ static int pwm_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&upper->lock);
+  ret = nxsem_wait(&upper->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -439,7 +436,9 @@ static int pwm_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   switch (cmd)
     {
       /* PWMIOC_SETCHARACTERISTICS - Set the characteristics of the next
-       *   pulsed output and start the pulsed output. It will change the
+       *   pulsed output.  This command will neither start nor stop the
+       *   pulsed output.  It will either setup the configuration that will
+       *   be used when the output is started; or it will change the
        *   characteristics of the pulsed output on the fly if the timer is
        *   already started.
        *
@@ -459,9 +458,7 @@ static int pwm_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
           memcpy(&upper->info, info, sizeof(struct pwm_info_s));
 
-          /* If PWM is already running, then re-start it with the new
-           * characteristics.
-           */
+          /* If PWM is already running, then re-start it with the new characteristics */
 
           if (upper->started)
             {
@@ -535,9 +532,7 @@ static int pwm_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         }
         break;
 
-      /* Any unrecognized IOCTL commands might be platform-specific ioctl
-       * commands.
-       */
+      /* Any unrecognized IOCTL commands might be platform-specific ioctl commands */
 
       default:
         {
@@ -548,7 +543,7 @@ static int pwm_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxmutex_unlock(&upper->lock);
+  nxsem_post(&upper->exclsem);
   return ret;
 }
 
@@ -595,13 +590,17 @@ int pwm_register(FAR const char *path, FAR struct pwm_lowerhalf_s *dev)
       return -ENOMEM;
     }
 
-  /* Initialize the PWM device structure (it was already zeroed by
-   * kmm_zalloc()).
-   */
+  /* Initialize the PWM device structure (it was already zeroed by kmm_zalloc()) */
 
-  nxmutex_init(&upper->lock);
+  nxsem_init(&upper->exclsem, 0, 1);
 #ifdef CONFIG_PWM_PULSECOUNT
   nxsem_init(&upper->waitsem, 0, 0);
+
+  /* The wait semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
+  nxsem_setprotocol(&upper->waitsem, SEM_PRIO_NONE);
 #endif
 
   upper->dev = dev;
@@ -623,7 +622,7 @@ int pwm_register(FAR const char *path, FAR struct pwm_lowerhalf_s *dev)
  *   1. The upper half driver calls the start method, providing the lower
  *      half driver with the pulse train characteristics.  If a fixed
  *      number of pulses is required, the 'count' value will be nonzero.
- *   2. The lower half driver's start() method must verify that it can
+ *   2. The lower half driver's start() methoc must verify that it can
  *      support the request pulse train (frequency, duty, AND pulse count).
  *      If it cannot, it should return an error.  If the pulse count is
  *      non-zero, it should set up the hardware for that number of pulses

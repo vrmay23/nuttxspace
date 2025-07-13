@@ -1,22 +1,34 @@
 /****************************************************************************
  * drivers/sensors/hts221.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014 Haltian Ltd. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +39,6 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <assert.h>
 #include <debug.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -38,7 +49,6 @@
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
 #include <nuttx/random.h>
 
@@ -52,6 +62,10 @@
 #  define hts221_dbg(x, ...)    _info(x, ##__VA_ARGS__)
 #else
 #  define hts221_dbg(x, ...)    sninfo(x, ##__VA_ARGS__)
+#endif
+
+#ifndef CONFIG_HTS221_I2C_FREQUENCY
+#  define CONFIG_HTS221_I2C_FREQUENCY 400000
 #endif
 
 #define HTS221_WHO_AM_I             0x0f
@@ -124,12 +138,12 @@ static int hts221_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
 struct hts221_dev_s
 {
-  FAR struct i2c_master_s *i2c;
+  struct i2c_master_s *i2c;
   uint8_t addr;
-  FAR hts221_config_t *config;
-  mutex_t devlock;
+  hts221_config_t *config;
+  sem_t devsem;
   volatile bool int_pending;
-  FAR struct pollfd *fds[CONFIG_HTS221_NPOLLWAITERS];
+  struct pollfd *fds[CONFIG_HTS221_NPOLLWAITERS];
   struct
   {
     int16_t t0_out;
@@ -155,9 +169,10 @@ static const struct file_operations g_humidityops =
   hts221_write,  /* write */
   NULL,          /* seek */
   hts221_ioctl,  /* ioctl */
-  NULL,          /* mmap */
-  NULL,          /* truncate */
   hts221_poll    /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL         /* unlink */
+#endif
 };
 
 /****************************************************************************
@@ -754,7 +769,7 @@ static int hts221_load_calibration_data(FAR struct hts221_dev_s *priv)
    * they are a good candidate to be added to entropy pool.
    */
 
-  up_rngaddentropy(RND_SRC_HW, (FAR uint32_t *)&priv->calib,
+  up_rngaddentropy(RND_SRC_HW, (uint32_t *)&priv->calib,
                    sizeof(priv->calib) / sizeof(uint32_t));
 
   return OK;
@@ -897,7 +912,7 @@ static int hts221_open(FAR struct file *filep)
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -906,7 +921,7 @@ static int hts221_open(FAR struct file *filep)
   priv->config->set_power(priv->config, true);
   priv->config->irq_enable(priv->config, true);
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   hts221_dbg("Sensor is powered on\n");
   return OK;
 }
@@ -919,7 +934,7 @@ static int hts221_close(FAR struct file *filep)
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -929,7 +944,7 @@ static int hts221_close(FAR struct file *filep)
   ret = hts221_power_on_off(priv, false);
   priv->config->set_power(priv->config, false);
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   hts221_dbg("CLOSED\n");
   return ret;
 }
@@ -945,7 +960,7 @@ static ssize_t hts221_read(FAR struct file *filep, FAR char *buffer,
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -968,7 +983,7 @@ static ssize_t hts221_read(FAR struct file *filep, FAR char *buffer,
         }
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return length;
 }
 
@@ -987,7 +1002,7 @@ static int hts221_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -1030,7 +1045,7 @@ static int hts221_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       break;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -1052,6 +1067,30 @@ static bool hts221_sample(FAR struct hts221_dev_s *priv)
   return status.is_humid_ready || status.is_temp_ready;
 }
 
+static void hts221_notify(FAR struct hts221_dev_s *priv)
+{
+  DEBUGASSERT(priv != NULL);
+
+  int i;
+
+  /* If there are threads waiting on poll() for data to become available,
+   * then wake them up now.  NOTE: we wake up all waiting threads because we
+   * do not know that they are going to do.  If they all try to read the
+   * data, then some make end up blocking after all.
+   */
+
+  for (i = 0; i < CONFIG_HTS221_NPOLLWAITERS; i++)
+    {
+      FAR struct pollfd *fds = priv->fds[i];
+      if (fds)
+        {
+          fds->revents |= POLLIN;
+          hts221_dbg("Report events: %02x\n", fds->revents);
+          nxsem_post(fds->sem);
+        }
+    }
+}
+
 static int hts221_poll(FAR struct file *filep, FAR struct pollfd *fds,
                        bool setup)
 {
@@ -1061,15 +1100,15 @@ static int hts221_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int ret = OK;
   int i;
 
-  DEBUGASSERT(fds);
+  DEBUGASSERT(filep && fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  priv = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  priv = (FAR struct hts221_dev_s *)inode->i_private;
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -1113,7 +1152,7 @@ static int hts221_poll(FAR struct file *filep, FAR struct pollfd *fds,
       flags = enter_critical_section();
       if (priv->int_pending || hts221_sample(priv))
         {
-          poll_notify(&fds, 1, POLLIN);
+          hts221_notify(priv);
         }
 
       leave_critical_section(flags);
@@ -1122,7 +1161,7 @@ static int hts221_poll(FAR struct file *filep, FAR struct pollfd *fds,
     {
       /* This is a request to tear down the poll. */
 
-      FAR struct pollfd **slot = (FAR struct pollfd **)fds->priv;
+      struct pollfd **slot = (struct pollfd **)fds->priv;
       DEBUGASSERT(slot != NULL);
 
       /* Remove all memory of the poll setup */
@@ -1132,7 +1171,7 @@ static int hts221_poll(FAR struct file *filep, FAR struct pollfd *fds,
     }
 
 out:
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -1144,7 +1183,7 @@ static int hts221_int_handler(int irq, FAR void *context, FAR void *arg)
 
   priv->int_pending = true;
   hts221_dbg("Hts221 interrupt\n");
-  poll_notify(priv->fds, CONFIG_HTS221_NPOLLWAITERS, POLLIN);
+  hts221_notify(priv);
 
   return OK;
 }
@@ -1155,7 +1194,7 @@ int hts221_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   int ret = 0;
   FAR struct hts221_dev_s *priv;
 
-  priv = kmm_zalloc(sizeof(struct hts221_dev_s));
+  priv = (struct hts221_dev_s *)kmm_zalloc(sizeof(struct hts221_dev_s));
 
   if (!priv)
     {
@@ -1166,17 +1205,16 @@ int hts221_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   priv->addr   = addr;
   priv->i2c    = i2c;
   priv->config = config;
-  nxmutex_init(&priv->devlock);
+  nxsem_init(&priv->devsem, 0, 1);
 
   priv->config->set_power(priv->config, true);
 
   ret = hts221_load_calibration_data(priv);
   if (ret < 0)
     {
-      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
       hts221_dbg("Cannot calibrate hts221 sensor\n");
-      return ret;
+      return -EAGAIN;
     }
 
   ret = register_driver(devpath, &g_humidityops, 0666, priv);
@@ -1185,7 +1223,6 @@ int hts221_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   if (ret < 0)
     {
-      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
       hts221_dbg("Error occurred during the driver registering\n");
       return ret;

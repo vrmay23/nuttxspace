@@ -1,22 +1,36 @@
 /****************************************************************************
  * net/udp/udp_netpoll.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2011-2015, 2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -52,7 +66,7 @@
  *
  * Input Parameters:
  *   dev      The structure of the network driver that caused the event
- *   pvpriv   An instance of struct udp_poll_s cast to void*
+ *   conn     The connection structure associated with the socket
  *   flags    Set of events describing why the callback was invoked
  *
  * Returned Value:
@@ -64,13 +78,14 @@
  ****************************************************************************/
 
 static uint16_t udp_poll_eventhandler(FAR struct net_driver_s *dev,
+                                      FAR void *conn,
                                       FAR void *pvpriv, uint16_t flags)
 {
-  FAR struct udp_poll_s *info = pvpriv;
+  FAR struct udp_poll_s *info = (FAR struct udp_poll_s *)pvpriv;
 
   ninfo("flags: %04x\n", flags);
 
-  DEBUGASSERT(!info || (info->conn && info->fds));
+  DEBUGASSERT(!info || (info->psock && info->fds));
 
   /* 'priv' might be null in some race conditions (?) */
 
@@ -82,7 +97,7 @@ static uint16_t udp_poll_eventhandler(FAR struct net_driver_s *dev,
 
       if ((flags & UDP_NEWDATA) != 0)
         {
-          eventset |= POLLIN;
+          eventset |= (POLLIN & info->fds->events);
         }
 
       /* Check for loss of connection events. */
@@ -94,18 +109,75 @@ static uint16_t udp_poll_eventhandler(FAR struct net_driver_s *dev,
 
       /* A poll is a sign that we are free to send data. */
 
-      else if (psock_udp_cansend(info->conn) >= 0)
+      else if ((flags & UDP_POLL) != 0 && psock_udp_cansend(info->psock) >= 0)
         {
-          eventset |= POLLOUT;
+          eventset |= (POLLOUT & info->fds->events);
         }
 
       /* Awaken the caller of poll() is requested event occurred. */
 
-      poll_notify(&info->fds, 1, eventset);
+      if (eventset)
+        {
+          info->fds->revents |= eventset;
+          nxsem_post(info->fds->sem);
+        }
     }
 
   return flags;
 }
+
+/****************************************************************************
+ * Name: udp_iob_work
+ *
+ * Description:
+ *   Work thread callback function execute when an IOB because available.
+ *
+ * Input Parameters:
+ *   psock - Socket state structure
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_NET_UDP_WRITE_BUFFERS) && defined(CONFIG_IOB_NOTIFIER)
+static inline void udp_iob_work(FAR void *arg)
+{
+  FAR struct udp_poll_s *pinfo;
+  FAR struct socket *psock;
+  FAR struct pollfd *fds;
+
+  pinfo = (FAR struct udp_poll_s *)arg;
+  DEBUGASSERT(pinfo->psock != NULL && pinfo->fds != NULL);
+
+  psock = pinfo->psock;
+  fds   = pinfo->fds;
+
+  /* Handle a race condition.  Check if we have already posted the POLLOUT
+   * event.  If so, don't do it again.
+   */
+
+  if ((fds->events & POLLWRNORM) != 0 &&
+      (fds->revents & POLLWRNORM) == 0)
+    {
+      /* Check if we are now able to send */
+
+      if (psock_udp_cansend(psock) >= 0)
+        {
+          /* Yes.. then signal the poll logic */
+
+          fds->revents |= POLLWRNORM;
+          nxsem_post(fds->sem);
+        }
+      else
+        {
+          /* No.. ask for the IOB free notification again */
+
+          pinfo->key = iob_notifier_setup(LPWORK, udp_iob_work, pinfo);
+        }
+    }
+}
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -129,30 +201,28 @@ static uint16_t udp_poll_eventhandler(FAR struct net_driver_s *dev,
 
 int udp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 {
-  FAR struct udp_conn_s *conn;
+  FAR struct udp_conn_s *conn = psock->s_conn;
   FAR struct udp_poll_s *info;
   FAR struct devif_callback_s *cb;
-  pollevent_t eventset = 0;
   int ret = OK;
-
-  /* Some of the following must be atomic */
-
-  net_lock();
-
-  conn = psock->s_conn;
 
   /* Sanity check */
 
+#ifdef CONFIG_DEBUG_FEATURES
   if (conn == NULL || fds == NULL)
     {
-      ret = -EINVAL;
-      goto errout_with_lock;
+      return -EINVAL;
     }
+#endif
+
+  /* Some of the  following must be atomic */
+
+  net_lock();
 
   /* Find a container to hold the poll information */
 
   info = conn->pollinfo;
-  while (info->conn != NULL)
+  while (info->psock != NULL)
     {
       if (++info >= &conn->pollinfo[CONFIG_NET_UDP_NPOLLWAITERS])
         {
@@ -179,18 +249,21 @@ int udp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 
   /* Initialize the poll info container */
 
-  info->conn = conn;
-  info->fds  = fds;
-  info->cb   = cb;
+  info->psock  = psock;
+  info->fds    = fds;
+  info->cb     = cb;
+#if defined(CONFIG_NET_UDP_WRITE_BUFFERS) && defined(CONFIG_IOB_NOTIFIER)
+  info->key    = 0;
+#endif
 
   /* Initialize the callback structure.  Save the reference to the info
    * structure as callback private data so that it will be available during
    * callback processing.
    */
 
-  cb->flags = NETDEV_DOWN;
-  cb->priv  = info;
-  cb->event = udp_poll_eventhandler;
+  cb->flags    = NETDEV_DOWN;
+  cb->priv     = (FAR void *)info;
+  cb->event    = udp_poll_eventhandler;
 
   if ((fds->events & POLLOUT) != 0)
     {
@@ -206,27 +279,46 @@ int udp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
    * for use during poll teardown as well.
    */
 
-  fds->priv = info;
+  fds->priv = (FAR void *)info;
 
   /* Check for read data availability now */
 
-  if (conn->readahead != NULL)
+  if (!IOB_QEMPTY(&conn->readahead))
     {
       /* Normal data may be read without blocking. */
 
-      eventset |= POLLRDNORM;
+      fds->revents |= (POLLRDNORM & fds->events);
     }
 
-  if (psock_udp_cansend(conn) >= 0)
+  if (psock_udp_cansend(psock) >= 0)
     {
       /* Normal data may be sent without blocking (at least one byte). */
 
-      eventset |= POLLWRNORM;
+      fds->revents |= (POLLWRNORM & fds->events);
     }
 
   /* Check if any requested events are already in effect */
 
-  poll_notify(&fds, 1, eventset);
+  if (fds->revents != 0)
+    {
+      /* Yes.. then signal the poll logic */
+
+      nxsem_post(fds->sem);
+    }
+
+#if defined(CONFIG_NET_UDP_WRITE_BUFFERS) && defined(CONFIG_IOB_NOTIFIER)
+  /* If (1) revents == 0, (2) write buffering is enabled, and (3) the
+   * POLLOUT event is needed, then setup to receive a notification an IOB
+   * is freed.
+   */
+
+  else if ((fds->events & POLLOUT) != 0)
+    {
+      /* Ask for the IOB free notification */
+
+      info->key = iob_notifier_setup(LPWORK, udp_iob_work, info);
+    }
+#endif
 
 errout_with_lock:
   net_unlock();
@@ -251,29 +343,35 @@ errout_with_lock:
 
 int udp_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds)
 {
-  FAR struct udp_conn_s *conn;
+  FAR struct udp_conn_s *conn = psock->s_conn;
   FAR struct udp_poll_s *info;
-
-  /* Some of the following must be atomic */
-
-  net_lock();
-
-  conn = psock->s_conn;
 
   /* Sanity check */
 
+#ifdef CONFIG_DEBUG_FEATURES
   if (!conn || !fds->priv)
     {
-      net_unlock();
       return -EINVAL;
     }
+#endif
 
   /* Recover the socket descriptor poll state info from the poll structure */
 
   info = (FAR struct udp_poll_s *)fds->priv;
-  DEBUGASSERT(info->fds != NULL && info->cb != NULL);
+  DEBUGASSERT(info != NULL && info->fds != NULL && info->cb != NULL);
   if (info != NULL)
     {
+     #if defined(CONFIG_NET_UDP_WRITE_BUFFERS) && defined(CONFIG_IOB_NOTIFIER)
+      /* Cancel any pending IOB free notification */
+
+      if (info->key > 0)
+        {
+          /* Ask for the IOB free notification */
+
+          iob_notifier_teardown(info->key);
+        }
+#endif
+
       /* Release the callback */
 
       udp_callback_free(info->dev, conn, info->cb);
@@ -284,10 +382,8 @@ int udp_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds)
 
       /* Then free the poll info container */
 
-      info->conn = NULL;
+      info->psock = NULL;
     }
-
-  net_unlock();
 
   return OK;
 }

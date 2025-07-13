@@ -1,11 +1,15 @@
-/****************************************************************************
- * arch/arm/src/s32k1xx/s32k1xx_edma.h
+/************************************************************************************
+ * arch/arm/src/s32k1xx/s32k1xx_dmac.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2016-2017 NXP
- * SPDX-FileCopyrightText: 2015, Freescale Semiconductor, Inc.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This file was leveraged from the NuttX i.MXRT port.  Portions of that eDMA logic
+ * derived from NXP sample code which has a compatible BSD 3-clause license:
+ *
+ *   Copyright (c) 2015, Freescale Semiconductor, Inc.
+ *   Copyright 2016-2017 NXP
+ *   All rights reserved
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +38,7 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_S32K1XX_S32K1XX_EDMAC_H
 #define __ARCH_ARM_SRC_S32K1XX_S32K1XX_EDMAC_H
@@ -61,48 +65,46 @@
  *      int ret;
  *      ret = s32k1xx_dmach_xfrsetup(handle, &config);
  *
- * 4. If you are setting up a scatter gather DMA
- *    (with CONFIG_S32K1XX_EDMA_NTCD > 0), then repeat steps 2 and 3 for
- *     each segment of the transfer.
+ * 4. If you are setting up a scatter gather DMA (with CONFIG_S32K1XX_EDMA_NTCD > 0),
+ *    then repeat steps 2 and 3 for each segment of the transfer.
  *
  * 5. Start the DMA:
  *
  *      ret = s32k1xx_dmach_start(handle, my_callback_func, priv);
  *
- *    Where my_callback_func() is called when the DMA completes or an error
- *    occurs. 'priv' represents some internal driver state that will be
- *    provided with the callback.
+ *    Where my_callback_func() is called when the DMA completes or an error occurs.
+ *    'priv' represents some internal driver state that will be provided with the
+ *    callback.
  *
- * 6. If you need to stop the DMA and free resources (such as if a timeout
- *    occurs), then:
+ * 6. If you need to stop the DMA and free resources (such as if a timeout occurs),
+ *    then:
  *
  *     i mxrt_dmach_stop(handle);
  *
- * 7. The callback will be received when the DMA completes (or an error
- *    occurs). After that, you may free the DMA channel, or reuse it on
- *    subsequent DMAs.
+ * 7. The callback will be received when the DMA completes (or an error occurs).
+ *    After that, you may free  the DMA channel, or re-use it on subsequent DMAs.
  *
  *      s32k1xx_dmach_free(handle);
  *
  * Almost non-invasive debug instrumentation is available.  You may call
- * s32k1xx_dmasample() to save the current state of the eDMA registers at
- * any given point in time.  At some later, postmortem analysis, you can
- * dump the content of the buffered registers with s32k1xx_dmadump().
- * s32k1xx_dmasample() is also available for monitoring DMA progress.
+ * s32k1xx_dmasample() to save the current state of the eDMA registers at any given
+ * point in time.  At some later, postmortem analysis, you can dump the content of
+ * the buffered registers with s32k1xx_dmadump().  s32k1xx_dmasample() is also
+ * available for monitoring DMA progress.
  */
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
 #include <stdint.h>
 #include "hardware/s32k1xx_edma.h"
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
 /* Configuration flags.
  *
@@ -117,38 +119,23 @@
 #  define EDMA_CONFIG_LINKTYPE_MINORLINK (1 << EDMA_CONFIG_LINKTYPE_SHIFT) /* Channel link after each minor loop */
 #  define EDMA_CONFIG_LINKTYPE_MAJORLINK (2 << EDMA_CONFIG_LINKTYPE_SHIFT) /* Channel link when major loop count exhausted */
 
-#define EDMA_CONFIG_LOOP_SHIFT           (2) /* Bits 2-3: Loop type */
-#define EDMA_CONFIG_LOOP_MASK            (3 << EDMA_CONFIG_LOOP_SHIFT)
-#  define EDMA_CONFIG_LOOPNONE           (0 << EDMA_CONFIG_LOOP_SHIFT) /* No looping */
-#  define EDMA_CONFIG_LOOPSRC            (1 << EDMA_CONFIG_LOOP_SHIFT) /* Source looping */
-#  define EDMA_CONFIG_LOOPDEST           (2 << EDMA_CONFIG_LOOP_SHIFT) /* Dest looping */
-
-#define EDMA_CONFIG_INTHALF              (1 << 4) /* Bits 4: Int on HALF */
-#define EDMA_CONFIG_INTMAJOR             (1 << 5) /* Bits 5: Int on all Major completion
-                                                   * Default is only on last completion
-                                                   * if using scatter gather
-                                                   */
-
-/****************************************************************************
+/************************************************************************************
  * Public Types
- ****************************************************************************/
+ ************************************************************************************/
 
-typedef void *DMACH_HANDLE;
-typedef void (*edma_callback_t)(DMACH_HANDLE handle,
-                                void *arg, bool done, int result);
+typedef FAR void *DMACH_HANDLE;
+typedef void (*edma_callback_t)(DMACH_HANDLE handle, void *arg, bool done, int result);
 
-/* This structure holds the source/destination transfer attribute
- * configuration.
- */
+/* eDMA transfer type */
 
-/* eDMA transfer sizes */
-
-enum s32k1xx_edma_sizes_e
+enum s32k1xx_edma_xfrtype_e
 {
-  EDMA_8BIT    = 0,      /* Transfer data size 8 */
-  EDMA_16BIT   = 1,      /* Transfer data size 16 */
-  EDMA_32BIT   = 2,      /* Transfer data size 32 */
+  EDMA_MEM2MEM = 0,      /* Transfer from memory to memory */
+  EDMA_PERIPH2MEM,       /* Transfer from peripheral to memory */
+  EDMA_MEM2PERIPH,       /* Transfer from memory to peripheral */
 };
+
+/* This structure holds the source/destination transfer attribute configuration. */
 
 struct s32k1xx_edma_xfrconfig_s
 {
@@ -160,6 +147,7 @@ struct s32k1xx_edma_xfrconfig_s
     uint8_t  flags;      /* See EDMA_CONFIG_* definitions */
     uint8_t  ssize;      /* Source data transfer size (see TCD_ATTR_SIZE_* definitions in rdware/. */
     uint8_t  dsize;      /* Destination data transfer size. */
+    uint8_t  ttype;      /* Transfer type (see enum s32k1xx_edma_xfrtype_e). */
 #ifdef CONFIG_S32K1XX_EDMA_EMLIM
     uint16_t nbytes;     /* Bytes to transfer in a minor loop */
 #else
@@ -170,9 +158,7 @@ struct s32k1xx_edma_xfrconfig_s
 #endif
 };
 
-/* The following is used for sampling DMA registers when CONFIG DEBUG_DMA
- * is selected
- */
+/* The following is used for sampling DMA registers when CONFIG DEBUG_DMA is selected */
 
 #ifdef CONFIG_DEBUG_DMA
 struct s32k1xx_dmaregs_s
@@ -213,15 +199,15 @@ struct s32k1xx_dmaregs_s
 };
 #endif /* CONFIG_DEBUG_DMA */
 
-/****************************************************************************
+/************************************************************************************
  * Inline Functions
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ASSEMBLY__
 
-/****************************************************************************
+/************************************************************************************
  * Public Data
- ****************************************************************************/
+ ************************************************************************************/
 
 #undef EXTERN
 #if defined(__cplusplus)
@@ -232,9 +218,9 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/****************************************************************************
+/************************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ************************************************************************************/
 
 /****************************************************************************
  * Name: s32k1xx_dmach_alloc
@@ -245,8 +231,7 @@ extern "C"
  *
  * Input Parameters:
  *   dmamux - DMAMUX configuration see DMAMUX channel configuration register
- *            bit-field definitions in hardware/s32k1xx_dmamux.h.
- *            Settings include:
+ *            bit-field definitions in hardware/s32k1xx_dmamux.h.  Settings include:
  *
  *            DMAMUX_CHCFG_SOURCE     Chip-specific DMA source (required)
  *            DMAMUX_CHCFG_AON        DMA Channel Always Enable (optional)
@@ -270,35 +255,32 @@ extern "C"
  *
  ****************************************************************************/
 
-DMACH_HANDLE s32k1xx_dmach_alloc(uint8_t dmamux, uint8_t dchpri);
+DMACH_HANDLE s32k1xx_dmach_alloc(uint32_t dmamux, uint8_t dchpri);
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_dmach_free
  *
  * Description:
- *   Release a DMA channel.
- *   NOTE:  The 'handle' used in this argument must NEVER be used again
- *   until s32k1xx_dmach_alloc() is called again to re-gain a valid handle.
+ *   Release a DMA channel.  NOTE:  The 'handle' used in this argument must NEVER be
+ *   used again until s32k1xx_dmach_alloc() is called again to re-gain a valid handle.
  *
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 void s32k1xx_dmach_free(DMACH_HANDLE handle);
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_dmach_xfrsetup
  *
  * Description:
  *   This function adds the eDMA transfer to the DMA sequence.  The request
  *   is setup according to the content of the transfer configuration
- *   structure.  For "normal" DMA, s32k1xx_dmach_xfrsetup is called only
- *   once.
+ *   structure.  For "normal" DMA, s32k1xx_dmach_xfrsetup is called only once.
  *   Scatter/gather DMA is accomplished by calling this function repeatedly,
  *   once for each transfer in the sequence.  Scatter/gather DMA processing
- *   is enabled automatically when the second transfer configuration is
- *   received.
+ *   is enabled automatically when the second transfer configuration is received.
  *
  *   This function may be called multiple times to handle multiple,
  *   discontinuous transfers (scatter-gather)
@@ -312,56 +294,52 @@ void s32k1xx_dmach_free(DMACH_HANDLE handle);
  *   Zero (OK) is returned on success; a negated errno value is returned on
  *   any failure.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 int s32k1xx_dmach_xfrsetup(DMACH_HANDLE *handle,
                            const struct s32k1xx_edma_xfrconfig_s *config);
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_dmach_start
  *
  * Description:
- *   Start the DMA transfer by enabling the channel DMA request.
- *   This function should be called after the final call to
- *   s32k1xx_dmasetup() in order to avoid race conditions.
+ *   Start the DMA transfer by enabling the channel DMA request.  This function
+ *   should be called after the final call to s32k1xx_dmasetup() in order to avoid
+ *   race conditions.
  *
- *   At the conclusion of each major DMA loop, a callback to the
- *   user-provided function is made:  |For "normal" DMAs, this will
- *   correspond to the DMA DONE interrupt; for scatter gather DMAs, multiple
- *   interrupts will be generated with the final being the DONE interrupt.
+ *   At the conclusion of each major DMA loop, a callback to the user-provided
+ *   function is made:  |For "normal" DMAs, this will correspond to the DMA DONE
+ *   interrupt; for scatter gather DMAs, multiple interrupts will be generated
+ *   with the final being the DONE interrupt.
  *
- *   At the conclusion of the DMA, the DMA channel is reset, all TCDs are
- *   freed, and the callback function is called with the the success/fail
- *   result of the DMA.
+ *   At the conclusion of the DMA, the DMA channel is reset, all TCDs are freed, and
+ *   the callback function is called with the the success/fail result of the DMA.
  *
- *   NOTE:
- *   On Rx DMAs (peripheral-to-memory or memory-to-memory), it is necessary
- *   to invalidate the destination memory.  That is not done automatically
- *   by the DMA module.  Invalidation of the destination memory regions is
- *   the responsibility of the caller.
+ *   NOTE: On Rx DMAs (peripheral-to-memory or memory-to-memory), it is necessary
+ *   to invalidate the destination memory.  That is not done automatically by the
+ *   DMA module.  Invalidation of the destination memory regions is the
+ *   responsibility of the caller.
  *
  * Input Parameters:
  *   handle   - DMA channel handle created by s32k1xx_dmach_alloc()
- *   callback - The callback to be invoked when the DMA is completes or is
- *              aborted.
+ *   callback - The callback to be invoked when the DMA is completes or is aborted.
  *   arg      - An argument that accompanies the callback
  *
  * Returned Value:
  *   Zero (OK) is returned on success; a negated errno value is returned on
  *   any failure.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-int s32k1xx_dmach_start(DMACH_HANDLE handle,
-                        edma_callback_t callback, void *arg);
+int s32k1xx_dmach_start(DMACH_HANDLE handle, edma_callback_t callback, void *arg);
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_dmach_stop
  *
  * Description:
- *   Cancel the DMA.  After s32k1xx_dmach_stop() is called, the DMA channel
- *   is reset, all TCDs are freed, and s32k1xx_dmarx/txsetup() must be called
- *   before s32k1xx_dmach_start() can be called again
+ *   Cancel the DMA.  After s32k1xx_dmach_stop() is called, the DMA channel is reset,
+ *   all TCDs are freed, and s32k1xx_dmarx/txsetup() must be called before
+ *   s32k1xx_dmach_start() can be called again
  *
  * Input Parameters:
  *   handle   - DMA channel handle created by s32k1xx_dmach_alloc()
@@ -369,11 +347,11 @@ int s32k1xx_dmach_start(DMACH_HANDLE handle,
  * Returned Value:
  *   None.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 void s32k1xx_dmach_stop(DMACH_HANDLE handle);
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_dmach_getcount
  *
  * Description:
@@ -396,7 +374,7 @@ void s32k1xx_dmach_stop(DMACH_HANDLE handle);
  *   initial value of NBYTES (for example copied before enabling the channel)
  *   is needed. The formula to calculate it is shown below:
  *
- *    RemainingBytes = RemainingMajorLoopCount * NBYTES(initially configured)
+ *     RemainingBytes = RemainingMajorLoopCount * NBYTES(initially configured)
  *
  * Input Parameters:
  *   handle  - DMA channel handle created by s32k1xx_dmach_alloc()
@@ -404,17 +382,17 @@ void s32k1xx_dmach_stop(DMACH_HANDLE handle);
  * Returned Value:
  *   Major loop count which has not been transferred yet for the current TCD.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 unsigned int s32k1xx_dmach_getcount(DMACH_HANDLE *handle);
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_dmasample
  *
  * Description:
  *   Sample DMA register contents
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifdef CONFIG_DEBUG_DMA
 void s32k1xx_dmasample(DMACH_HANDLE handle, struct s32k1xx_dmaregs_s *regs);
@@ -422,13 +400,13 @@ void s32k1xx_dmasample(DMACH_HANDLE handle, struct s32k1xx_dmaregs_s *regs);
 #  define s32k1xx_dmasample(handle,regs)
 #endif
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_dmadump
  *
  * Description:
  *   Dump previously sampled DMA register contents
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifdef CONFIG_DEBUG_DMA
 void s32k1xx_dmadump(const struct s32k1xx_dmaregs_s *regs, const char *msg);

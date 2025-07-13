@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/netlink/netlink_sockif.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018-2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,7 +49,6 @@
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/sched.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/wqueue.h>
@@ -50,26 +62,31 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-static int  netlink_setup(FAR struct socket *psock);
+static int  netlink_setup(FAR struct socket *psock, int protocol);
 static sockcaps_t netlink_sockcaps(FAR struct socket *psock);
 static void netlink_addref(FAR struct socket *psock);
 static int  netlink_bind(FAR struct socket *psock,
-                        FAR const struct sockaddr *addr, socklen_t addrlen);
+              FAR const struct sockaddr *addr, socklen_t addrlen);
 static int  netlink_getsockname(FAR struct socket *psock,
-                                FAR struct sockaddr *addr,
-                                FAR socklen_t *addrlen);
+              FAR struct sockaddr *addr, FAR socklen_t *addrlen);
 static int  netlink_getpeername(FAR struct socket *psock,
-                                FAR struct sockaddr *addr,
-                                FAR socklen_t *addrlen);
+              FAR struct sockaddr *addr, FAR socklen_t *addrlen);
+static int  netlink_listen(FAR struct socket *psock, int backlog);
 static int  netlink_connect(FAR struct socket *psock,
-                            FAR const struct sockaddr *addr,
-                            socklen_t addrlen);
+              FAR const struct sockaddr *addr, socklen_t addrlen);
+static int  netlink_accept(FAR struct socket *psock,
+              FAR struct sockaddr *addr, FAR socklen_t *addrlen,
+              FAR struct socket *newsock);
 static int  netlink_poll(FAR struct socket *psock, FAR struct pollfd *fds,
-                         bool setup);
-static ssize_t netlink_sendmsg(FAR struct socket *psock,
-                               FAR struct msghdr *msg, int flags);
-static ssize_t netlink_recvmsg(FAR struct socket *psock,
-                               FAR struct msghdr *msg, int flags);
+              bool setup);
+static ssize_t netlink_send(FAR struct socket *psock,
+              FAR const void *buf, size_t len, int flags);
+static ssize_t netlink_sendto(FAR struct socket *psock, FAR const void *buf,
+              size_t len, int flags, FAR const struct sockaddr *to,
+              socklen_t tolen);
+static ssize_t netlink_recvfrom(FAR struct socket *psock, FAR void *buf,
+              size_t len, int flags, FAR struct sockaddr *from,
+              FAR socklen_t *fromlen);
 static int netlink_close(FAR struct socket *psock);
 
 /****************************************************************************
@@ -84,12 +101,16 @@ const struct sock_intf_s g_netlink_sockif =
   netlink_bind,         /* si_bind */
   netlink_getsockname,  /* si_getsockname */
   netlink_getpeername,  /* si_getpeername */
-  NULL,                 /* si_listen */
+  netlink_listen,       /* si_listen */
   netlink_connect,      /* si_connect */
-  NULL,                 /* si_accept */
+  netlink_accept,       /* si_accept */
   netlink_poll,         /* si_poll */
-  netlink_sendmsg,      /* si_sendmsg */
-  netlink_recvmsg,      /* si_recvmsg */
+  netlink_send,         /* si_send */
+  netlink_sendto,       /* si_sendto */
+#ifdef CONFIG_NET_SENDFILE
+  NULL,                 /* si_sendfile */
+#endif
+  netlink_recvfrom,     /* si_recvfrom */
   netlink_close         /* si_close */
 };
 
@@ -108,6 +129,7 @@ const struct sock_intf_s g_netlink_sockif =
  * Input Parameters:
  *   psock    - A pointer to a user allocated socket structure to be
  *              initialized.
+ *   protocol - NetLink socket protocol (see sys/socket.h)
  *
  * Returned Value:
  *   Zero (OK) is returned on success.  Otherwise, a negated errno value is
@@ -115,25 +137,19 @@ const struct sock_intf_s g_netlink_sockif =
  *
  ****************************************************************************/
 
-static int netlink_setup(FAR struct socket *psock)
+static int netlink_setup(FAR struct socket *psock, int protocol)
 {
   int domain = psock->s_domain;
   int type = psock->s_type;
-  int proto = psock->s_proto;
 
   /* Verify that the protocol is supported */
 
-  DEBUGASSERT((unsigned int)proto <= UINT8_MAX);
+  DEBUGASSERT((unsigned int)protocol <= UINT8_MAX);
 
-  switch (proto)
+  switch (protocol)
     {
 #ifdef CONFIG_NETLINK_ROUTE
       case NETLINK_ROUTE:
-        break;
-#endif
-
-#ifdef CONFIG_NETLINK_NETFILTER
-      case NETLINK_NETFILTER:
         break;
 #endif
 
@@ -143,8 +159,7 @@ static int netlink_setup(FAR struct socket *psock)
 
   /* Verify the socket type (domain should always be PF_NETLINK here) */
 
-  if (domain == PF_NETLINK &&
-      (type == SOCK_RAW || type == SOCK_DGRAM || type == SOCK_CTRL))
+  if (domain == PF_NETLINK && (type == SOCK_RAW || type == SOCK_DGRAM))
     {
       /* Allocate the NetLink socket connection structure and save it in the
        * new socket instance.
@@ -157,6 +172,10 @@ static int netlink_setup(FAR struct socket *psock)
 
           return -ENOMEM;
         }
+
+      /* Initialize the connection instance */
+
+      conn->protocol = (uint8_t)protocol;
 
       /* Set the reference count on the connection structure.  This
        * reference count will be incremented only if the socket is
@@ -215,6 +234,8 @@ static void netlink_addref(FAR struct socket *psock)
 {
   FAR struct netlink_conn_s *conn;
 
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL);
+
   conn = psock->s_conn;
   DEBUGASSERT(conn->crefs > 0 && conn->crefs < 255);
   conn->crefs++;
@@ -256,14 +277,15 @@ static int netlink_bind(FAR struct socket *psock,
   FAR struct sockaddr_nl *nladdr;
   FAR struct netlink_conn_s *conn;
 
-  DEBUGASSERT(addrlen >= sizeof(struct sockaddr_nl));
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL && addr != NULL &&
+              addrlen >= sizeof(struct sockaddr_nl));
 
   /* Save the address information in the connection structure */
 
   nladdr = (FAR struct sockaddr_nl *)addr;
-  conn   = psock->s_conn;
+  conn   = (FAR struct netlink_conn_s *)psock->s_conn;
 
-  conn->pid    = nladdr->nl_pid ? nladdr->nl_pid : nxsched_gettid();
+  conn->pid    = nladdr->nl_pid ? nladdr->nl_pid : getpid();
   conn->groups = nladdr->nl_groups;
 
   return OK;
@@ -298,9 +320,10 @@ static int netlink_getsockname(FAR struct socket *psock,
   FAR struct sockaddr_nl *nladdr;
   FAR struct netlink_conn_s *conn;
 
-  DEBUGASSERT(*addrlen >= sizeof(struct sockaddr_nl));
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL && addr != NULL &&
+              addrlen != NULL && *addrlen >= sizeof(struct sockaddr_nl));
 
-  conn = psock->s_conn;
+  conn = (FAR struct netlink_conn_s *)psock->s_conn;
 
   /* Return the address information in the address structure */
 
@@ -350,9 +373,10 @@ static int netlink_getpeername(FAR struct socket *psock,
   FAR struct sockaddr_nl *nladdr;
   FAR struct netlink_conn_s *conn;
 
-  DEBUGASSERT(*addrlen >= sizeof(struct sockaddr_nl));
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL && addr != NULL &&
+              addrlen != NULL && *addrlen >= sizeof(struct sockaddr_nl));
 
-  conn = psock->s_conn;
+  conn = (FAR struct netlink_conn_s *)psock->s_conn;
 
   /* Return the address information in the address structure */
 
@@ -365,6 +389,37 @@ static int netlink_getpeername(FAR struct socket *psock,
 
   *addrlen = sizeof(struct sockaddr_nl);
   return OK;
+}
+
+/****************************************************************************
+ * Name: netlink_listen
+ *
+ * Description:
+ *   To accept connections, a socket is first created with psock_socket(), a
+ *   willingness to accept incoming connections and a queue limit for
+ *   incoming connections are specified with psock_listen(), and then the
+ *   connections are accepted with psock_accept().  For the case of AFINET
+ *   and AFINET6 sockets, psock_listen() calls this function.  The
+ *   psock_listen() call applies only to sockets of type SOCK_STREAM or
+ *   SOCK_SEQPACKET.
+ *
+ * Input Parameters:
+ *   psock    Reference to an internal, bound socket structure.
+ *   backlog  The maximum length the queue of pending connections may grow.
+ *            If a connection request arrives with the queue full, the client
+ *            may receive an error with an indication of ECONNREFUSED or,
+ *            if the underlying protocol supports retransmission, the request
+ *            may be ignored so that retries succeed.
+ *
+ * Returned Value:
+ *   On success, zero is returned. On error, a negated errno value is
+ *   returned.  See list() for the set of appropriate error values.
+ *
+ ****************************************************************************/
+
+static int netlink_listen(FAR struct socket *psock, int backlog)
+{
+  return -EOPNOTSUPP;
 }
 
 /****************************************************************************
@@ -392,17 +447,69 @@ static int netlink_connect(FAR struct socket *psock,
   FAR struct sockaddr_nl *nladdr;
   FAR struct netlink_conn_s *conn;
 
-  DEBUGASSERT(addrlen >= sizeof(struct sockaddr_nl));
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL && addr != NULL &&
+              addrlen >= sizeof(struct sockaddr_nl));
 
   /* Save the address information in the connection structure */
 
   nladdr = (FAR struct sockaddr_nl *)addr;
-  conn   = psock->s_conn;
+  conn   = (FAR struct netlink_conn_s *)psock->s_conn;
 
   conn->dst_pid    = nladdr->nl_pid;
   conn->dst_groups = nladdr->nl_groups;
 
   return OK;
+}
+
+/****************************************************************************
+ * Name: netlink_accept
+ *
+ * Description:
+ *   The netlink_accept function is used with connection-based socket
+ *   types (SOCK_STREAM, SOCK_SEQPACKET and SOCK_RDM). It extracts the first
+ *   connection request on the queue of pending connections, creates a new
+ *   connected socket with mostly the same properties as 'sockfd', and
+ *   allocates a new socket descriptor for the socket, which is returned. The
+ *   newly created socket is no longer in the listening state. The original
+ *   socket 'sockfd' is unaffected by this call.  Per file descriptor flags
+ *   are not inherited across an inet_accept.
+ *
+ *   The 'sockfd' argument is a socket descriptor that has been created with
+ *   socket(), bound to a local address with bind(), and is listening for
+ *   connections after a call to listen().
+ *
+ *   On return, the 'addr' structure is filled in with the address of the
+ *   connecting entity. The 'addrlen' argument initially contains the size
+ *   of the structure pointed to by 'addr'; on return it will contain the
+ *   actual length of the address returned.
+ *
+ *   If no pending connections are present on the queue, and the socket is
+ *   not marked as non-blocking, accept blocks the caller until a
+ *   connection is present. If the socket is marked non-blocking and no
+ *   pending connections are present on the queue, inet_accept returns
+ *   EAGAIN.
+ *
+ * Input Parameters:
+ *   psock    Reference to the listening socket structure
+ *   addr     Receives the address of the connecting client
+ *   addrlen  Input:  Allocated size of 'addr'
+ *            Return: Actual size returned size of 'addr'
+ *   newsock  Location to return the accepted socket information.
+ *
+ * Returned Value:
+ *   Returns 0 (OK) on success.  On failure, it returns a negated errno
+ *   value.  See accept() for a description of the appropriate error value.
+ *
+ * Assumptions:
+ *   The network is locked.
+ *
+ ****************************************************************************/
+
+static int netlink_accept(FAR struct socket *psock,
+                          FAR struct sockaddr *addr, FAR socklen_t *addrlen,
+                          FAR struct socket *newsock)
+{
+  return -EOPNOTSUPP;
 }
 
 /****************************************************************************
@@ -429,13 +536,15 @@ static void netlink_response_available(FAR void *arg)
    * condition?
    */
 
+  sched_lock();
   net_lock();
 
-  if (conn->fds != NULL)
+  if (conn->pollsem != NULL && conn->pollevent != NULL)
     {
       /* Wake up the poll() with POLLIN */
 
-      poll_notify(&conn->fds, 1, POLLIN);
+       *conn->pollevent |= POLLIN;
+       nxsem_post(conn->pollsem);
     }
   else
     {
@@ -444,9 +553,11 @@ static void netlink_response_available(FAR void *arg)
 
   /* Allow another poll() */
 
-  conn->fds = NULL;
+  conn->pollsem   = NULL;
+  conn->pollevent = NULL;
 
   net_unlock();
+  sched_unlock();
 }
 
 /****************************************************************************
@@ -478,7 +589,8 @@ static int netlink_poll(FAR struct socket *psock, FAR struct pollfd *fds,
   FAR struct netlink_conn_s *conn;
   int ret = OK;
 
-  conn = psock->s_conn;
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL);
+  conn = (FAR struct netlink_conn_s *)psock->s_conn;
 
   /* Check if we are setting up or tearing down the poll */
 
@@ -493,7 +605,7 @@ static int netlink_poll(FAR struct socket *psock, FAR struct pollfd *fds,
        */
 
       net_lock();
-      if (netlink_check_response(conn))
+      if (netlink_check_response(psock))
         {
           revents |= POLLIN;
         }
@@ -502,9 +614,11 @@ static int netlink_poll(FAR struct socket *psock, FAR struct pollfd *fds,
        * requested event set.
        */
 
-      poll_notify(&fds, 1, revents);
-      if (fds->revents != 0)
+      revents &= fds->events;
+      if (revents != 0)
         {
+          fds->revents = revents;
+          nxsem_post(fds->sem);
           net_unlock();
           return OK;
         }
@@ -519,7 +633,7 @@ static int netlink_poll(FAR struct socket *psock, FAR struct pollfd *fds,
            * on the Netlink connection.
            */
 
-          if (conn->fds != NULL)
+          if (conn->pollsem != NULL || conn->pollevent != NULL)
             {
               nerr("ERROR: Multiple polls() on socket not supported.\n");
               net_unlock();
@@ -528,14 +642,16 @@ static int netlink_poll(FAR struct socket *psock, FAR struct pollfd *fds,
 
           /* Set up the notification */
 
-          conn->fds = fds;
+          conn->pollsem    = fds->sem;
+          conn->pollevent  = &fds->revents;
 
           ret = netlink_notifier_setup(netlink_response_available,
                                        conn, conn);
           if (ret < 0)
             {
               nerr("ERROR: netlink_notifier_setup() failed: %d\n", ret);
-              conn->fds = NULL;
+              conn->pollsem   = NULL;
+              conn->pollevent = NULL;
             }
         }
 
@@ -545,96 +661,109 @@ static int netlink_poll(FAR struct socket *psock, FAR struct pollfd *fds,
     {
       /* Cancel any response notifications */
 
-      netlink_notifier_teardown(conn);
-      conn->fds = NULL;
+      ret = netlink_notifier_teardown(conn);
+      conn->pollsem   = NULL;
+      conn->pollevent = NULL;
     }
 
   return ret;
 }
 
 /****************************************************************************
- * Name: netlink_sendmsg
+ * Name: netlink_send
  *
  * Description:
- *   If sendmsg() is used on a connection-mode (SOCK_STREAM, SOCK_SEQPACKET)
- *   socket, the parameters 'msg_name' and 'msg_namelen' are ignored (and the
- *   error EISCONN may be returned when they are not NULL and 0), and the
- *   error ENOTCONN is returned when the socket was not actually connected.
+ *   The netlink_send() call may be used only when the socket is in
+ *   a connected state  (so that the intended recipient is known).
  *
  * Input Parameters:
- *   psock    A reference to the structure of the socket to be connected
- *   msg      msg to send
- *   flags    Send flags (ignored)
+ *   psock - An instance of the internal socket structure.
+ *   buf   - Data to send
+ *   len   - Length of data to send
+ *   flags - Send flags (ignored)
  *
  * Returned Value:
  *   On success, returns the number of characters sent.  On  error, a negated
- *   errno value is returned (see sendmsg() for the list of appropriate error
+ *   errno value is returned (see send() for the list of appropriate error
  *   values.
+ *
+ ****************************************************************************/
+
+static ssize_t netlink_send(FAR struct socket *psock, FAR const void *buf,
+                            size_t len, int flags)
+{
+  FAR struct netlink_conn_s *conn;
+  struct sockaddr_nl nladdr;
+
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL && buf != NULL);
+
+  /* Get the underlying connection structure */
+
+  conn = (FAR struct netlink_conn_s *)psock->s_conn;
+
+  /* Format the address */
+
+  nladdr.nl_family = AF_NETLINK;
+  nladdr.nl_pad    = 0;
+  nladdr.nl_pid    = conn->dst_pid;
+  nladdr.nl_groups = conn->dst_groups;
+
+  /* Then let sendto() perform the actual send operation */
+
+  return netlink_sendto(psock, buf, len, flags,
+                        (FAR const struct sockaddr *)&nladdr,
+                        sizeof(struct sockaddr_nl));
+}
+
+/****************************************************************************
+ * Name: netlink_sendto
+ *
+ * Description:
+ *   If sendto() is used on a connection-mode (SOCK_STREAM, SOCK_SEQPACKET)
+ *   socket, the parameters to and 'tolen' are ignored (and the error EISCONN
+ *   may be returned when they are not NULL and 0), and the error ENOTCONN is
+ *   returned when the socket was not actually connected.
+ *
+ * Input Parameters:
+ *   psock    A reference to the structure of the socket to be connected
+ *   buf      Data to send
+ *   len      Length of data to send
+ *   flags    Send flags (ignored)
+ *   to       Address of recipient
+ *   tolen    The length of the address structure
+ *
+ * Returned Value:
+ *   None
  *
  * Assumptions:
  *
  ****************************************************************************/
 
-static ssize_t netlink_sendmsg(FAR struct socket *psock,
-                               FAR struct msghdr *msg, int flags)
+static ssize_t netlink_sendto(FAR struct socket *psock, FAR const void *buf,
+                              size_t len, int flags,
+                              FAR const struct sockaddr *to, socklen_t tolen)
 {
-  FAR const void *buf = msg->msg_iov->iov_base;
-  FAR const struct sockaddr *to = msg->msg_name;
-  socklen_t tolen = msg->msg_namelen;
   FAR struct netlink_conn_s *conn;
   FAR struct nlmsghdr *nlmsg;
-  struct sockaddr_nl nladdr;
   int ret;
 
-  /* Validity check, only single iov supported */
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL && buf != NULL &&
+              to != NULL && tolen >= sizeof(struct sockaddr_nl));
 
-  if (msg->msg_iovlen != 1)
-    {
-      return -ENOTSUP;
-    }
-
-  /* Get the underlying connection structure */
-
-  conn = psock->s_conn;
-  if (to == NULL)
-    {
-      /* netlink_send() */
-
-      /* Format the address */
-
-      nladdr.nl_family = AF_NETLINK;
-      nladdr.nl_pad    = 0;
-      nladdr.nl_pid    = conn->dst_pid;
-      nladdr.nl_groups = conn->dst_groups;
-
-      to = (FAR const struct sockaddr *)&nladdr;
-      tolen = sizeof(struct sockaddr_nl);
-    }
-
-  DEBUGASSERT(tolen >= sizeof(struct sockaddr_nl));
+  conn = (FAR struct netlink_conn_s *)psock->s_conn;
 
   /* Get a reference to the netlink message */
 
   nlmsg = (FAR struct nlmsghdr *)buf;
   DEBUGASSERT(nlmsg->nlmsg_len >= sizeof(struct nlmsghdr));
 
-  switch (psock->s_proto)
+  switch (conn->protocol)
     {
 #ifdef CONFIG_NETLINK_ROUTE
       case NETLINK_ROUTE:
-        ret = netlink_route_sendto(conn, nlmsg,
-                                   msg->msg_iov->iov_len, flags,
-                                   (FAR const struct sockaddr_nl *)to,
+        ret = netlink_route_sendto(psock, nlmsg, len, flags,
+                                   (FAR struct sockaddr_nl *)to,
                                    tolen);
-        break;
-#endif
-
-#ifdef CONFIG_NETLINK_NETFILTER
-      case NETLINK_NETFILTER:
-        ret = netlink_netfilter_sendto(conn, nlmsg,
-                                       msg->msg_iov->iov_len, flags,
-                                       (FAR const struct sockaddr_nl *)to,
-                                       tolen);
         break;
 #endif
 
@@ -647,69 +776,59 @@ static ssize_t netlink_sendmsg(FAR struct socket *psock,
 }
 
 /****************************************************************************
- * Name: netlink_recvmsg
+ * Name: netlink_recvfrom
  *
  * Description:
- *   recvmsg() receives messages from a socket, and may be used to receive
+ *   recvfrom() receives messages from a socket, and may be used to receive
  *   data on a socket whether or not it is connection-oriented.
  *
- *   If msg_name is not NULL, and the underlying protocol provides the source
- *   address, this source address is filled in. The argument 'msg_namelen' is
- *   initialized to the size of the buffer associated with msg_name, and
- *   modified on return to indicate the actual size of the address stored
- *   there.
+ *   If from is not NULL, and the underlying protocol provides the source
+ *   address, this source address is filled in. The argument 'fromlen'
+ *   initialized to the size of the buffer associated with from, and modified
+ *   on return to indicate the actual size of the address stored there.
  *
  * Input Parameters:
  *   psock    A pointer to a NuttX-specific, internal socket structure
- *   msg      Buffer to receive the message
+ *   buf      Buffer to receive data
+ *   len      Length of buffer
  *   flags    Receive flags (ignored)
+ *   from     Address of source (may be NULL)
+ *   fromlen  The length of the address structure
  *
  ****************************************************************************/
 
-static ssize_t netlink_recvmsg(FAR struct socket *psock,
-                               FAR struct msghdr *msg, int flags)
+static ssize_t netlink_recvfrom(FAR struct socket *psock, FAR void *buf,
+                                size_t len, int flags,
+                                FAR struct sockaddr *from,
+                                FAR socklen_t *fromlen)
 {
-  FAR void *buf = msg->msg_iov->iov_base;
-  size_t len = msg->msg_iov->iov_len;
-  FAR struct sockaddr *from = msg->msg_name;
-  FAR socklen_t *fromlen = &msg->msg_namelen;
   FAR struct netlink_response_s *entry;
-  FAR struct socket_conn_s *conn;
-  int ret = OK;
 
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL && buf != NULL);
   DEBUGASSERT(from == NULL ||
               (fromlen != NULL && *fromlen >= sizeof(struct sockaddr_nl)));
 
-  if (msg->msg_iovlen != 1)
-    {
-      return -ENOTSUP;
-    }
-
   /* Find the response to this message.  The return value */
 
-  entry = netlink_tryget_response(psock->s_conn);
+  entry = (FAR struct netlink_response_s *)netlink_tryget_response(psock);
   if (entry == NULL)
     {
-      conn = psock->s_conn;
-
-      /* No response is available, but presumably, one is expected.  Check
+      /* No response is variable, but presumably, one is expected.  Check
        * if the socket has been configured for non-blocking operation.
        */
 
-      if (_SS_ISNONBLOCK(conn->s_flags) || (flags & MSG_DONTWAIT) != 0)
+      if (_SS_ISNONBLOCK(psock->s_flags) || (flags & MSG_DONTWAIT) != 0)
         {
           return -EAGAIN;
         }
 
-      /* Wait for the response. */
+      /* Wait for the response.  This should always succeed. */
 
-      ret = netlink_get_response(psock->s_conn, &entry);
-
-      /* If interrupted by signals, return errno */
-
+      entry = (FAR struct netlink_response_s *)netlink_get_response(psock);
+      DEBUGASSERT(entry != NULL);
       if (entry == NULL)
         {
-          return ret;
+          return -EPIPE;
         }
     }
 
@@ -750,6 +869,7 @@ static ssize_t netlink_recvmsg(FAR struct socket *psock,
 static int netlink_close(FAR struct socket *psock)
 {
   FAR struct netlink_conn_s *conn = psock->s_conn;
+  int ret = OK;
 
   /* Perform some pre-close operations for the NETLINK socket type. */
 
@@ -763,6 +883,14 @@ static int netlink_close(FAR struct socket *psock)
 
       conn->crefs = 0;
       netlink_free(psock->s_conn);
+
+      if (ret < 0)
+        {
+          /* Return with error code, but free resources. */
+
+          nerr("ERROR: netlink_close failed: %d\n", ret);
+          return ret;
+        }
     }
   else
     {
@@ -771,7 +899,7 @@ static int netlink_close(FAR struct socket *psock)
       conn->crefs--;
     }
 
-  return OK;
+  return ret;
 }
 
 #endif /* CONFIG_NET_NETLINK */

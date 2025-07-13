@@ -1,22 +1,32 @@
 /****************************************************************************
  * arch/risc-v/include/arch.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Ken Pettit. All rights reserved.
+ *   Author: Ken Pettit <pettitkd@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -35,87 +45,67 @@
 
 #ifndef __ASSEMBLY__
 #  include <stdint.h>
-#  include <stddef.h>
+#endif
+
+#ifdef CONFIG_ARCH_RV32IM
+#  include "rv32im/csr.h"
 #endif
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Provide the maximum amount of page table levels per MMU type */
+/* Macros to get the core and vendor ID, HART, arch and ISA codes, etc.
+ */
+#ifdef CONFIG_RV32IM_SYSTEM_CSRRS_SUPPORT
 
-#ifdef CONFIG_ARCH_MMU_TYPE_SV39
-#  define ARCH_PGT_MAX_LEVELS (3)
-#elif CONFIG_ARCH_MMU_TYPE_SV32
-#  define ARCH_PGT_MAX_LEVELS (2)
+uint32_t up_getmisa(void);
+uint32_t up_getarchid(void);
+uint32_t up_getimpid(void);
+uint32_t up_getvendorid(void);
+uint32_t up_gethartid(void);
+
+#else
+
+#define up_getmisa() 0
+#define up_getarchid() 0
+#define up_getimpid() 0
+#define up_getvendorid() 0
+#define up_gethartid() 0
+
 #endif
 
-/* Amount of static page tables allocated for an address environment */
-
-#ifdef CONFIG_ARCH_ADDRENV
-#  define ARCH_SPGTS          (ARCH_PGT_MAX_LEVELS - 1)
-#endif
+/****************************************************************************
+ * Inline functions
+ ****************************************************************************/
 
 /****************************************************************************
  * Public Types
  ****************************************************************************/
 
-#ifdef CONFIG_ARCH_ADDRENV
-#ifndef __ASSEMBLY__
-
-/* A task group must have its L1 table in memory always, and the rest can
- * be dynamically committed to memory (and even swapped).
- *
- * In this implementation level tables except the final level N are always
- * kept in static memory, while the level N tables are always dynamically
- * allocated. There is one static page per level in `spgtables[]`.
- *
- * The implications ? They depend on the MMU type.
- *
- * For Sv32 this means that:
- * - A task can not have more than 4GB of memory allocated.
- * - The minimum amount of memory needed for page tables per task is 8K,
- *   which gives access to 4MB of memory. This is plenty for many tasks.
- *
- * For Sv39 this means that:
- * - A task can not have more than 1GB of memory allocated. This should be
- *   plenty enough...
- * - The minimum amount of memory needed for page tables per task is 12K,
- *   which gives access to 2MB of memory. This is plenty for many tasks.
- */
-
-struct arch_addrenv_s
-{
-  /* Physical addresses of the static page tables (levels N-1) here, these
-   * are allocated when a task is created.
-   */
-
-  uintptr_t spgtables[ARCH_SPGTS];
-
-  /* The text, data, heap bases and heap size here */
-
-  uintptr_t textvbase;
-  uintptr_t datavbase;
-  uintptr_t heapvbase;
-  size_t    heapsize;
-
-  /* The page directory root (satp) value */
-
-  uintptr_t satp;
-};
-
-typedef struct arch_addrenv_s arch_addrenv_t;
-#endif /* __ASSEMBLY__ */
-#endif /* CONFIG_ARCH_ADDRENV */
+/****************************************************************************
+ * Public Variables
+ ****************************************************************************/
 
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
 
+#ifdef CONFIG_RV32IM_HW_MULDIV
+uint32_t up_hard_mul(uint32_t a, uint32_t b);
+uint32_t up_hard_mulh(uint32_t a, uint32_t b);
+uint32_t up_hard_mulhsu(uint32_t a, uint32_t b);
+uint32_t up_hard_mulhu(uint32_t a, uint32_t b);
+uint32_t up_hard_div(uint32_t a, uint32_t b);
+uint32_t up_hard_rem(uint32_t a, uint32_t b);
+uint32_t up_hard_divu(uint32_t a, uint32_t b);
+uint32_t up_hard_remu(uint32_t a, uint32_t b);
+uint32_t time_hard_mul(uint32_t a, uint32_t b, uint32_t *t);
+#endif
+
 #ifdef __cplusplus
 #define EXTERN extern "C"
-extern "C"
-{
+extern "C" {
 #else
 #define EXTERN extern
 #endif

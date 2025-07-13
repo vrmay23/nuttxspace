@@ -1,22 +1,35 @@
 /****************************************************************************
- * wireless/ieee802154/mac802154_loopback.c
+ * wireless/iee802154/mac802154_loopback.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017-2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,6 +49,7 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 
+#include <nuttx/wdog.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/mm/iob.h>
 #include <nuttx/net/net.h>
@@ -86,6 +100,10 @@
 #  define LO_FRAMELEN IEEE802154_MAX_PHY_PACKET_SIZE
 #endif
 
+/* TX poll delay = 1 seconds. CLK_TCK is the number of clock ticks per second */
+
+#define LO_WDDELAY   (1*CLK_TCK)
+
 /* Fake value for MAC header length */
 
 #define MAC_HDRLEN   9
@@ -103,6 +121,7 @@ struct lo_driver_s
   bool lo_bifup;               /* true:ifup false:ifdown */
   bool lo_pending;             /* True: TX poll pending */
   uint8_t lo_panid[2];         /* Fake PAN ID for testing */
+  WDOG_ID lo_polldog;          /* TX poll timer */
   struct work_s lo_work;       /* For deferring poll work to the work queue */
   FAR struct iob_s *lo_head;   /* Head of IOBs queued for loopback */
   FAR struct iob_s *lo_tail;   /* Tail of IOBs queued for loopback */
@@ -149,6 +168,8 @@ static inline void lo_netmask(FAR struct net_driver_s *dev);
 
 static int  lo_loopback(FAR struct net_driver_s *dev);
 static void lo_loopback_work(FAR void *arg);
+static void lo_poll_work(FAR void *arg);
+static void lo_poll_expiry(int argc, wdparm_t arg, ...);
 
 /* NuttX callback functions */
 
@@ -184,10 +205,8 @@ static int lo_properties(FAR struct radio_driver_s *netdev,
  *
  *    128  112  96   80    64   48   32   16
  *    ---- ---- ---- ----  ---- ---- ---- ----
- *    fe80 0000 0000 0000  0000 00ff fe00 xxxx 2-byte
- *                                             short address IEEE 48-bit MAC
- *    fe80 0000 0000 0000  xxxx xxxx xxxx xxxx 8-byte
- *                                             extended address IEEE EUI-64
+ *    fe80 0000 0000 0000  0000 00ff fe00 xxxx 2-byte short address IEEE 48-bit MAC
+ *    fe80 0000 0000 0000  xxxx xxxx xxxx xxxx 8-byte extended address IEEE EUI-64
  *
  ****************************************************************************/
 
@@ -206,14 +225,10 @@ static void lo_addr2ip(FAR struct net_driver_s *dev)
   dev->d_ipv6addr[1]  = 0;
   dev->d_ipv6addr[2]  = 0;
   dev->d_ipv6addr[3]  = 0;
-  dev->d_ipv6addr[4]  = HTONS((uint16_t)g_eaddr[0] << 8 |
-                              (uint16_t)g_eaddr[1]);
-  dev->d_ipv6addr[5]  = HTONS((uint16_t)g_eaddr[2] << 8 |
-                              (uint16_t)g_eaddr[3]);
-  dev->d_ipv6addr[6]  = HTONS((uint16_t)g_eaddr[4] << 8 |
-                              (uint16_t)g_eaddr[5]);
-  dev->d_ipv6addr[7]  = HTONS((uint16_t)g_eaddr[6] << 8 |
-                              (uint16_t)g_eaddr[7]);
+  dev->d_ipv6addr[4]  = HTONS((uint16_t)g_eaddr[0] << 8 | (uint16_t)g_eaddr[1]);
+  dev->d_ipv6addr[5]  = HTONS((uint16_t)g_eaddr[2] << 8 | (uint16_t)g_eaddr[3]);
+  dev->d_ipv6addr[6]  = HTONS((uint16_t)g_eaddr[4] << 8 | (uint16_t)g_eaddr[5]);
+  dev->d_ipv6addr[7]  = HTONS((uint16_t)g_eaddr[6] << 8 | (uint16_t)g_eaddr[7]);
 
   /* Invert the U/L bit */
 
@@ -238,8 +253,7 @@ static void lo_addr2ip(FAR struct net_driver_s *dev)
   dev->d_ipv6addr[4]  = 0;
   dev->d_ipv6addr[5]  = HTONS(0x00ff);
   dev->d_ipv6addr[6]  = HTONS(0xfe00);
-  dev->d_ipv6addr[7]  = HTONS((uint16_t)g_saddr[0] << 8 |
-                              (uint16_t)g_saddr[1]);
+  dev->d_ipv6addr[7]  = HTONS((uint16_t)g_saddr[0] << 8 |  (uint16_t)g_saddr[1]);
 #endif
 }
 #endif
@@ -253,10 +267,8 @@ static void lo_addr2ip(FAR struct net_driver_s *dev)
  *
  *    128  112  96   80    64   48   32   16
  *    ---- ---- ---- ----  ---- ---- ---- ----
- *    fe80 0000 0000 0000  0000 00ff fe00 xxxx 2-byte
- *                                             short address IEEE 48-bit MAC
- *    fe80 0000 0000 0000  xxxx xxxx xxxx xxxx 8-byte
- *                                             extended address IEEE EUI-64
+ *    fe80 0000 0000 0000  0000 00ff fe00 xxxx 2-byte short address IEEE 48-bit MAC
+ *    fe80 0000 0000 0000  xxxx xxxx xxxx xxxx 8-byte extended address IEEE EUI-64
  *
  ****************************************************************************/
 
@@ -286,8 +298,8 @@ static inline void lo_netmask(FAR struct net_driver_s *dev)
  *
  * Description:
  *   Check if the network has any outgoing packets ready to send.  This is
- *   a callback from devif_poll().  devif_poll() will be called only during
- *   normal TX polling.
+ *   a callback from devif_poll() or devif_timer().  devif_poll() will be
+ *   called only during normal TX polling.
  *
  * Input Parameters:
  *   dev - Reference to the NuttX driver state structure
@@ -432,6 +444,83 @@ static void lo_loopback_work(FAR void *arg)
 }
 
 /****************************************************************************
+ * Name: lo_poll_work
+ *
+ * Description:
+ *   Perform periodic polling from the worker thread
+ *
+ * Input Parameters:
+ *   arg - The argument passed when work_queue() as called.
+ *
+ * Returned Value:
+ *   OK on success
+ *
+ * Assumptions:
+ *   The network is locked
+ *
+ ****************************************************************************/
+
+static void lo_poll_work(FAR void *arg)
+{
+  FAR struct lo_driver_s *priv = (FAR struct lo_driver_s *)arg;
+
+  /* Perform the poll */
+
+  net_lock();
+
+#ifdef CONFIG_NET_6LOWPAN
+  /* Make sure the our single packet buffer is attached */
+
+  priv->lo_radio.r_dev.d_buf = g_iobuffer.rb_buf;
+#endif
+
+  /* Then perform the poll */
+
+  devif_timer(&priv->lo_radio.r_dev, LO_WDDELAY, lo_loopback);
+
+  /* Setup the watchdog poll timer again */
+
+  wd_start(priv->lo_polldog, LO_WDDELAY, lo_poll_expiry, 1, priv);
+  net_unlock();
+}
+
+/****************************************************************************
+ * Name: lo_poll_expiry
+ *
+ * Description:
+ *   Periodic timer handler.  Called from the timer interrupt handler.
+ *
+ * Input Parameters:
+ *   argc - The number of available arguments
+ *   arg  - The first argument
+ *
+ * Returned Value:
+ *   None
+ *
+ * Assumptions:
+ *   The network is locked.
+ *
+ ****************************************************************************/
+
+static void lo_poll_expiry(int argc, wdparm_t arg, ...)
+{
+  FAR struct lo_driver_s *priv = (FAR struct lo_driver_s *)arg;
+
+  if (!work_available(&priv->lo_work) || priv->lo_head != NULL)
+    {
+      nwarn("WARNING: lo_work NOT available\n");
+      priv->lo_pending = true;
+    }
+  else
+    {
+      /* Schedule to perform the interrupt processing on the worker thread. */
+
+      priv->lo_pending = false;
+      work_queue(LPBKWORK, &priv->lo_work, lo_poll_work, priv, 0);
+    }
+}
+
+/****************************************************************************
  * Name: lo_ifup
  *
  * Description:
@@ -458,7 +547,7 @@ static int lo_ifup(FAR struct net_driver_s *dev)
         dev->d_ipv6addr[3], dev->d_ipv6addr[4], dev->d_ipv6addr[5],
         dev->d_ipv6addr[6], dev->d_ipv6addr[7]);
 #ifdef CONFIG_NET_6LOWPAN_EXTENDEDADDR
-  ninfo("Node: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x PANID=%02x:%02x\n",
+  ninfo("             Node: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x PANID=%02x:%02x\n",
          dev->d_mac.radio.nv_addr[0], dev->d_mac.radio.nv_addr[1],
          dev->d_mac.radio.nv_addr[2], dev->d_mac.radio.nv_addr[3],
          dev->d_mac.radio.nv_addr[4], dev->d_mac.radio.nv_addr[5],
@@ -472,12 +561,11 @@ static int lo_ifup(FAR struct net_driver_s *dev)
 #else
   if (dev->d_mac.radio.nv_addrlen == 8)
     {
-      ninfo("Bringing up: Node: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x",
+      ninfo("Bringing up: Node: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x PANID=%02x:%02x\n",
              dev->d_mac.radio.nv_addr[0], dev->d_mac.radio.nv_addr[1],
              dev->d_mac.radio.nv_addr[2], dev->d_mac.radio.nv_addr[3],
              dev->d_mac.radio.nv_addr[4], dev->d_mac.radio.nv_addr[5],
-             dev->d_mac.radio.nv_addr[6], dev->d_mac.radio.nv_addr[7]);
-      ninfo("            PANID=%02x:%02x\n",
+             dev->d_mac.radio.nv_addr[6], dev->d_mac.radio.nv_addr[7],
              priv->lo_panid[0], priv->lo_panid[1]);
     }
   else if (dev->d_mac.radio.nv_addrlen == 2)
@@ -491,6 +579,11 @@ static int lo_ifup(FAR struct net_driver_s *dev)
       nerr("ERROR: No address assigned\n");
     }
 #endif
+
+  /* Set and activate a timer process */
+
+  wd_start(priv->lo_polldog, LO_WDDELAY, lo_poll_expiry,
+           1, (wdparm_t)priv);
 
   priv->lo_bifup = true;
   return OK;
@@ -517,6 +610,10 @@ static int lo_ifdown(FAR struct net_driver_s *dev)
   FAR struct lo_driver_s *priv = (FAR struct lo_driver_s *)dev->d_private;
 
   ninfo("IP up: %u\n", priv->lo_bifup);
+
+  /* Cancel the TX poll timer and TX timeout timers */
+
+  wd_cancel(priv->lo_polldog);
 
   /* Mark the device "down" */
 
@@ -651,8 +748,8 @@ static int lo_addmac(FAR struct net_driver_s *dev, FAR const uint8_t *mac)
  * Name: lo_rmmac
  *
  * Description:
- *   NuttX Callback: Remove the specified MAC address from the hardware
- *   multicast address filtering
+ *   NuttX Callback: Remove the specified MAC address from the hardware multicast
+ *   address filtering
  *
  * Input Parameters:
  *   dev  - Reference to the NuttX driver state structure
@@ -862,9 +959,7 @@ static int lo_req_data(FAR struct radio_driver_s *netdev,
       DEBUGASSERT(iob->io_offset == MAC_HDRLEN);
       memset(iob->io_data, 0, MAC_HDRLEN);
 
-      /* Add the IOB to the tail of the queue of framelist to be looped
-       * back
-       */
+      /* Add the IOB to the tail of the queue of framelist to be looped back */
 
       if (priv->lo_tail == NULL)
         {
@@ -938,7 +1033,7 @@ static int lo_properties(FAR struct radio_driver_s *netdev,
   memset(properties->sp_mcast.nv_addr, 0xff, RADIO_MAX_ADDRLEN);
 
 #ifdef CONFIG_NET_STARPOINT
-  /* Star hub node address -- Not supported */
+  /* Star hub node address -- Not supported*/
 
 #endif
 
@@ -993,7 +1088,7 @@ int ieee8021514_loopback(void)
 #ifdef CONFIG_NETDEV_IOCTL
   dev->d_ioctl        = lo_ioctl;         /* Handle network IOCTL commands */
 #endif
-  dev->d_private      = priv;             /* Used to recover private state from dev */
+  dev->d_private      = (FAR void *)priv; /* Used to recover private state from dev */
 
   /* Set the network mask and advertise our MAC-based IP address */
 
@@ -1006,11 +1101,14 @@ int ieee8021514_loopback(void)
   radio->r_req_data   = lo_req_data;      /* Enqueue frame for transmission */
   radio->r_properties = lo_properties;    /* Returns radio properties */
 
+  /* Create a watchdog for timing polling for and timing of transmissions */
+
+  priv->lo_polldog    = wd_create();      /* Create periodic poll timer */
+
 #ifdef CONFIG_NET_6LOWPAN
-  /* Make sure the our single packet buffer is attached.
-   * We must do this before registering the device since, once the device
-   * is registered, a packet may be attempted to be forwarded and require
-   * the buffer.
+  /* Make sure the our single packet buffer is attached. We must do this before
+   * registering the device since, once the device is registered, a packet may
+   * be attempted to be forwarded and require the buffer.
    */
 
   priv->lo_radio.r_dev.d_buf = g_iobuffer.rb_buf;

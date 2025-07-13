@@ -1,9 +1,8 @@
 /****************************************************************************
  * drivers/modem/u-blox.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016 Vladimir Komendantskiy. All rights reserved.
- * SPDX-FileContributor: Vladimir Komendantskiy <vladimir@moixaenergy.com>
+ *   Copyright (C) 2016 Vladimir Komendantskiy. All rights reserved.
+ *   Author: Vladimir Komendantskiy <vladimir@moixaenergy.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,14 +43,12 @@
 #include <stdbool.h>
 #include <string.h>
 #include <poll.h>
-#include <assert.h>
-#include <debug.h>
 #include <errno.h>
 
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/irq.h>
-#include <nuttx/lib/lib.h>
+#include <nuttx/kmalloc.h>
 #include <nuttx/modem/u-blox.h>
 
 /****************************************************************************
@@ -59,7 +56,6 @@
  ****************************************************************************/
 
 /* Debug ********************************************************************/
-
 /* Non-standard debug that may be enabled just for testing the modem driver */
 
 #ifdef CONFIG_MODEM_U_BLOX_DEBUG
@@ -71,52 +67,50 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
 /* The type of upper half driver state. */
 
 struct ubxmdm_upper
 {
-  FAR char *path;     /* Registration path */
+  FAR char* path;     /* Registration path */
 
   /* The contained lower-half driver. */
 
-  FAR struct ubxmdm_lower *lower;
+  FAR struct ubxmdm_lower* lower;
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static ssize_t ubxmdm_read(FAR struct file *filep,
-                           FAR char *buffer,
-                           size_t buflen);
-static ssize_t ubxmdm_write(FAR struct file *filep,
-                            FAR const char *buffer,
+static ssize_t ubxmdm_read (FAR struct file* filep,
+                            FAR char* buffer,
                             size_t buflen);
-static int     ubxmdm_ioctl(FAR struct file *filep,
+static ssize_t ubxmdm_write(FAR struct file* filep,
+                            FAR const char* buffer,
+                            size_t buflen);
+static int     ubxmdm_ioctl(FAR struct file* filep,
                             int cmd,
                             unsigned long arg);
 
-static int     ubxmdm_poll(FAR struct file *filep,
-                           FAR struct pollfd *fds,
-                           bool setup);
+static int     ubxmdm_poll (FAR struct file* filep,
+                            FAR struct pollfd* fds,
+                            bool setup);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations g_ubxmdm_fops =
+static const struct file_operations ubxmdm_fops =
 {
-  NULL,         /* open */
-  NULL,         /* close */
+  0,            /* open */
+  0,            /* close */
   ubxmdm_read,  /* read */
   ubxmdm_write, /* write */
-  NULL,         /* seek */
+  0,            /* seek */
   ubxmdm_ioctl, /* ioctl */
-  NULL,         /* mmap */
-  NULL,         /* truncate */
   ubxmdm_poll   /* poll */
 };
 
@@ -124,29 +118,29 @@ static const struct file_operations g_ubxmdm_fops =
  * Private Functions
  ****************************************************************************/
 
-static ssize_t ubxmdm_read(FAR struct file *filep,
-                           FAR char *buffer,
+static ssize_t ubxmdm_read(FAR struct file* filep,
+                           FAR char* buffer,
                            size_t len)
 {
   return 0; /* Return EOF */
 }
 
-static ssize_t ubxmdm_write(FAR struct file *filep,
-                            FAR const char *buffer,
+static ssize_t ubxmdm_write(FAR struct file* filep,
+                            FAR const char* buffer,
                             size_t len)
 {
   return len; /* Say that everything was written */
 }
 
-static int ubxmdm_ioctl(FAR struct file *filep,
+static int ubxmdm_ioctl(FAR struct file* filep,
                         int cmd,
                         unsigned long arg)
 {
-  FAR struct inode         *inode = filep->f_inode;
-  FAR struct ubxmdm_upper  *upper;
-  FAR struct ubxmdm_lower  *lower;
-  FAR struct ubxmdm_status *status;
+  FAR struct inode*         inode = filep->f_inode;
+  FAR struct ubxmdm_upper*  upper;
+  FAR struct ubxmdm_lower*  lower;
   int                       ret;
+  FAR struct ubxmdm_status* status;
 
   m_info("cmd: %d arg: %ld\n", cmd, arg);
   upper = inode->i_private;
@@ -215,7 +209,7 @@ static int ubxmdm_ioctl(FAR struct file *filep,
     case MODEM_IOC_GETSTATUS:
       if (lower->ops->getstatus)
         {
-          status = (FAR struct ubxmdm_status *)((uintptr_t)arg);
+          status = (FAR struct ubxmdm_status*) ((uintptr_t) arg);
           if (status)
             {
               ret = lower->ops->getstatus(lower, status);
@@ -245,7 +239,7 @@ static int ubxmdm_ioctl(FAR struct file *filep,
         }
       else
         {
-          ret = -ENOTTY;
+          ret = -ENOSYS;
         }
 
       break;
@@ -254,13 +248,17 @@ static int ubxmdm_ioctl(FAR struct file *filep,
   return ret;
 }
 
-static int ubxmdm_poll(FAR struct file *filep,
-                       FAR struct pollfd *fds,
+static int ubxmdm_poll(FAR struct file* filep,
+                       FAR struct pollfd* fds,
                        bool setup)
 {
   if (setup)
     {
-      poll_notify(&fds, 1, POLLIN | POLLOUT);
+      fds->revents |= (fds->events & (POLLIN | POLLOUT));
+      if (fds->revents != 0)
+        {
+          nxsem_post(fds->sem);
+        }
     }
 
   return OK;
@@ -270,7 +268,7 @@ static int ubxmdm_poll(FAR struct file *filep,
  * Public Functions
  ****************************************************************************/
 
-FAR void *ubxmdm_register(FAR const char *path,
+FAR void* ubxmdm_register(FAR const char *path,
                           FAR struct ubxmdm_lower *lower)
 {
   FAR struct ubxmdm_upper *upper;
@@ -278,7 +276,7 @@ FAR void *ubxmdm_register(FAR const char *path,
 
   DEBUGASSERT(path && lower);
 
-  upper = (FAR struct ubxmdm_upper *)
+  upper = (FAR struct ubxmdm_upper*)
     kmm_zalloc(sizeof(struct ubxmdm_upper));
   if (!upper)
     {
@@ -294,17 +292,17 @@ FAR void *ubxmdm_register(FAR const char *path,
       goto errout_with_upper;
     }
 
-  ret = register_driver(path, &g_ubxmdm_fops, 0666, upper);
+  ret = register_driver(path, &ubxmdm_fops, 0666, upper);
   if (ret < 0)
     {
       m_err("ERROR: register_driver failed: %d\n", ret);
       goto errout_with_path;
     }
 
-  return (FAR void *)upper;
+  return (FAR void*) upper;
 
 errout_with_path:
-  lib_free(upper->path);
+  kmm_free(upper->path);
 
 errout_with_upper:
   kmm_free(upper);
@@ -318,7 +316,7 @@ void ubxmdm_unregister(FAR void *handle)
   FAR struct ubxmdm_upper *upper;
   FAR struct ubxmdm_lower *lower;
 
-  upper = (FAR struct ubxmdm_upper *) handle;
+  upper = (FAR struct ubxmdm_upper*) handle;
   DEBUGASSERT(upper != NULL);
   lower = upper->lower;
   DEBUGASSERT(lower != NULL);
@@ -330,6 +328,6 @@ void ubxmdm_unregister(FAR void *handle)
 
   unregister_driver(upper->path);
 
-  lib_free(upper->path);
+  kmm_free(upper->path);
   kmm_free(upper);
 }

@@ -1,27 +1,44 @@
 /****************************************************************************
  * apps/examples/pdcurses/testcurs_main.c
+ * This is a test program for PDCurses. Originally by
+ * John Burnell <johnb@kea.am.dsir.govt.nz>
+ * wrs(5/28/93) -- modified to be consistent (perform identically)
+ *                with either PDCurses or under Unix System V, R4
+ *  $Id: testcurs.c,v 1.85 2008/07/14 12:35:23 wmcbrine Exp $
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Adapted by: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Adapted from the original public domain pdcurses by Gregory Nutt and
+ * released as part of NuttX under the 3-clause BSD license:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- ****************************************************************************/
-
-/****************************************************************************
- * Adapted from the original public domain pdcurses by Gregory Nutt
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
  ****************************************************************************/
 
 /****************************************************************************
@@ -31,9 +48,12 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
-#include <sys/param.h>
 
 #include "graphics/curses.h"
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
 
 #ifdef WACS_S1
 #  define HAVE_WIDE 1
@@ -46,10 +66,6 @@
 #if HAVE_WIDE
 #  include <wchar.h>
 #endif
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
 
 #ifdef A_COLOR
 #  define HAVE_COLOR 1
@@ -114,19 +130,19 @@ static const COMMAND command[] =
   {"Scroll Test", scroll_test},
   {"Input Test", input_test},
   {"Output Test", output_test},
-  {"ACS Test", acs_test},
+  {"ACS Test", acs_test}
 #if HAVE_COLOR
-  {"Color Test", color_test},
+  , {"Color Test", color_test}
 #endif
 #if HAVE_CLIPBOARD
-  {"Clipboard Test", clipboard_test},
+  , {"Clipboard Test", clipboard_test}
 #endif
 #if HAVE_WIDE
-  {"Wide Input", wide_test},
+  , {"Wide Input", wide_test}
 #endif
 };
 
-#define MAX_OPTIONS nitems(command)
+#define MAX_OPTIONS (sizeof(command) / sizeof(COMMAND))
 
 static int height;
 static int width;
@@ -141,9 +157,9 @@ static const char *acs_names[] =
   "ACS_PLMINUS", "ACS_BULLET",
 
   "ACS_LARROW", "ACS_RARROW", "ACS_UARROW", "ACS_DARROW",
-  "ACS_BOARD", "ACS_LANTERN", "ACS_BLOCK",
+  "ACS_BOARD", "ACS_LANTERN", "ACS_BLOCK"
 #ifdef ACS_S3
-  "ACS_S3", "ACS_S7", "ACS_LEQUAL", "ACS_GEQUAL",
+   , "ACS_S3", "ACS_S7", "ACS_LEQUAL", "ACS_GEQUAL",
   "ACS_PI", "ACS_NEQUAL", "ACS_STERLING"
 #endif
 };
@@ -242,7 +258,6 @@ static int init_test(WINDOW ** win, int argc, char *argv[])
       start_color();
     }
 #endif
-
   /* Create a drawing window */
 
   width  = 60;
@@ -360,7 +375,7 @@ static void input_test(WINDOW *win)
   sw = w / 3;
   sh = h / 3;
 
-  if (!(subWin = subwin(win, sh, sw, by + h - sh - 2, bx + w - sw - 2)))
+  if ((subWin = subwin(win, sh, sw, by + h - sh - 2, bx + w - sw - 2)) == NULL)
     {
       return;
     }
@@ -682,7 +697,7 @@ static void output_test(WINDOW *win)
 
       wattron(win1, A_BLINK);
       mvwaddstr(win1, 4, 1,
-               "This blinking text should appear in only the second window");
+                "This blinking text should appear in only the second window");
       wattroff(win1, A_BLINK);
 
       mvwin(win1, by, bx);
@@ -729,7 +744,7 @@ static void output_test(WINDOW *win)
 
   wclear(win);
   wmove(win, 2, 2);
-  wprintw(win, "This is a formatted string in a window: %d is it\n", 42);
+  wprintw(win, "This is a formatted string in a window: %d %s\n", 42, "is it");
   mvwaddstr(win, 10, 1, "Enter a string: ");
   wrefresh(win);
   echo();
@@ -893,8 +908,7 @@ static void clipboard_test(WINDOW *win)
   FAR struct pdc_context_s *ctx = PDC_ctx();
 #endif
 
-  mvaddstr(1, 1,
-           "This test will display the contents of the system clipboard");
+  mvaddstr(1, 1, "This test will display the contents of the system clipboard");
 
   continue2();
 
@@ -927,7 +941,7 @@ static void clipboard_test(WINDOW *win)
 
   clear();
   mvaddstr(1, 1,
-       "This test will place the following string in the system clipboard:");
+           "This test will place the following string in the system clipboard:");
   mvaddstr(2, 1, text);
 
   i = PDC_setclipboard(text, strlen(text));
@@ -1081,8 +1095,7 @@ static void color_test(WINDOW *win)
       for (j = 0; j < 16; j++)
         {
           mvaddch(tmarg + i + 5, col2 + j, fill | COLOR_PAIR(i + 4));
-          mvaddch(tmarg + i + 5, col3 + j,
-                  fill | COLOR_PAIR(i + 4) | A_BOLD);
+          mvaddch(tmarg + i + 5, col3 + j, fill | COLOR_PAIR(i + 4) | A_BOLD);
         }
     }
 
@@ -1099,7 +1112,7 @@ static void color_test(WINDOW *win)
         short red;
         short green;
         short blue;
-      }orgcolors[16];
+      } orgcolors[16];
 
       int MAXCOL = (COLORS >= 16) ? 16 : 8;
 
@@ -1135,8 +1148,7 @@ static void color_test(WINDOW *win)
 
       for (i = 0; i < MAXCOL; i++)
         {
-          init_color(i, orgcolors[i].red,
-                     orgcolors[i].green, orgcolors[i].blue);
+          init_color(i, orgcolors[i].red, orgcolors[i].green, orgcolors[i].blue);
         }
     }
 }
@@ -1181,8 +1193,7 @@ void display_menu(int old_option, int new_option)
 #ifdef CONFIG_PDCURSES_MULTITHREAD
   FAR struct pdc_context_s *ctx = PDC_ctx();
 #endif
-  int lmarg = (COLS - 14) / 2;
-  int tmarg = (LINES - (MAX_OPTIONS + 2)) / 2;
+  int lmarg = (COLS - 14) / 2, tmarg = (LINES - (MAX_OPTIONS + 2)) / 2;
 
   if (old_option == -1)
     {

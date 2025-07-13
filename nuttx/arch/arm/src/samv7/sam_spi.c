@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/arm/src/samv7/sam_spi.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2017 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Diego Sanchez <dsanchez@nx-engineering.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +41,6 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -40,13 +53,14 @@
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/kmalloc.h>
 #include <nuttx/wdog.h>
 #include <nuttx/clock.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "sam_gpio.h"
 #include "sam_xdmac.h"
 #include "sam_periphclks.h"
@@ -153,7 +167,7 @@ struct sam_spics_s
 #ifdef CONFIG_SAMV7_SPI_DMA
   bool candma;                 /* DMA is supported */
   sem_t dmawait;               /* Used to wait for DMA completion */
-  struct wdog_s dmadog;        /* Watchdog that handles DMA timeouts */
+  WDOG_ID dmadog;              /* Watchdog that handles DMA timeouts */
   int result;                  /* DMA result */
   DMA_HANDLE rxdma;            /* SPI RX DMA handle */
   DMA_HANDLE txdma;            /* SPI TX DMA handle */
@@ -178,7 +192,7 @@ typedef void (*select_t)(uint32_t devid, bool selected);
 struct sam_spidev_s
 {
   uint32_t base;               /* SPI controller register base address */
-  mutex_t spilock;             /* Assures mutually exclusive access to SPI */
+  sem_t spisem;                /* Assures mutually exclusive access to SPI */
   select_t select;             /* SPI select call-out */
   bool initialized;            /* TRUE: Controller has been initialized */
   bool escape_lastxfer;        /* Don't set LASTXFER-Bit in the next transfer */
@@ -206,7 +220,7 @@ struct sam_spidev_s
 static bool     spi_checkreg(struct sam_spidev_s *spi, bool wr,
                   uint32_t value, uint32_t address);
 #else
-#  define       spi_checkreg(spi,wr,value,address) (false)
+# define        spi_checkreg(spi,wr,value,address) (false)
 #endif
 
 static inline uint32_t spi_getreg(struct sam_spidev_s *spi,
@@ -218,7 +232,7 @@ static inline struct sam_spidev_s *spi_device(struct sam_spics_s *spics);
 #ifdef CONFIG_DEBUG_SPI_INFO
 static void     spi_dumpregs(struct sam_spidev_s *spi, const char *msg);
 #else
-#  define       spi_dumpregs(spi,msg)
+# define        spi_dumpregs(spi,msg)
 #endif
 
 static inline void spi_flush(struct sam_spidev_s *spi);
@@ -254,9 +268,9 @@ static int      spi_lock(struct spi_dev_s *dev, bool lock);
 static void     spi_select(struct spi_dev_s *dev, uint32_t devid,
                   bool selected);
 static uint32_t spi_setfrequency(struct spi_dev_s *dev, uint32_t frequency);
-#ifdef CONFIG_SPI_DELAY_CONTROL
+#ifdef CONFIG_SPI_CS_DELAY_CONTROL
 static int      spi_setdelay(struct spi_dev_s *dev, uint32_t a, uint32_t b,
-                             uint32_t c, uint32_t i);
+                             uint32_t c);
 #endif
 #ifdef CONFIG_SPI_HWFEATURES
 static int      spi_hwfeatures(struct spi_dev_s *dev, uint8_t features);
@@ -311,7 +325,7 @@ static const struct spi_ops_s g_spi0ops =
   .lock              = spi_lock,
   .select            = spi_select,
   .setfrequency      = spi_setfrequency,
-#ifdef CONFIG_SPI_DELAY_CONTROL
+#ifdef CONFIG_SPI_CS_DELAY_CONTROL
   .setdelay          = spi_setdelay,
 #endif
   .setmode           = spi_setmode,
@@ -338,7 +352,6 @@ static const struct spi_ops_s g_spi0ops =
 static struct sam_spidev_s g_spi0dev =
 {
   .base              = SAM_SPI0_BASE,
-  .spilock           = NXMUTEX_INITIALIZER,
   .select            = sam_spi0select,
 #ifdef CONFIG_SAMV7_SPI_DMA
   .pid               = SAM_PID_SPI0,
@@ -354,7 +367,7 @@ static const struct spi_ops_s g_spi1ops =
   .lock              = spi_lock,
   .select            = spi_select,
   .setfrequency      = spi_setfrequency,
-#ifdef CONFIG_SPI_DELAY_CONTROL
+#ifdef CONFIG_SPI_CS_DELAY_CONTROL
   .setdelay          = spi_setdelay,
 #endif
   .setmode           = spi_setmode,
@@ -378,7 +391,6 @@ static const struct spi_ops_s g_spi1ops =
 static struct sam_spidev_s g_spi1dev =
 {
   .base              = SAM_SPI1_BASE,
-  .spilock           = NXMUTEX_INITIALIZER,
   .select            = sam_spi1select,
 #ifdef CONFIG_SAMV7_SPI_DMA
   .pid               = SAM_PID_SPI1,
@@ -406,7 +418,7 @@ static struct sam_spidev_s g_spi1dev =
  *
  * Returned Value:
  *   true:  This is the first register access of this type.
- *   false: This is the same as the preceding register access.
+ *   flase: This is the same as the preceding register access.
  *
  ****************************************************************************/
 
@@ -740,7 +752,8 @@ static void spi_dma_sampledone(struct sam_spics_s *spics)
  *   DMA.
  *
  * Input Parameters:
- *   arg    - The argument
+ *   argc   - The number of arguments (should be 1)
+ *   arg    - The argument (state structure reference cast to uint32_t)
  *
  * Returned Value:
  *   None
@@ -751,7 +764,7 @@ static void spi_dma_sampledone(struct sam_spics_s *spics)
  ****************************************************************************/
 
 #ifdef CONFIG_SAMV7_SPI_DMA
-static void spi_dmatimeout(wdparm_t arg)
+static void spi_dmatimeout(int argc, uint32_t arg, ...)
 {
   struct sam_spics_s *spics = (struct sam_spics_s *)arg;
   DEBUGASSERT(spics != NULL);
@@ -796,7 +809,7 @@ static void spi_rxcallback(DMA_HANDLE handle, void *arg, int result)
 
   /* Cancel the watchdog timeout */
 
-  wd_cancel(&spics->dmadog);
+  wd_cancel(spics->dmadog);
 
   /* Sample DMA registers at the time of the callback */
 
@@ -906,11 +919,11 @@ static int spi_lock(struct spi_dev_s *dev, bool lock)
   spiinfo("lock=%d\n", lock);
   if (lock)
     {
-      ret = nxmutex_lock(&spi->spilock);
+      ret = nxsem_wait_uninterruptible(&spi->spisem);
     }
   else
     {
-      ret = nxmutex_unlock(&spi->spilock);
+      ret = nxsem_post(&spi->spisem);
     }
 
   return ret;
@@ -1011,7 +1024,7 @@ static uint32_t spi_setfrequency(struct spi_dev_s *dev, uint32_t frequency)
   uint32_t regval;
   unsigned int offset;
 
-  spiinfo("cs=%d frequency=%" PRId32 "\n", spics->cs, frequency);
+  spiinfo("cs=%d frequency=%d\n", spics->cs, frequency);
 
   /* Check if the requested frequency is the same as the frequency
    * selection
@@ -1084,15 +1097,14 @@ static uint32_t spi_setfrequency(struct spi_dev_s *dev, uint32_t frequency)
   /* Calculate the new actual frequency */
 
   actual = SAM_SPI_CLOCK / scbr;
-  spiinfo("csr[offset=%02x]=%08" PRIx32 " actual=%" PRId32 "\n",
-          offset, regval, actual);
+  spiinfo("csr[offset=%02x]=%08x actual=%d\n", offset, regval, actual);
 
   /* Save the frequency setting */
 
   spics->frequency = frequency;
   spics->actual    = actual;
 
-  spiinfo("Frequency %" PRId32 "->%" PRId32 "\n", frequency, actual);
+  spiinfo("Frequency %d->%d\n", frequency, actual);
   return actual;
 }
 
@@ -1107,17 +1119,15 @@ static uint32_t spi_setfrequency(struct spi_dev_s *dev, uint32_t frequency)
  *   startdelay - The delay between CS active and first CLK
  *   stopdelay  - The delay between last CLK and CS inactive
  *   csdelay    - The delay between CS inactive and CS active again
- *   ifdelay    - The delay between frames
  *
  * Returned Value:
  *   Returns 0 if ok
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SPI_DELAY_CONTROL
+#ifdef CONFIG_SPI_CS_DELAY_CONTROL
 static int spi_setdelay(struct spi_dev_s *dev, uint32_t startdelay,
-                        uint32_t stopdelay, uint32_t csdelay,
-                        uint32_t ifdelay)
+                        uint32_t stopdelay, uint32_t csdelay)
 {
   struct sam_spics_s *spics = (struct sam_spics_s *)dev;
   struct sam_spidev_s *spi = spi_device(spics);
@@ -1127,10 +1137,9 @@ static int spi_setdelay(struct spi_dev_s *dev, uint32_t startdelay,
   uint32_t regval;
   unsigned int offset;
 
-  spiinfo("cs=%u startdelay=%" PRIu32 "\n", spics->cs, startdelay);
-  spiinfo("cs=%u stopdelay=%" PRIu32 "\n", spics->cs, stopdelay);
-  spiinfo("cs=%u csdelay=%" PRIu32 "\n", spics->cs, csdelay);
-  spiinfo("cs=%u ifdelay=%" PRIu32 "\n", spics->cs, ifdelay);
+  spiinfo("cs=%d startdelay=%d\n", spics->cs, startdelay);
+  spiinfo("cs=%d stopdelay=%d\n", spics->cs, stopdelay);
+  spiinfo("cs=%d csdelay=%d\n", spics->cs, csdelay);
 
   offset = (unsigned int)g_csroffset[spics->cs];
 
@@ -1157,7 +1166,7 @@ static int spi_setdelay(struct spi_dev_s *dev, uint32_t startdelay,
   regval |= (uint32_t) dlybs << SPI_CSR_DLYBS_SHIFT;
   spi_putreg(spi, regval, offset);
 
-  /* ifdelay = DLYBCT: Delay Between Consecutive Transfers.
+  /* stopdelay = DLYBCT: Delay Between Consecutive Transfers.
    * This field defines the delay between two consecutive transfers with the
    * same peripheral without removing the chip select. The delay is always
    * inserted after each transfer and before removing the chip select if
@@ -1171,7 +1180,7 @@ static int spi_setdelay(struct spi_dev_s *dev, uint32_t startdelay,
    */
 
   dlybct  = SAM_SPI_CLOCK;
-  dlybct *= ifdelay;
+  dlybct *= stopdelay;
   dlybct /= 1000000000;
   dlybct /= 32;
   regval  = spi_getreg(spi, offset);
@@ -1353,7 +1362,7 @@ static void spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
         }
 
       spi_putreg(spi, regval, offset);
-      spiinfo("csr[offset=%02x]=%08" PRIx32 "\n", offset, regval);
+      spiinfo("csr[offset=%02x]=%08x\n", offset, regval);
 
       /* Save the mode so that subsequent re-configurations will be faster */
 
@@ -1369,7 +1378,7 @@ static void spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
  *
  * Input Parameters:
  *   dev -  Device-specific state data
- *   nbits - The number of bits requested
+ *   nbits - The number of bits requests
  *
  * Returned Value:
  *   none
@@ -1384,7 +1393,7 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
   unsigned int offset;
 
   spiinfo("cs=%d nbits=%d\n", spics->cs, nbits);
-  DEBUGASSERT(nbits > 7 && nbits < 17);
+  DEBUGASSERT(spics && nbits > 7 && nbits < 17);
 
   /* Has the number of bits changed? */
 
@@ -1398,9 +1407,9 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
       regval |= SPI_CSR_BITS(nbits);
       spi_putreg(spi, regval, offset);
 
-      spiinfo("csr[offset=%02x]=%08" PRIx32 "\n", offset, regval);
+      spiinfo("csr[offset=%02x]=%08x\n", offset, regval);
 
-      /* Save the selection so that subsequent re-configurations will be
+      /* Save the selection so the subsequence re-configurations will be
        * faster.
        */
 
@@ -1426,31 +1435,20 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
 
 static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd)
 {
-  struct sam_spics_s *spics = (struct sam_spics_s *)dev;
-  if (spics->nbits <= 8)
-    {
-      uint8_t txbyte;
-      uint8_t rxbyte;
+  uint8_t txbyte;
+  uint8_t rxbyte;
 
-      txbyte = (uint8_t)wd;
-      rxbyte = (uint8_t)0;
-      spi_exchange(dev, &txbyte, &rxbyte, 1);
+  /* spi_exchange can do this. Note: right now, this only deals with 8-bit
+   * words.  If the SPI interface were configured for words of other sizes,
+   * this would fail.
+   */
 
-      spiinfo("Sent %02x received %02x\n", txbyte, rxbyte);
-      return (uint32_t)rxbyte;
-    }
-  else
-    {
-      uint16_t txword;
-      uint16_t rxword;
+  txbyte = (uint8_t)wd;
+  rxbyte = (uint8_t)0;
+  spi_exchange(dev, &txbyte, &rxbyte, 1);
 
-      txword = (uint16_t)wd;
-      rxword = (uint16_t)0;
-      spi_exchange(dev, &txword, &rxword, 1);
-
-      spiinfo("Sent %02x received %02x\n", txword, rxword);
-      return (uint32_t)rxword;
-    }
+  spiinfo("Sent %02x received %02x\n", txbyte, rxbyte);
+  return (uint32_t)rxbyte;
 }
 
 /****************************************************************************
@@ -1809,7 +1807,7 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
   regaddr = spi_regaddr(spics, SAM_SPI_RDR_OFFSET);
   memaddr = (uintptr_t)rxbuffer;
 
-  ret = sam_dmarxsetup(spics->rxdma, regaddr, memaddr, nbytes);
+  ret = sam_dmarxsetup(spics->rxdma, regaddr, memaddr, nwords);
   if (ret < 0)
     {
       dmaerr("ERROR: sam_dmarxsetup failed: %d\n", ret);
@@ -1823,7 +1821,7 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
   regaddr = spi_regaddr(spics, SAM_SPI_TDR_OFFSET);
   memaddr = (uintptr_t)txbuffer;
 
-  ret = sam_dmatxsetup(spics->txdma, regaddr, memaddr, nbytes);
+  ret = sam_dmatxsetup(spics->txdma, regaddr, memaddr, nwords);
   if (ret < 0)
     {
       dmaerr("ERROR: sam_dmatxsetup failed: %d\n", ret);
@@ -1865,8 +1863,8 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
     {
       /* Start (or re-start) the watchdog timeout */
 
-      ret = wd_start(&spics->dmadog, DMA_TIMEOUT_TICKS,
-                     spi_dmatimeout, (wdparm_t)spics);
+      ret = wd_start(spics->dmadog, DMA_TIMEOUT_TICKS,
+                     spi_dmatimeout, 1, (uint32_t)spics);
       if (ret < 0)
         {
            spierr("ERROR: wd_start failed: %d\n", ret);
@@ -1878,7 +1876,7 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
 
       /* Cancel the watchdog timeout */
 
-      wd_cancel(&spics->dmadog);
+      wd_cancel(spics->dmadog);
 
       /* Check if we were awakened by an error of some kind. */
 
@@ -1994,10 +1992,10 @@ static void spi_recvblock(struct spi_dev_s *dev, void *buffer, size_t nwords)
  *
  ****************************************************************************/
 
-struct spi_dev_s *sam_spibus_initialize(int port)
+FAR struct spi_dev_s *sam_spibus_initialize(int port)
 {
-  struct sam_spidev_s *spi;
-  struct sam_spics_s *spics;
+  FAR struct sam_spidev_s *spi;
+  FAR struct sam_spics_s *spics;
   int csno  = (port & __SPI_CS_MASK) >> __SPI_CS_SHIFT;
   int spino = (port & __SPI_SPI_MASK) >> __SPI_SPI_SHIFT;
   irqstate_t flags;
@@ -2022,7 +2020,7 @@ struct spi_dev_s *sam_spibus_initialize(int port)
    * chip select structures.
    */
 
-  spics = kmm_zalloc(sizeof(struct sam_spics_s));
+  spics = (struct sam_spics_s *)zalloc(sizeof(struct sam_spics_s));
   if (!spics)
     {
       spierr("ERROR: Failed to allocate a chip select structure\n");
@@ -2030,7 +2028,7 @@ struct spi_dev_s *sam_spibus_initialize(int port)
     }
 
   /* Set up the initial state for this chip select structure.  Other fields
-   * were zeroed by kmm_zalloc().
+   * were zeroed by zalloc().
    */
 
 #ifdef CONFIG_SAMV7_SPI_DMA
@@ -2160,10 +2158,27 @@ struct spi_dev_s *sam_spibus_initialize(int port)
       spi_getreg(spi, SAM_SPI_SR_OFFSET);
       spi_getreg(spi, SAM_SPI_RDR_OFFSET);
 
+      /* Initialize the SPI semaphore that enforces mutually exclusive
+       * access to the SPI registers.
+       */
+
+      nxsem_init(&spi->spisem, 0, 1);
+      spi->escape_lastxfer = false;
       spi->initialized = true;
 
 #ifdef CONFIG_SAMV7_SPI_DMA
+      /* Initialize the SPI semaphore that is used to wake up the waiting
+       * thread when the DMA transfer completes.  This semaphore is used for
+       * signaling and, hence, should not have priority inheritance enabled.
+       */
+
       nxsem_init(&spics->dmawait, 0, 0);
+      nxsem_setprotocol(&spics->dmawait, SEM_PRIO_NONE);
+
+      /* Create a watchdog time to catch DMA timeouts */
+
+      spics->dmadog = wd_create();
+      DEBUGASSERT(spics->dmadog);
 #endif
 
       spi_dumpregs(spi, "After initialization");
@@ -2180,7 +2195,7 @@ struct spi_dev_s *sam_spibus_initialize(int port)
   spi_putreg(spi, regval, offset);
 
   spics->nbits = 8;
-  spiinfo("csr[offset=%02x]=%08" PRIx32 "\n", offset, regval);
+  spiinfo("csr[offset=%02x]=%08x\n", offset, regval);
 
   return &spics->spidev;
 }

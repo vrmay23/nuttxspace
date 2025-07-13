@@ -1,27 +1,41 @@
 /****************************************************************************
  * boards/arm/stm32/nucleo-f302r8/include/board.h
+ * include/arch/board/board.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Mateusz Szafoni <raiden00@railab.me>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_STM32_NUCLEO_F302R8_INCLUDE_BOARD_H
-#define __BOARDS_ARM_STM32_NUCLEO_F302R8_INCLUDE_BOARD_H
+#ifndef __BOARDS_ARM_STM32_NUCLEOF302R8_INCLUDE_BOARD_H
+#define __BOARDS_ARM_STM32_NUCLEOF302R8_INCLUDE_BOARD_H
 
 /****************************************************************************
  * Included Files
@@ -32,6 +46,10 @@
 #ifndef __ASSEMBLY__
 #  include <stdint.h>
 #  include <stdbool.h>
+#endif
+
+#ifdef __KERNEL__
+#  include "stm32.h"
 #endif
 
 /****************************************************************************
@@ -53,9 +71,7 @@
 #define STM32_HSE_FREQUENCY     STM32_BOARD_XTAL
 #define STM32_LSE_FREQUENCY     32768            /* X2 on board */
 
-/* PLL source is HSE/1, PLL multiplier is 9: PLL frequency is
- * 8MHz (XTAL) x 9 = 72MHz
- */
+/* PLL source is HSE/1, PLL multipler is 9: PLL frequency is 8MHz (XTAL) x 9 = 72MHz */
 
 #define STM32_CFGR_PLLSRC       RCC_CFGR_PLLSRC
 #define STM32_CFGR_PLLXTPRE     0
@@ -72,6 +88,7 @@
 
 #define STM32_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK
 #define STM32_HCLK_FREQUENCY    STM32_SYSCLK_FREQUENCY
+#define STM32_BOARD_HCLK        STM32_HCLK_FREQUENCY      /* same as above, to satisfy compiler */
 
 /* APB2 clock (PCLK2) is HCLK (72MHz) */
 
@@ -121,7 +138,6 @@
 #define BOARD_TIM8_FREQUENCY   STM32_HCLK_FREQUENCY
 
 /* LED definitions **********************************************************/
-
 /* The Nucleo F302R8 board has three LEDs.  Two of these are controlled by
  * logic on the board and are not available for software control:
  *
@@ -132,7 +148,7 @@
  *
  * And one can be controlled by software:
  *
- * User LD2: green LED is a user LED connected to the I/O PB13 of the
+ * User LD2: green LED is a user LED connected to the I/O PA5 of the
  *           STM32F302R8T6.
  *
  * If CONFIG_ARCH_LEDS is not defined, then the user can control the LED in
@@ -175,7 +191,6 @@
 #define LED_PANIC        1
 
 /* Button definitions *******************************************************/
-
 /* The Nucleo F302R8 supports two buttons; only one button is controllable
  * by software:
  *
@@ -191,11 +206,6 @@
 
 /* Alternate function pin selections ****************************************/
 
-/* TIM2 input ***************************************************************/
-
-#define GPIO_TIM2_CH1IN (GPIO_TIM2_CH1IN_2 | GPIO_PULLUP) /* PA15 */
-#define GPIO_TIM2_CH2IN (GPIO_TIM2_CH2IN_2 | GPIO_PULLUP) /* PB3 */
-
 /* USART */
 
 /* By default the USART2 is connected to STLINK Virtual COM Port:
@@ -205,37 +215,6 @@
 
 #define GPIO_USART2_RX GPIO_USART2_RX_2 /* PA3 */
 #define GPIO_USART2_TX GPIO_USART2_TX_2 /* PA2 */
-
-/* USART1
- *
- * At default use:
- *   USART1_RX - PB7
- *   USART1_TX - PB6
- *
- * If CONFIG_NUCLEOF302R8_RS485_WAVESHARE=y use configuration to match RS485
- * shield from Waveshare:
- *
- *   USART1_RX - PA10
- *   USART1_TX - PA9
- *   RS485_DIR - PA8 (arduino D7)
- *
- */
-
-#ifdef CONFIG_NUCLEOF302R8_RS485_WAVESHARE
-#  define GPIO_USART1_RX GPIO_USART1_RX_1 /* PA10 */
-#  define GPIO_USART1_TX GPIO_USART1_TX_1 /* PA9 */
-#  define GPIO_USART1_RS485_DIR (GPIO_OUTPUT | GPIO_PUSHPULL |          \
-                                 GPIO_SPEED_50MHz | GPIO_OUTPUT_CLEAR | \
-                                 GPIO_PORTA | GPIO_PIN8)
-#else
-#  define GPIO_USART1_RX GPIO_USART1_RX_2 /* PB7 */
-#  define GPIO_USART1_TX GPIO_USART1_TX_2 /* PB6 */
-#endif
-
-/* CAN */
-
-#define GPIO_CAN1_RX     GPIO_CAN_RX_3 /* PB8 */
-#define GPIO_CAN1_TX     GPIO_CAN_TX_3 /* PB9 */
 
 /* PWM configuration ********************************************************/
 
@@ -256,53 +235,25 @@
 #define GPIO_TIM2_CH2OUT  GPIO_TIM2_CH2OUT_1  /* PA1 */
 #define GPIO_TIM2_CH3OUT  GPIO_TIM2_CH3OUT_1  /* PA9 */
 
-/* DMA channels *************************************************************/
+/* Configuration specific to high priority interrupts example:
+ *   - TIM1 CC1 trigger for ADC if DMA transfer and TIM1 PWM
+ *   - ADC DMA transfer on DMA1_CH1
+ */
 
+#ifdef CONFIG_NUCLEOF302R8_HIGHPRI
+
+#if defined(CONFIG_STM32_TIM1_PWM) && defined(CONFIG_STM32_ADC1_DMA)
+
+/* TIM1 - ADC trigger */
+
+#define ADC1_EXTSEL_VALUE ADC1_EXTSEL_T1CC1
+
+#endif /* CONFIG_STM32_TIM1_PWM */
+#endif /* CONFIG_NUCLEOF302R8_HIGHPRI */
+
+/* DMA channels *************************************************************/
 /* ADC */
 
 #define ADC1_DMA_CHAN DMACHAN_ADC1     /* DMA1_CH1 */
-
-#ifdef CONFIG_BOARD_STM32_IHM07M1
-
-/* Configuration specific for the X-NUCLEO-IHM07M1 expansion board with
- * the L6230 gate drivers.
- */
-
-/* TIM1 configuration *******************************************************/
-
-#  define GPIO_TIM1_CH1OUT   GPIO_TIM1_CH1OUT_2 /* TIM1 CH1  - PA8  - U high */
-#  define GPIO_TIM1_CH2OUT   GPIO_TIM1_CH2OUT_2 /* TIM1 CH2  - PA9  - V high */
-#  define GPIO_TIM1_CH3OUT   GPIO_TIM1_CH3OUT_2 /* TIM1 CH3  - PA10 - W high */
-#  define GPIO_TIM1_CH4OUT   0                  /* not used as output */
-
-/* UVW ENABLE */
-
-#  define GPIO_FOC_EN_U (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|  \
-                         GPIO_OUTPUT_CLEAR|GPIO_PORTC|GPIO_PIN10)
-#  define GPIO_FOC_EN_V (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|  \
-                         GPIO_OUTPUT_CLEAR|GPIO_PORTC|GPIO_PIN11)
-#  define GPIO_FOC_EN_W (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|  \
-                         GPIO_OUTPUT_CLEAR|GPIO_PORTC|GPIO_PIN12)
-
-/* DIAG/ENABLE */
-
-#  define GPIO_FOC_DIAGEN (GPIO_OUTPUT|GPIO_OPENDRAIN|GPIO_SPEED_50MHz| \
-                           GPIO_OUTPUT_CLEAR|GPIO_PORTA|GPIO_PIN11)
-
-#  define GPIO_FOC_LED2   (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz| \
-                           GPIO_OUTPUT_CLEAR|GPIO_PORTB|GPIO_PIN2)
-
-/* Debug pins */
-
-#  define GPIO_FOC_DEBUG0 (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz| \
-                           GPIO_OUTPUT_CLEAR|GPIO_PORTB|GPIO_PIN8)
-#  define GPIO_FOC_DEBUG1 (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz| \
-                           GPIO_OUTPUT_CLEAR|GPIO_PORTB|GPIO_PIN9)
-#  define GPIO_FOC_DEBUG2 (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz| \
-                           GPIO_OUTPUT_CLEAR|GPIO_PORTC|GPIO_PIN6)
-#  define GPIO_FOC_DEBUG3 (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz| \
-                           GPIO_OUTPUT_CLEAR|GPIO_PORTC|GPIO_PIN5)
-
-#endif  /* CONFIG_BOARD_STM32_IHM07M1 */
 
 #endif /* __BOARDS_ARM_STM32_NUCLEO_F302R8_INCLUDE_BOARD_H */

@@ -1,22 +1,36 @@
 /****************************************************************************
  * fs/vfs/fs_fsync.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2013-2014, 2016-2017 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,9 +48,10 @@
 #include <nuttx/sched.h>
 #include <nuttx/cancelpt.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/fs/ioctl.h>
 
 #include "inode/inode.h"
+
+#ifndef CONFIG_DISABLE_MOUNTPOINT
 
 /****************************************************************************
  * Public Functions
@@ -54,8 +69,14 @@
 
 int file_fsync(FAR struct file *filep)
 {
-  FAR struct inode *inode;
-  int ret;
+  struct inode *inode;
+
+  /* Was this file opened for write access? */
+
+  if ((filep->f_oflags & O_WROK) == 0)
+    {
+      return -EBADF;
+    }
 
   /* Is this inode a registered mountpoint? Does it support the
    * sync operations may be relevant to device drivers but only
@@ -63,28 +84,15 @@ int file_fsync(FAR struct file *filep)
    */
 
   inode = filep->f_inode;
-  if (inode != NULL)
+  if (!inode || !INODE_IS_MOUNTPT(inode) ||
+      !inode->u.i_mops || !inode->u.i_mops->sync)
     {
-#ifndef CONFIG_DISABLE_MOUNTPOINT
-      if (INODE_IS_MOUNTPT(inode))
-        {
-          if (inode->u.i_mops && inode->u.i_mops->sync)
-            {
-              /* Yes, then tell the mountpoint to sync this file */
-
-              return inode->u.i_mops->sync(filep);
-            }
-        }
-      else
-#endif
-      if (inode->u.i_ops && inode->u.i_ops->ioctl)
-        {
-          ret = inode->u.i_ops->ioctl(filep, BIOC_FLUSH, 0);
-          return ret >= 0 ? 0 : ret;
-        }
+      return -EINVAL;
     }
 
-  return -EINVAL;
+  /* Yes, then tell the mountpoint to sync this file */
+
+  return inode->u.i_mops->sync(filep);
 }
 
 /****************************************************************************
@@ -106,16 +114,17 @@ int fsync(int fd)
 
   /* Get the file structure corresponding to the file descriptor. */
 
-  ret = file_get(fd, &filep);
+  ret = fs_getfilep(fd, &filep);
   if (ret < 0)
     {
       goto errout;
     }
 
+  DEBUGASSERT(filep != NULL);
+
   /* Perform the fsync operation */
 
   ret = file_fsync(filep);
-  file_put(filep);
   if (ret < 0)
     {
       goto errout;
@@ -129,3 +138,5 @@ errout:
   set_errno(-ret);
   return ERROR;
 }
+
+#endif /* !CONFIG_DISABLE_MOUNTPOINT */

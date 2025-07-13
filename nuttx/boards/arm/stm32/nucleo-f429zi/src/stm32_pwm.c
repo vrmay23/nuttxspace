@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/stm32/nucleo-f429zi/src/stm32_pwm.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * boards/arm/stm32f4/nucleo-f429zi/src/stm32_pwm.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -35,7 +33,7 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "stm32_pwm.h"
 #include "nucleo-144.h"
 
@@ -73,7 +71,7 @@ int stm32_pwm_setup(void)
     {
       /* Call stm32_pwminitialize() to get an instance of the PWM interface */
 
-#if defined(CONFIG_STM32_TIM1_PWM)
+#if defined(CONFIG_STM32F4_TIM1_PWM)
       pwm = stm32_pwminitialize(1);
       if (!pwm)
         {
@@ -89,7 +87,7 @@ int stm32_pwm_setup(void)
         }
 #endif
 
-#if defined(CONFIG_STM32_TIM2_PWM)
+#if defined(CONFIG_STM32F4_TIM2_PWM)
       pwm = stm32_pwminitialize(2);
       if (!pwm)
         {
@@ -105,7 +103,7 @@ int stm32_pwm_setup(void)
         }
 #endif
 
-#if defined(CONFIG_STM32_TIM3_PWM)
+#if defined(CONFIG_STM32F4_TIM3_PWM)
       pwm = stm32_pwminitialize(3);
       if (!pwm)
         {
@@ -121,7 +119,7 @@ int stm32_pwm_setup(void)
         }
 #endif
 
-#if defined(CONFIG_STM32_TIM4_PWM)
+#if defined(CONFIG_STM32F4_TIM4_PWM)
       pwm = stm32_pwminitialize(4);
       if (!pwm)
         {

@@ -1,22 +1,35 @@
 /****************************************************************************
  * libs/libc/misc/lib_envpath.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -38,7 +51,7 @@
 
 #include "libc.h"
 
-#if defined(CONFIG_LIBC_ENVPATH)
+#if defined(CONFIG_LIB_ENVPATH)
 
 /****************************************************************************
  * Private Types
@@ -86,7 +99,6 @@ ENVPATH_HANDLE envpath_init(FAR const char *name)
 {
   FAR struct envpath_s *envpath;
   FAR char *path;
-  size_t size;
 
   /* Get the value of the PATH variable */
 
@@ -97,30 +109,29 @@ ENVPATH_HANDLE envpath_init(FAR const char *name)
        * exist in the environment.
        */
 
-      return NULL;
+      return (ENVPATH_HANDLE)NULL;
     }
 
   /* Allocate a container for the PATH variable contents */
 
-  size = strlen(path) + 1;
   envpath = (FAR struct envpath_s *)
-    lib_malloc(SIZEOF_ENVPATH_S(size));
+    lib_malloc(SIZEOF_ENVPATH_S(strlen(path) + 1));
 
   if (!envpath)
     {
       /* Ooops.. we are out of memory */
 
-      return NULL;
+      return (ENVPATH_HANDLE)NULL;
     }
 
   /* Populate the container */
 
-  strlcpy(envpath->path, path, size);
+  strcpy(envpath->path, path);
   envpath->next = envpath->path;
 
   /* And return the containing cast to an opaque handle */
 
-  return envpath;
+  return (ENVPATH_HANDLE)envpath;
 }
 
 /****************************************************************************
@@ -177,19 +188,18 @@ FAR char *envpath_next(ENVPATH_HANDLE handle, FAR const char *relpath)
 
       path = envpath->next;
       if (*path == '\0')
-        {
-          /* If it points to a NULL it means that either (1) the PATH
-           * variable is empty, or (2) we have already examined all of the
-           * paths in the path variable.
+       {
+          /* If it points to a NULL it means that either (1) the PATH varialbe
+           * is empty, or (2) we have already examined all of the paths in the
+           * path variable.
            */
 
-          return NULL;
-        }
+          return (FAR char *)NULL;
+       }
 
-      /* Okay... 'path' points to the beginning of the string.  The string
-       * may be terminated either with (1) ':' which separates the path from
-       * the next path in the list, or (2) NUL which marks the end of the
-       * list.
+      /* Okay... 'path' points to the beginning of the string.  The string may
+       * be terminated either with (1) ':' which separates the path from the
+       * next path in the list, or (2) NUL which marks the end of the list.
        */
 
       endptr = strchr(path, ':');
@@ -217,12 +227,12 @@ FAR char *envpath_next(ENVPATH_HANDLE handle, FAR const char *relpath)
         {
           /* Failed to allocate memory */
 
-          return NULL;
+          return (FAR char *)NULL;
         }
 
       /* Construct the full path */
 
-      snprintf(fullpath, pathlen, "%s/%s", path, relpath);
+      sprintf(fullpath, "%s/%s", path, relpath);
 
       /* Verify that a regular file exists at this path */
 

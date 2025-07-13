@@ -1,8 +1,6 @@
 /****************************************************************************
  * fs/aio/aio_cancel.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -83,12 +81,6 @@
 
 int aio_cancel(int fildes, FAR struct aiocb *aiocbp)
 {
-  if (fildes < 0)
-    {
-      set_errno(EBADF);
-      return ERROR;
-    }
-
   FAR struct aio_container_s *aioc;
   FAR struct aio_container_s *next;
   pid_t pid;
@@ -102,7 +94,8 @@ int aio_cancel(int fildes, FAR struct aiocb *aiocbp)
    */
 
   ret = AIO_ALLDONE;
-  aio_lock();
+  sched_lock();
+  ret = aio_lock();
 
   if (aiocbp)
     {
@@ -134,9 +127,7 @@ int aio_cancel(int fildes, FAR struct aiocb *aiocbp)
               status = work_cancel(LPWORK, &aioc->aioc_work);
               if (status >= 0)
                 {
-                  /* Remove the container from the list of pending
-                   * transfers
-                   */
+                  /* Remove the container from the list of pending transfers */
 
                   pid = aioc->aioc_pid;
                   aioc_decant(aioc);
@@ -191,9 +182,7 @@ int aio_cancel(int fildes, FAR struct aiocb *aiocbp)
               status = work_cancel(LPWORK, &aioc->aioc_work);
               if (status >= 0)
                 {
-                  /* Remove the container from the list of pending
-                   * transfers
-                   */
+                  /* Remove the container from the list of pending transfers */
 
                   next   =
                     (FAR struct aio_container_s *)aioc->aioc_link.flink;
@@ -221,6 +210,7 @@ int aio_cancel(int fildes, FAR struct aiocb *aiocbp)
     }
 
   aio_unlock();
+  sched_unlock();
   return ret;
 }
 

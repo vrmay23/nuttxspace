@@ -1,22 +1,34 @@
 /****************************************************************************
  * drivers/sensors/lps25h.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2017 Haltian Ltd. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,12 +40,10 @@
 #include <nuttx/arch.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <sys/types.h>
-#include <assert.h>
 #include <debug.h>
 #include <stdio.h>
 #include <errno.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/random.h>
 
 #include <nuttx/sensors/lps25h.h>
@@ -46,6 +56,10 @@
 #  define lps25h_dbg(x, ...)      _info(x, ##__VA_ARGS__)
 #else
 #  define lps25h_dbg(x, ...)      sninfo(x, ##__VA_ARGS__)
+#endif
+
+#ifndef CONFIG_LPS25H_I2C_FREQUENCY
+#  define CONFIG_LPS25H_I2C_FREQUENCY     400000
 #endif
 
 #define LPS25H_PRESSURE_INTERNAL_DIVIDER  4096
@@ -113,13 +127,13 @@
 
 struct lps25h_dev_s
 {
-  FAR struct i2c_master_s *i2c;
+  struct i2c_master_s *i2c;
   uint8_t addr;
   bool irqenabled;
   volatile bool int_pending;
-  mutex_t devlock;
+  sem_t devsem;
   sem_t waitsem;
-  FAR lps25h_config_t *config;
+  lps25h_config_t *config;
 };
 
 enum LPS25H_RES_CONF_AVG_PRES
@@ -212,6 +226,10 @@ static const struct file_operations g_lps25hops =
   lps25h_write,  /* write */
   NULL,          /* seek */
   lps25h_ioctl,  /* ioctl */
+  NULL           /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL         /* unlink */
+ #endif
 };
 
 /****************************************************************************
@@ -256,7 +274,7 @@ static int lps25h_do_transfer(FAR struct lps25h_dev_s *dev,
   return ret;
 }
 
-static int lps25h_write_reg8(FAR struct lps25h_dev_s *dev, uint8_t reg_addr,
+static int lps25h_write_reg8(struct lps25h_dev_s *dev, uint8_t reg_addr,
                              const uint8_t value)
 {
   struct i2c_msg_s msgv[2] =
@@ -272,7 +290,7 @@ static int lps25h_write_reg8(FAR struct lps25h_dev_s *dev, uint8_t reg_addr,
       .frequency = CONFIG_LPS25H_I2C_FREQUENCY,
       .addr      = dev->addr,
       .flags     = I2C_M_NOSTART,
-      .buffer    = (FAR void *)&value,
+      .buffer    = (void *)&value,
       .length    = 1
     }
   };
@@ -325,7 +343,7 @@ static int lps25h_open(FAR struct file *filep)
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&dev->devlock);
+  ret = nxsem_wait_uninterruptible(&dev->devsem);
   if (ret < 0)
     {
       return ret;
@@ -346,7 +364,7 @@ static int lps25h_open(FAR struct file *filep)
   dev->irqenabled = true;
 
 out:
-  nxmutex_unlock(&dev->devlock);
+  nxsem_post(&dev->devsem);
   return ret;
 }
 
@@ -358,7 +376,7 @@ static int lps25h_close(FAR struct file *filep)
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&dev->devlock);
+  ret = nxsem_wait_uninterruptible(&dev->devsem);
   if (ret < 0)
     {
       return ret;
@@ -370,7 +388,7 @@ static int lps25h_close(FAR struct file *filep)
   dev->config->set_power(dev->config, false);
   lps25h_dbg("CLOSED\n");
 
-  nxmutex_unlock(&dev->devlock);
+  nxsem_post(&dev->devsem);
   return ret;
 }
 
@@ -385,7 +403,7 @@ static ssize_t lps25h_read(FAR struct file *filep, FAR char *buffer,
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&dev->devlock);
+  ret = nxsem_wait_uninterruptible(&dev->devsem);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -415,7 +433,8 @@ static ssize_t lps25h_read(FAR struct file *filep, FAR char *buffer,
     }
 
 out:
-  nxmutex_unlock(&dev->devlock);
+
+  nxsem_post(&dev->devsem);
   return length;
 }
 
@@ -488,6 +507,7 @@ static int lps25h_one_shot(FAR struct lps25h_dev_s *dev)
 {
   int ret = ERROR;
   int retries;
+  struct timespec abstime;
   irqstate_t flags;
 
   if (!dev->irqenabled)
@@ -523,8 +543,16 @@ static int lps25h_one_shot(FAR struct lps25h_dev_s *dev)
           return ret;
         }
 
-      ret = nxsem_tickwait_uninterruptible(&dev->waitsem,
-                                      MSEC2TICK(LPS25H_RETRY_TIMEOUT_MSECS));
+      clock_gettime(CLOCK_REALTIME, &abstime);
+      abstime.tv_sec += (LPS25H_RETRY_TIMEOUT_MSECS / 1000);
+      abstime.tv_nsec += (LPS25H_RETRY_TIMEOUT_MSECS % 1000) * 1000 * 1000;
+      while (abstime.tv_nsec >= (1000 * 1000 * 1000))
+        {
+          abstime.tv_sec++;
+          abstime.tv_nsec -= 1000 * 1000 * 1000;
+        }
+
+      ret = nxsem_timedwait_uninterruptible(&dev->waitsem, &abstime);
       if (ret == OK)
         {
           break;
@@ -675,7 +703,7 @@ static int lps25h_read_temper(FAR struct lps25h_dev_s *dev,
   return ret;
 }
 
-static int lps25h_who_am_i(FAR struct lps25h_dev_s *dev,
+static int lps25h_who_am_i(struct lps25h_dev_s *dev,
                            lps25h_who_am_i_data * who_am_i_data)
 {
   uint8_t who_addr = LPS25H_WHO_AM_I;
@@ -690,7 +718,7 @@ static int lps25h_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&dev->devlock);
+  ret = nxsem_wait_uninterruptible(&dev->devsem);
   if (ret < 0)
     {
       return ret;
@@ -703,7 +731,7 @@ static int lps25h_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       break;
 
     case SNIOC_PRESSURE_OUT:
-      ret = lps25h_read_pressure(dev, (FAR lps25h_pressure_data_t *)arg);
+      ret = lps25h_read_pressure(dev, (lps25h_pressure_data_t *) arg);
       break;
 
     case SNIOC_TEMPERATURE_OUT:
@@ -711,7 +739,7 @@ static int lps25h_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
        * or results are bogus.
        */
 
-      ret = lps25h_read_temper(dev, (FAR lps25h_temper_data_t *)arg);
+      ret = lps25h_read_temper(dev, (lps25h_temper_data_t *) arg);
       break;
 
     case SNIOC_SENSOR_OFF:
@@ -719,7 +747,7 @@ static int lps25h_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       break;
 
     case SNIOC_GET_DEV_ID:
-      ret = lps25h_who_am_i(dev, (FAR lps25h_who_am_i_data *)arg);
+      ret = lps25h_who_am_i(dev, (lps25h_who_am_i_data *) arg);
       break;
 
     default:
@@ -727,7 +755,7 @@ static int lps25h_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       break;
     }
 
-  nxmutex_unlock(&dev->devlock);
+  nxsem_post(&dev->devsem);
   return ret;
 }
 
@@ -737,14 +765,14 @@ int lps25h_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   int ret = 0;
   FAR struct lps25h_dev_s *dev;
 
-  dev = kmm_zalloc(sizeof(struct lps25h_dev_s));
+  dev = (struct lps25h_dev_s *)kmm_zalloc(sizeof(struct lps25h_dev_s));
   if (!dev)
     {
       lps25h_dbg("Memory cannot be allocated for LPS25H sensor\n");
       return -ENOMEM;
     }
 
-  nxmutex_init(&dev->devlock);
+  nxsem_init(&dev->devsem, 0, 1);
   nxsem_init(&dev->waitsem, 0, 0);
 
   dev->addr = addr;
@@ -762,11 +790,9 @@ int lps25h_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   if (ret < 0)
     {
-      nxmutex_destroy(&dev->devlock);
-      nxsem_destroy(&dev->waitsem);
       kmm_free(dev);
       lps25h_dbg("Error occurred during the driver registering\n");
-      return ret;
+      return ERROR;
     }
 
   dev->config->irq_attach(config, lps25h_int_handler, dev);

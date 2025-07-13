@@ -13,10 +13,6 @@ config SAMA5_HAVE_AESB
 	bool
 	default n
 
-config SAMA5_HAVE_CLASSD
-	bool
-	default n
-
 config SAMA5_HAVE_ICM
 	bool
 	default n
@@ -93,18 +89,6 @@ config SAMA5_HAVE_CAN1
 	bool
 	default n
 
-config SAMA5_MCAN
-	bool
-	default n
-
-config SAMA5_HAVE_MCAN0
-	bool
-	default n
-
-config SAMA5_HAVE_MCAN1
-	bool
-	default n
-
 config SAMA5_HAVE_DMA
 	bool
 	default n
@@ -137,23 +121,11 @@ config SAMA5_HAVE_EMAC1
 	bool
 	default n
 
-config SAMA5_HAVE_SDMMC
-	bool
-	default n
-
 config SAMA5_HAVE_HSMCI2
 	bool
 	default n
 
 config SAMA5_HAVE_PIOE
-	bool
-	default n
-
-config SAMA5_HAVE_QSPI0
-	bool
-	default n
-
-config SAMA5_HAVE_QSPI1
 	bool
 	default n
 
@@ -193,10 +165,6 @@ config SAMA5_HAVE_VDEC
 	bool
 	default n
 
-config SAMA5_HAVE_RSTC_EXTRST
-	bool
-	default n
-
 # Summary configurations
 
 config SAMA5_FLEXCOM
@@ -215,33 +183,12 @@ config SAMA5_FLEXCOM_TWI
 	bool
 	default n
 
-config SAMA5_FLEXCOM_TWI0
-	bool
-	default n
-
-config SAMA5_FLEXCOM_TWI1
-	bool
-	default n
-
-config SAMA5_FLEXCOM_TWI2
-	bool
-	default n
-
-config SAMA5_FLEXCOM_TWI3
-	bool
-	default n
-
-config SAMA5_FLEXCOM_TWI4
-	bool
-	default n
-
 # Chip Selection
 
 config ARCH_CHIP_SAMA5D2
 	bool
 	default n
 	select ARMV7A_HAVE_L2CC_PL310
-	select ARM_HAVE_NEON
 	select SAMA5_HAVE_AESB
 	select ARCH_NAND_HWECC
 	select SAMA5_HAVE_EMACB
@@ -258,8 +205,7 @@ config ARCH_CHIP_SAMA5D2
 	select SAMA5_HAVE_FLEXCOM2
 	select SAMA5_HAVE_FLEXCOM3
 	select SAMA5_HAVE_FLEXCOM4
-	select SAMA5_HAVE_QSPI0
-	select SAMA5_HAVE_QSPI1
+	select SAMA5_HAVE_QSPI
 	select SAMA5_HAVE_XDMA
 	select SAMA5_HAVE_SAIC
 	select SAMA5_HAVE_SFC
@@ -270,20 +216,17 @@ config ARCH_CHIP_SAMA5D2
 config ARCH_CHIP_SAMA5D3
 	bool
 	default n
-	select ARM_HAVE_DPFPU
 	select SAMA5_HAVE_DMA
 	select SAMA5_HAVE_PIOE
 	select SAMA5_HAVE_USART0
 	select SAMA5_HAVE_USART1
 	select SAMA5_HAVE_USART2
 	select SAMA5_HAVE_USART3
-	select SAMA5_HAVE_RSTC_EXTRST
 
 config ARCH_CHIP_SAMA5D4
 	bool
 	default n
 	select ARMV7A_HAVE_L2CC_PL310
-	select ARM_HAVE_NEON
 	select ARCH_NAND_HWECC
 	select SAMA5_HAVE_AESB
 	select SAMA5_HAVE_EMACB
@@ -315,48 +258,40 @@ choice
 config ARCH_CHIP_ATSAMA5D21
 	bool "Atmel ATSAMA5D21"
 	select ARCH_CHIP_SAMA5D2
-	select SAMA5_HAVE_CLASSD
 
 config ARCH_CHIP_ATSAMA5D22
 	bool "Atmel ATSAMA5D22"
 	select ARCH_CHIP_SAMA5D2
-	select SAMA5_HAVE_MCAN0
+	select SAMA5_HAVE_CAN0
 
 config ARCH_CHIP_ATSAMA5D23
 	bool "Atmel ATSAMA5D23"
 	select ARCH_CHIP_SAMA5D2
-	select SAMA5_HAVE_MCAN0
-	select SAMA5_HAVE_CLASSD
+	select SAMA5_HAVE_CAN0
 
 config ARCH_CHIP_ATSAMA5D24
 	bool "Atmel ATSAMA5D24"
 	select ARCH_CHIP_SAMA5D2
 	select SAMA5_HAVE_DDR32
-	select SAMA5_HAVE_CLASSD
 
 config ARCH_CHIP_ATSAMA5D26
 	bool "Atmel ATSAMA5D26"
 	select ARCH_CHIP_SAMA5D2
 	select SAMA5_HAVE_DDR32
-	select SAMA5_HAVE_CLASSD
 
 config ARCH_CHIP_ATSAMA5D27
 	bool "Atmel ATSAMA5D27"
 	select ARCH_CHIP_SAMA5D2
-	select SAMA5_HAVE_MCAN0
-	select SAMA5_HAVE_MCAN1
+	select SAMA5_HAVE_CAN0
+	select SAMA5_HAVE_CAN1
 	select SAMA5_HAVE_DDR32
-	select SAMA5_HAVE_SDMMC
-	select SAMA5_HAVE_GMAC
-	select SAMA5_HAVE_CLASSD
 
 config ARCH_CHIP_ATSAMA5D28
 	bool "Atmel ATSAMA5D28"
 	select ARCH_CHIP_SAMA5D2
-	select SAMA5_HAVE_MCAN0
-	select SAMA5_HAVE_MCAN1
+	select SAMA5_HAVE_CAN0
+	select SAMA5_HAVE_CAN1
 	select SAMA5_HAVE_DDR32
-	select SAMA5_HAVE_CLASSD
 
 config ARCH_CHIP_ATSAMA5D31
 	bool "Atmel ATSAMA5D31"
@@ -440,11 +375,6 @@ config SAMA5_AES
 	bool "Advanced Encryption Standard (AES)"
 	default n
 
-config SAMA5D2_CLASSD
-	bool "Class D Audio (CLASSD)"
-	default n
-	depends on SAMA5_HAVE_CLASSD
-
 config SAMA5_TDES
 	bool "Triple Data Encryption Standard (TDES)"
 	default n
@@ -491,6 +421,7 @@ config SAMA5_SAIC
 	bool "Secure Advanced Interrupt Controller (SAIC)"
 	default n
 	depends on SAMA5_HAVE_SAIC
+	select ARMV7A_DECODEFIQ
 
 config SAMA5_RXLP
 	bool "Low power asynchronous receiver"
@@ -614,12 +545,6 @@ config SAMA5_TWI3
 	default n
 	depends on SAMA5_HAVE_TWI3
 
-config SAMA5_SDMMC
-	bool "Secure Digital Multimedia Card Interface (SDMMC)"
-	default n
-	depends on SAMA5_HAVE_SDMMC
-	select ARCH_HAVE_SDIO
-
 config SAMA5_HSMCI0
 	bool "High Speed Multimedia Card Interface 0 (HSMCI0)"
 	default n
@@ -658,16 +583,6 @@ config SAMA5_SPI2
 	bool "Serial Peripheral Interface 2 (SPI2)"
 	default n
 	depends on SAMA5_HAVE_SPI2
-
-config SAMA5_QSPI0
-	bool "Quad SPI interface 0 (QSPI0)"
-	default n
-	depends on SAMA5_HAVE_QSPI0
-
-config SAMA5_QSPI1
-	bool "Quad SPI interface 1 (QSPI1)"
-	default n
-	depends on SAMA5_HAVE_QSPI1
 
 config SAMA5_TC0
 	bool "Timer Counter 0 (ch. 0, 1, 2) (TC0)"
@@ -798,24 +713,6 @@ config SAMA5_CAN1
 	select CAN
 	depends on SAMA5_HAVE_CAN1
 
-config SAMA5_MCAN0
-	bool "MCAN controller 0 (MCAN0)"
-	default n
-	depends on SAMA5_HAVE_MCAN0
-	select CAN
-	select ARCH_HAVE_CAN_ERRORS
-	select CAN_TXREADY
-	select SAMA5_MCAN
-
-config SAMA5_MCAN1
-	bool "MCAN controller 1 (MCAN1)"
-	default n
-	depends on SAMA5_HAVE_MCAN1
-	select CAN
-	select ARCH_HAVE_CAN_ERRORS
-	select CAN_TXREADY
-	select SAMA5_MCAN
-
 config SAMA5_SHA
 	bool "Secure Hash Algorithm (SHA)"
 	default n
@@ -832,7 +729,6 @@ config SAMA5_ARM
 config SAMA5_FUSE
 	bool "Fuse Controller (FUSE)"
 	default n
-	depends on SAMA5_HAVE_FUSE
 
 config SAMA5_MPDDRC
 	bool "MPDDR controller (MPDDRC)"
@@ -844,28 +740,6 @@ config SAMA5_VDEC
 	depends on SAMA5_HAVE_VDEC
 
 endmenu # SAMA5 Peripheral Support
-
-config SAMA5_SYSTEMRESET
-	bool "Enable System Reset"
-	select ARCH_HAVE_RESET
-	---help---
-		Enable up_systemreset
-
-if SAMA5_SYSTEMRESET && SAMA5_HAVE_RSTC_EXTRST
-
-config SAMA5_EXTRESET_ERST
-	int "Drive External nRST duration"
-	default 0
-	range 0 16
-	---help---
-		Define if the external reset (nRST) will be generated in up_systemreset
-		and for how long:
-
-		- A value of 0 will not drive the external reset
-		- A value of 1-16 will drive the external reset for 2^SAMA5_EXTRESET_ERST
-		  slow clock cycles.
-
-endif # SAMA5_SYSTEMRESET
 
 config SAMA5_PIO_IRQ
 	bool "PIO pin interrupts"
@@ -915,10 +789,9 @@ config SAMA5_FLEXCOM0_SPI
 	bool "SPI"
 	select SAMA5_FLEXCOM_SPI
 
-config SAMA5_FLEXCOM0_TWI
+config SAMA5_FLEXCOM0_SPI
 	bool "TWI"
 	select SAMA5_FLEXCOM_TWI
-	select SAMA5_FLEXCOM_TWI0
 
 endchoice # FLEXCOM0 Configuration
 
@@ -937,10 +810,9 @@ config SAMA5_FLEXCOM1_SPI
 	bool "SPI"
 	select SAMA5_FLEXCOM_SPI
 
-config SAMA5_FLEXCOM1_TWI
+config SAMA5_FLEXCOM1_SPI
 	bool "TWI"
 	select SAMA5_FLEXCOM_TWI
-	select SAMA5_FLEXCOM_TWI1
 
 endchoice # FLEXCOM1 Configuration
 
@@ -959,10 +831,9 @@ config SAMA5_FLEXCOM2_SPI
 	bool "SPI"
 	select SAMA5_FLEXCOM_SPI
 
-config SAMA5_FLEXCOM2_TWI
+config SAMA5_FLEXCOM2_SPI
 	bool "TWI"
 	select SAMA5_FLEXCOM_TWI
-	select SAMA5_FLEXCOM_TWI2
 
 endchoice # FLEXCOM2 Configuration
 
@@ -974,17 +845,16 @@ choice
 config SAMA5_FLEXCOM3_USART
 	bool "USART"
 	select SAMA5_FLEXCOM_USART
-	select USART3_SERIALDRIVER
-	select ARCH_HAVE_SERIAL_TERMIOS
 
 config SAMA5_FLEXCOM3_SPI
 	bool "SPI"
 	select SAMA5_FLEXCOM_SPI
+	select USART3_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
 
-config SAMA5_FLEXCOM3_TWI
+config SAMA5_FLEXCOM3_SPI
 	bool "TWI"
 	select SAMA5_FLEXCOM_TWI
-	select SAMA5_FLEXCOM_TWI3
 
 endchoice # FLEXCOM3 Configuration
 
@@ -1003,10 +873,9 @@ config SAMA5_FLEXCOM4_SPI
 	bool "SPI"
 	select SAMA5_FLEXCOM_SPI
 
-config SAMA5_FLEXCOM4_TWI
+config SAMA5_FLEXCOM4_SPI
 	bool "TWI"
 	select SAMA5_FLEXCOM_TWI
-	select SAMA5_FLEXCOM_TWI4
 
 endchoice # FLEXCOM4 Configuration
 endmenu # Flexcom Configuration
@@ -1061,220 +930,6 @@ config SAMA5_DBGU_PARITY
 
 endif # !SAMA5_DBGU_NOCONFIG
 endmenu #DBGU Configuration
-
-if SAMA5D2_CLASSD
-
-menu "Class D Peripheral Configuration"
-
-menu "Class D DMA options"
-
-config SAMA5D2_CLASSD_DMA_DMAC_NUMBER
-	int "Class D DMA Controller number"
-	default 0
-	range 0 1
-	---help---
-		Select which xdma controller to use for Class D DMA.
-
-config SAMA5D2_CLASSD_DMADEBUG
-	bool "Class D DMA transfer debug"
-	depends on DEBUG_FEATURES && DEBUG_DMA && DEBUG_DMA_INFO
-	default n
-	---help---
-		Enable special debug instrumentation analyze Class D DMA data transfers.
-		This logic is as non-invasive as possible:  It samples DMA
-		registers at key points in the data transfer and then dumps all of
-		the registers at the end of the transfer.
-
-endmenu # "Class D DMA options"
-
-config SAMA5D2_CLASSD_INFLIGHT
-	int "SAMA5 Class D maximum in-flight audio buffers"
-	default 2
-
-config SAMA5D2_CLASSD_PAD_CLK
-	bool "Enable Audio Clock Output pin"
-	default n
-
-config SAMA5D2_CLASSD_LEN
-	bool "Left Channel Enable (LEN)"
-	default y
-
-config SAMA5D2_CLASSD_REN
-	bool "Right Channel Enable (REN)"
-	default y
-
-choice
-	prompt "Class D PWM Modulation Type"
-	default SAMA5D2_CLASSD_PWM_TRAILING
-	---help---
-		TRAILING EDGE: The signal is single-ended.
-			If bit NON_OVERLAP is cleared, the signal is sent to
-			CLASSD_L0 and CLASSD_R0.
-
-			If bit NON_OVERLAP is set, the signal is sent to
-			CLASSD_L0/L1 and CLASSD_R0/R1.
-		UNIFORM: The signal is differential.
-			If bit NON_OVERLAP is cleared, the signal is sent to
-			CLASSD_L0/L2 and CLASSD_R0/R2.
-
-			If bit NON_OVERLAP is set, the signal is sent to
-			CLASSD_L0/L1/L2/L3 and CLASSD_R0/R1/R2/R3.
-
-config SAMA5D2_CLASSD_PWM_TRAILING
-bool "Trailing"
-
-config SAMA5D2_CLASSD_PWM_UNIFORM
-bool "Uniform"
-
-endchoice # Class D PWM Modulation Type
-
-config SAMA5D2_CLASSD_NON_OVERLAP_MODE
-	bool "Non-overlapping Circuit Enable (NON_OVERLAP)"
-	default n
-
-choice
-	depends on SAMA5D2_CLASSD_NON_OVERLAP_MODE
-	prompt "Non-overlapping Value (NOVRVAL)"
-	default SAMA5D2_CLASSD_NON_OVERLAP_5NS
-	---help---
-		Non-overlapping time
-
-config SAMA5D2_CLASSD_NON_OVERLAP_5NS
-	bool "5ns"
-
-config SAMA5D2_CLASSD_NON_OVERLAP_10NS
-	bool "10ns"
-
-config SAMA5D2_CLASSD_NON_OVERLAP_15NS
-	bool "15ns"
-
-config SAMA5D2_CLASSD_NON_OVERLAP_20NS
-	bool "20ns"
-
-endchoice # Non-overlapping Value (NOVRVAL)
-
-config SAMA5D2_CLASSD_DEEMP
-	bool "Enable De-emphasis Filter (DEEMP)"
-	default n
-
-config SAMA5D2_CLASSD_SWAP
-	bool "Swap Left and Right Channels (SWAP)"
-	default n
-
-choice
-	prompt "Default Data Sampling Frequency (FRAME)"
-	default SAMA5D2_CLASSD_FRAME_8K
-	---help---
-		Incoming Data Sampling Frequency default
-
-config SAMA5D2_CLASSD_FRAME_8K
-	bool "8kHz"
-
-config SAMA5D2_CLASSD_FRAME_16K
-	bool "16kHz"
-
-config SAMA5D2_CLASSD_FRAME_32K
-	bool "32kHz"
-
-config SAMA5D2_CLASSD_FRAME_48K
-	bool "48kHz"
-
-config SAMA5D2_CLASSD_FRAME_96K
-	bool "96kHz"
-
-config SAMA5D2_CLASSD_FRAME_22K05
-	bool "22.05kHz"
-
-config SAMA5D2_CLASSD_FRAME_44K1
-	bool "44.1kHz"
-
-config SAMA5D2_CLASSD_FRAME_88K2
-	bool "88.2kHz"
-
-endchoice # Incoming Data Sampling Frequency (FRAME)
-
-choice
-	prompt "Equalisation Selection (EQCFG)"
-	default SAMA5D2_CLASSD_EQ_FLAT
-	---help---
-		Equalisation selection
-
-config SAMA5D2_CLASSD_EQ_FLAT
-	bool "Flat response"
-
-config SAMA5D2_CLASSD_EQ_BB12
-	bool "Bass Boost +12dB"
-
-config SAMA5D2_CLASSD_EQ_BB6
-	bool "Bass Boost +6dB"
-
-config SAMA5D2_CLASSD_EQ_BC12
-	bool "Bass Cut -12dB"
-
-config SAMA5D2_CLASSD_EQ_BC6
-	bool "Bass Cut -6dB"
-
-config SAMA5D2_CLASSD_EQ_MB3
-	bool "Medium Boost +3dB"
-
-config SAMA5D2_CLASSD_EQ_MB8
-	bool "Medium Boost +8dB"
-
-config SAMA5D2_CLASSD_EQ_MC3
-	bool "Medium Cut -3dB"
-
-config SAMA5D2_CLASSD_EQ_MC8
-	bool "Medium Cut -8dB"
-
-config SAMA5D2_CLASSD_EQ_TB12
-	bool "Treble Boost +12dB"
-
-config SAMA5D2_CLASSD_EQ_TB6
-	bool "Treble Boost +6dB"
-
-config SAMA5D2_CLASSD_EQ_TC12
-	bool "Treble Cut -12dB"
-
-config SAMA5D2_CLASSD_EQ_TC6
-	bool "Treble Cut -6dB"
-
-endchoice # Equalisation Selection (EQCFG)
-
-config SAMA5D2_CLASSD_MONO
-	bool "Enable Mono Mode (MONO)"
-	default 0
-	---help---
-		Disabled. The signal is sent stereo to the left and right channels.
-		Enabled.  The same signal is sent on both left and right channels.
-				  The sent signal is defined by the MONOMODE field value.
-
-choice
-	prompt "Mono Mode Selection (MONOMODE)"
-	default SAMA5D2_CLASSD_MONOMODE_MIX
-	depends on SAMA5D2_CLASSD_MONO
-	---help---
-		Selects which signals are used in mono mode
-
-config SAMA5D2_CLASSD_MONOMODE_MIX
-	bool "(L+R)/2 -> channels"
-
-config SAMA5D2_CLASSD_MONOMODE_SAT
-	bool "(L+R)   -> both channels, saturated on overrange"
-
-config SAMA5D2_CLASSD_MONOMODE_LEFT
-	bool "L       -> both channels"
-
-config SAMA5D2_CLASSD_MONOMODE_RIGHT
-	bool "R       -> both channels"
-
-endchoice # Mono Mode Selection (MONOMODE)
-
-config SAMA5D2_CLASSD_REGDEBUG
-	bool "Enable Register Debug"
-	default 0
-	
-endmenu # Class D Default Configuration
-endif # SAMA5D2_CLASSD
 
 if SAMA5_LCDC
 menu "LCDC Configuration"
@@ -1756,687 +1411,6 @@ config SAMA5_LCDC_REGDEBUG
 endmenu # LCDC configuration
 endif # SAMA5_LCDC
 
-if SAMA5_MCAN
-
-config SAMA5_MCAN_QUEUE_MODE
-	bool "MCAN QUEUE mode (vs FIFO mode)"
-	default n
-
-menu "MCAN device driver options"
-
-choice
-	prompt "MCAN clock source"
-	default SAMA5_MCAN_CLKSRC_UPLL
-
-config SAMA5_MCAN_CLKSRC_SLOW
-	bool "Slow clock"
-
-config SAMA5_MCAN_CLKSRC_MAIN
-	bool "Main clock"
-
-config SAMA5_MCAN_CLKSRC_PLLA
-	bool "PLLA clock"
-
-config SAMA5_MCAN_CLKSRC_UPLL
-	bool "UPLL clock"
-
-config SAMA5_MCAN_CLKSRC_MCK
-	bool "Master clock"
-
-endchoice # MCAN clock source
-
-config SAMA5_MCAN_CLKSRC_PRESCALER
-	int "MCAN clock prescaler"
-	default 6
-	range 1 1024
-	---help---
-		The frequency associated with time quanta is derived by dividing
-		down the input frequency. This setting provides prescaler/divider
-		must lie the range of 1 to 1024.
-
-menu "MCAN0 device driver options"
-	depends on SAMA5_MCAN0
-
-choice
-	prompt "MCAN0 mode"
-	default SAMA5_MCAN0_ISO11898_1
-
-config SAMA5_MCAN0_ISO11898_1
-	bool "ISO11898-1"
-	---help---
-		Enable ISO11898-1 mode
-
-config SAMA5_MCAN0_FD
-	bool "FD"
-	depends on CAN_FD
-	---help---
-		Enable FD mode
-
-config SAMA5_MCAN0_FD_BSW
-	bool "FD with fast bit rate switching"
-	depends on CAN_FD
-	---help---
-		Enable FD mode with fast bit rate switching mode.
-
-endchoice # MCAN0 mode
-
-config SAMA5_MCAN0_LOOPBACK
-	bool "Enable MCAN0 loopback mode"
-	default n
-	---help---
-		Enable the MCAN0 local loopback mode for testing purposes.
-
-config SAMA5_MCAN0_BITRATE
-	int "MCAN0 nominal bitrate"
-	default 500000
-	---help---
-		MCAN0 bitrate in bits per second.  Required if SAMA5_MCAN0 is defined.
-
-config SAMA5_MCAN0_PROPSEG
-	int "MCAN0 nominal PropSeg"
-	default 3
-	range 1 256
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN0_PHASESEG1
-	int "MCAN0 nominal PhaseSeg1"
-	default 8
-	range 1 256
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-		PhaseSeg1+PropSeg must be between 2 and 256
-
-config SAMA5_MCAN0_PHASESEG2
-	int "MCAN0 nominal PhaseSeg2"
-	default 4
-	range 1 128
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN0_SJW
-	int "MCAN0 nominal synchronization jump width"
-	default 7
-	range 1 128
-	---help---
-		The duration of a synchronization jump is Tcan_clk x SJW.
-
-config SAMA5_MCAN0_FBITRATE
-	int "MCAN0 data bitrate"
-	default SAMA5_MCAN0_BITRATE
-	---help---
-		MCAN0 data bitrate in bits per second.  Required if SAMA5_MCAN0 is
-		defined.
-
-config SAMA5_MCAN0_FPROPSEG
-	int "MCAN0 data PropSeg"
-	default SAMA5_MCAN0_PROPSEG
-	range 1 63
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN0_FPHASESEG1
-	int "MCAN0 data PhaseSeg1"
-	default SAMA5_MCAN0_PHASESEG1
-	range 1 63
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN0_FPHASESEG2
-	int "MCAN0 data PhaseSeg2"
-	default SAMA5_MCAN0_PHASESEG2
-	range 1 63
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN0_FSJW
-	int "MCAN0 data synchronization jump width"
-	default SAMA5_MCAN0_SJW
-	range 1 8
-	---help---
-		The duration of a synchronization jump is Tcan_clk x FSJW.
-
-config SAMA5_MCAN0_NSTDFILTERS
-	int "MCAN0 number of standard filters"
-	default 0
-	range 0 128
-	---help---
-		Number of standard message ID filters.
-
-config SAMA5_MCAN0_NEXTFILTERS
-	int "MCAN0 number of extended filters"
-	default 0
-	range 0 64
-	depends on CAN_EXTID
-	---help---
-		Number of extended message ID filters.
-
-choice
-	prompt "MCAN0 RX FIFO0 element size"
-	default SAMA5_MCAN0_RXFIFO0_8BYTES
-
-config SAMA5_MCAN0_RXFIFO0_8BYTES
-	bool "8 bytes"
-
-config SAMA5_MCAN0_RXFIFO0_12BYTES
-	bool "12 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO0_16BYTES
-	bool "16 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO0_20BYTES
-	bool "20 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO0_24BYTES
-	bool "24 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO0_32BYTES
-	bool "32 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO0_48BYTES
-	bool "48 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO0_64BYTES
-	bool "64 bytes"
-	depends on SAMA5_MCAN0_FD
-
-endchoice # MCAN0 RX buffer element size
-
-config SAMA5_MCAN0_RXFIFO0_SIZE
-	int "MCAN0 RX FIFO0 size"
-	default 8
-	range 1 64
-	---help---
-		Number of receive FIFO 0 elements.  Zero disables FIFO 0.
-
-choice
-	prompt "MCAN0 RX FIFO1 element size"
-	default SAMA5_MCAN0_RXFIFO1_8BYTES
-
-config SAMA5_MCAN0_RXFIFO1_8BYTES
-	bool "8 bytes"
-
-config SAMA5_MCAN0_RXFIFO1_12BYTES
-	bool "12 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO1_16BYTES
-	bool "16 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO1_20BYTES
-	bool "20 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO1_24BYTES
-	bool "24 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO1_32BYTES
-	bool "32 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO1_48BYTES
-	bool "48 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXFIFO1_64BYTES
-	bool "64 bytes"
-	depends on SAMA5_MCAN0_FD
-
-endchoice # MCAN0 RX buffer element size
-
-config SAMA5_MCAN0_RXFIFO1_SIZE
-	int "MCAN0 RX FIFO1 size"
-	default 4
-	range 1 64
-	---help---
-		Number of receive FIFO 1 elements for MCAN0.  Zero disables FIFO 1.
-
-choice
-	prompt "MCAN0 RX buffer element size"
-	default SAMA5_MCAN0_RXBUFFER_8BYTES
-
-config SAMA5_MCAN0_RXBUFFER_8BYTES
-	bool "8 bytes"
-
-config SAMA5_MCAN0_RXBUFFER_12BYTES
-	bool "12 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXBUFFER_16BYTES
-	bool "16 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXBUFFER_20BYTES
-	bool "20 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXBUFFER_24BYTES
-	bool "24 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXBUFFER_32BYTES
-	bool "32 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXBUFFER_48BYTES
-	bool "48 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_RXBUFFER_64BYTES
-	bool "64 bytes"
-	depends on SAMA5_MCAN0_FD
-
-endchoice # MCAN0 RX buffer element size
-
-config SAMA5_MCAN0_DEDICATED_RXBUFFER_SIZE
-	int "MCAN0 dedicated RX buffer size"
-	default 0
-	range 0 64
-	depends on EXPERIMENTAL
-	---help---
-		Number of dedicated RX buffer elements for MCAN0.
-
-		NOTE: Dedicated RX buffers are not used in the current MCAN design.
-
-choice
-	prompt "MCAN0 TX buffer element size"
-	default SAMA5_MCAN0_TXBUFFER_8BYTES
-
-config SAMA5_MCAN0_TXBUFFER_8BYTES
-	bool "8 bytes"
-
-config SAMA5_MCAN0_TXBUFFER_12BYTES
-	bool "12 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_TXBUFFER_16BYTES
-	bool "16 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_TXBUFFER_20BYTES
-	bool "20 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_TXBUFFER_24BYTES
-	bool "24 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_TXBUFFER_32BYTES
-	bool "32 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_TXBUFFER_48BYTES
-	bool "48 bytes"
-	depends on SAMA5_MCAN0_FD
-
-config SAMA5_MCAN0_TXBUFFER_64BYTES
-	bool "64 bytes"
-	depends on SAMA5_MCAN0_FD
-
-endchoice # MCAN0 TX buffer element size
-
-config SAMA5_MCAN0_DEDICATED_TXBUFFER_SIZE
-	int "MCAN0 dedicated TX buffer size"
-	default 0
-	range 0 32
-	depends on EXPERIMENTAL
-	---help---
-		Number of dedicated TX buffer elements for MCAN0.
-
-		NOTE: Dedicated TX buffers are not used in the current MCAN design.
-
-config SAMA5_MCAN0_TXFIFOQ_SIZE
-	int "MCAN0 TX FIFO queue size"
-	default 4
-	range 1 32
-	---help---
-		Number of dedicated TX buffer elements for MCAN0.
-
-config SAMA5_MCAN0_TXEVENTFIFO_SIZE
-	int "MCAN0 TX event FIFO size"
-	default 0
-	range 0 32
-	depends on EXPERIMENTAL
-	---help---
-		Number of TX event FIFO elements for MCAN0.  Zero disables TX event FIFO.
-
-endmenu # MCAN0 device driver options
-
-menu "MCAN1 device driver options"
-	depends on SAMA5_MCAN1
-
-choice
-	prompt "MCAN1 mode"
-	default SAMA5_MCAN1_ISO11898_1
-
-config SAMA5_MCAN1_ISO11898_1
-	bool "ISO11898-1"
-	---help---
-		Enable ISO11898-1 mode
-
-config SAMA5_MCAN1_FD
-	bool "FD"
-	depends on CAN_FD
-	---help---
-		Enable FD mode
-
-config SAMA5_MCAN1_FD_BSW
-	bool "FD with fast bit rate switching"
-	depends on CAN_FD
-	---help---
-		Enable FD mode with fast bit rate switching mode.
-
-endchoice # MCAN0 mode
-
-config SAMA5_MCAN1_LOOPBACK
-	bool "Enable MCAN1 loopback mode"
-	default n
-	---help---
-		Enable the MCAN1 local loopback mode for testing purposes.
-
-config SAMA5_MCAN1_BITRATE
-	int "MCAN1 nominal bitrate"
-	default 500000
-	---help---
-		MCAN1 bitrate in bits per second.  Required if SAMA5_MCAN1 is
-		defined.
-
-config SAMA5_MCAN1_PROPSEG
-	int "MCAN1 nominal PropSeg"
-	default 3
-	range 1 256
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN1_PHASESEG1
-	int "MCAN1 nominal PhaseSeg1"
-	default 8
-	range 1 256
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN1_PHASESEG2
-	int "MCAN1 nominal PhaseSeg2"
-	default 4
-	range 1 128
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN1_SJW
-	int "MCAN1 nominal synchronization jump width"
-	default 7
-	range 1 128
-	---help---
-		The duration of a synchronization jump is Tcan_clk x SJW.
-
-config SAMA5_MCAN1_FBITRATE
-	int "MCAN1 data bitrate"
-	default SAMA5_MCAN1_BITRATE
-	---help---
-		MCAN1 bitrate in bits per second.  Required if SAMA5_MCAN1 is
-		defined.
-
-config SAMA5_MCAN1_FPROPSEG
-	int "MCAN1 data PropSeg"
-	default SAMA5_MCAN1_PROPSEG
-	range 1 63
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN1_FPHASESEG1
-	int "MCAN1 data PhaseSeg1"
-	default SAMA5_MCAN1_PHASESEG1
-	range 1 63
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN1_FPHASESEG2
-	int "MCAN1 data PhaseSeg2"
-	default SAMA5_MCAN1_PHASESEG2
-	range 1 63
-	---help---
-		The length of the bit time is Tquanta * (SyncSeg + PropSeg + PhaseSeg1 + PhaseSeg2).
-
-config SAMA5_MCAN1_FSJW
-	int "MCAN1 data synchronization jump width"
-	default SAMA5_MCAN1_SJW
-	range 1 8
-	---help---
-		The duration of a synchronization jump is Tcan_clk x FSJW.
-
-config SAMA5_MCAN1_NSTDFILTERS
-	int "MCAN1 number of standard filters"
-	default 8
-	range 0 128
-	---help---
-		Number of standard message ID filters.
-
-config SAMA5_MCAN1_NEXTFILTERS
-	int "MCAN1 number of extended filters"
-	default 8
-	range 0 64
-	depends on CAN_EXTID
-	---help---
-		Number of extended message ID filters.
-
-choice
-	prompt "MCAN1 RX FIFO0 element size"
-	default SAMA5_MCAN1_RXFIFO0_8BYTES
-
-config SAMA5_MCAN1_RXFIFO0_8BYTES
-	bool "8 bytes"
-
-config SAMA5_MCAN1_RXFIFO0_12BYTES
-	bool "12 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO0_16BYTES
-	bool "16 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO0_20BYTES
-	bool "20 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO0_24BYTES
-	bool "24 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO0_32BYTES
-	bool "32 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO0_48BYTES
-	bool "48 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO0_64BYTES
-	bool "64 bytes"
-	depends on SAMA5_MCAN1_FD
-
-endchoice # MCAN1 RX buffer element size
-
-config SAMA5_MCAN1_RXFIFO0_SIZE
-	int "MCAN1 RX FIFO0 size"
-	default 8
-	range 1 64
-	---help---
-		Number of receive FIFO 0 elements.  Zero disables FIFO 0.
-
-choice
-	prompt "MCAN1 RX FIFO1 element size"
-	default SAMA5_MCAN1_RXFIFO1_8BYTES
-
-config SAMA5_MCAN1_RXFIFO1_8BYTES
-	bool "8 bytes"
-
-config SAMA5_MCAN1_RXFIFO1_12BYTES
-	bool "12 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO1_16BYTES
-	bool "16 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO1_20BYTES
-	bool "20 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO1_24BYTES
-	bool "24 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO1_32BYTES
-	bool "32 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO1_48BYTES
-	bool "48 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXFIFO1_64BYTES
-	bool "64 bytes"
-	depends on SAMA5_MCAN1_FD
-
-endchoice # MCAN1 RX buffer element size
-
-config SAMA5_MCAN1_RXFIFO1_SIZE
-	int "MCAN1 RX FIFO1 size"
-	default 4
-	range 1 64
-	---help---
-		Number of receive FIFO 1 elements for MCAN1.  Zero disables FIFO 1.
-
-choice
-	prompt "MCAN1 RX buffer element size"
-	default SAMA5_MCAN1_RXBUFFER_8BYTES
-
-config SAMA5_MCAN1_RXBUFFER_8BYTES
-	bool "8 bytes"
-
-config SAMA5_MCAN1_RXBUFFER_12BYTES
-	bool "12 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXBUFFER_16BYTES
-	bool "16 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXBUFFER_20BYTES
-	bool "20 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXBUFFER_24BYTES
-	bool "24 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXBUFFER_32BYTES
-	bool "32 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXBUFFER_48BYTES
-	bool "48 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_RXBUFFER_64BYTES
-	bool "64 bytes"
-	depends on SAMA5_MCAN1_FD
-
-endchoice # MCAN1 RX buffer element size
-
-config SAMA5_MCAN1_DEDICATED_RXBUFFER_SIZE
-	int "MCAN1 dedicated RX buffer size"
-	default 0
-	range 0 64
-	depends on EXPERIMENTAL
-	---help---
-		Number of dedicated RX buffer elements for MCAN1.
-
-		NOTE: Dedicated RX buffers are not used in the current MCAN design.
-
-choice
-	prompt "MCAN1 TX buffer element size"
-	default SAMA5_MCAN1_TXBUFFER_8BYTES
-
-config SAMA5_MCAN1_TXBUFFER_8BYTES
-	bool "8 bytes"
-
-config SAMA5_MCAN1_TXBUFFER_12BYTES
-	bool "12 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_TXBUFFER_16BYTES
-	bool "16 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_TXBUFFER_20BYTES
-	bool "20 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_TXBUFFER_24BYTES
-	bool "24 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_TXBUFFER_32BYTES
-	bool "32 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_TXBUFFER_48BYTES
-	bool "48 bytes"
-	depends on SAMA5_MCAN1_FD
-
-config SAMA5_MCAN1_TXBUFFER_64BYTES
-	bool "64 bytes"
-	depends on SAMA5_MCAN1_FD
-
-endchoice # MCAN1 TX buffer element size
-
-config SAMA5_MCAN1_TXEVENTFIFO_SIZE
-	int "MCAN1 TX event FIFO size"
-	default 0
-	range 0 32
-	depends on EXPERIMENTAL
-	---help---
-		Number of TX event FIFO elements for MCAN1.  Zero disables TX event FIFO.
-
-config SAMA5_MCAN1_DEDICATED_TXBUFFER_SIZE
-	int "MCAN1 dedicated TX buffer size"
-	default 0
-	range 0 32
-	depends on EXPERIMENTAL
-	---help---
-		Number of dedicated TX buffer elements for MCAN1.
-
-		NOTE: Dedicated TX buffers are not used in the current MCAN design.
-
-config SAMA5_MCAN1_TXFIFOQ_SIZE
-	int "MCAN1 TX FIFO queue"
-	default 4
-	range 1 32
-	---help---
-		Number of dedicated TX buffer elements for MCAN1.
-
-endmenu # MCAN1 device driver options
-
-config SAMA5_MCAN_REGDEBUG
-	bool "CAN Register level debug"
-	depends on DEBUG_CAN_INFO
-	default n
-	---help---
-		Output detailed register-level CAN device debug information.
-		Requires also CONFIG_DEBUG_CAN_INFO.
-
-endmenu # CAN device driver options
-endif # SAMA5_MCAN
-
 if SAMA5_GMAC
 
 menu "GMAC device driver options"
@@ -2590,7 +1564,8 @@ config SAMA5_EMAC_MII
 
 config SAMA5_EMAC_RMII
 	bool
-	default !SAMA5_EMAC_MII
+	default y if !SAMA5_EMAC_MII
+	default n if SAMA5_EMAC_MII
 
 config SAMA5_EMAC_AUTONEG
 	bool "Use autonegotiation"
@@ -3373,43 +2348,10 @@ config SAMA5_SPI_DMA
 	---help---
 		Use DMA to improve SPI transfer performance.
 
-config SAMA5_SPI_XDMA
-	bool "SPI XDMA"
-	default n
-	depends on SAMA5_XDMAC0 || SAMA5_XDMAC1
-	---help---
-		Use XDMA to improve SPI transfer performance.
-
-choice
-	prompt "SPI0 XDMAC channel selection"
-	default SAMA5_SPI0_XDMAC0
-	depends on SAMA5_SPI_XDMA && SAMA5_SPI0
-
-config SAMA5_SPI0_XDMAC0
-	bool "XDMAC0"
-
-config SAMA5_SPI0_XDMAC1
-	bool "XDMAC1"
-
-endchoice
-
-choice
-	prompt "SPI1 XDMAC channel selection"
-	default SAMA5_SPI1_XDMAC0
-	depends on SAMA5_SPI_XDMA && SAMA5_SPI1
-
-config SAMA5_SPI1_XDMAC0
-	bool "XDMAC0"
-
-config SAMA5_SPI1_XDMAC1
-	bool "XDMAC1"
-
-endchoice
-
 config SAMA5_SPI_DMATHRESHOLD
 	int "SPI DMA threshold"
 	default 4
-	depends on SAMA5_SPI_DMA || SAMA5_SPI_XDMA
+	depends on SAMA5_SPI_DMA
 	---help---
 		When SPI DMA is enabled, small DMA transfers will still be performed
 		by polling logic.  But we need a threshold value to determine what
@@ -3417,7 +2359,7 @@ config SAMA5_SPI_DMATHRESHOLD
 
 config SAMA5_SPI_DMADEBUG
 	bool "SPI DMA transfer debug"
-	depends on (SAMA5_SPI_DMA || SAMA5_SPI_XDMA) && DEBUG_FEATURES && DEBUG_DMA
+	depends on SAMA5_SPI_DMA && DEBUG_FEATURES && DEBUG_DMA
 	default n
 	---help---
 		Enable special debug instrumentation analyze SPI DMA data transfers.
@@ -3436,95 +2378,7 @@ config SAMA5_SPI_REGDEBUG
 endmenu # SPI device driver options
 endif # SAMA5_SPI0 || SAMA5_SPI1
 
-if SAMA5_FLEXCOM0_SPI || SAMA5_FLEXCOM1_SPI || SAMA5_FLEXCOM2_SPI || SAMA5_FLEXCOM3_SPI || SAMA5_FLEXCOM4_SPI
-
-menu "Flexcom SPI device driver options"
-
-config SAMA5_FLEXCOM_SPI_DMA
-	bool "Flexcom SPI DMA"
-	default n
-	depends on (SAMA5_XDMAC0 && SAMA5_FLEXCOM_SPI) || (SAMA5_XDMAC1 && SAMA5_FLEXCOM_SPI)
-	---help---
-		Use DMA to improve SPI transfer performance.
-
-config SAMA5_FLEXCOM_SPI_DMAC_NUMBER
-	int "Flexcom SPI DMA Controller number"
-	default 0
-	range 0 1
-	depends on SAMA5_FLEXCOM_SPI_DMA
-	---help---
-		Select which xdma controller to use for Flexcom SPI DMA.
-
-config SAMA5_FLEXCOM_SPI_DMATHRESHOLD
-	int "FLEXCOM SPI DMA threshold"
-	default 4
-	depends on SAMA5_FLEXCOM_SPI_DMA
-	---help---
-		When SPI DMA is enabled, small DMA transfers will still be performed
-		by polling logic.  But we need a threshold value to determine what
-		is small.  That value is provided by SAMA5_SPI_DMATHRESHOLD.
-
-config SAMA5_FLEXCOM_SPI_DMADEBUG
-	bool "FLEXCOM SPI DMA transfer debug"
-	depends on SAMA5_SPI_DMA && DEBUG_FEATURES && DEBUG_DMA
-	default n
-	---help---
-		Enable special debug instrumentation analyze SPI DMA data transfers.
-		This logic is as non-invasive as possible:  It samples DMA
-		registers at key points in the data transfer and then dumps all of
-		the registers at the end of the transfer.
-
-endmenu # Flexcom SPI device driver options
-endif # SAMA5_FLEXCOM0_SPI || SAMA5_FLEXCOM1_SPI || SAMA5_FLEXCOM2_SPI || SAMA5_FLEXCOM3_SPI || SAMA5_FLEXCOM4_SPI
-
-menu "QSPI Device Driver Configuration"
-	depends on SAMA5_QSPI0 || SAMA5_QSPI1
-
-config SAMA5_QSPI_DLYBS
-	int "Delay Before QSCK (nsec)"
-	default 0
-
-config SAMA5_QSPI_DLYBCT
-	int "Delay Between Consecutive Transfers (nsec)"
-	default 0
-
-config SAMA5_QSPI_DMA
-	bool "QSPI DMA"
-	default n
-	depends on SAMA5_XDMAC0 || SAMA5_XDMAC1
-	---help---
-		Use XDMA to improve SPI transfer performance.
-
-config SAMA5_QSPI_DMATHRESHOLD
-	int "QSPI DMA threshold"
-	default 4
-	depends on SAMA5_QSPI_DMA
-	---help---
-		When QSPI (X)DMA is enabled, small DMA transfers will still be performed
-		by polling logic.  But we need a threshold value to determine what
-		is small.  That value is provided by SAMA5_QSPI_DMATHRESHOLD.
-
-config SAMA5_QSPI_DMADEBUG
-	bool "QSPI DMA transfer debug"
-	depends on SAMA5_QSPI_DMA && DEBUG_FEATURES && DEBUG_DMA
-	default n
-	---help---
-		Enable special debug instrumentation analyze QSPI DMA data transfers.
-		This logic is as non-invasive as possible:  It samples DMA
-		registers at key points in the data transfer and then dumps all of
-		the registers at the end of the transfer.
-
-config SAMA5_QSPI_REGDEBUG
-	bool "QSPI Register level debug"
-	depends on DEBUG_SPI_INFO
-	default n
-	---help---
-		Output detailed register-level QSPI device debug information.
-		Requires also CONFIG_DEBUG_SPI_INFO.
-
-endmenu # QSPI Device Driver Configuration
-
-if SAMA5_TWI0 || SAMA5_TWI1 || SAMA5_TWI2 || SAMA5_TWI3 || SAMA5_FLEXCOM_TWI
+if SAMA5_TWI0 || SAMA5_TWI1 || SAMA5_TWI2 || SAMA5_TWI3
 
 menu "TWI device driver options"
 
@@ -3548,32 +2402,6 @@ config SAMA5_TWI3_FREQUENCY
 	default 100000
 	depends on SAMA5_TWI3
 
-config SAMA5_TWI_FC0_FREQUENCY
-	int "TWI4 (flexcom-0) Frequency"
-	default 100000
-	depends on SAMA5_FLEXCOM_TWI0
-
-config SAMA5_TWI_FC1_FREQUENCY
-	int "TWI5 (flexcom-1) Frequency"
-	default 100000
-	depends on SAMA5_FLEXCOM_TWI1
-
-config SAMA5_TWI_FC2_FREQUENCY
-	int "TWI6 (flexcom-2) Frequency"
-	default 100000
-	depends on SAMA5_FLEXCOM_TWI2
-
-config SAMA5_TWI_FC3_FREQUENCY
-	int "TWI7 (flexcom-3) Frequency"
-	default 100000
-	depends on SAMA5_FLEXCOM_TWI3
-
-config SAMA5_TWI_FC4_FREQUENCY
-	int "TWI8 (flexcom-4) Frequency"
-	default 100000
-	depends on SAMA5_FLEXCOM_TWI4
-
-
 config SAMA5_TWI_REGDEBUG
 	bool "TWI register level debug"
 	depends on DEBUG_I2C_INFO
@@ -3583,7 +2411,7 @@ config SAMA5_TWI_REGDEBUG
 		Very invasive! Requires also CONFIG_DEBUG_I2C_INFO.
 
 endmenu # TWI device driver options
-endif # SAMA5_TWI0 || SAMA5_TWI1 || SAMA5_TWI2 || SAMA5_TWI3 | SAMA5_FLEXCOM_TWI
+endif # SAMA5_TWI0 || SAMA5_TWI1 || SAMA5_TWI2 || SAMA5_TWI3
 
 if SAMA5_SSC0 || SAMA5_SSC1
 menu "SSC Configuration"
@@ -4120,7 +2948,6 @@ config SAMA5_OHCI
 	default n
 	select USBHOST
 	select USBHOST_HAVE_ASYNCH
-	select USBHOST_WAITER
 	---help---
 		Build support for the SAMA5 USB full speed Open Host Controller
 		Interface (OHCI).
@@ -4157,7 +2984,6 @@ config SAMA5_EHCI
 	default n
 	select USBHOST
 	select USBHOST_HAVE_ASYNCH
-	select USBHOST_WAITER
 	---help---
 		Build support for the SAMA5 USB high speed Enhanced Host Controller
 		Interface (EHCI).  If low/full speed is needed too, then you must
@@ -4207,7 +3033,7 @@ if SAMA5_OHCI || SAMA5_EHCI
 config SAMA5_UHPHS_RHPORT1
 	bool "Use Port A"
 	default y
-	depends on !SAMA5_UDPHS || SAMA5_USB_DRP
+	depends on !SAMA5_UDPHS
 
 config SAMA5_UHPHS_RHPORT2
 	bool "Use Port B"
@@ -4327,7 +3153,7 @@ if SAMA5_ADC_HAVE_CHAN
 config SAMA5_ADC_DMA
 	bool "DMA Support"
 	default n
-	depends on SAMA5_DMAC1 || SAMA5_XDMAC0 || SAMA5_XDMAC1
+	depends on SAMA5_DMAC1
 	---help---
 		Enable DMA transfers of converted data.  This option is only
 		useful if you have numerous DMA channels enabled.  The end result
@@ -4362,7 +3188,6 @@ config SAMA5_ADC_DMASAMPLES
 
 config SAMA5_ADC_AUTOCALIB
 	bool "ADC auto-calibration"
-	depends on ARCH_CHIP_SAMA5D3
 	default n
 	---help---
 		Perform ADC auto-calibration during the ADC initialization sequence
@@ -4379,12 +3204,11 @@ config SAMA5_ADC_ANARCH
 	default n
 	---help---
 		This option allows you to select different gain, offset, and single
-		vs. differential modes for each channel, depending on ARCH.
+		vs. differential modes for each channel.
 
 if SAMA5_ADC_ANARCH
 
 menu "Channel gain"
-	depends on ARCH_CHIP_SAMA5D
 
 config SAMA5_ADC_GAIN0
 	int "Channel 0 gain"
@@ -4521,7 +3345,6 @@ config SAMA5_ADC_GAIN11
 endmenu # Channel gain
 
 menu "Channel offsets"
-	depends on ARCH_CHIP_SAMA5D3
 
 config SAMA5_ADC_OFFSET0
 	bool "Channel 0 offset"
@@ -4622,7 +3445,6 @@ config SAMA5_ADC_OFFSET11
 endmenu # Channel offsets
 
 menu "Channel differential mode"
-	depends on ARCH_CHIP_SAMA5D2 || ARCH_CHIP_SAMA5D3
 
 config SAMA5_ADC_DIFFMODE0
 	bool "Channel 0 differential mode"
@@ -4716,28 +3538,25 @@ if !SAMA5_ADC_ANARCH
 config SAMA5_ADC_GAIN
 	int "Analog gain"
 	default 1
-	depends on ARCH_CHIP_SAMA5D3
+	depends on SAMA5_ADC_CHAN0
 	range 0 3
 	---help---
 		Valid gain settings are {0, 1, 2, 3} which may be interpreted as
 		either {1, 1, 2, 4} if the channels are configured for single ended
 		mode or as {0.5, 1, 2, 2} if the channels are configured for
-		differential mode. Applies to all channels.
+		differential mode.
 
 config SAMA5_ADC_OFFSET
 	bool "Offset"
 	default n
-	depends on ARCH_CHIP_SAMA5D3
 	---help---
-		Center the analog signal on Vrefin/2 before the gain scaling for
-		all channels.
-
+		Center the analog signal on Vrefin/2 before the gain scaling.
 
 config SAMA5_ADC_DIFFMODE
 	bool "Differential mode"
 	default n
 	---help---
-		Selects differential (vs. single-ended mode) for all channels.
+		Selects differential (vs. single-ended mode)
 
 endif # !SAMA5_ADC_ANARCH
 
@@ -4754,16 +3573,6 @@ config SAMA5_ADC_SWTRIG
 	---help---
 		A-to-D Conversion is initiated only by software via an ioctl()
 
-config SAMA5_ADC_PERIODIC_TRIG
-	bool "Periodic trigger"
-	---help---
-		A-to-D Conversion is triggered periodically
-
-config SAMA5_ADC_CONTINUOUS_TRIG
-	bool "Continuous trigger"
-	---help---
-		A-to-D Conversion is continuous
-
 config SAMA5_ADC_ADTRG
 	bool "External trigger via the ADTRG pin"
 	---help---
@@ -4776,45 +3585,12 @@ config SAMA5_ADC_TIOATRIG
 		A-to-D Conversion is initiated the A output from one of
 		Timer/Counter 0 channels.
 
-config SAMA5_ADC_PWMTRIG
-	bool "PWM Event trigger"
-	depends on SAMA5_PWM
-	---help---
-		A-to-D Conversion is initiated from the PWM event lines
-
-config SAMA5_ADC_RTCOUT
-	bool "RTC Out trigger"
-	depends on SAMA5_RTC
-	depends on ARCH_CHIP_SAMA5D2
-	---help---
-		A-to-D Conversion is initiated from the RTC output
-
 endchoice # Trigger mode
-
-if SAMA5_ADC_PWMTRIG
-
-choice
-	prompt "PWM Event Line Selection"
-	default SAMA5_ADC_PWM_TRIG_LINE0
-
-config SAMA5_ADC_PWM_TRIG_LINE0
-	bool "PWM event Line 0"
-	---help---
-		Trigger A-to-D conversion on PWM event line 0
-
-config SAMA5_ADC_PWM_TRIG_LINE1
-	bool "PWM event Line 1"
-	---help---
-		Trigger A-to-D conversion on PWM event line 1
-
-endchoice # PWM Event Line Selection
-endif # SAMA5_ADC_PWMTRIG
-
-if SAMA5_ADC_ADTRG || SAMA5_ADC_TIOATRIG || SAMA5_ADC_PWMTRIG || SAMA5_ADC_RTCOUT
 
 choice
 	prompt "ADTRG edge"
 	default SAMA5_ADC_ADTRG_BOTH
+	depends on SAMA5_ADC_ADTRG
 
 config SAMA5_ADC_ADTRG_RISING
 	bool "Rising edge"
@@ -4832,7 +3608,6 @@ config SAMA5_ADC_ADTRG_BOTH
 		Trigger A-to-D conversion on both edges of the ADTRG signal
 
 endchoice # ADTRG edge
-endif # SAMA5_ADC_ADTRG
 
 if SAMA5_ADC_TIOATRIG
 
@@ -4895,17 +3670,6 @@ config SAMA5_ADC_TIOA_BOTH
 
 endchoice # ADTRG edge
 endif # SAMA5_ADC_TIOATRIG
-
-if SAMA5_ADC_PERIODIC_TRIG
-
-config SAMA5_ADC_TRIGGER_PERIOD
-	int "ADC Periodic Trigger Rate, useconds"
-	default 50000
-	---help---
-		This setting determines the periodic sample trigger rate in useconds.
-
-endif # SAMA5_ADC_TRIGGER_PERIOD
-
 endmenu # ADC Trigger Selection
 endif # SAMA5_ADC_HAVE_CHAN
 
@@ -4986,12 +3750,6 @@ config SAMA5_TSD_NPOLLWAITERS
 	default 4
 	---help---
 		Maximum number of threads that can be waiting on poll()
-
-config SAMA5_TSD_AUTOCALIB
-	bool "TSD auto-calibration"
-	default y
-	---help---
-		Perform TSD auto-calibration during the TSD initialization sequence
 
 endif # SAMA5_TSD
 endmenu # Touchscreen Configuration
@@ -5122,14 +3880,16 @@ endif # SAMA5_TC2
 
 config SAMA5_ONESHOT
 	bool "TC one-shot wrapper"
-	default SCHED_TICKLESS
+	default n if !SCHED_TICKLESS
+	default y if SCHED_TICKLESS
 	---help---
 		Enable a wrapper around the low level timer/counter functions to
 		support one-shot timer.
 
 config SAMA5_FREERUN
 	bool "TC free-running wrapper"
-	default SCHED_TICKLESS
+	default n if !SCHED_TICKLESS
+	default y if SCHED_TICKLESS
 	---help---
 		Enable a wrapper around the low level timer/counter functions to
 		support a free-running timer.
@@ -5424,7 +4184,8 @@ config SAMA5_WDT_INTERRUPT
 
 config SAMA5_WDT_DEBUGHALT
 	bool "Halt on DEBUG"
-	default DEBUG_FEATURES
+	default y if DEBUG_FEATURES
+	default n if !DEBUG_FEATURES
 	---help---
 		Halt the watchdog timer in the debug state
 
@@ -5536,9 +4297,9 @@ endchoice # CS0 Memory Type
 #	depends on SAMA5_EBICS0_NAND
 #
 # config SAMA5_EBICS0_ECCNONE
-#	bool "No ECC"
-#	---help---
-#		Only raw transfers to/from NAND are supported
+# 	bool "No ECC"
+# 	---help---
+# 		Only raw transfers to/from NAND are supported
 #
 # config SAMA5_EBICS0_SWECC
 #	bool "Software ECC"
@@ -6295,31 +5056,4 @@ config SAMA5_EBICS3_HEAP_SIZE
 
 endif #SAMA5_EBICS3_HEAP
 endmenu # Heap Configuration
-
-config SAMA5_SDMMC
-	bool "enable SDMMC controller"
-	default SAMA5_HAVE_SDMMC
-	select SDIO_DMA
-	select SCHED_HPWORK
-	select MMCSD
-	select MMCSD_SDIO
-	select SDIO_BLOCKSETUP
-	select ARCH_HAVE_SDIO
-	select SAMA5_SDMMC_DMA
-	---help---
-		Enable SD Card interface SDMMC. Selects SAMA5_SDMMC SAMA5_SDMMC_DMA SDIO_DMA SCHED_HPWORK SDIO_BLOCKSETUP
-
-choice
-	prompt "SDMMC maximum bus speed"
-	default SAMA5_SDMMC_50MHZ
-	depends on SAMA5_SDMMC
-
-config SAMA5_SDMMC_25MHZ
-	bool "SDMMC 25Mhz"
-
-config SAMA5_SDMMC_50MHZ
-	bool "SDMMC 50Mhz"
-
-endchoice # SDMMC bus speed
-
 endif # ARCH_CHIP_SAMA5

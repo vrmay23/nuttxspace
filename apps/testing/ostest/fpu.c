@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/testing/ostest/fpu.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,11 +38,8 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/arch.h>
 #include <sys/wait.h>
 
-#include <assert.h>
-#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -41,15 +51,18 @@
 /****************************************************************************
  * Pre-processor definitions
  ****************************************************************************/
-
-/* Configuration ************************************************************/
+/* Configuration *******************************************************/
 
 #undef HAVE_FPU
 #ifdef CONFIG_ARCH_FPU
-#  if defined(CONFIG_SCHED_WAITPID) && \
+#  if defined(CONFIG_TESTING_OSTEST_FPUSIZE) && \
+      defined(CONFIG_SCHED_WAITPID) && \
       defined(CONFIG_BUILD_FLAT)
 #    define HAVE_FPU 1
 #  else
+#    ifndef CONFIG_TESTING_OSTEST_FPUSIZE
+#      warning "FPU test not built; CONFIG_TESTING_OSTEST_FPUSIZE not defined"
+#    endif
 #    ifndef CONFIG_SCHED_WAITPID
 #      warning "FPU test not built; CONFIG_SCHED_WAITPID not defined"
 #    endif
@@ -77,40 +90,47 @@
 #  define CONFIG_TESTING_OSTEST_FPUSTACKSIZE 2048
 #endif
 
-/* Other definitions ********************************************************/
+/* Other definitions ***************************************************/
+/* We'll keep all data using 32-bit values only to force 32-bit alignment.
+ * This logic has no real notion of the underlying representation.
+ */
 
+#define FPU_WORDSIZE ((CONFIG_TESTING_OSTEST_FPUSIZE+3)>>2)
 #define FPU_NTHREADS  2
 
-/* Some architectures require XCPTCONTEXT to be aligned */
-
-#ifndef XCPTCONTEXT_ALIGN
-#  define XCPTCONTEXT_ALIGN 1
+#ifndef NULL
+# define NULL (void*)0
 #endif
+
+/****************************************************************************
+ * External Dependencies
+ ****************************************************************************/
+/* This test is very dependent on support provided by the chip/board-
+ * layer logic.  In particular, it expects the following functions
+ * to be provided:
+ */
+
+/* Given an array of size CONFIG_TESTING_OSTEST_FPUSIZE, this function
+ * will return the current FPU registers.
+ */
+
+extern void arch_getfpu(FAR uint32_t *fpusave);
+
+/* Given two arrays of size CONFIG_TESTING_OSTEST_FPUSIZE this
+ * function will compare them and return true if they are identical.
+ */
+
+extern bool arch_cmpfpu(FAR const uint32_t *fpusave1,
+                        FAR const uint32_t *fpusave2);
 
 /****************************************************************************
  * Private Types
  ****************************************************************************/
 
-#ifndef PRIxREG
-typedef uintptr_t   uintreg_t;
-
-#if UINTPTR_MAX <= UINT32_MAX
-#  define PRIxREG   "08" PRIxPTR
-#else
-#  define PRIxREG   "016" PRIxPTR
-#endif
-
-#endif
-
 struct fpu_threaddata_s
 {
-#if XCPTCONTEXT_ALIGN > 1
-  uintreg_t save1[XCPTCONTEXT_REGS] aligned_data(XCPTCONTEXT_ALIGN);
-  uintreg_t save2[XCPTCONTEXT_REGS] aligned_data(XCPTCONTEXT_ALIGN);
-#else
-  uintreg_t save1[XCPTCONTEXT_REGS];
-  uintreg_t save2[XCPTCONTEXT_REGS];
-#endif
+  uint32_t save1[FPU_WORDSIZE];
+  uint32_t save2[FPU_WORDSIZE];
 
   /* These are just dummy values to force the compiler to do the
    * requested floating point computations without the nonsense
@@ -139,23 +159,21 @@ static uint8_t g_fpuno;
  * Private Functions
  ****************************************************************************/
 
-static void fpu_dump(FAR uintreg_t *buffer, FAR const char *msg)
+static void fpu_dump(FAR uint32_t *buffer, FAR const char *msg)
 {
-  int i;
-  int j;
-  int k;
+  int i, j, k;
 
   printf("%s (%p):\n", msg, buffer);
-  for (i = 0; i < XCPTCONTEXT_REGS; i += 8)
+  for (i = 0; i < FPU_WORDSIZE; i += 8)
     {
       printf("    %04x: ", i);
       for (j = 0; j < 8; j++)
         {
           k = i + j;
 
-          if (k < XCPTCONTEXT_REGS)
+          if (k < FPU_WORDSIZE)
             {
-              printf("%" PRIxREG " ", buffer[k]);
+              printf("%08x ", buffer[k]);
             }
           else
             {
@@ -163,9 +181,8 @@ static void fpu_dump(FAR uintreg_t *buffer, FAR const char *msg)
               break;
             }
         }
-
       printf("\n");
-    }
+   }
 }
 
 static int fpu_task(int argc, char *argv[])
@@ -197,15 +214,15 @@ static int fpu_task(int argc, char *argv[])
 
   for (i = 0; i < CONFIG_TESTING_OSTEST_FPULOOPS; i++)
     {
-      printf("FPU#%d: pass %d\n", id, i + 1);
+      printf("FPU#%d: pass %d\n", id, i+1);
       fflush(stdout);
 
       /* Set the FPU register save arrays to a known-but-illogical values so
        * that we can verify that reading of the registers actually occurs.
        */
 
-      memset(fpu->save1, 0xff, XCPTCONTEXT_REGS * sizeof(uintreg_t));
-      memset(fpu->save2, 0xff, XCPTCONTEXT_REGS * sizeof(uintreg_t));
+      memset(fpu->save1, 0xff, FPU_WORDSIZE * sizeof(uint32_t));
+      memset(fpu->save2, 0xff, FPU_WORDSIZE * sizeof(uint32_t));
 
       /* Prevent context switches while we set up some stuff */
 
@@ -240,40 +257,34 @@ static int fpu_task(int argc, char *argv[])
 
       /* Sample the floating point registers */
 
-      up_saveusercontext(fpu->save1);
+      arch_getfpu(fpu->save1);
 
-      /* Re-read and verify the FPU registers consistently without
-       * corruption
-       */
+      /* Re-read and verify the FPU registers consistently without corruption */
 
-      up_saveusercontext(fpu->save2);
-      if (!up_fpucmp(fpu->save1, fpu->save2))
+      arch_getfpu(fpu->save2);
+      if (!arch_cmpfpu(fpu->save1, fpu->save2))
         {
           printf("ERROR FPU#%d: save1 and save2 do not match\n", id);
           fpu_dump(fpu->save1, "Values after math operations (save1)");
           fpu_dump(fpu->save2, "Values after verify re-read (save2)");
-          ASSERT(false);
           return EXIT_FAILURE;
         }
 
-      /* Now unlock and sleep for a while -- this should result in some
-       * context switches
-       */
+      /* Now unlock and sleep for a while -- this should result in some context switches */
 
       sched_unlock();
       usleep(CONFIG_TESTING_OSTEST_FPUMSDELAY * 1000);
 
-      /* Several context switches should have occurred.  Now verify that
-       * the floating point registers are still correctly set.
+      /* Several context switches should have occurred.  Now verify that the floating
+       * point registers are still correctly set.
        */
 
-      up_saveusercontext(fpu->save2);
-      if (!up_fpucmp(fpu->save1, fpu->save2))
+      arch_getfpu(fpu->save2);
+      if (!arch_cmpfpu(fpu->save1, fpu->save2))
         {
           printf("ERROR FPU#%d: save1 and save2 do not match\n", id);
           fpu_dump(fpu->save1, "Values before waiting (save1)");
           fpu_dump(fpu->save2, "Values after waiting (save2)");
-          ASSERT(false);
           return EXIT_FAILURE;
         }
     }
@@ -299,28 +310,23 @@ void fpu_test(void)
 
   g_fpuno = 0;
   printf("Starting task FPU#1\n");
-  task1 = task_create("FPU#1", CONFIG_TESTING_OSTEST_FPUPRIORITY,
-                      CONFIG_TESTING_OSTEST_FPUSTACKSIZE, fpu_task, NULL);
+  task1 = task_create("FPU#1", CONFIG_TESTING_OSTEST_FPUPRIORITY, CONFIG_TESTING_OSTEST_FPUSTACKSIZE, fpu_task, NULL);
   if (task1 < 0)
     {
       printf("fpu_test: ERROR Failed to start task FPU#1\n");
-      ASSERT(false);
     }
   else
     {
       printf("fpu_test: Started task FPU#1 at PID=%d\n", task1);
     }
-
   fflush(stdout);
   usleep(250);
 
   printf("Starting task FPU#2\n");
-  task2 = task_create("FPU#2", CONFIG_TESTING_OSTEST_FPUPRIORITY,
-                      CONFIG_TESTING_OSTEST_FPUSTACKSIZE, fpu_task, NULL);
+  task2 = task_create("FPU#2", CONFIG_TESTING_OSTEST_FPUPRIORITY, CONFIG_TESTING_OSTEST_FPUSTACKSIZE, fpu_task, NULL);
   if (task2 < 0)
     {
       printf("fpu_test: ERROR Failed to start task FPU#1\n");
-      ASSERT(false);
     }
   else
     {
@@ -335,7 +341,6 @@ void fpu_test(void)
 
 #else
   printf("fpu_test: ERROR: The FPU test is not properly configured\n");
-  ASSERT(false);
 #endif
   printf("fpu_test: Returning\n");
 }

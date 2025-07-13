@@ -1,28 +1,40 @@
 /****************************************************************************
  * drivers/sensors/max31855.c
+ * Character driver for the Maxim MAX31855 Thermocouple-to-Digital Converter
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Alan Carvalho de Assis. All rights reserved.
+ *   Author: Alan Carvalho de Assis <acassis@extern.io>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-/* Character driver for the Maxim MAX31855 Thermocouple-to-Digital Converter
- *
- * NOTE: Some Maxim MAX31855 chips have an issue it report value 25% lower
+/* NOTE: Some Maxim MAX31855 chips have an issue it report value 25% lower
  * of real temperature, for more info read this thread:
  * http://www.eevblog.com/forum/projects/max31855-temperature-error/
  */
@@ -33,10 +45,8 @@
 
 #include <nuttx/config.h>
 
-#include <inttypes.h>
 #include <stdlib.h>
 #include <fixedmath.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -52,16 +62,16 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+/****************************************************************************
+ * Private
+ ****************************************************************************/
+
 #define MAX31855_FAULT         (1 << 16)
 #define MAX31855_SHORT_VCC     (1 << 2)
 #define MAX31855_SHORT_GND     (1 << 1)
 #define MAX31855_OPEN_CIRCUIT  (1 << 0)
 #define MAX31855_TEMP_COUPLE   0xffffc000
 #define MAX31855_TEMP_JUNCTION 0xfff0
-
-/****************************************************************************
- * Private Types
- ****************************************************************************/
 
 struct max31855_dev_s
 {
@@ -79,6 +89,8 @@ static void max31855_unlock(FAR struct spi_dev_s *spi);
 
 /* Character driver methods */
 
+static int     max31855_open(FAR struct file *filep);
+static int     max31855_close(FAR struct file *filep);
 static ssize_t max31855_read(FAR struct file *filep, FAR char *buffer,
                              size_t buflen);
 static ssize_t max31855_write(FAR struct file *filep, FAR const char *buffer,
@@ -90,10 +102,13 @@ static ssize_t max31855_write(FAR struct file *filep, FAR const char *buffer,
 
 static const struct file_operations g_max31855fops =
 {
-  NULL,            /* open */
-  NULL,            /* close */
-  max31855_read,   /* read */
-  max31855_write,  /* write */
+  max31855_open,
+  max31855_close,
+  max31855_read,
+  max31855_write,
+  NULL,
+  NULL,
+  NULL
 };
 
 /****************************************************************************
@@ -131,6 +146,32 @@ static void max31855_unlock(FAR struct spi_dev_s *spi)
 }
 
 /****************************************************************************
+ * Name: max31855_open
+ *
+ * Description:
+ *   This function is called whenever the MAX31855 device is opened.
+ *
+ ****************************************************************************/
+
+static int max31855_open(FAR struct file *filep)
+{
+  return OK;
+}
+
+/****************************************************************************
+ * Name: max31855_close
+ *
+ * Description:
+ *   This routine is called when the MAX31855 device is closed.
+ *
+ ****************************************************************************/
+
+static int max31855_close(FAR struct file *filep)
+{
+  return OK;
+}
+
+/****************************************************************************
  * Name: max31855_read
  ****************************************************************************/
 
@@ -154,8 +195,7 @@ static ssize_t max31855_read(FAR struct file *filep, FAR char *buffer,
 
   if (buflen != 2)
     {
-      snerr("ERROR: You can't read something other than 16 bits "
-            "(2 bytes)\n");
+      snerr("ERROR: You can't read something other than 16 bits (2 bytes)\n");
       return -EINVAL;
     }
 
@@ -187,7 +227,7 @@ static ssize_t max31855_read(FAR struct file *filep, FAR char *buffer,
   regval |= (regmsb & 0xff00) << 8;
   regval |= (regmsb & 0xff) << 24;
 
-  sninfo("Read from MAX31855 = 0x%08" PRIX32 "\n", regval);
+  sninfo("Read from MAX31855 = 0x%08X\n", regval);
 
   /* Feed sensor data to entropy pool */
 
@@ -280,8 +320,7 @@ int max31855_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
 
   /* Initialize the MAX31855 device structure */
 
-  priv = (FAR struct max31855_dev_s *)
-         kmm_malloc(sizeof(struct max31855_dev_s));
+  priv = (FAR struct max31855_dev_s *)kmm_malloc(sizeof(struct max31855_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");

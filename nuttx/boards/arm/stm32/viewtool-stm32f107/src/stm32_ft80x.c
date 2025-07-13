@@ -1,22 +1,35 @@
 /****************************************************************************
- * boards/arm/stm32/viewtool-stm32f107/src/stm32_ft80x.c
+ * boards/arm/stm32/viewtools-stm32f107/src/stm32_ft80x.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -37,7 +50,7 @@
 #include <nuttx/spi/spi.h>
 #include <nuttx/lcd/ft80x.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "stm32_gpio.h"
 #include "stm32_spi.h"
 
@@ -58,7 +71,7 @@ struct viewtool_ft80xlower_s
   /* Extensions for the viewtool board */
 
   xcpt_t handler;
-  void *arg;
+  FAR void *arg;
 };
 
 /****************************************************************************
@@ -81,19 +94,18 @@ struct viewtool_ft80xlower_s
  *   destroy - The driver has been unlinked. Cleanup as necessary.
  */
 
-static int  ft80x_attach(const struct ft80x_config_s *lower, xcpt_t isr,
-                         void *arg);
-static void ft80x_enable(const struct ft80x_config_s *lower,
-                         bool enable);
-static void ft80x_clear(const struct ft80x_config_s *lower);
+static int  ft80x_attach(FAR const struct ft80x_config_s *lower, xcpt_t isr,
+              FAR void *arg);
+static void ft80x_enable(FAR const struct ft80x_config_s *lower, bool enable);
+static void ft80x_clear(FAR const struct ft80x_config_s *lower);
 
-static void ft80x_pwrdown(const struct ft80x_config_s *lower,
+static void ft80x_pwrdown(FAR const struct ft80x_config_s *lower,
                           bool pwrdown);
 #ifdef CONFIG_LCD_FT80X_AUDIO_MCUSHUTDOWN
-static void ft80x_audio(const struct ft80x_config_s *lower, bool enable);
+static void ft80x_audio(FAR const struct ft80x_config_s *lower, bool enable);
 #endif
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-static void ft80x_destroy(const struct ft80x_config_s *lower);
+static void ft80x_destroy(FAR const struct ft80x_config_s *lower);
 #endif
 
 /****************************************************************************
@@ -152,11 +164,11 @@ static struct viewtool_ft80xlower_s g_ft80xlower =
  *
  ****************************************************************************/
 
-static int ft80x_attach(const struct ft80x_config_s *lower, xcpt_t isr,
-                        void *arg)
+static int ft80x_attach(FAR const struct ft80x_config_s *lower, xcpt_t isr,
+                        FAR void *arg)
 {
-  struct viewtool_ft80xlower_s *priv =
-    (struct viewtool_ft80xlower_s *)lower;
+  FAR struct viewtool_ft80xlower_s *priv =
+    (FAR struct viewtool_ft80xlower_s *)lower;
 
   if (isr)
     {
@@ -179,11 +191,11 @@ static int ft80x_attach(const struct ft80x_config_s *lower, xcpt_t isr,
   return OK;
 }
 
-static void ft80x_enable(const struct ft80x_config_s *lower,
+static void ft80x_enable(FAR const struct ft80x_config_s *lower,
                          bool enable)
 {
-  struct viewtool_ft80xlower_s *priv =
-    (struct viewtool_ft80xlower_s *)lower;
+  FAR struct viewtool_ft80xlower_s *priv =
+    (FAR struct viewtool_ft80xlower_s *)lower;
   irqstate_t flags;
 
   /* Attach and enable, or detach and disable.  Enabling and disabling GPIO
@@ -214,12 +226,12 @@ static void ft80x_enable(const struct ft80x_config_s *lower,
   leave_critical_section(flags);
 }
 
-static void ft80x_clear(const struct ft80x_config_s *lower)
+static void ft80x_clear(FAR const struct ft80x_config_s *lower)
 {
   /* Does nothing */
 }
 
-static void ft80x_pwrdown(const struct ft80x_config_s *lower,
+static void ft80x_pwrdown(FAR const struct ft80x_config_s *lower,
                           bool pwrdown)
 {
   /* Powerdown pin is active low.  Hence, it is really a power up pin. */
@@ -228,14 +240,14 @@ static void ft80x_pwrdown(const struct ft80x_config_s *lower,
 }
 
 #ifdef CONFIG_LCD_FT80X_AUDIO_MCUSHUTDOWN
-static void ft80x_audio(const struct ft80x_config_s *lower, bool enable)
+static void ft80x_audio(FAR const struct ft80x_config_s *lower, bool enable)
 {
   /* Does nothing */
 }
 #endif
 
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-static void ft80x_destroy(const struct ft80x_config_s *lower)
+static void ft80x_destroy(FAR const struct ft80x_config_s *lower)
 {
   /* Does nothing */
 }
@@ -263,7 +275,7 @@ static void ft80x_destroy(const struct ft80x_config_s *lower)
 
 int stm32_ft80x_setup(void)
 {
-  struct spi_dev_s *spi;
+  FAR struct spi_dev_s *spi;
   int ret;
 
   /* Configure the FT80x interrupt pin as an input and powerdown pin as an
@@ -288,9 +300,7 @@ int stm32_ft80x_setup(void)
   if (ret < 0)
     {
       lcderr("ERROR: Failed to register touchscreen device\n");
-
       /* up_spiuninitialize(spi); */
-
       return -ENODEV;
     }
 

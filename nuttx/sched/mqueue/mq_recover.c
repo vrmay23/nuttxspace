@@ -1,7 +1,5 @@
 /****************************************************************************
- * sched/mqueue/mq_recover.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  sched/mqueue/mq_recover.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -58,8 +56,6 @@
 
 void nxmq_recover(FAR struct tcb_s *tcb)
 {
-  FAR struct mqueue_inode_s *msgq;
-
   /* If were were waiting for a timed message queue event, then the
    * timer was canceled and deleted in nxtask_recover() before this
    * function was called.
@@ -67,14 +63,12 @@ void nxmq_recover(FAR struct tcb_s *tcb)
 
   /* Was the task waiting for a message queue to become non-empty? */
 
-  msgq = tcb->waitobj;
-
   if (tcb->task_state == TSTATE_WAIT_MQNOTEMPTY)
     {
       /* Decrement the count of waiters */
 
-      DEBUGASSERT(msgq && msgq->cmn.nwaitnotempty > 0);
-      msgq->cmn.nwaitnotempty--;
+      DEBUGASSERT(tcb->msgwaitq && tcb->msgwaitq->nwaitnotempty > 0);
+      tcb->msgwaitq->nwaitnotempty--;
     }
 
   /* Was the task waiting for a message queue to become non-full? */
@@ -83,7 +77,7 @@ void nxmq_recover(FAR struct tcb_s *tcb)
     {
       /* Decrement the count of waiters */
 
-      DEBUGASSERT(msgq && msgq->cmn.nwaitnotfull > 0);
-      msgq->cmn.nwaitnotfull--;
+      DEBUGASSERT(tcb->msgwaitq && tcb->msgwaitq->nwaitnotfull > 0);
+      tcb->msgwaitq->nwaitnotfull--;
     }
 }

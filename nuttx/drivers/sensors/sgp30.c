@@ -1,22 +1,36 @@
 /****************************************************************************
  * drivers/sensors/sgp30.c
+ * Driver for the Sensirion SGP30 Gas Platform sensor
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Haltian Ltd. All rights reserved.
+ *   Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +44,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
-#include <assert.h>
 #include <errno.h>
 #include <time.h>
 #include <debug.h>
@@ -40,7 +53,6 @@
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/sensors/sgp30.h>
-#include <nuttx/mutex.h>
 #include <nuttx/random.h>
 
 #if defined(CONFIG_I2C) && defined(CONFIG_SENSORS_SGP30)
@@ -55,12 +67,16 @@
 #  define sgp30_dbg(x, ...)    sninfo(x, ##__VA_ARGS__)
 #endif
 
+#ifndef CONFIG_SGP30_I2C_FREQUENCY
+#  define CONFIG_SGP30_I2C_FREQUENCY 100000
+#endif
+
 #define SGP30_I2C_RETRIES 3
 #define SGP30_INIT_RETRIES 5
 #define SGP30_INIT_LIMIT_MS 10
 
 /****************************************************************************
- * Private Types
+ * Private
  ****************************************************************************/
 
 struct sgp30_dev_s
@@ -74,7 +90,7 @@ struct sgp30_dev_s
   int16_t crefs;                /* Number of open references */
 #endif
   struct timespec last_update;
-  mutex_t devlock;
+  sem_t devsem;
 };
 
 struct sgp30_word_s
@@ -157,11 +173,7 @@ static const struct file_operations g_sgp30fops =
   sgp30_write,    /* write */
   NULL,           /* seek */
   sgp30_ioctl,    /* ioctl */
-  NULL,           /* mmap */
-  NULL,           /* truncate */
-  NULL,           /* poll */
-  NULL,           /* readv */
-  NULL            /* writev */
+  NULL            /* poll */
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   , sgp30_unlink /* unlink */
 #endif
@@ -556,12 +568,12 @@ static int sgp30_measure_raw(FAR struct sgp30_dev_s *priv,
 static int sgp30_open(FAR struct file *filep)
 {
   FAR struct inode *inode = filep->f_inode;
-  FAR struct sgp30_dev_s *priv = inode->i_private;
+  FAR struct sgp30_dev_s *priv  = inode->i_private;
   int ret = OK;
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -595,7 +607,7 @@ static int sgp30_open(FAR struct file *filep)
           add_sensor_randomness((buf[0].crc << 24) ^ (serial[0].crc << 16) ^
                                 (serial[1].crc << 8) ^ (serial[2].crc << 0));
 
-          clock_systime_timespec(&start);
+          clock_gettime(CLOCK_REALTIME, &start);
           ret = sgp30_write_cmd(priv, SGP30_CMD_INIT_AIR_QUALITY, NULL, 0);
           if (ret < 0)
             {
@@ -605,7 +617,7 @@ static int sgp30_open(FAR struct file *filep)
           else
             {
               uint32_t repeat = SGP30_INIT_RETRIES;
-              clock_systime_timespec(&curr);
+              clock_gettime(CLOCK_REALTIME, &curr);
               sgp30_dbg("sgp30_write_cmd(SGP30_CMD_INIT_AIR_QUALITY)\n");
               while (repeat-- &&
                      time_has_passed_ms(&curr, &start, SGP30_INIT_LIMIT_MS))
@@ -630,10 +642,10 @@ static int sgp30_open(FAR struct file *filep)
 
                   nxsig_usleep(CONFIG_SGP30_RESET_DELAY_US);
 
-                  clock_systime_timespec(&start);
+                  clock_gettime(CLOCK_REALTIME, &start);
                   ret = sgp30_write_cmd(priv, SGP30_CMD_INIT_AIR_QUALITY,
                                         NULL, 0);
-                  clock_systime_timespec(&curr);
+                  clock_gettime(CLOCK_REALTIME, &curr);
                   if (ret < 0)
                     {
                       sgp30_dbg("sgp30_write_cmd(SGP30_CMD_INIT_AIR_QUALITY)"
@@ -654,7 +666,7 @@ static int sgp30_open(FAR struct file *filep)
         }
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 #endif
@@ -676,7 +688,7 @@ static int sgp30_close(FAR struct file *filep)
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -693,12 +705,12 @@ static int sgp30_close(FAR struct file *filep)
 
   if (priv->crefs <= 0 && priv->unlinked)
     {
-      nxmutex_destroy(&priv->devlock);
+      nxsem_destroy(&priv->devsem);
       kmm_free(priv);
       return OK;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return OK;
 }
 #endif
@@ -720,7 +732,7 @@ static ssize_t sgp30_read(FAR struct file *filep, FAR char *buffer,
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -733,7 +745,7 @@ static ssize_t sgp30_read(FAR struct file *filep, FAR char *buffer,
        * sensor use on hot swappable I2C bus.
        */
 
-      nxmutex_unlock(&priv->devlock);
+      nxsem_post(&priv->devsem);
       return -ENODEV;
     }
 #endif
@@ -742,13 +754,13 @@ static ssize_t sgp30_read(FAR struct file *filep, FAR char *buffer,
    *       to run measurement command every 1 second.
    */
 
-  clock_systime_timespec(&ts);
+  clock_gettime(CLOCK_REALTIME, &ts);
 
   while (!has_time_passed(&ts, &priv->last_update, 1))
     {
       if (filep->f_oflags & O_NONBLOCK)
         {
-          nxmutex_unlock(&priv->devlock);
+          nxsem_post(&priv->devsem);
           return -EAGAIN;
         }
 
@@ -765,12 +777,12 @@ static ssize_t sgp30_read(FAR struct file *filep, FAR char *buffer,
           ret = nxsig_nanosleep(&ts_sleep, NULL);
           if (ret == -EINTR)
             {
-              nxmutex_unlock(&priv->devlock);
+              nxsem_post(&priv->devsem);
               return -EINTR;
             }
         }
 
-      clock_systime_timespec(&ts);
+      clock_gettime(CLOCK_REALTIME, &ts);
     }
 
   ret = sgp30_measure_airq(priv, &data);
@@ -792,7 +804,7 @@ static ssize_t sgp30_read(FAR struct file *filep, FAR char *buffer,
       priv->last_update = ts;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return length;
 }
 
@@ -819,7 +831,7 @@ static int sgp30_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -832,7 +844,7 @@ static int sgp30_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
        * sensor use on hot swappable I2C bus.
        */
 
-      nxmutex_unlock(&priv->devlock);
+      nxsem_post(&priv->devsem);
       return -ENODEV;
     }
 #endif
@@ -900,7 +912,7 @@ static int sgp30_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         {
           /* Input is absolute humidity in unit "mg/m^3". */
 
-          if (arg >= 256000)
+          if (arg < 0 || arg >= 256000)
             {
               ret = -EINVAL;
               break;
@@ -975,7 +987,7 @@ static int sgp30_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -989,12 +1001,12 @@ static int sgp30_unlink(FAR struct inode *inode)
   FAR struct sgp30_dev_s *priv;
   int ret;
 
-  DEBUGASSERT(inode->i_private != NULL);
-  priv = inode->i_private;
+  DEBUGASSERT(inode != NULL && inode->i_private != NULL);
+  priv = (FAR struct sgp30_dev_s *)inode->i_private;
 
   /* Get exclusive access */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -1004,7 +1016,7 @@ static int sgp30_unlink(FAR struct inode *inode)
 
   if (priv->crefs <= 0)
     {
-      nxmutex_destroy(&priv->devlock);
+      nxsem_destroy(&priv->devsem);
       kmm_free(priv);
       return OK;
     }
@@ -1014,7 +1026,7 @@ static int sgp30_unlink(FAR struct inode *inode)
    */
 
   priv->unlinked = true;
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return OK;
 }
 #endif
@@ -1053,7 +1065,7 @@ int sgp30_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   /* Initialize the device structure */
 
-  priv = kmm_zalloc(sizeof(struct sgp30_dev_s));
+  priv = (FAR struct sgp30_dev_s *)kmm_zalloc(sizeof(struct sgp30_dev_s));
   if (priv == NULL)
     {
       sgp30_dbg("ERROR: Failed to allocate instance\n");
@@ -1063,7 +1075,7 @@ int sgp30_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   priv->i2c  = i2c;
   priv->addr = addr;
 
-  nxmutex_init(&priv->devlock);
+  nxsem_init(&priv->devsem, 0, 1);
 
   /* Register the character driver */
 
@@ -1071,7 +1083,6 @@ int sgp30_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   if (ret < 0)
     {
       sgp30_dbg("ERROR: Failed to register driver: %d\n", ret);
-      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
     }
 

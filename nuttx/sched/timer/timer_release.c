@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/timer/timer_release.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -26,12 +24,11 @@
 
 #include <nuttx/config.h>
 
+#include <queue.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
-#include <nuttx/queue.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/spinlock.h>
 
 #include "timer/timer.h"
 
@@ -57,7 +54,7 @@ static inline void timer_free(struct posix_timer_s *timer)
 
   /* Remove the timer from the allocated list */
 
-  flags = spin_lock_irqsave(&g_locktimers);
+  flags = enter_critical_section();
   sq_rem((FAR sq_entry_t *)timer, (FAR sq_queue_t *)&g_alloctimers);
 
   /* Return it to the free list if it is one of the preallocated timers */
@@ -66,14 +63,14 @@ static inline void timer_free(struct posix_timer_s *timer)
   if ((timer->pt_flags & PT_FLAGS_PREALLOCATED) != 0)
     {
       sq_addlast((FAR sq_entry_t *)timer, (FAR sq_queue_t *)&g_freetimers);
-      spin_unlock_irqrestore(&g_locktimers, flags);
+      leave_critical_section(flags);
     }
   else
 #endif
     {
       /* Otherwise, return it to the heap */
 
-      spin_unlock_irqrestore(&g_locktimers, flags);
+      leave_critical_section(flags);
       kmm_free(timer);
     }
 }
@@ -122,9 +119,11 @@ int timer_release(FAR struct posix_timer_s *timer)
       return 1;
     }
 
-  /* Cancel the underlying watchdog instance */
+  /* Free the underlying watchdog instance (the timer will be canceled by the
+   * watchdog logic before it is actually deleted)
+   */
 
-  wd_cancel(&timer->pt_wdog);
+  wd_delete(timer->pt_wdog);
 
   /* Cancel any pending notification */
 

@@ -1,27 +1,41 @@
 /****************************************************************************
  * boards/arm/sam34/sam4s-xplained-pro/src/sam4s-xplained-pro.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014, 2016 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Bob Doiron
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_SAM34_SAM4S_XPLAINED_PRO_SRC_SAM4S_XPLAINED_PRO_H
-#define __BOARDS_ARM_SAM34_SAM4S_XPLAINED_PRO_SRC_SAM4S_XPLAINED_PRO_H
+#ifndef __BOARDS_ARM_SAM34_SAM4S_XPLAINED_SRC_SAM4S_XPLAINED_H
+#define __BOARDS_ARM_SAM34_SAM4S_XPLAINED_SRC_SAM4S_XPLAINED_H
 
 /****************************************************************************
  * Included Files
@@ -46,15 +60,7 @@
 #define HAVE_HSMCI      1
 #define HAVE_PROC       1
 #define HAVE_USBDEV     1
-
-#if defined(CONFIG_MTD_NAND) && defined(CONFIG_SAM34_EXTNAND)
-#define HAVE_NAND       1
-#endif
 #undef  HAVE_USBMONITOR
-
-#if defined(CONFIG_MMCSD_SPI)
-#  define HAVE_MMCSD_SPI 1
-#endif
 
 /* HSMCI */
 
@@ -85,16 +91,6 @@
 #if defined(HAVE_HSMCI) && !defined(CONFIG_SAM34_GPIOC_IRQ)
 #  warning PIOC interrupts not enabled.  No MMC/SD support.
 #  undef HAVE_HSMCI
-#endif
-
-/* MMC/SD minor numbers */
-
-#ifndef CONFIG_NSH_MMCSDMINOR
-#  define CONFIG_NSH_MMCSDMINOR 0
-#endif
-
-#ifndef CONFIG_NSH_MMCSDSLOTNO
-#  define CONFIG_NSH_MMCSDSLOTNO 0
 #endif
 
 /* USB Device */
@@ -174,27 +170,14 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Public Data
+ * Public data
  ****************************************************************************/
 
-/* SPI0 */
+#ifndef __ASSEMBLY__
 
-#ifdef HAVE_MMCSD_SPI
-#define GPIO_SPISD_NPCS0 (GPIO_OUTPUT | GPIO_CFG_PULLUP | GPIO_OUTPUT_SET | \
-                        GPIO_PORT_PIOA | GPIO_PIN11)
-#define SPISD_PORT      SPI0_CS0
-
-#define GPIO_SPI_CD   (GPIO_INPUT | GPIO_CFG_PULLUP | GPIO_PORT_PIOC | GPIO_PIN19)
-#define SD_SPI_IRQ    SAM_IRQ_PC19
-#endif /* HAVE_MMCSD_SPI */
-
-/* NAND */
-
-#ifdef HAVE_NAND
-#  define NAND_MINOR 0
-#  define SAM_SMC_CS0 0 /* GPIO_SMC_NCS0  connect SAM_SMC_CS0_BASE */
-int sam_nand_automount(int minor);
-#endif /* HAVE_NAND */
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
 
 /****************************************************************************
  * Name: sam_hsmci_initialize
@@ -207,10 +190,8 @@ int sam_nand_automount(int minor);
 #ifdef HAVE_HSMCI
 int sam_hsmci_initialize(void);
 #else
-#  define sam_hsmci_initialize()
+# define sam_hsmci_initialize()
 #endif
-
-int sam_sdinitialize(int port, int minor);
 
 /****************************************************************************
  * Name: sam_cardinserted
@@ -254,4 +235,5 @@ bool sam_writeprotected(int slotno);
 
 int sam_watchdog_initialize(void);
 
-#endif /* __BOARDS_ARM_SAM34_SAM4S_XPLAINED_PRO_SRC_SAM4S_XPLAINED_PRO_H */
+#endif /* __ASSEMBLY__ */
+#endif /* __BOARDS_ARM_SAM34_SAM4S_XPLAINED_SRC_SAM4S_XPLAINED_H */

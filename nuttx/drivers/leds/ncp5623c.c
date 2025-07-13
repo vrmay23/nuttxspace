@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/leds/ncp5623c.c
+ * based on drivers/leds/pca9635pw.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Author: Konstantin Berzenko <kpberezenko@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,7 +39,6 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -38,7 +50,7 @@
 #if defined(CONFIG_I2C) && defined(CONFIG_NCP5623C)
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
 struct ncp5623c_dev_s
@@ -56,8 +68,7 @@ static int ncp5623c_i2c_write_byte(FAR struct ncp5623c_dev_s *priv,
 
 static int ncp5623c_open(FAR struct file *filep);
 static int ncp5623c_close(FAR struct file *filep);
-static int ncp5623c_ioctl(FAR struct file *filep, int cmd,
-                          unsigned long arg);
+static int ncp5623c_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 static ssize_t ncp5623c_read(FAR struct file *filep, FAR char *buffer,
                  size_t buflen);
 static ssize_t ncp5623c_write(FAR struct file *filep, FAR const char *buffer,
@@ -73,8 +84,9 @@ static const struct file_operations g_ncp5623c_fileops =
   ncp5623c_close,              /* close */
   ncp5623c_read,               /* read */
   ncp5623c_write,              /* write */
-  NULL,                        /* seek */
+  0,                           /* seek */
   ncp5623c_ioctl,              /* ioctl */
+  0                            /* poll */
 };
 
 /****************************************************************************
@@ -150,7 +162,7 @@ static int ncp5623c_open(FAR struct file *filep)
 
   /* Set up Max current */
 
-  ret = ncp5623c_i2c_write_byte(priv, NCP5623C_ILED, 0x1f);
+  ret = ncp5623c_i2c_write_byte(priv, NCP5623C_ILED, 0x1F);
   if (ret != OK)
     {
       lcderr("ERROR: Could not set up max current\n");
@@ -192,8 +204,7 @@ static int ncp5623c_close(FAR struct file *filep)
  * Name: ncp5623c_ioctl
  *
  * Description:
- *   This function is called whenever an ioctl call to a NCP5623C is
- *   performed.
+ *   This function is called whenever an ioctl call to a NCP5623C is performed.
  *
  ****************************************************************************/
 
@@ -264,15 +275,15 @@ static int ncp5623c_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 int ncp5623c_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
                       uint8_t const ncp5623c_i2c_addr)
 {
-  FAR struct ncp5623c_dev_s *priv;
-
   /* Sanity check */
 
   DEBUGASSERT(i2c != NULL);
 
   /* Initialize the NCP5623C device structure */
 
-  priv = kmm_malloc(sizeof(struct ncp5623c_dev_s));
+  FAR struct ncp5623c_dev_s *priv =
+    (FAR struct ncp5623c_dev_s *)kmm_malloc(sizeof(struct ncp5623c_dev_s));
+
   if (priv == NULL)
     {
       lcderr("ERROR: Failed to allocate instance of ncp5623c_dev_s\n");
@@ -284,7 +295,7 @@ int ncp5623c_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   /* Register the character driver */
 
-  int const ret = register_driver(devpath, &g_ncp5623c_fileops, 0666, priv);
+  int const ret = register_driver(devpath, &g_ncp5623c_fileops, 666, priv);
   if (ret != OK)
     {
       lcderr("ERROR: Failed to register driver: %d\n", ret);

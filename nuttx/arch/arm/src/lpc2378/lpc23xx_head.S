@@ -1,12 +1,13 @@
 /****************************************************************************
  * arch/arm/src/arm/lpc2378/lpc23xx_head.S
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2010 Rommel Marcelo. All rights reserved.
- * SPDX-FileCopyrightText: 2014 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2010,2012 Gregory Nutt. All rights reserved.
- * SPDX-FileContributor: Rommel Marcelo
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2010 Rommel Marcelo. All rights reserved.
+ *   Author: Rommel Marcelo
+ *
+ * This file is part of the NuttX RTOS and based on the lpc2148 port:
+ *
+ *   Copyright (C) 2010, 2012, 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,6 +47,7 @@
 
 #include "arm.h"
 #include "lpc2378.h"
+#include "up_arch.h"
 #include "lpc23xx_uart.h"
 #include "lpc23xx_scb.h"
 #include "lpc23xx_pinsel.h"
@@ -61,20 +63,20 @@
 #ifdef CONFIG_DEBUG_FEATURES
 	.macro	showprogress, code
 	mov	r0, #\code
-	bl	arm_lowputc
+	bl	up_lowputc
 	.endm
 #else
 	.macro	showprogress, code
 	.endm
 #endif
 
-/****************************************************************************
+/*****************************************************************************
  * Text
- ****************************************************************************/
+ *****************************************************************************/
 
 	.text
 
-/****************************************************************************
+/*****************************************************************************
  * Name: _vector_table
  *
  * Description:
@@ -83,7 +85,7 @@
  *   the vector table is the reset vector and this is the code that
  *   will execute when the processor is reset.
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 	.globl	_vector_table
 	.type	_vector_table, %function
@@ -93,32 +95,32 @@ _vector_table:
 	ldr	pc, .Lswihandler		/* 0x08: Software interrupt */
 	ldr	pc, .Lprefetchaborthandler	/* 0x0c: Prefetch abort */
 	ldr	pc, .Ldataaborthandler		/* 0x10: Data abort */
-	.long	0xB8A06F58			/* 0x14: Vector checksum */
+	.long	0xB8A06F58				/* 0x14: Vector checksum */
 	ldr	pc, .Lirqhandler		/* 0x18: IRQ */
 	ldr	pc, .Lfiqhandler		/* 0x1c: FIQ */
 
-	.globl	__start
-	.globl	arm_vectorundefinsn
-	.globl	arm_vectorsvc
-	.globl	arm_vectorprefetch
-	.globl	arm_vectordata
-	.globl	arm_vectorirq
-	.globl	arm_vectorfiq
+	.globl   __start
+	.globl	up_vectorundefinsn
+	.globl	up_vectorswi
+	.globl	up_vectorprefetch
+	.globl	up_vectordata
+	.globl	up_vectorirq
+	.globl	up_vectorfiq
 
 .Lresethandler:
-	.long	__start
+	.long   __start
 .Lundefinedhandler:
-	.long	arm_vectorundefinsn
+	.long	up_vectorundefinsn
 .Lswihandler:
-	.long	arm_vectorsvc
+	.long	up_vectorswi
 .Lprefetchaborthandler:
-	.long	arm_vectorprefetch
+	.long	up_vectorprefetch
 .Ldataaborthandler:
-	.long	arm_vectordata
+	.long	up_vectordata
 .Lirqhandler:
-	.long	arm_vectorirq
+	.long	up_vectorirq
 .Lfiqhandler:
-	.long	arm_vectorfiq
+	.long	up_vectorfiq
 	.size	_vector_table, . - _vector_table
 
 /****************************************************************************
@@ -130,20 +132,20 @@ _vector_table:
  * below.
  */
 	.text
-	.globl __start
+    .globl __start
 	.type	__start, #function
 __start:
 
 	/* Call lowlevel init C-function */
 
-	.extern configure_pll
-	ldr	r0, =configure_pll
+	.extern ConfigurePLL
+	ldr	r0, =ConfigurePLL
 	mov	lr, pc
 	bx	r0
 
 	/* First, setup initial processor mode */
 
-	mov	r0, #(PSR_MODE_SYS | PSR_I_BIT | PSR_F_BIT )
+	mov	r0, #(SVC_MODE | PSR_I_BIT | PSR_F_BIT )
 	msr	cpsr, r0
 
 /* Configure the uart so that we can get debug output as soon
@@ -156,7 +158,7 @@ __start:
 	/* Setup system stack (and get the BSS range) */
 
 	adr	r0, LC0
-	ldmia	r0, {r4, r5, sp}
+	ldmia   r0, {r4, r5, sp}
 
 	/* Clear system BSS section (Initialize with 0) */
 
@@ -181,7 +183,7 @@ __start:
 
 	mov	fp, #0
 #ifdef USE_EARLYSERIALINIT
-	bl	arm_earlyserialinit
+	bl	up_earlyserialinit
 	showprogress 'S'
 #endif
 
@@ -209,7 +211,7 @@ __start:
 
 LC0:	.long	_sbss
 	.long	_ebss
-	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE
+	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE-4
 
 LC2:	.long	_eronly	/* Where .data defaults are stored in FLASH */
 	.long	_sdata	/* Where .data needs to reside in SDRAM */

@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/timer/timer_initialize.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -29,11 +27,10 @@
 
 #include <sys/types.h>
 #include <time.h>
+#include <queue.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
-#include <nuttx/queue.h>
-#include <nuttx/trace.h>
 
 #include "timer/timer.h"
 
@@ -66,8 +63,6 @@ volatile sq_queue_t g_freetimers;
 
 volatile sq_queue_t g_alloctimers;
 
-spinlock_t g_locktimers = SP_UNLOCKED;
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -86,10 +81,8 @@ spinlock_t g_locktimers = SP_UNLOCKED;
  *
  ****************************************************************************/
 
-void timer_initialize(void)
+void weak_function timer_initialize(void)
 {
-  sched_trace_begin();
-
 #if CONFIG_PREALLOC_TIMERS > 0
   int i;
 
@@ -108,7 +101,6 @@ void timer_initialize(void)
   /* Initialize the list of allocated timers */
 
   sq_init((FAR sq_queue_t *)&g_alloctimers);
-  sched_trace_end();
 }
 
 /****************************************************************************
@@ -130,16 +122,13 @@ void timer_initialize(void)
  *
  ****************************************************************************/
 
-void timer_deleteall(pid_t pid)
+void weak_function timer_deleteall(pid_t pid)
 {
   FAR struct posix_timer_s *timer;
   FAR struct posix_timer_s *next;
-  sq_queue_t freetimers;
   irqstate_t flags;
 
-  sq_init(&freetimers);
-
-  flags = spin_lock_irqsave(&g_locktimers);
+  flags = enter_critical_section();
   for (timer = (FAR struct posix_timer_s *)g_alloctimers.head;
        timer != NULL;
        timer = next)
@@ -147,62 +136,11 @@ void timer_deleteall(pid_t pid)
       next = timer->flink;
       if (timer->pt_owner == pid)
         {
-          sq_rem((FAR sq_entry_t *)timer, (FAR sq_queue_t *)&g_alloctimers);
-          sq_addlast((FAR sq_entry_t *)timer, (FAR sq_queue_t *)&freetimers);
+          timer_delete((timer_t)timer);
         }
     }
 
-  spin_unlock_irqrestore(&g_locktimers, flags);
-
-  for (timer = (FAR struct posix_timer_s *)freetimers.head;
-       timer != NULL;
-       timer = next)
-    {
-      next = timer->flink;
-      sq_rem((FAR sq_entry_t *)timer, (FAR sq_queue_t *)&freetimers);
-      timer_release(timer);
-    }
-}
-
-/****************************************************************************
- * Name: timer_gethandle
- *
- * Description:
- *   Returns the posix timer in the activity from the corresponding timerid
- *
- * Input Parameters:
- *   timerid - The pre-thread timer, previously created by the call to
- *     timer_create(), to be be set.
- *
- * Returned Value:
- *   On success, timer_gethandle() returns pointer to the posix_timer_s;
- *   On error, NULL is returned.
- *
- ****************************************************************************/
-
-FAR struct posix_timer_s *timer_gethandle(timer_t timerid)
-{
-  FAR struct posix_timer_s *timer = NULL;
-  FAR sq_entry_t *entry;
-  irqstate_t flags;
-
-  if (timerid != NULL)
-    {
-      flags = spin_lock_irqsave(&g_locktimers);
-
-      sq_for_every(&g_alloctimers, entry)
-        {
-          if (entry == timerid)
-            {
-              timer = (FAR struct posix_timer_s *)timerid;
-              break;
-            }
-        }
-
-      spin_unlock_irqrestore(&g_locktimers, flags);
-    }
-
-  return timer;
+  leave_critical_section(flags);
 }
 
 #endif /* CONFIG_DISABLE_POSIX_TIMERS */

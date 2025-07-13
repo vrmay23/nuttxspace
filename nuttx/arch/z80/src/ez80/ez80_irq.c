@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/z80/src/ez80/ez80_irq.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -33,6 +31,16 @@
 #include "z80_internal.h"
 
 /****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+/* This holds a references to the current interrupt level register storage
+ * structure.  If is non-NULL only during interrupt processing.
+ */
+
+volatile chipreg_t *g_current_regs;
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -42,6 +50,8 @@
 
 void up_irqinitialize(void)
 {
+  g_current_regs = NULL;
+
   /* And finally, enable interrupts */
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS

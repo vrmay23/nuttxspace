@@ -1,22 +1,35 @@
 /****************************************************************************
- * net/usrsock/usrsock_ioctl.c
+ * nuttx/net/usrsock/usrsock_ioctl.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Pinecone Inc. All rights reserved.
+ *   Author: Jianli Dong<dongjianli@pinecone.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,13 +46,10 @@
 #include <errno.h>
 #include <debug.h>
 
-#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/usrsock.h>
-#ifdef CONFIG_NETDEV_WIRELESS_IOCTL
-#  include <nuttx/wireless/wireless.h>
-#endif
+
 #include "socket/socket.h"
 #include "usrsock/usrsock.h"
 
@@ -48,10 +58,11 @@
  ****************************************************************************/
 
 static uint16_t ioctl_event(FAR struct net_driver_s *dev,
-                            FAR void *pvpriv, uint16_t flags)
+                                  FAR void *pvconn,
+                                  FAR void *pvpriv, uint16_t flags)
 {
   FAR struct usrsock_data_reqstate_s *pstate = pvpriv;
-  FAR struct usrsock_conn_s *conn = pstate->reqstate.conn;
+  FAR struct usrsock_conn_s *conn = pvconn;
 
   if (flags & USRSOCK_EVENT_ABORT)
     {
@@ -62,9 +73,9 @@ static uint16_t ioctl_event(FAR struct net_driver_s *dev,
 
       /* Stop further callbacks */
 
-      pstate->reqstate.cb->flags = 0;
-      pstate->reqstate.cb->priv  = NULL;
-      pstate->reqstate.cb->event = NULL;
+      pstate->reqstate.cb->flags   = 0;
+      pstate->reqstate.cb->priv    = NULL;
+      pstate->reqstate.cb->event   = NULL;
 
       /* Wake up the waiting thread */
 
@@ -88,9 +99,9 @@ static uint16_t ioctl_event(FAR struct net_driver_s *dev,
 
       /* Stop further callbacks */
 
-      pstate->reqstate.cb->flags = 0;
-      pstate->reqstate.cb->priv  = NULL;
-      pstate->reqstate.cb->event = NULL;
+      pstate->reqstate.cb->flags   = 0;
+      pstate->reqstate.cb->priv    = NULL;
+      pstate->reqstate.cb->event   = NULL;
 
       /* Wake up the waiting thread */
 
@@ -105,15 +116,13 @@ static uint16_t ioctl_event(FAR struct net_driver_s *dev,
  ****************************************************************************/
 
 static int do_ioctl_request(FAR struct usrsock_conn_s *conn, int cmd,
-                            FAR void *arg, size_t arglen)
+                                 FAR void *arg, size_t arglen)
 {
   struct usrsock_request_ioctl_s req =
   {
   };
 
-  struct iovec bufs[3] =
-  {
-  };
+  struct iovec bufs[2];
 
   if (arglen > UINT16_MAX)
     {
@@ -127,21 +136,12 @@ static int do_ioctl_request(FAR struct usrsock_conn_s *conn, int cmd,
   req.cmd = cmd;
   req.arglen = arglen;
 
-  bufs[0].iov_base = &req;
+  bufs[0].iov_base = (FAR void *)&req;
   bufs[0].iov_len = sizeof(req);
-  bufs[1].iov_base = arg;
+  bufs[1].iov_base = (FAR void *)arg;
   bufs[1].iov_len = req.arglen;
 
-#ifdef CONFIG_NETDEV_WIRELESS_IOCTL
-  if (WL_IS80211POINTERCMD(cmd))
-    {
-      FAR struct iwreq *wlreq = arg;
-      bufs[2].iov_base = wlreq->u.data.pointer;
-      bufs[2].iov_len = wlreq->u.data.length;
-    }
-#endif
-
-  return usrsock_do_request(conn, bufs, nitems(bufs));
+  return usrsockdev_do_request(conn, bufs, ARRAY_SIZE(bufs));
 }
 
 /****************************************************************************
@@ -152,44 +152,25 @@ static int do_ioctl_request(FAR struct usrsock_conn_s *conn, int cmd,
  * Name: usrsock_ioctl
  *
  * Description:
- *   This function performs network device specific operations.
+ *   The usrsock_ioctl() function performs network device specific operations.
  *
  * Parameters:
- *   psock    A reference to the socket structure of the socket
+ *   psock    A pointer to a NuttX-specific, internal socket structure
  *   cmd      The ioctl command
  *   arg      The argument of the ioctl cmd
  *
  ****************************************************************************/
 
-int usrsock_ioctl(FAR struct socket *psock, int cmd, unsigned long arg_)
+int usrsock_ioctl(FAR struct socket *psock, int cmd, FAR void *arg,
+                  size_t arglen)
 {
   FAR struct usrsock_conn_s *conn = psock->s_conn;
   struct usrsock_data_reqstate_s state =
   {
   };
 
-  struct iovec inbufs[2] =
-  {
-  };
-
-  FAR void *arg = (FAR void *)(uintptr_t)arg_;
-  ssize_t arglen;
+  struct iovec inbufs[1];
   int ret;
-
-  /* Bypass FIONBIO to socket level,
-   * since the usrsock server always put the socket in nonblocking mode.
-   */
-
-  if (cmd == FIONBIO)
-    {
-      return -ENOTTY;
-    }
-
-  arglen = net_ioctl_arglen(psock->s_domain, cmd);
-  if (arglen < 0)
-    {
-      return arglen;
-    }
 
   net_lock();
 
@@ -219,26 +200,16 @@ int usrsock_ioctl(FAR struct socket *psock, int cmd, unsigned long arg_)
 
   inbufs[0].iov_base = arg;
   inbufs[0].iov_len = arglen;
+  usrsock_setup_datain(conn, inbufs, ARRAY_SIZE(inbufs));
 
-#ifdef CONFIG_NETDEV_WIRELESS_IOCTL
-  if (WL_IS80211POINTERCMD(cmd))
-    {
-      FAR struct iwreq *wlreq = arg;
-      inbufs[1].iov_base = wlreq->u.data.pointer;
-      inbufs[1].iov_len = wlreq->u.data.length;
-    }
-#endif
-
-  usrsock_setup_datain(conn, inbufs, nitems(inbufs));
-
-  /* Request user-space daemon to handle ioctl. */
+  /* Request user-space daemon to close socket. */
 
   ret = do_ioctl_request(conn, cmd, arg, arglen);
   if (ret >= 0)
     {
       /* Wait for completion of request. */
 
-      net_sem_wait_uninterruptible(&state.reqstate.recvsem);
+      net_lockedwait_uninterruptible(&state.reqstate.recvsem);
       ret = state.reqstate.result;
 
       DEBUGASSERT(state.valuelen <= arglen);
@@ -250,6 +221,7 @@ int usrsock_ioctl(FAR struct socket *psock, int cmd, unsigned long arg_)
 
 errout_unlock:
   net_unlock();
+
   return ret;
 }
 

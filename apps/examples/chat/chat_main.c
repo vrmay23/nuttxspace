@@ -1,9 +1,8 @@
 /****************************************************************************
  * apps/examples/chat/chat_main.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016 Vladimir Komendantskiy. All rights reserved.
- * SPDX-FileContributor: Vladimir Komendantskiy <vladimir@moixaenergy.com>
+ *   Copyright (C) 2016 Vladimir Komendantskiy. All rights reserved.
+ *   Author: Vladimir Komendantskiy <vladimir@moixaenergy.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,8 +43,6 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 
-#include <assert.h>
-#include <debug.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -75,7 +72,7 @@ struct chat_app
   /* Private fields */
 
   int argc;                        /* number of command-line arguments */
-  FAR char **argv;                 /* command-line arguments */
+  FAR char** argv;                 /* command-line arguments */
   char tty[CHAT_TTYNAME_SIZE];     /* modem TTY device node */
   FAR const char *script;          /* raw chat script - input to the parser */
   bool script_dynalloc;            /* true if the script should be freed */
@@ -159,8 +156,8 @@ static int chat_script_preset(FAR struct chat_app *priv, int script_number)
   return ret;
 }
 
-static int chat_script_read(FAR struct chat_app *priv,
-                            FAR const char *filepath)
+static int chat_script_read(FAR struct chat_app* priv,
+                            FAR const char* filepath)
 {
   FAR char *scriptp;
   size_t spare_size = CONFIG_EXAMPLES_CHAT_SIZE - 1;
@@ -220,7 +217,7 @@ static int chat_script_read(FAR struct chat_app *priv,
   return ret;
 }
 
-static int chat_parse_args(FAR struct chat_app *priv)
+static int chat_parse_args(FAR struct chat_app* priv)
 {
   /* -d TTY device node (non-Linux feature)
    * -e echo to stderr
@@ -254,10 +251,11 @@ static int chat_parse_args(FAR struct chat_app *priv)
           switch (priv->argv[i][1])
             {
             case 'd':
-
               /* set the TTY device node */
 
-              strlcpy(priv->tty, priv->argv[i] + 2, CHAT_TTYNAME_SIZE);
+              strncpy(priv->tty,
+                      (FAR char*) priv->argv[i] + 2,
+                      CHAT_TTYNAME_SIZE-1);
               break;
 
             case 'e':
@@ -265,11 +263,13 @@ static int chat_parse_args(FAR struct chat_app *priv)
               break;
 
             case 'f':
-              ret = chat_script_read(priv, priv->argv[i] + 2);
+              ret = chat_script_read(priv,
+                                     (FAR char*) priv->argv[i] + 2);
               break;
 
             case 'p':
-              numarg = strtol(priv->argv[i] + 2, NULL, 10);
+              numarg = strtol((FAR char*) priv->argv[i] + 2,
+                              NULL, 10);
               if (errno < 0)
                 {
                   ret = -EINVAL;
@@ -280,7 +280,8 @@ static int chat_parse_args(FAR struct chat_app *priv)
               break;
 
             case 't':
-              numarg = strtol(priv->argv[i] + 2, NULL, 10);
+              numarg = strtol((FAR char*) priv->argv[i] + 2,
+                              NULL, 10);
 
               if (errno < 0 || numarg < 0)
                 {
@@ -319,7 +320,7 @@ static int chat_parse_args(FAR struct chat_app *priv)
  *
  ****************************************************************************/
 
-int main(int argc, FAR char **argv)
+int main(int argc, FAR char** argv)
 {
   struct chat_app priv;
   int ret;
@@ -332,10 +333,10 @@ int main(int argc, FAR char **argv)
   priv.ctl.timeout = CONFIG_EXAMPLES_CHAT_TIMEOUT_SECONDS;
   priv.script = NULL;
   priv.script_dynalloc = false;
-  strlcpy(priv.tty, CONFIG_EXAMPLES_CHAT_TTY_DEVNODE, CHAT_TTYNAME_SIZE);
+  strncpy(priv.tty, CONFIG_EXAMPLES_CHAT_TTY_DEVNODE, CHAT_TTYNAME_SIZE-1);
 
   _info("parsing the arguments\n");
-  ret = chat_parse_args((FAR struct chat_app *)&priv);
+  ret = chat_parse_args((FAR struct chat_app*) &priv);
   if (ret < 0)
     {
       _info("Command line parsing failed: code %d, errno %d\n", ret, errno);
@@ -369,7 +370,7 @@ int main(int argc, FAR char **argv)
       goto with_tty_dev;
     }
 
-  ret = chat((FAR struct chat_ctl *)&priv.ctl, priv.script);
+  ret = chat((FAR struct chat_ctl*) &priv.ctl, priv.script);
 
 with_tty_dev:
   close(priv.ctl.fd);

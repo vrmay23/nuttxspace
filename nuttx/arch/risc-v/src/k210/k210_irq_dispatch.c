@@ -1,22 +1,32 @@
 /****************************************************************************
  * arch/risc-v/src/k210/k210_irq_dispatch.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Masayuki Ishikawa. All rights reserved.
+ *   Author: Masayuki Ishikawa <masayuki.ishikawa@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,34 +41,43 @@
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <sys/types.h>
+#include <nuttx/board.h>
+#include <arch/board/board.h>
 
-#include "riscv_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "group/group.h"
 
-#include "k210_memorymap.h"
-
 /****************************************************************************
- * Pre-processor Definitions
+ * Public Data
  ****************************************************************************/
 
-#define RV_IRQ_MASK 59
+extern void up_fault(int irq, uint64_t *regs);
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * riscv_dispatch_irq
+ * k210_dispatch_irq
  ****************************************************************************/
 
-void *riscv_dispatch_irq(uintptr_t vector, uintptr_t *regs)
+void *k210_dispatch_irq(uint64_t vector, uint64_t *regs)
 {
-  int irq = (vector >> RV_IRQ_MASK) | (vector & 0xf);
+  uint32_t  irq = (vector >> (27 + 32)) | (vector & 0xf);
+  uint64_t *mepc = regs;
+
+  /* Check if fault happened */
+
+  if (vector < K210_IRQ_ECALLU)
+    {
+      up_fault((int)irq, regs);
+    }
 
   /* Firstly, check if the irq is machine external interrupt */
 
-  if (RISCV_IRQ_MEXT == irq)
+  if (K210_IRQ_MEXT == irq)
     {
       uint32_t val = getreg32(K210_PLIC_CLAIM);
 
@@ -67,25 +86,54 @@ void *riscv_dispatch_irq(uintptr_t vector, uintptr_t *regs)
       irq += val;
     }
 
+  /* NOTE: In case of ecall, we need to adjust mepc in the context */
+
+  if (K210_IRQ_ECALLM == irq || K210_IRQ_ECALLU == irq)
+    {
+      *mepc += 4;
+    }
+
   /* Acknowledge the interrupt */
 
-  riscv_ack_irq(irq);
+  up_ack_irq(irq);
+
+#ifdef CONFIG_SUPPRESS_INTERRUPTS
+  PANIC();
+#else
+  /* Current regs non-zero indicates that we are processing an interrupt;
+   * CURRENT_REGS is also used to manage interrupt level context switches.
+   *
+   * Nested interrupts are not supported
+   */
+
+  ASSERT(CURRENT_REGS == NULL);
+  CURRENT_REGS = regs;
 
   /* MEXT means no interrupt */
 
-  if (RISCV_IRQ_MEXT != irq)
+  if (K210_IRQ_MEXT != irq)
     {
       /* Deliver the IRQ */
 
-      regs = riscv_doirq(irq, regs);
+      irq_dispatch(irq, regs);
     }
 
-  if (RISCV_IRQ_MEXT <= irq)
+  if (K210_IRQ_MEXT <= irq)
     {
       /* Then write PLIC_CLAIM to clear pending in PLIC */
 
-      putreg32(irq - RISCV_IRQ_MEXT, K210_PLIC_CLAIM);
+      putreg32(irq - K210_IRQ_MEXT, K210_PLIC_CLAIM);
     }
+#endif
+
+  /* If a context switch occurred while processing the interrupt then
+   * CURRENT_REGS may have change value.  If we return any value different
+   * from the input regs, then the lower level will know that a context
+   * switch occurred during interrupt processing.
+   */
+
+  regs = (uint64_t *)CURRENT_REGS;
+  CURRENT_REGS = NULL;
 
   return regs;
 }

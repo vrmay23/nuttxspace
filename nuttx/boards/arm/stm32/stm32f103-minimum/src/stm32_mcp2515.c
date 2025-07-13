@@ -1,22 +1,35 @@
 /****************************************************************************
- * boards/arm/stm32/stm32f103-minimum/src/stm32_mcp2515.c
+ * boards/arm/stm32/stm32f4discovery/src/stm32_mcp2515.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Alan Carvalho de Assis. All rights reserved.
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,7 +39,6 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -58,9 +70,9 @@ struct stm32_mcp2515config_s
 
   /* Additional private definitions only known to this driver */
 
-  struct mcp2515_can_s *handle; /* The MCP2515 driver handle */
-  mcp2515_handler_t handler;    /* The MCP2515 interrupt handler */
-  void *arg;                    /* Argument to pass to the interrupt handler */
+  FAR struct mcp2515_can_s *handle; /* The MCP2515 driver handle */
+  mcp2515_handler_t handler;        /* The MCP2515 interrupt handler */
+  FAR void *arg;                    /* Argument to pass to the interrupt handler */
 };
 
 /****************************************************************************
@@ -74,8 +86,8 @@ struct stm32_mcp2515config_s
  *   attach  - Attach the MCP2515 interrupt handler to the GPIO interrupt
  */
 
-static int  mcp2515_attach(struct mcp2515_config_s *state,
-                           mcp2515_handler_t handler, void *arg);
+static int  mcp2515_attach(FAR struct mcp2515_config_s *state,
+                           mcp2515_handler_t handler, FAR void *arg);
 
 /****************************************************************************
  * Private Data
@@ -114,10 +126,10 @@ static struct stm32_mcp2515config_s g_mcp2515config =
 
 /* This is the MCP2515 Interrupt handler */
 
-int mcp2515_interrupt(int irq, void *context, void *arg)
+int mcp2515_interrupt(int irq, FAR void *context, FAR void *arg)
 {
-  struct stm32_mcp2515config_s *priv =
-             (struct stm32_mcp2515config_s *)arg;
+  FAR struct stm32_mcp2515config_s *priv =
+             (FAR struct stm32_mcp2515config_s *)arg;
 
   DEBUGASSERT(priv != NULL);
 
@@ -133,11 +145,11 @@ int mcp2515_interrupt(int irq, void *context, void *arg)
   return OK;
 }
 
-static int mcp2515_attach(struct mcp2515_config_s *state,
-                          mcp2515_handler_t handler, void *arg)
+static int mcp2515_attach(FAR struct mcp2515_config_s *state,
+                          mcp2515_handler_t handler, FAR void *arg)
 {
-  struct stm32_mcp2515config_s *priv =
-             (struct stm32_mcp2515config_s *)state;
+  FAR struct stm32_mcp2515config_s *priv =
+             (FAR struct stm32_mcp2515config_s *)state;
   irqstate_t flags;
 
   caninfo("Saving handler %p\n", handler);
@@ -147,7 +159,7 @@ static int mcp2515_attach(struct mcp2515_config_s *state,
   priv->handler = handler;
   priv->arg = arg;
 
-  /* Configure the interrupt for falling edge */
+  /* Configure the interrupt for falling edge*/
 
   stm32_gpiosetevent(GPIO_MCP2515_IRQ, false, true, false,
                      mcp2515_interrupt, priv);
@@ -175,11 +187,11 @@ static int mcp2515_attach(struct mcp2515_config_s *state,
  *
  ****************************************************************************/
 
-int stm32_mcp2515initialize(const char *devpath)
+int stm32_mcp2515initialize(FAR const char *devpath)
 {
-  struct spi_dev_s     *spi;
-  struct can_dev_s     *can;
-  struct mcp2515_can_s *mcp2515;
+  FAR struct spi_dev_s     *spi;
+  FAR struct can_dev_s     *can;
+  FAR struct mcp2515_can_s *mcp2515;
   int ret;
 
   /* Check if we are already initialized */

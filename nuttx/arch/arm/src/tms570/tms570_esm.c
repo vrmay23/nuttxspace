@@ -1,10 +1,14 @@
 /****************************************************************************
  * arch/arm/src/tms570/tms570_esm.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2012 Texas Instruments Incorporated
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Derives from the TI "Project0" sample code which has a compatible 3-
+ * clause BSD license:
+ *
+ * Copyright (c) 2012, Texas Instruments Incorporated
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,13 +48,13 @@
 
 #include <sys/types.h>
 #include <stdint.h>
-#include <assert.h>
 #include <debug.h>
 
 #include <arch/irq.h>
-#include <sched/sched.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "hardware/tms570_esm.h"
 #include "tms570_esm.h"
 
@@ -141,17 +145,17 @@ int tms570_esm_initialize(void)
  *
  ****************************************************************************/
 
-int tms570_esm_interrupt(int irq, void *context, void *arg)
+int tms570_esm_interrupt(int irq, void *context, FAR void *arg)
 {
-  struct tcb_s *tcb = this_task();
+  /* Save the saved processor context in CURRENT_REGS where it can be accessed
+   * for register dumps and possibly context switching.
+   */
 
-  tcb->xcp.regs = context;
-  up_set_interrupt_context(true);
+  CURRENT_REGS = (uint32_t *)context;
 
   /* Crash -- possibly showing diagnostic debug information. */
 
-  _err("ERROR: ESM Interrupt. PC: %08" PRIx32 "\n",
-       ((uint32_t *)running_regs())[REG_PC]);
+  _err("ERROR: ESM Interrupt. PC: %08x\n", CURRENT_REGS[REG_PC]);
   PANIC();
   return OK; /* To keep the compiler happy */
 }

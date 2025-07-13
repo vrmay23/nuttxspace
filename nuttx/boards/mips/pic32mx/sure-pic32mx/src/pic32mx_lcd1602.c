@@ -1,29 +1,41 @@
 /****************************************************************************
  * boards/mips/pic32mx/sure-pic32mx/src/pic32mx_lcd1602.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/* This logic supports the connection of an LCD1602 LCD to the PCB Logic
+ * This logic supports the connection of an LCD1602 LCD to the PCB Logic
  * PIC32MX board.  The LCD1602 is based on the Hitachi HD44780U LCD
  * controller
- */
+ *
+ *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************/
 
 /* LCD pin mapping (see boards/sure-pic32mx/README.txt)
  *
@@ -59,14 +71,12 @@
 
 #include <nuttx/config.h>
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 #include <ctype.h>
 #include <poll.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -78,9 +88,9 @@
 #include <nuttx/lcd/slcd_codec.h>
 #include <nuttx/semaphore.h>
 
-#include "mips_internal.h"
-#include "pic32mx_ioport.h"
-#include "pic32mx_int.h"
+#include "up_arch.h"
+#include "pic32mx-ioport.h"
+#include "pic32mx-int.h"
 #include "pic32mx.h"
 #include "sure-pic32mx.h"
 
@@ -100,6 +110,16 @@
 #  define CONFIG_LCD_MAXPOWER 100
 #endif
 
+/* The ever-present MIN/MAX macros ******************************************/
+
+#ifndef MIN
+#  define MIN(a,b) (a < b ? a : b)
+#endif
+
+#ifndef MAX
+#  define MAX(a,b) (a > b ? a : b)
+#endif
+
 /* LCD **********************************************************************/
 
 #define LCD_NROWS        2
@@ -109,8 +129,17 @@
 #define NOP              __asm__ __volatile__ ("nop");
 
 /****************************************************************************
- * Private Types
+ * Private Type Definition
  ****************************************************************************/
+
+/* SLCD incoming stream structure */
+
+struct lcd_instream_s
+{
+  struct lib_instream_s stream;
+  FAR const char *buffer;
+  ssize_t nbytes;
+};
 
 /* Global LCD state */
 
@@ -129,9 +158,9 @@ struct lcd1602_2
 /* Debug */
 
 #ifdef CONFIG_DEBUG_LCD_INFO
-static void lcd_dumpstate(const char *msg);
-static void lcd_dumpstream(const char *msg,
-                           const struct lib_meminstream_s *stream);
+static void lcd_dumpstate(FAR const char *msg);
+static void lcd_dumpstream(FAR const char *msg,
+                           FAR const struct lcd_instream_s *stream);
 #else
 #  define lcd_dumpstate(msg)
 #  define lcd_dumpstream(msg, stream)
@@ -139,7 +168,7 @@ static void lcd_dumpstream(const char *msg,
 
 /* Internal functions */
 
-static int lcd_getstream(struct lib_instream_s *instream);
+static int lcd_getstream(FAR struct lib_instream_s *instream);
 static void lcd_brightness(uint8_t brightness);
 static void lcd_shortdelay(int delay);
 static void lcd_wrcommand(uint8_t cmd);
@@ -154,10 +183,10 @@ static void lcd_action(enum slcdcode_e code, uint8_t count);
 
 /* Character driver operations */
 
-static ssize_t lcd_read(struct file *, char *, size_t);
-static ssize_t lcd_write(struct file *, const char *, size_t);
-static int lcd_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int lcd_poll(struct file *filep, struct pollfd *fds,
+static ssize_t lcd_read(FAR struct file *, FAR char *, size_t);
+static ssize_t lcd_write(FAR struct file *, FAR const char *, size_t);
+static int lcd_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
+static int lcd_poll(FAR struct file *filep, FAR struct pollfd *fds,
                     bool setup);
 
 /****************************************************************************
@@ -168,14 +197,12 @@ static int lcd_poll(struct file *filep, struct pollfd *fds,
 
 static const struct file_operations g_lcdops =
 {
-  NULL,          /* open */
-  NULL,          /* close */
+  0,             /* open */
+  0,             /* close */
   lcd_read,      /* read */
   lcd_write,     /* write */
-  NULL,          /* seek */
+  0,             /* seek */
   lcd_ioctl,     /* ioctl */
-  NULL,          /* mmap */
-  NULL,          /* truncate */
   lcd_poll       /* poll */
 };
 
@@ -192,7 +219,7 @@ static struct lcd1602_2 g_lcd1602;
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_LCD_INFO
-static void lcd_dumpstate(const char *msg)
+static void lcd_dumpstate(FAR const char *msg)
 {
   uint8_t buffer[LCD_NCOLUMNS];
   uint8_t ch;
@@ -227,15 +254,38 @@ static void lcd_dumpstate(const char *msg)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_LCD_INFO
-static void lcd_dumpstream(const char *msg,
-                           const struct lib_meminstream_s *stream)
+static void lcd_dumpstream(FAR const char *msg,
+                           FAR const struct lcd_instream_s *stream)
 {
   lcdinfo("%s:\n", msg);
   lcdinfo("  nget: %d nbytes: %d\n",
-          stream->common.nget, stream->buflen);
-  lib_dumpbuffer("STREAM", stream->buffer, stream->buflen);
+          stream->stream.nget, stream->nbytes);
+  lib_dumpbuffer("STREAM", stream->buffer, stream->nbytes);
 }
 #endif
+
+/****************************************************************************
+ * Name: lcd_getstream
+ *
+ * Description:
+ *   Get one character from the keyboard.
+ *
+ ****************************************************************************/
+
+static int lcd_getstream(FAR struct lib_instream_s *instream)
+{
+  FAR struct lcd_instream_s *lcdstream = (FAR struct lcd_instream_s *)instream;
+
+  DEBUGASSERT(lcdstream && lcdstream->buffer);
+  if (lcdstream->nbytes > 0)
+    {
+      lcdstream->nbytes--;
+      lcdstream->stream.nget++;
+      return (int)*lcdstream->buffer++;
+    }
+
+  return EOF;
+}
 
 /****************************************************************************
  * Name: lcd_brightness
@@ -528,9 +578,7 @@ static void lcd_action(enum slcdcode_e code, uint8_t count)
         {
           int tmp;
 
-          /* If we are at the home position or if the count is zero,
-           * then ignore the action
-           */
+          /* If we are at the home position or if the count is zero, then ignore the action */
 
           if (g_lcd1602.curcol < 1 || count < 1)
             {
@@ -569,9 +617,7 @@ static void lcd_action(enum slcdcode_e code, uint8_t count)
             nchars = LCD_NCOLUMNS - g_lcd1602.curcol;
             nmove  = MIN(nchars, count) - 1;
 
-            /* Move all characters after the current cursor position left by
-             * 'nmove' characters
-             */
+            /* Move all characters after the current cursor position left by 'nmove' characters */
 
             for (i = g_lcd1602.curcol + nmove; i < LCD_NCOLUMNS - 1; i++)
               {
@@ -604,9 +650,7 @@ static void lcd_action(enum slcdcode_e code, uint8_t count)
                 last = LCD_NCOLUMNS - 1;
               }
 
-            /* Erase N characters after the current cursor position left by
-             * one
-             */
+            /* Erase N characters after the current cursor position left by one */
 
             for (i = g_lcd1602.curcol; i < last; i++)
               {
@@ -632,9 +676,7 @@ static void lcd_action(enum slcdcode_e code, uint8_t count)
         {
           int i;
 
-          /* Erase characters after the current cursor position to the end of
-           * the line
-           */
+          /* Erase characters after the current cursor position to the end of the line */
 
           for (i = g_lcd1602.curcol; i < LCD_NCOLUMNS; i++)
             {
@@ -751,7 +793,7 @@ static void lcd_action(enum slcdcode_e code, uint8_t count)
  * Name: lcd_read
  ****************************************************************************/
 
-static ssize_t lcd_read(struct file *filep, char *buffer, size_t len)
+static ssize_t lcd_read(FAR struct file *filep, FAR char *buffer, size_t len)
 {
   uint8_t row;
   uint8_t column;
@@ -785,10 +827,10 @@ static ssize_t lcd_read(struct file *filep, char *buffer, size_t len)
  * Name: lcd_write
  ****************************************************************************/
 
-static ssize_t lcd_write(struct file *filep,  const char *buffer,
+static ssize_t lcd_write(FAR struct file *filep,  FAR const char *buffer,
                          size_t len)
 {
-  struct lib_meminstream_s instream;
+  struct lcd_instream_s instream;
   struct slcdstate_s state;
   enum slcdret_e result;
   uint8_t ch;
@@ -796,14 +838,17 @@ static ssize_t lcd_write(struct file *filep,  const char *buffer,
 
   /* Initialize the stream for use with the SLCD CODEC */
 
-  lib_meminstream(&instream, buffer, len);
+  instream.stream.get  = lcd_getstream;
+  instream.stream.nget = 0;
+  instream.buffer      = buffer;
+  instream.nbytes      = len;
+
   lcd_dumpstream("BEFORE WRITE", &instream);
 
   /* Now decode and process every byte in the input buffer */
 
   memset(&state, 0, sizeof(struct slcdstate_s));
-  while ((result = slcd_decode(&instream.common,
-                               &state, &ch, &count)) != SLCDRET_EOF)
+  while ((result = slcd_decode(&instream.stream, &state, &ch, &count)) != SLCDRET_EOF)
     {
       lcdinfo("slcd_decode returned result=%d char=%d count=%d\n",
               result, ch, count);
@@ -867,7 +912,7 @@ static ssize_t lcd_write(struct file *filep,  const char *buffer,
  * Name: lcd_ioctl
  ****************************************************************************/
 
-static int lcd_ioctl(struct file *filep, int cmd, unsigned long arg)
+static int lcd_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
   switch (cmd)
     {
@@ -879,8 +924,7 @@ static int lcd_ioctl(struct file *filep, int cmd, unsigned long arg)
 
       case SLCDIOC_GETATTRIBUTES:
         {
-          struct slcd_attributes_s *attr =
-                            (struct slcd_attributes_s *)((uintptr_t)arg);
+          FAR struct slcd_attributes_s *attr = (FAR struct slcd_attributes_s *)((uintptr_t)arg);
 
           lcdinfo("SLCDIOC_GETATTRIBUTES:\n");
 
@@ -905,11 +949,9 @@ static int lcd_ioctl(struct file *filep, int cmd, unsigned long arg)
 
       case SLCDIOC_CURPOS:
         {
-          struct slcd_curpos_s *curpos =
-                              (struct slcd_curpos_s *)((uintptr_t)arg);
+          FAR struct slcd_curpos_s *curpos = (FAR struct slcd_curpos_s *)((uintptr_t)arg);
 
-          lcdinfo("SLCDIOC_CURPOS: row=%d column=%d\n",
-                   g_lcd1602.currow, g_lcd1602.curcol);
+          lcdinfo("SLCDIOC_CURPOS: row=%d column=%d\n", g_lcd1602.currow, g_lcd1602.curcol);
 
           if (!curpos)
             {
@@ -929,7 +971,7 @@ static int lcd_ioctl(struct file *filep, int cmd, unsigned long arg)
 
       case SLCDIOC_GETBRIGHTNESS:
         {
-          int *brightness = (int *)((uintptr_t)arg);
+          FAR int *brightness = (FAR int *)((uintptr_t)arg);
           if (!brightness)
             {
               return -EINVAL;
@@ -972,16 +1014,19 @@ static int lcd_ioctl(struct file *filep, int cmd, unsigned long arg)
  * Name: lcd_poll
  ****************************************************************************/
 
-static int lcd_poll(struct file *filep, struct pollfd *fds,
-                    bool setup)
+static int lcd_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                        bool setup)
 {
   if (setup)
     {
       /* Data is always available to be read */
 
-      poll_notify(&fds, 1, POLLIN | POLLOUT);
+      fds->revents |= (fds->events & (POLLIN|POLLOUT));
+      if (fds->revents != 0)
+        {
+          nxsem_post(fds->sem);
+        }
     }
-
   return OK;
 }
 
@@ -1023,7 +1068,7 @@ int up_lcd1602_initialize(void)
       g_lcd1602.brightness = 0;                 /* Remember the light is off */
 
       /* A small delay is necessary between when GPIO_LCD_E was set up as an
-       * output with initial value of 0 and this operation. That delay should
+       * output with initial value of 0 and this operation.  That delay should
        * be well covered by the intervening GPIO configurations.
        */
 
@@ -1035,22 +1080,22 @@ int up_lcd1602_initialize(void)
 
       up_mdelay(5);
 
-      /* Select the 8-bit interface. BF cannot be checked before this
-       * command. This needs to be done a few times with some magic delays.
+      /* Select the 8-bit interface. BF cannot be checked before this command.
+       * This needs to be done a few times with some magic delays.
        *
        * Function set: 5x7 Style | N=2R | DL=8D
        */
 
-      lcd_wrcommand(HD4478OU_FUNC | HD4478OU_FUNC_F5X7 |
+      lcd_wrcommand(HD4478OU_FUNC | HD4478OU_FUNC_F5x7 |
                     HD4478OU_FUNC_N1 | HD4478OU_FUNC_DL8D);
       up_udelay(100);            /* Delay more than 100uS */
-      lcd_wrcommand(HD4478OU_FUNC | HD4478OU_FUNC_F5X7 |
+      lcd_wrcommand(HD4478OU_FUNC | HD4478OU_FUNC_F5x7 |
                     HD4478OU_FUNC_N1 | HD4478OU_FUNC_DL8D);
       up_udelay(40);             /* Delay more than 40uS */
-      lcd_wrcommand(HD4478OU_FUNC | HD4478OU_FUNC_F5X7 |
+      lcd_wrcommand(HD4478OU_FUNC | HD4478OU_FUNC_F5x7 |
                     HD4478OU_FUNC_N1 | HD4478OU_FUNC_DL8D);
       lcd_waitbusy();
-      lcd_wrcommand(HD4478OU_FUNC | HD4478OU_FUNC_F5X7 |
+      lcd_wrcommand(HD4478OU_FUNC | HD4478OU_FUNC_F5x7 |
                     HD4478OU_FUNC_N1 | HD4478OU_FUNC_DL8D);
       lcd_waitbusy();
 

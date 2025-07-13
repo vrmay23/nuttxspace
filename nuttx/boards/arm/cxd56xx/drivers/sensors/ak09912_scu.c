@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/cxd56xx/drivers/sensors/ak09912_scu.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +42,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fixedmath.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <arch/types.h>
@@ -46,7 +58,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_SENSORS_AK09912_SCU_DECI
+#ifdef CONFIG_CXD56_DECI_AK09912
 #  define MAG_SEQ_TYPE SEQ_TYPE_DECI
 #else
 #  define MAG_SEQ_TYPE SEQ_TYPE_NORMAL
@@ -131,17 +143,19 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
-/* Structure for ak09912 device */
+/**
+ * @brief Structure for ak09912 device
+ */
 
 struct ak09912_dev_s
 {
-  struct i2c_master_s *i2c; /* I2C interface */
-  uint8_t       addr;       /* I2C address */
-  int           freq;       /* Frequency <= 3.4MHz */
-  int           port;       /* I2C port */
+  FAR struct i2c_master_s *i2c; /* I2C interface */
+  uint8_t       addr;           /* I2C address */
+  int           freq;           /* Frequency <= 3.4MHz */
+  int           port;           /* I2C port */
 
   struct seq_s *seq;
   int           id;
@@ -153,13 +167,13 @@ struct ak09912_dev_s
 
 /* Character driver methods */
 
-static int ak09912_open(struct file *filep);
-static int ak09912_close(struct file *filep);
-static ssize_t ak09912_read(struct file *filep, char *buffer,
+static int ak09912_open(FAR struct file *filep);
+static int ak09912_close(FAR struct file *filep);
+static ssize_t ak09912_read(FAR struct file *filep, FAR char *buffer,
+                           size_t buflen);
+static ssize_t ak09912_write(FAR struct file *filep, FAR const char *buffer,
                             size_t buflen);
-static ssize_t ak09912_write(struct file *filep, const char *buffer,
-                             size_t buflen);
-static int ak09912_ioctl(struct file *filep, int cmd, unsigned long arg);
+static int ak09912_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -171,8 +185,12 @@ static const struct file_operations g_ak09912fops =
   ak09912_close,                 /* close */
   ak09912_read,                  /* read */
   ak09912_write,                 /* write */
-  NULL,                          /* seek */
-  ak09912_ioctl,                 /* ioctl */
+  0,                            /* seek */
+  ak09912_ioctl,                            /* ioctl */
+#ifndef CONFIG_DISABLE_POLL
+  0,                            /* poll */
+#endif
+  0                             /* unlink */
 };
 
 /* Take XYZ data, temperature and Status 2 register.
@@ -189,7 +207,7 @@ static struct ak09912_sensadj_s g_asa;
 
 /* Sequencer instance */
 
-static struct seq_s *g_seq = NULL;
+static FAR struct seq_s *g_seq = NULL;
 
 /* Reference count */
 
@@ -207,7 +225,7 @@ static int g_refcnt = 0;
  *
  ****************************************************************************/
 
-static uint8_t ak09912_getreg8(struct ak09912_dev_s *priv,
+static uint8_t ak09912_getreg8(FAR struct ak09912_dev_s *priv,
                                uint8_t regaddr)
 {
   uint8_t regval = 0;
@@ -231,7 +249,7 @@ static uint8_t ak09912_getreg8(struct ak09912_dev_s *priv,
  *
  ****************************************************************************/
 
-static void ak09912_putreg8(struct ak09912_dev_s *priv, uint8_t regaddr,
+static void ak09912_putreg8(FAR struct ak09912_dev_s *priv, uint8_t regaddr,
                            uint8_t regval)
 {
   uint16_t inst[2];
@@ -252,7 +270,7 @@ static void ak09912_putreg8(struct ak09912_dev_s *priv, uint8_t regaddr,
  *
  ****************************************************************************/
 
-static int ak09912_getreg(struct ak09912_dev_s *priv, uint8_t regaddr,
+static int ak09912_getreg(FAR struct ak09912_dev_s *priv, uint8_t regaddr,
                           uint8_t *buffer, uint32_t cnt)
 {
   uint16_t inst[2];
@@ -275,7 +293,7 @@ static int ak09912_getreg(struct ak09912_dev_s *priv, uint8_t regaddr,
  *
  ****************************************************************************/
 
-static int ak09912_checkid(struct ak09912_dev_s *priv)
+static int ak09912_checkid(FAR struct ak09912_dev_s *priv)
 {
   uint16_t devid = 0;
 
@@ -296,7 +314,7 @@ static int ak09912_checkid(struct ak09912_dev_s *priv)
   return OK;
 }
 
-static int ak09912_seqinit(struct ak09912_dev_s *priv)
+static int ak09912_seqinit(FAR struct ak09912_dev_s *priv)
 {
   DEBUGASSERT(g_seq == NULL);
 
@@ -329,10 +347,10 @@ static int ak09912_seqinit(struct ak09912_dev_s *priv)
  *
  ****************************************************************************/
 
-static int ak09912_open(struct file *filep)
+static int ak09912_open(FAR struct file *filep)
 {
-  struct inode        *inode = filep->f_inode;
-  struct ak09912_dev_s *priv = inode->i_private;
+  FAR struct inode        *inode = filep->f_inode;
+  FAR struct ak09912_dev_s *priv  = inode->i_private;
 
   if (g_refcnt == 0)
     {
@@ -367,10 +385,10 @@ static int ak09912_open(struct file *filep)
  *
  ****************************************************************************/
 
-static int ak09912_close(struct file *filep)
+static int ak09912_close(FAR struct file *filep)
 {
-  struct inode        *inode = filep->f_inode;
-  struct ak09912_dev_s *priv = inode->i_private;
+  FAR struct inode        *inode = filep->f_inode;
+  FAR struct ak09912_dev_s *priv  = inode->i_private;
 
   g_refcnt--;
 
@@ -398,11 +416,11 @@ static int ak09912_close(struct file *filep)
  * Name: ak09912_read
  ****************************************************************************/
 
-static ssize_t ak09912_read(struct file *filep, char *buffer,
+static ssize_t ak09912_read(FAR struct file *filep, FAR char *buffer,
                             size_t len)
 {
-  struct inode        *inode = filep->f_inode;
-  struct ak09912_dev_s *priv = inode->i_private;
+  FAR struct inode        *inode = filep->f_inode;
+  FAR struct ak09912_dev_s *priv  = inode->i_private;
 
   len = len / AK09912_BYTESPERSAMPLE * AK09912_BYTESPERSAMPLE;
   len = seq_read(priv->seq, priv->id, buffer, len);
@@ -414,8 +432,8 @@ static ssize_t ak09912_read(struct file *filep, char *buffer,
  * Name: ak09912_write
  ****************************************************************************/
 
-static ssize_t ak09912_write(struct file *filep, const char *buffer,
-                             size_t buflen)
+static ssize_t ak09912_write(FAR struct file *filep, FAR const char *buffer,
+                            size_t buflen)
 {
   return -ENOSYS;
 }
@@ -424,10 +442,10 @@ static ssize_t ak09912_write(struct file *filep, const char *buffer,
  * Name: ak09912_write
  ****************************************************************************/
 
-static int ak09912_ioctl(struct file *filep, int cmd, unsigned long arg)
+static int ak09912_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
-  struct inode *inode = filep->f_inode;
-  struct ak09912_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct ak09912_dev_s *priv  = inode->i_private;
   int ret = OK;
 
   switch (cmd)
@@ -438,8 +456,7 @@ static int ak09912_ioctl(struct file *filep, int cmd, unsigned long arg)
 
       case SNIOC_GETADJ:
         {
-          struct ak09912_sensadj_s *user = (struct ak09912_sensadj_s *)
-                                           (uintptr_t)arg;
+          struct ak09912_sensadj_s *user = (struct ak09912_sensadj_s *)(uintptr_t)arg;
 
           user->x = g_asa.x;
           user->y = g_asa.y;
@@ -471,7 +488,7 @@ static int ak09912_ioctl(struct file *filep, int cmd, unsigned long arg)
  * Public Functions
  ****************************************************************************/
 
-int ak09912_init(struct i2c_master_s *i2c, int port)
+int ak09912_init(FAR struct i2c_master_s *i2c, int port)
 {
   struct ak09912_dev_s tmp;
   struct ak09912_dev_s *priv = &tmp;
@@ -513,34 +530,31 @@ int ak09912_init(struct i2c_master_s *i2c, int port)
 }
 
 /****************************************************************************
- * Name: ak09912_scu_register
+ * Name: ak09912_register
  *
  * Description:
  *   Register the AK09912 character device as 'devpath'
  *
  * Input Parameters:
  *   devpath - The full path to the driver to register. E.g., "/dev/mag"
- *   minor   - The number of sequencer
  *   i2c     - An instance of the I2C interface to use to communicate with
  *             AK09912
- *   port    - I2C port number
  *
  * Returned Value:
  *   Zero (OK) on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-int ak09912_scu_register(const char *devpath, int minor,
-                         struct i2c_master_s *i2c, int port)
+int ak09912_register(FAR const char *devpath, int minor,
+                     FAR struct i2c_master_s *i2c, int port)
 {
-  struct ak09912_dev_s *priv;
+  FAR struct ak09912_dev_s *priv;
   char path[16];
   int ret;
 
   /* Initialize the AK09912 device structure */
 
-  priv = (struct ak09912_dev_s *)
-          kmm_malloc(sizeof(struct ak09912_dev_s));
+  priv = (FAR struct ak09912_dev_s *)kmm_malloc(sizeof(struct ak09912_dev_s));
   if (!priv)
     {
       snerr("Failed to allocate instance\n");

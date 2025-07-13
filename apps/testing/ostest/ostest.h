@@ -1,22 +1,36 @@
 /****************************************************************************
  * apps/testing/ostest/ostest.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2011-2012, 2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,9 +42,6 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include <signal.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -78,7 +89,7 @@
 #  define CONFIG_STDIO_BUFFER_SIZE 0
 #endif
 
-#if defined(CONFIG_FILE_STREAM) && CONFIG_STDIO_BUFFER_SIZE > 0 && \
+#if CONFIG_NFILE_STREAMS > 0 && CONFIG_STDIO_BUFFER_SIZE > 0 && \
     !defined(CONFIG_STDIO_LINEBUFFER)
 #  define FFLUSH() fflush(stdout)
 #else
@@ -86,16 +97,16 @@
 #endif
 
 /****************************************************************************
- * Public Function Prototypes
+ * Public Types
  ****************************************************************************/
 
-/* getopt.c *****************************************************************/
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
 
-int getopt_test(void);
-
-/* libc_memmem.c ************************************************************/
-
-int memmem_test(void);
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
 
 /* setvbuf.c ****************************************************************/
 
@@ -105,9 +116,7 @@ int setvbuf_test(void);
 
 /* dev_null.c ***************************************************************/
 
-#ifdef CONFIG_DEV_NULL
-int dev_null_test(void);
-#endif
+int dev_null(void);
 
 /* fpu.c ********************************************************************/
 
@@ -121,20 +130,12 @@ void aio_test(void);
 
 /* restart.c ****************************************************************/
 
-#ifndef CONFIG_BUILD_KERNEL
 void restart_test(void);
-#endif
 
 /* waitpid.c ****************************************************************/
 
 #ifdef CONFIG_SCHED_WAITPID
 int waitpid_test(void);
-#endif
-
-/* wqueue.c *****************************************************************/
-
-#if defined(CONFIG_SCHED_LPWORK) || defined(CONFIG_SCHED_HPWORK)
-void wqueue_test(void);
 #endif
 
 /* mutex.c ******************************************************************/
@@ -195,10 +196,6 @@ void timedwait_test(void);
 
 void sigprocmask_test(void);
 
-/* sighelper.c **************************************************************/
-
-bool sigset_isequal(FAR const sigset_t *left, FAR const sigset_t *right);
-
 /* sighand.c ****************************************************************/
 
 void sighand_test(void);
@@ -210,10 +207,6 @@ void signest_test(void);
 /* suspend.c ****************************************************************/
 
 void suspend_test(void);
-
-/* wdog.c *******************************************************************/
-
-void wdog_test(void);
 
 /* posixtimers.c ************************************************************/
 
@@ -228,17 +221,9 @@ void rr_test(void);
 
 void sporadic_test(void);
 
-/* sporadic2.c **************************************************************/
-
-void sporadic2_test(void);
-
 /* tls.c ********************************************************************/
 
 void tls_test(void);
-
-/* sched_thread_local.c *****************************************************/
-
-void sched_thread_local_test(void);
 
 /* pthread_rwlock.c *********************************************************/
 
@@ -247,12 +232,6 @@ void pthread_rwlock_test(void);
 /* pthread_rwlock_cancel.c **************************************************/
 
 void pthread_rwlock_cancel_test(void);
-
-/* pthread_exit.c ***********************************************************/
-
-#ifdef CONFIG_SCHED_WAITPID
-void pthread_exit_test(void);
-#endif
 
 /* pthread_cleanup.c ********************************************************/
 
@@ -266,24 +245,10 @@ void barrier_test(void);
 
 void priority_inheritance(void);
 
-/* schedlock.c **************************************************************/
-
-void sched_lock_test(void);
-
 /* vfork.c ******************************************************************/
 
-#if defined(CONFIG_ARCH_HAVE_FORK) && defined(CONFIG_SCHED_WAITPID)
+#if defined(CONFIG_ARCH_HAVE_VFORK) && defined(CONFIG_SCHED_WAITPID)
 int vfork_test(void);
-#endif
-
-/* setjmp.c *****************************************************************/
-
-void setjmp_test(void);
-
-/* smp_call.c ***************************************************************/
-
-#ifdef CONFIG_SMP
-void smp_call_test(void);
 #endif
 
 /* APIs exported (conditionally) by the OS specifically for testing of
@@ -296,12 +261,6 @@ int sem_nfreeholders(void);
 #else
 #  define sem_enumholders(sem)
 #  define sem_nfreeholders()
-#endif
-
-/* nxevent.c ****************************************************************/
-
-#if defined(CONFIG_SCHED_EVENTS) && defined(CONFIG_BUILD_FLAT)
-void nxevent_test(void);
 #endif
 
 #endif /* __APPS_TESTING_OSTEST_OSTEST_H */

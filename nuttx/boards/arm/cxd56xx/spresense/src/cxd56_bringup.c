@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/cxd56xx/spresense/src/cxd56_bringup.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,13 +40,14 @@
 #include <nuttx/config.h>
 
 #include <stdio.h>
+#include <sys/mount.h>
 #include <sys/types.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
-#include <nuttx/fs/fs.h>
+#include <nuttx/board.h>
 #include <arch/board/board.h>
 
 #ifdef CONFIG_RNDIS
@@ -88,7 +102,7 @@
 #endif
 
 #ifdef CONFIG_PWM
-#  include <arch/board/cxd56_pwm.h>
+#  include "cxd56_pwm.h"
 #endif
 
 #ifdef CONFIG_CXD56_ADC
@@ -105,14 +119,6 @@
 
 #ifdef CONFIG_CXD56_GEOFENCE
 #  include "cxd56_geofence.h"
-#endif
-
-#ifdef CONFIG_VIDEO_FB
-#  include <nuttx/video/fb.h>
-#endif
-
-#ifdef CONFIG_CXD56_CISIF
-#  include <arch/chip/cisif.h>
 #endif
 
 #include "spresense.h"
@@ -170,6 +176,7 @@ static void timer_initialize(void)
       snprintf(devname, sizeof(devname), "/dev/timer%d", i);
       cxd56_timer_initialize(devname, i);
     }
+  return;
 }
 #endif
 
@@ -186,7 +193,7 @@ static void timer_initialize(void)
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_LIB_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -236,46 +243,6 @@ int cxd56_bringup(void)
     }
 #endif
 
-  cxd56_uart_initialize();
-  cxd56_timerisr_initialize();
-
-#ifdef CONFIG_CXD56_CPUFIFO
-  ret = cxd56_pm_bootup();
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to powermgr boot up.\n");
-    }
-#endif
-
-#ifndef CONFIG_CXD56_SUBCORE
-  /* Set the special pins for the host interface to GPIO mode because
-   * their mode is automatically changed by latching the SYSTEM0/1 pins.
-   */
-
-  CXD56_PIN_CONFIGS(PINCONFS_SPI2A_GPIO);
-
-  /* Initialize CPU clock to max frequency */
-
-  board_clock_initialize();
-
-  /* Setup the power of external device */
-
-  board_power_setup(0);
-#endif
-
-#ifdef CONFIG_CXD56_SCU
-  scu_initialize();
-#endif
-
-#if defined(CONFIG_SENSORS_CXD5602PWBIMU) && \
-    !defined(CONFIG_CXD56_CXD5602PWBIMU_LATE_INITIALIZE)
-  ret = board_cxd5602pwbimu_initialize(5);
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize CXD5602PWBIMU.\n");
-    }
-#endif
-
 #ifdef CONFIG_CXD56_I2C_DRIVER
   #ifdef CONFIG_CXD56_I2C0
   ret = board_i2cdev_initialize(0);
@@ -302,30 +269,27 @@ int cxd56_bringup(void)
   #endif
 #endif
 
-#ifdef CONFIG_SYSTEM_SPITOOL
-#  ifdef CONFIG_CXD56_SPI3
-  ret = board_spidev_initialize(3);
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize SPI3.\n");
-    }
-#  endif
+  cxd56_uart_initialize();
+  cxd56_timerisr_initialize();
 
-#  ifdef CONFIG_CXD56_SPI4
-  ret = board_spidev_initialize(4);
+#ifdef CONFIG_CXD56_CPUFIFO
+  ret = cxd56_pm_bootup();
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize SPI4.\n");
+      _err("ERROR: Failed to powermgr bootup.\n");
     }
-#  endif
+#endif
 
-#  ifdef CONFIG_CXD56_SPI5
-  ret = board_spidev_initialize(5);
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize SPI5.\n");
-    }
-#  endif
+  /* Initialize CPU clock to max frequency */
+
+  board_clock_initialize();
+
+  /* Setup the power of external device */
+
+  board_power_setup(0);
+
+#ifdef CONFIG_CXD56_SCU
+  scu_initialize();
 #endif
 
 #ifdef CONFIG_FS_PROCFS
@@ -340,10 +304,10 @@ int cxd56_bringup(void)
     }
 #endif
 
-  ret = nx_mount(NULL, CXD56_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
+  ret = mount(NULL, CXD56_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
   if (ret < 0)
     {
-      _err("ERROR: Failed to mount the procfs: %d\n", ret);
+      _err("ERROR: Failed to mount the procfs: %d\n", errno);
     }
 #endif
 
@@ -351,7 +315,7 @@ int cxd56_bringup(void)
   ret = board_pwm_setup();
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize pwm.\n");
+      _err("ERROR: Failed to initialize pwm. \n");
     }
 #endif
 
@@ -359,7 +323,7 @@ int cxd56_bringup(void)
   ret = cxd56_adcinitialize();
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize adc.\n");
+      _err("ERROR: Failed to initialize adc. \n");
     }
 #endif
 
@@ -367,7 +331,7 @@ int cxd56_bringup(void)
   ret = userled_lower_initialize("/dev/userleds");
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize led.\n");
+      _err("ERROR: Failed to initialize led. \n");
     }
 #endif
 
@@ -375,46 +339,25 @@ int cxd56_bringup(void)
   ret = board_flash_initialize();
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize SPI-Flash. %d\n", ret);
+      _err("ERROR: Failed to initialize SPI-Flash. %d\n", errno);
     }
 #endif
-
-#ifdef CONFIG_AUDIO_CXD56
-  ret = board_audio_initialize_driver(1);
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize audio. %d\n", ret);
-    }
-#endif
-
-#ifndef CONFIG_CXD56_CAMERA_LATE_INITIALIZE
-#ifdef CONFIG_VIDEO_ISX019
-  ret = isx019_initialize();
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize ISX019 board. %d\n", errno);
-    }
-#endif /* CONFIG_VIDEO_ISX019 */
 
 #ifdef CONFIG_VIDEO_ISX012
-  ret = isx012_initialize();
+  ret = board_isx012_initialize(IMAGER_I2C);
   if (ret < 0)
     {
       _err("ERROR: Failed to initialize ISX012 board. %d\n", errno);
     }
-#endif /* CONFIG_VIDEO_ISX012 */
 
-#ifdef CONFIG_CXD56_CISIF
-  ret = cxd56_cisif_initialize();
-  if (ret < 0)
+  g_video_devops = isx012_initialize();
+  if (g_video_devops == NULL)
     {
-      _err("ERROR: Failed to initialize CISIF. %d\n", errno);
+      _err("ERROR: Failed to populate ISX012 devops. %d\n", errno);
       ret = ERROR;
     }
-#endif /* CONFIG_CXD56_CISIF */
-#endif /* CONFIG_CXD56_CAMERA_LATE_INITIALIZE */
+#endif /* CONFIG_VIDEO_ISX012 */
 
-#if defined(CONFIG_CXD56_SDIO)
   /* In order to prevent Hi-Z from being input to the SD Card controller,
    * Initialize SDIO pins to GPIO low output with internal pull-down.
    */
@@ -427,37 +370,11 @@ int cxd56_bringup(void)
   cxd56_gpio_write(PIN_SDIO_DATA2, false);
   cxd56_gpio_write(PIN_SDIO_DATA3, false);
 
+#if defined(CONFIG_CXD56_SDIO)
   ret = board_sdcard_initialize();
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize sdhci.\n");
-    }
-#endif
-
-#ifdef CONFIG_CXD56_SPISD
-  /* Mount the SPI-based MMC/SD block driver */
-
-  ret = board_spisd_initialize(0, CONFIG_CXD56_SPISD_SPI_CH);
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize SPI device to MMC/SD: %d\n",
-           ret);
-    }
-#endif
-
-#ifdef CONFIG_CXD56_SDCARD_AUTOMOUNT
-  /* Initialize the auto-mounter */
-
-  board_automount_initialize();
-#endif
-
-#if defined(CONFIG_CXD56_EMMC) && !defined(CONFIG_CXD56_EMMC_LATE_INITIALIZE)
-  /* Mount the eMMC block driver */
-
-  ret = board_emmc_initialize();
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize eMMC: %d\n", ret);
+      _err("ERROR: Failed to initialize sdhci. \n");
     }
 #endif
 
@@ -469,7 +386,7 @@ int cxd56_bringup(void)
 
   up_pm_release_wakelock(&wlock);
 
-#if defined(CONFIG_RNDIS) && !defined(CONFIG_RNDIS_COMPOSITE)
+#if defined(CONFIG_RNDIS)
   uint8_t mac[6];
   mac[0] = 0xa0; /* TODO */
   mac[1] = (CONFIG_NETINIT_MACADDR_2 >> (8 * 0)) & 0xff;
@@ -480,19 +397,19 @@ int cxd56_bringup(void)
   usbdev_rndis_initialize(mac);
 #endif
 
+#ifdef CONFIG_MODEM_ALTMDM
+  ret = board_altmdm_initialize("/dev/altmdm");
+  if (ret < 0)
+    {
+      _err("ERROR: Failed to initialize Altair modem. \n");
+    }
+#endif
+
 #ifdef CONFIG_WL_GS2200M
   ret = board_gs2200m_initialize("/dev/gs2200m", 5);
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize GS2200M.\n");
-    }
-#endif
-
-#if defined(CONFIG_MODEM_ALT1250) && !defined(CONFIG_CXD56_LTE_LATE_INITIALIZE)
-  ret = board_alt1250_initialize("/dev/alt1250");
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize ALT1250.\n");
+      _err("ERROR: Failed to initialize GS2200M. \n");
     }
 #endif
 
@@ -500,15 +417,7 @@ int cxd56_bringup(void)
   ret = cxd56_gnssinitialize("/dev/gps");
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize gnss.\n");
-    }
-#endif
-
-#if defined(CONFIG_CXD56_GNSS_ADDON) && !defined(CONFIG_CXD56_GNSS_ADDON_LATE_INITIALIZE)
-  ret = board_gnss_addon_initialize("/dev/gps2", 0);
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize gnss addon.\n");
+      _err("ERROR: Failed to initialize gnss. \n");
     }
 #endif
 
@@ -516,23 +425,15 @@ int cxd56_bringup(void)
   ret = cxd56_geofenceinitialize("/dev/geofence");
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize geofence.\n");
+      _err("ERROR: Failed to initialize geofence. \n");
     }
 #endif
 
-#ifdef CONFIG_SENSORS
-  ret = board_sensors_initialize();
+#ifdef CONFIG_SENSORS_BMI160_I2C
+  ret = board_bmi160_initialize(0);
   if (ret < 0)
     {
-      _err("ERROR: Failed to initialize sensors.\n");
-    }
-#endif
-
-#ifdef CONFIG_VIDEO_FB
-  ret = fb_register(0, 0);
-  if (ret < 0)
-    {
-      _err("ERROR: Failed to initialize Frame Buffer Driver.\n");
+      _err("ERROR: Failed to initialize BMI160. \n");
     }
 #endif
 

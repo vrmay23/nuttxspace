@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/wireless/bluetooth/bt_uart_bcm4343x.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Dave Marples <dave@marples.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,7 +39,6 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -46,6 +58,8 @@
 #include <nuttx/kthread.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/serial/tioctl.h>
+#include <nuttx/wireless/bluetooth/bt_uart.h>
+#include <nuttx/wireless/bluetooth/bt_uart_shim.h>
 #include <termios.h>
 
 #include "bt_uart.h"
@@ -127,6 +141,7 @@ static int uartwriteconf(FAR const struct btuart_lowerhalf_s *lower,
   int ret;
   int gotlen = 0;
   FAR uint8_t *din;
+  struct timespec abstime;
 
   DEBUGASSERT(lower != NULL);
 
@@ -150,7 +165,22 @@ static int uartwriteconf(FAR const struct btuart_lowerhalf_s *lower,
   din = kmm_malloc(maxl);
   while (gotlen < maxl)
     {
-      ret = nxsem_tickwait_uninterruptible(rxsem, MSEC2TICK(100));
+      ret = clock_gettime(CLOCK_REALTIME, &abstime);
+      if (ret < 0)
+        {
+          goto exit_uartwriteconf;
+        }
+
+      /* Add the offset to the time in the future */
+
+      abstime.tv_nsec += NSEC_PER_SEC / 10;
+      if (abstime.tv_nsec >= NSEC_PER_SEC)
+        {
+          abstime.tv_nsec -= NSEC_PER_SEC;
+          abstime.tv_sec++;
+        }
+
+      ret = nxsem_timedwait_uninterruptible(rxsem, &abstime);
       if (ret < 0)
         {
           /* We didn't receive enough message, so fall out */
@@ -173,7 +203,7 @@ static int uartwriteconf(FAR const struct btuart_lowerhalf_s *lower,
   ret = ((memcmp(din, cmp, maxl) == 0) ? 0 : -ECOMM);
 
 exit_uartwriteconf:
-  kmm_free(din);
+  free(din);
 exit_uartwriteconf_nofree:
   return ret;
 }
@@ -272,14 +302,13 @@ static int load_bcm4343x_firmware(FAR const struct btuart_lowerhalf_s *lower)
       0x00
     };
 
-  /* Let's temporarily connect to the hci uart rx callback so we can get
-   * data.
-   */
+  /* Let's temporarily connect to the hci uart rx callback so we can get data */
 
   lower->rxattach(lower, hciuart_cb, &rxsem);
   lower->rxenable(lower, true);
 
   nxsem_init(&rxsem, 0, 0);
+  nxsem_setprotocol(&rxsem, SEM_PRIO_NONE);
 
   /* It is possible this could fail if modem is already at high speed, so we
    * can safely ignore error return value.
@@ -369,7 +398,7 @@ static int load_bcm4343x_firmware(FAR const struct btuart_lowerhalf_s *lower)
       ret = -ECOMM;
     }
 
-load_bcm4343x_firmware_finished:
+  load_bcm4343x_firmware_finished:
   lower->rxenable(lower, false);
   lower->rxattach(lower, NULL, NULL);
 
@@ -381,9 +410,10 @@ load_bcm4343x_firmware_finished:
  ****************************************************************************/
 
 /****************************************************************************
- * Name: btuart_create
+ * Name: btuart_register
  *
- *   Create the UART-based bluetooth device.
+ *   Create the UART-based Bluetooth device and register it with the
+ *   Bluetooth stack.
  *
  * Input Parameters:
  *   lower - an instance of the lower half driver interface
@@ -394,19 +424,14 @@ load_bcm4343x_firmware_finished:
  *
  ****************************************************************************/
 
-int btuart_create(FAR const struct btuart_lowerhalf_s *lower,
-                  FAR struct bt_driver_s **driver)
+int btuart_register(FAR const struct btuart_lowerhalf_s *lower)
 {
   FAR struct btuart_upperhalf_s *upper;
   int ret;
 
   wlinfo("lower %p\n", lower);
 
-  if (lower == NULL)
-    {
-      wlerr("ERROR: btuart lower half is NULL\n");
-      return -ENODEV;
-    }
+  DEBUGASSERT(lower != NULL);
 
   /* Allocate a new instance of the upper half driver state structure */
 
@@ -424,8 +449,6 @@ int btuart_create(FAR const struct btuart_lowerhalf_s *lower,
   upper->dev.head_reserve = H4_HEADER_SIZE;
   upper->dev.open = btuart_open;
   upper->dev.send = btuart_send;
-  upper->dev.close = btuart_close;
-  upper->dev.ioctl = btuart_ioctl;
   upper->lower = lower;
 
   /* Load firmware */
@@ -438,6 +461,14 @@ int btuart_create(FAR const struct btuart_lowerhalf_s *lower,
       return -EINVAL;
     }
 
-  *driver = &upper->dev;
+  /* And register the driver with the network and the Bluetooth stack. */
+
+  ret = bt_netdev_register(&upper->dev);
+  if (ret < 0)
+    {
+      wlerr("ERROR: bt_netdev_register failed: %d\n", ret);
+      kmm_free(upper);
+    }
+
   return ret;
 }

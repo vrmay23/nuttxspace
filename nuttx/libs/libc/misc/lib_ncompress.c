@@ -1,28 +1,15 @@
+
 /****************************************************************************
  * libs/libc/misc/lib_ncompress.c
+ * File compression ala IEEE Computer, Mar 1992.
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/* This is the file compress24.c extracted from the ncompress-4.2.4 release
+ * This is the file compress24.c extracted from the ncompress-4.2.4 release
  * and adapted for NuttX.  The original code was released into the public
- * domain. The original authors are listed below:
+ * domain.   This NuttX version is re-released under the standard NuttX
+ * BSD 3-clause license.  The original authors are listed below:
  *
  *   Spencer W. Thomas   (decvax!harpo!utah-cs!utah-gr!thomas)
  *   Jim McKie           (decvax!mcvax!jim)
@@ -33,10 +20,34 @@
  *   Dave Mack           (csu@alembic.acs.com)
  *   Peter Jannesen, Network Communication Systems
  *                       (peter@ncs.nl)
- ****************************************************************************/
-
-/****************************************************************************
- * Included Files
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
  ****************************************************************************/
 
 #include <sys/types.h>
@@ -51,10 +62,6 @@
 #include <ctype.h>
 #include <signal.h>
 #include <errno.h>
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
 
 #define RECURSIVE  1
 
@@ -73,8 +80,11 @@
 
 #define MARK(a) { asm(" .globl M.a"); asm("M.a:"); }
 
+#undef min
+#define min(a,b) ((a>b) ? b : a)
+
 #ifndef IBUFSIZ
-#  define IBUFSIZ BUFSIZ        /* Default input buffer size */
+#  define IBUFSIZ BUFSIZ        /* Defailt input buffer size */
 #endif
 #ifndef OBUFSIZ
 #  define OBUFSIZ BUFSIZ        /* Default output buffer size */
@@ -87,37 +97,34 @@
        /* Defines for third byte of header */
 #define MAGIC_1  (char_type)'\037'      /* First byte of compressed file */
 #define MAGIC_2  (char_type)'\235'      /* Second byte of compressed file */
+#define BIT_MASK 0x1f           /* Mask for 'number of compression bits' */
+         /* Masks 0x20 and 0x40 are free.  */
+         /* I think 0x20 should mean that there is */
+         /* a fourth header byte (for expansion).  */
+#define BLOCK_MODE 0x80         /* Block compression if table is full and */
+         /* compression rate is dropping flush tables */
 
-#define BIT_MASK 0x1f      /* Mask for 'number of compression bits' */
-                           /* Masks 0x20 and 0x40 are free.  */
-                           /* I think 0x20 should mean that there is */
-                           /* a fourth header byte (for expansion).  */
-
-#define BLOCK_MODE 0x80    /* Block compression if table is full and */
-                           /* compression rate is dropping flush tables */
-
-/* the next two codes should not be changed lightly, as they must not
- * lie within the contiguous general code space.
- */
+   /* the next two codes should not be changed lightly, as they must not */
+   /* lie within the contiguous general code space.  */
 #define FIRST 257               /* first free entry */
 #define CLEAR 256               /* table clear output code */
 
 #define INIT_BITS 9             /* initial number of bits/code */
 
 #ifndef SACREDMEM
-
-/* SACREDMEM is the amount of physical memory saved for others; compress
- * will hog the rest.
- */
+ /*
+  * SACREDMEM is the amount of physical memory saved for others; compress
+  * will hog the rest.
+  */
 #  define SACREDMEM 0
 #endif
 
 #ifndef USERMEM
-
-/* Set USERMEM to the maximum amount of physical user memory available
- * in bytes.  USERMEM is used to determine the maximum BITS that can be used
- * for compression.
- */
+ /*
+  * Set USERMEM to the maximum amount of physical user memory available
+  * in bytes.  USERMEM is used to determine the maximum BITS that can be used
+  * for compression.
+  */
 #  define USERMEM  450000       /* default user memory */
 #endif
 
@@ -129,7 +136,9 @@
 #  define NOALLIGN 0
 #endif
 
-/* machine variants which require cc -Dmachine:  pdp11, z8000, DOS */
+/*
+ * machine variants which require cc -Dmachine:  pdp11, z8000, DOS
+ */
 
 #ifdef interdata                /* Perkin-Elmer */
 #  define SIGNED_COMPARE_SLOW   /* signed compare is slower than unsigned */
@@ -156,6 +165,10 @@
 #  undef NOALLIGN
 #  define NOALLIGN 1
 #endif                                 /* DOS */
+
+#ifndef O_BINARY
+#  define O_BINARY 0            /* System has no binary mode */
+#endif
 
 #ifdef M_XENIX                  /* Stupid compiler can't handle arrays with */
 #  if BITS == 16                /* more than 65535 bytes - so we fake it */
@@ -302,17 +315,16 @@ int quiet = 1;                  /* don't tell me about compression */
 int do_decomp = 0;              /* Decompress mode */
 int force = 0;                  /* Force overwrite of files and links */
 int nomagic = 0;                /* Use a 3-byte magic number header, */
-
          /* unless old file */
+int block_mode = BLOCK_MODE;    /* Block compress mode -C compatible with 2.0 */
+int maxbits = BITS;             /* user settable max # bits/code */
+int zcat_flg = 0;               /* Write output on stdout, suppress messages */
+int recursive = 0;              /* compress directories */
+int exit_code = -1;             /* Exitcode of compress (-1 no file compressed)
+                                 */
 
-int block_mode = BLOCK_MODE;  /* Block compress mode -C compatible with 2.0 */
-int maxbits = BITS;           /* user settable max # bits/code */
-int zcat_flg = 0;             /* Write output on stdout, suppress messages */
-int recursive = 0;            /* compress directories */
-int exit_code = -1;           /* Exitcode of compress (-1 no file compressed) */
-
-char_type inbuf[IBUFSIZ + 64];       /* Input buffer */
-char_type outbuf[OBUFSIZ + 2048];    /* Output buffer */
+char_type inbuf[IBUFSIZ + 64];  /* Input buffer */
+char_type outbuf[OBUFSIZ + 2048];       /* Output buffer */
 
 struct stat infstat;            /* Input file status */
 char *ifname;                   /* Input filename */
@@ -323,7 +335,8 @@ int fgnd_flag = 0;              /* Running in background (SIGINT=SIGIGN) */
 long bytes_in;                  /* Total number of byte from input */
 long bytes_out;                 /* Total number of byte to output */
 
-/* To save much memory, we overlay the table used by compress() with those
+/*
+ * To save much memory, we overlay the table used by compress() with those
  * used by decompress().  The tab_prefix table is the same size and type
  * as the codetab.  The tab_suffix table needs 2**BITS characters.  We
  * get this from the beginning of htab.  The output stack uses the rest
@@ -341,9 +354,7 @@ count_int htab6[8192];
 count_int htab7[8192];
 count_int htab8[HSIZE - 65536];
 count_int *htab[9] =
-{
-  htab0, htab1, htab2, htab3, htab4, htab5, htab6, htab7, htab8
-};
+  { htab0, htab1, htab2, htab3, htab4, htab5, htab6, htab7, htab8 };
 
 unsigned short code0tab[16384];
 unsigned short code1tab[16384];
@@ -351,9 +362,7 @@ unsigned short code2tab[16384];
 unsigned short code3tab[16384];
 unsigned short code4tab[16384];
 unsigned short *codetab[5] =
-{
-  code0tab, code1tab, code2tab, code3tab, code4tab
-};
+  { code0tab, code1tab, code2tab, code3tab, code4tab };
 
 #  define htabof(i)   (htab[(i) >> 13][(i) & 0x1fff])
 #  define codetabof(i)  (codetab[(i) >> 14][(i) & 0x3fff])
@@ -424,11 +433,8 @@ int primetab[256] =             /* Special secudary hash table.  */
 };
 #  endif
 
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-/* compress fdin to fdout
+/*
+ * compress fdin to fdout
  *
  * Algorithm:  use open addressing double hashing (no chaining) on the
  * prefix code / next character combination.  We do a variant of Knuth's
@@ -442,7 +448,6 @@ int primetab[256] =             /* Special secudary hash table.  */
  * file size for noticeable speed improvement on small files.  Please direct
  * questions about this implementation to ames!jaw.
  */
-
 void compress(int fdin, int fdout)
 {
   long hp;
@@ -526,9 +531,7 @@ void compress(int fdin, int fdout)
               checkpoint = bytes_in + CHECK_GAP;
 
               if (bytes_in > 0x007fffff)
-                {
-                  /* shift will overflow */
-
+                {               /* shift will overflow */
                   rat = (bytes_out + (outbits >> 3)) >> 8;
 
                   if (rat == 0) /* Don't divide by zero */
@@ -537,11 +540,10 @@ void compress(int fdin, int fdout)
                     rat = bytes_in / rat;
                 }
               else
-
-                  /* 8 fractional bits */
-
-                  rat = (bytes_in << 8) / (bytes_out + (outbits >> 3));
-
+                rat = (bytes_in << 8) / (bytes_out + (outbits >> 3));   /* 8
+                                                                         * fractional
+                                                                         * bits
+                                                                         */
               if (rat >= ratio)
                 ratio = (int)rat;
               else
@@ -572,108 +574,106 @@ void compress(int fdin, int fdout)
               memset(outbuf + (outbits >> 3) + 1, '\0', OBUFSIZ);
             }
 
-            {
-              int i;
+          {
+            int i;
 
-              i = rsize - rlop;
+            i = rsize - rlop;
 
-              if ((code_int) i > extcode - free_ent)
-                i = (int)(extcode - free_ent);
-              if (i > ((sizeof(outbuf) - 32) * 8 - outbits) / n_bits)
-                i = ((sizeof(outbuf) - 32) * 8 - outbits) / n_bits;
+            if ((code_int) i > extcode - free_ent)
+              i = (int)(extcode - free_ent);
+            if (i > ((sizeof(outbuf) - 32) * 8 - outbits) / n_bits)
+              i = ((sizeof(outbuf) - 32) * 8 - outbits) / n_bits;
 
-              if (!stcode && (long)i > checkpoint - bytes_in)
-                i = (int)(checkpoint - bytes_in);
+            if (!stcode && (long)i > checkpoint - bytes_in)
+              i = (int)(checkpoint - bytes_in);
 
-              rlop += i;
-              bytes_in += i;
-            }
+            rlop += i;
+            bytes_in += i;
+          }
 
           goto next;
         hfound:fcode.e.ent = codetabof(hp);
         next:if (rpos >= rlop)
-          goto endlop;
+            goto endlop;
         next2:fcode.e.c = inbuf[rpos++];
 #  ifndef FAST
-            {
-              code_int i;
-              fc = fcode.code;
+          {
+            code_int i;
+            fc = fcode.code;
 
-              hp = (((long)(fcode.e.c)) << (BITS - 8)) ^ (long)(fcode.e.ent);
+            hp = (((long)(fcode.e.c)) << (BITS - 8)) ^ (long)(fcode.e.ent);
 
-              if ((i = htabof(hp)) == fc)
-                  goto hfound;
+            if ((i = htabof(hp)) == fc)
+              goto hfound;
 
-              if (i != -1)
-                {
-                  long disp;
+            if (i != -1)
+              {
+                long disp;
 
-                  disp = (HSIZE - hp) - 1;        /* secondary hash (after G.
-                                                   * Knott) */
+                disp = (HSIZE - hp) - 1;        /* secondary hash (after G.
+                                                 * Knott) */
 
-                  do
-                    {
-                      if ((hp -= disp) < 0)
-                          hp += HSIZE;
+                do
+                  {
+                    if ((hp -= disp) < 0)
+                      hp += HSIZE;
 
-                      if ((i = htabof(hp)) == fc)
-                          goto hfound;
-                    }
-                  while (i != -1);
-                }
-            }
+                    if ((i = htabof(hp)) == fc)
+                      goto hfound;
+                  }
+                while (i != -1);
+              }
+          }
 #  else
-            {
-              long i;
-              long p;
-              fc = fcode.code;
+          {
+            long i;
+            long p;
+            fc = fcode.code;
 
-              hp = ((((long)(fcode.e.c)) << (HBITS - 8)) ^
-                      (long)(fcode.e.ent));
+            hp = ((((long)(fcode.e.c)) << (HBITS - 8)) ^ (long)(fcode.e.ent));
 
-              if ((i = htabof(hp)) == fc)
-                  goto hfound;
-              if (i == -1)
-                  goto out;
+            if ((i = htabof(hp)) == fc)
+              goto hfound;
+            if (i == -1)
+              goto out;
 
-              p = primetab[fcode.e.c];
-              lookup:hp = (hp + p) & HMASK;
-              if ((i = htabof(hp)) == fc)
-                  goto hfound;
-              if (i == -1)
-                  goto out;
-              hp = (hp + p) & HMASK;
-              if ((i = htabof(hp)) == fc)
-                  goto hfound;
-              if (i == -1)
-                  goto out;
-              hp = (hp + p) & HMASK;
-              if ((i = htabof(hp)) == fc)
-                  goto hfound;
-              if (i == -1)
-                  goto out;
-              goto lookup;
-            }
-
-      out:;
+            p = primetab[fcode.e.c];
+          lookup:hp = (hp + p) & HMASK;
+            if ((i = htabof(hp)) == fc)
+              goto hfound;
+            if (i == -1)
+              goto out;
+            hp = (hp + p) & HMASK;
+            if ((i = htabof(hp)) == fc)
+              goto hfound;
+            if (i == -1)
+              goto out;
+            hp = (hp + p) & HMASK;
+            if ((i = htabof(hp)) == fc)
+              goto hfound;
+            if (i == -1)
+              goto out;
+            goto lookup;
+          }
+        out:;
 #  endif
           output(outbuf, outbits, fcode.e.ent, n_bits);
 
-            {
-              long fc = fcode.code;
-              fcode.e.ent = fcode.e.c;
+          {
+            long fc = fcode.code;
+            fcode.e.ent = fcode.e.c;
 
-              if (stcode)
-                {
-                  codetabof(hp) = (unsigned short)free_ent++;
-                  htabof(hp) = fc;
-                }
-            }
+            if (stcode)
+              {
+                codetabof(hp) = (unsigned short)free_ent++;
+                htabof(hp) = fc;
+              }
+          }
 
           goto next;
 
         endlop:if (fcode.e.ent >= FIRST && rpos < rsize)
-              goto next2;
+            goto next2;
 
           if (rpos > rlop)
             {
@@ -681,7 +681,6 @@ void compress(int fdin, int fdout)
               rlop = rpos;
             }
         }
-
       while (rlop < rsize);
     }
 
@@ -695,9 +694,12 @@ void compress(int fdin, int fdout)
     write_error();
 
   bytes_out += (outbits + 7) >> 3;
+
+  return;
 }
 
-/* Decompress stdin to stdout.  This routine adapts to the codes in the
+/*
+ * Decompress stdin to stdout.  This routine adapts to the codes in the
  * file building the "string" table on-the-fly; requiring no table to
  * be stored in the compressed file.  The tables used herein are shared
  * with those of the compress() routine.  See the definitions above.
@@ -777,21 +779,21 @@ void decompress(int fdin, int fdout)
 
   do
     {
-      resetbuf:;
-        {
-          int i;
-          int e;
-          int o;
+    resetbuf:;
+      {
+        int i;
+        int e;
+        int o;
 
-          o = posbits >> 3;
-          e = o <= insize ? insize - o : 0;
+        o = posbits >> 3;
+        e = o <= insize ? insize - o : 0;
 
-          for (i = 0; i < e; ++i)
-            inbuf[i] = inbuf[i + o];
+        for (i = 0; i < e; ++i)
+          inbuf[i] = inbuf[i + o];
 
-          insize = e;
-          posbits = 0;
-        }
+        insize = e;
+        posbits = 0;
+      }
 
       if (insize < sizeof(inbuf) - IBUFSIZ)
         {
@@ -832,9 +834,7 @@ void decompress(int fdin, int fdout)
                   fprintf(stderr, "uncompress: corrupt input\n");
                   abort_compress();
                 }
-
-              outbuf[outpos++] =
-                        (char_type)(finchar = (int)(oldcode = code));
+              outbuf[outpos++] = (char_type) (finchar = (int)(oldcode = code));
               continue;
             }
 
@@ -863,9 +863,8 @@ void decompress(int fdin, int fdout)
                   p = &inbuf[posbits >> 3];
 
                   fprintf(stderr,
-                          "insize:%d posbits:%d "
-                          "inbuf:%02X %02X %02X %02X %02X (%d)\n",
-                           insize, posbits, p[1], p[0], p[1], p[2], p[3],
+                          "insize:%d posbits:%d inbuf:%02X %02X %02X %02X %02X (%d)\n",
+                          insize, posbits, p[-1], p[0], p[1], p[2], p[3],
                           (posbits & 07));
                   fprintf(stderr, "uncompress: corrupt input\n");
                   abort_compress();
@@ -875,10 +874,8 @@ void decompress(int fdin, int fdout)
               code = oldcode;
             }
 
-          /* Generate output characters in reverse order */
-
           while ((cmp_code_int) code >= (cmp_code_int) 256)
-            {
+            {                   /* Generate output characters in reverse order */
               *--stackp = tab_suffixof(code);
               code = tab_prefixof(code);
             }
@@ -887,40 +884,39 @@ void decompress(int fdin, int fdout)
 
           /* And put them out in forward order */
 
-            {
-              int i;
+          {
+            int i;
 
-              if (outpos + (i = (de_stack - stackp)) >= OBUFSIZ)
-                {
-                  do
-                    {
-                      if (i > OBUFSIZ - outpos)
-                        i = OBUFSIZ - outpos;
+            if (outpos + (i = (de_stack - stackp)) >= OBUFSIZ)
+              {
+                do
+                  {
+                    if (i > OBUFSIZ - outpos)
+                      i = OBUFSIZ - outpos;
 
-                      if (i > 0)
-                        {
-                          memcpy(outbuf + outpos, stackp, i);
-                          outpos += i;
-                        }
+                    if (i > 0)
+                      {
+                        memcpy(outbuf + outpos, stackp, i);
+                        outpos += i;
+                      }
 
-                      if (outpos >= OBUFSIZ)
-                        {
-                          if (write(fdout, outbuf, outpos) != outpos)
-                            write_error();
+                    if (outpos >= OBUFSIZ)
+                      {
+                        if (write(fdout, outbuf, outpos) != outpos)
+                          write_error();
 
-                          outpos = 0;
-                        }
-
-                      stackp += i;
-                    }
-                  while ((i = (de_stack - stackp)) > 0);
-                }
-              else
-                {
-                  memcpy(outbuf + outpos, stackp, i);
-                  outpos += i;
-                }
-            }
+                        outpos = 0;
+                      }
+                    stackp += i;
+                  }
+                while ((i = (de_stack - stackp)) > 0);
+              }
+            else
+              {
+                memcpy(outbuf + outpos, stackp, i);
+                outpos += i;
+              }
+          }
 
           if ((code = free_ent) < maxmaxcode)   /* Generate the new entry. */
             {

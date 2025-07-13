@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/wdog/wd_gettime.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -52,16 +50,36 @@
  *
  ****************************************************************************/
 
-sclock_t wd_gettime(FAR struct wdog_s *wdog)
+int wd_gettime(WDOG_ID wdog)
 {
-  sclock_t delay;
+  irqstate_t flags;
 
-  if (wdog == NULL || !WDOG_ISACTIVE(wdog))
+  /* Verify the wdog */
+
+  flags = enter_critical_section();
+  if (wdog != NULL && WDOG_ISACTIVE(wdog))
     {
-      return 0;
+      /* Traverse the watchdog list accumulating lag times until we find the
+       * wdog that we are looking for
+       */
+
+      FAR struct wdog_s *curr;
+      int delay = 0;
+
+      for (curr = (FAR struct wdog_s *)g_wdactivelist.head;
+           curr != NULL;
+           curr = curr->next)
+        {
+          delay += curr->lag;
+          if (curr == wdog)
+            {
+              delay -= wd_elapse();
+              leave_critical_section(flags);
+              return delay;
+            }
+        }
     }
 
-  delay = wdog->expired - clock_systime_ticks();
-
-  return delay < 0 ? 0 : delay;
+  leave_critical_section(flags);
+  return 0;
 }

@@ -1,22 +1,36 @@
 /****************************************************************************
  * boards/arm/cxd56xx/common/src/cxd56_crashdump.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: David Sidrane <david_s5@nscdg.com>
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,17 +43,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <time.h>
 
-#include <nuttx/kmalloc.h>
-
 #include <arch/chip/backuplog.h>
 #include <arch/chip/crashdump.h>
 #include "cxd56_wdt.h"
-#include "arm_internal.h"
+
+#include "up_arch.h"
+#include "up_internal.h"
 
 /****************************************************************************
  * Private Functions
@@ -54,7 +67,7 @@
  ****************************************************************************/
 
 #if defined(CONFIG_CXD56_RESET_ON_CRASH)
-static int nmi_handler(int irq, void *context, void *arg)
+static int nmi_handler(int irq, FAR void *context, FAR void *arg)
 {
   return 0;
 }
@@ -100,18 +113,19 @@ static void copy_reverse(stack_word_t *dest, stack_word_t *src, int size)
  * Name: board_crashdump
  ****************************************************************************/
 
-void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
-                     const char *filename, int lineno,
-                     const char *msg, void *regs)
+void board_crashdump(uintptr_t currentsp, FAR void *tcb,
+                     FAR const uint8_t *filename, int lineno)
 {
+  FAR struct tcb_s *rtcb;
   fullcontext_t *pdump;
 
   enter_critical_section();
 
+  rtcb = (FAR struct tcb_s *)tcb;
 #ifdef CONFIG_CXD56_BACKUPLOG
   pdump = up_backuplog_alloc("crash", sizeof(fullcontext_t));
 #else
-  pdump = kmm_malloc(sizeof(fullcontext_t));
+  pdump = malloc(sizeof(fullcontext_t));
 #endif
   if (!pdump)
     {
@@ -137,7 +151,7 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
           offset = len - sizeof(pdump->info.filename);
         }
 
-      strlcpy(pdump->info.filename, (char *)&filename[offset],
+      strncpy(pdump->info.filename, (char *)&filename[offset],
               sizeof(pdump->info.filename));
     }
 
@@ -147,22 +161,29 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
    * fault.
    */
 
-  pdump->info.current_regs = (uintptr_t)running_regs();
+  pdump->info.current_regs = (uintptr_t)CURRENT_REGS;
 
   /* Save Context */
 
-  strlcpy(pdump->info.name, get_task_name(tcb), sizeof(pdump->info.name));
+#if CONFIG_TASK_NAME_SIZE > 0
+  strncpy(pdump->info.name, rtcb->name, CONFIG_TASK_NAME_SIZE);
+#endif
 
-  pdump->info.pid = tcb->pid;
+  pdump->info.pid = rtcb->pid;
 
-  if (up_interrupt_context())
+  /* If  current_regs is not NULL then we are in an interrupt context
+   * and the user context is in current_regs else we are running in
+   * the users context
+   */
+
+  if (CURRENT_REGS)
     {
 #if CONFIG_ARCH_INTERRUPTSTACK > 3
-      pdump->info.stacks.interrupt.sp = sp;
+      pdump->info.stacks.interrupt.sp = currentsp;
 #endif
-      pdump->info.flags |= (REGS_PRESENT | USERSTACK_PRESENT |
+      pdump->info.flags |= (REGS_PRESENT | USERSTACK_PRESENT | \
                             INTSTACK_PRESENT);
-      memcpy(pdump->info.regs, running_regs(),
+      memcpy(pdump->info.regs, (void *)CURRENT_REGS,
              sizeof(pdump->info.regs));
       pdump->info.stacks.user.sp = pdump->info.regs[REG_R13];
     }
@@ -171,19 +192,25 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
       /* users context */
 
       pdump->info.flags |= USERSTACK_PRESENT;
-      pdump->info.stacks.user.sp = sp;
+      pdump->info.stacks.user.sp = currentsp;
     }
 
-  pdump->info.stacks.user.top = (uint32_t)tcb->stack_base_ptr +
-                                          tcb->adj_stack_size;
-  pdump->info.stacks.user.size = (uint32_t)tcb->adj_stack_size;
+  if (pdump->info.pid == 0)
+    {
+      pdump->info.stacks.user.top = g_idle_topstack - 4;
+      pdump->info.stacks.user.size = CONFIG_IDLETHREAD_STACKSIZE;
+    }
+  else
+    {
+      pdump->info.stacks.user.top = (uint32_t)rtcb->adj_stack_ptr;
+      pdump->info.stacks.user.size = (uint32_t)rtcb->adj_stack_size;
+    }
 
 #if CONFIG_ARCH_INTERRUPTSTACK > 3
   /* Get the limits on the interrupt stack memory */
 
-  pdump->info.stacks.interrupt.top =
-    up_get_intstackbase(this_cpu()) + INTSTACK_SIZE;
-  pdump->info.stacks.interrupt.size = INTSTACK_SIZE;
+  pdump->info.stacks.interrupt.top = (uint32_t)&g_intstackbase;
+  pdump->info.stacks.interrupt.size  = (CONFIG_ARCH_INTERRUPTSTACK & ~3);
 
   /* If In interrupt Context save the interrupt stack data centered
    * about the interrupt stack pointer
@@ -192,15 +219,15 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
   if ((pdump->info.flags & INTSTACK_PRESENT) != 0)
     {
       stack_word_t *ps = (stack_word_t *) pdump->info.stacks.interrupt.sp;
-      copy_reverse(pdump->istack, &ps[nitems(pdump->istack) / 2],
-                   nitems(pdump->istack));
+      copy_reverse(pdump->istack, &ps[ARRAYSIZE(pdump->istack) / 2],
+                   ARRAYSIZE(pdump->istack));
     }
 
   /* Is it Invalid? */
 
-  if (!(pdump->info.stacks.interrupt.sp <= pdump->info.stacks.interrupt.top
-      && pdump->info.stacks.interrupt.sp > pdump->info.stacks.interrupt.top
-       - pdump->info.stacks.interrupt.size))
+  if (!(pdump->info.stacks.interrupt.sp <= pdump->info.stacks.interrupt.top &&
+        pdump->info.stacks.interrupt.sp > pdump->info.stacks.interrupt.top -
+        pdump->info.stacks.interrupt.size))
     {
       pdump->info.flags |= INVALID_INTSTACK_PTR;
     }
@@ -213,8 +240,8 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
   if ((pdump->info.flags & USERSTACK_PRESENT) != 0)
     {
       stack_word_t *ps = (stack_word_t *) pdump->info.stacks.user.sp;
-      copy_reverse(pdump->ustack, &ps[nitems(pdump->ustack) / 2],
-                   nitems(pdump->ustack));
+      copy_reverse(pdump->ustack, &ps[ARRAYSIZE(pdump->ustack) / 2],
+                   ARRAYSIZE(pdump->ustack));
     }
 
   /* Is it Invalid? */
@@ -229,7 +256,6 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
 exit:
 #if defined(CONFIG_CXD56_RESET_ON_CRASH)
   board_reset_on_crash();
-#else
-  return;
 #endif
+  return;
 }

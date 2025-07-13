@@ -1,22 +1,37 @@
 /****************************************************************************
- * apps/netutils/tftpc/tftpc_put.c
+ * netuils/tftp/tftpc_put.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2011, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2018 Sebastien Lorquet. All rights reserved.
+ *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, TFTP_DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -74,8 +89,8 @@
  *   blockno - The block number of the packet
  *
  * Return Value:
- *   Number of bytes read into the packet. <TFTP_PACKETSIZE means end of
- *   file; <1 if an error occurs.
+ *   Number of bytes read into the packet. <TFTP_PACKETSIZE means end of file;
+ *   <1 if an error occurs.
  *
  ****************************************************************************/
 
@@ -97,7 +112,6 @@ int tftp_mkdatapacket(off_t offset, FAR uint8_t *packet, uint16_t blockno,
     {
       return ERROR;
     }
-
   return nbytesread + TFTP_DATAHEADERSIZE;
 }
 
@@ -139,7 +153,7 @@ static int tftp_rcvack(int sd, FAR uint8_t *packet,
     {
       /* Try for until a valid ACK is received or some error occurs */
 
-      for (; ; )
+      for (;;)
         {
           /* Receive the next UDP packet from the server */
 
@@ -150,11 +164,11 @@ static int tftp_rcvack(int sd, FAR uint8_t *packet,
 
               if (nbytes == 0)
                 {
-                  nerr("ERROR: Connection lost: %zd bytes\n", nbytes);
+                  nerr("ERROR: Connection lost: %d bytes\n", nbytes);
                 }
               else if (nbytes > 0)
                 {
-                  nerr("ERROR: Short packet: %zd bytes\n", nbytes);
+                  nerr("ERROR: Short packet: %d bytes\n", nbytes);
                 }
               else
                 {
@@ -167,25 +181,25 @@ static int tftp_rcvack(int sd, FAR uint8_t *packet,
             }
           else
             {
-              /* Get the port being used by the server if that has not yet
-               * been established.
-               */
+               /* Get the port being used by the server if that has not yet
+                * been established.
+                */
 
-              if (!*port)
-                {
-                  *port            = from.sin_port;
-                  server->sin_port = from.sin_port;
-                }
+               if (!*port)
+                 {
+                   *port            = from.sin_port;
+                   server->sin_port = from.sin_port;
+                 }
 
-              /* Verify that the packet was received from the correct host
-               * and port.
-               */
+               /* Verify that the packet was received from the correct host and
+                * port.
+                */
 
-              if (server->sin_addr.s_addr != from.sin_addr.s_addr)
-                {
-                  ninfo("Invalid address in DATA\n");
-                  continue;
-                }
+               if (server->sin_addr.s_addr != from.sin_addr.s_addr)
+                 {
+                   ninfo("Invalid address in DATA\n");
+                   continue;
+                 }
 
               if (*port != server->sin_port)
                 {
@@ -198,16 +212,16 @@ static int tftp_rcvack(int sd, FAR uint8_t *packet,
 
               /* Parse the error message */
 
-              opcode   = (uint16_t)packet[0] << 8 | (uint16_t)packet[1];
-              rblockno = (uint16_t)packet[2] << 8 | (uint16_t)packet[3];
+               opcode   = (uint16_t)packet[0] << 8 | (uint16_t)packet[1];
+               rblockno = (uint16_t)packet[2] << 8 | (uint16_t)packet[3];
 
               /* Verify that the message that we received is an ACK for the
                * expected block number.
                */
 
-              if (opcode != TFTP_ACK)
-                {
-                  nwarn("WARNING: Bad opcode\n");
+               if (opcode != TFTP_ACK)
+                 {
+                   nwarn("WARNING: Bad opcode\n");
 
 #ifdef CONFIG_DEBUG_NET_WARN
                   if (opcode == TFTP_ERR)
@@ -218,8 +232,7 @@ static int tftp_rcvack(int sd, FAR uint8_t *packet,
 #endif
                   if (opcode > TFTP_MAXRFC1350)
                     {
-                      packetlen = tftp_mkerrpacket(packet,
-                                                   TFTP_ERR_ILLEGALOP,
+                      packetlen = tftp_mkerrpacket(packet, TFTP_ERR_ILLEGALOP,
                                                    TFTP_ERRST_ILLEGALOP);
                       tftp_sendto(sd, packet, packetlen, server);
                     }
@@ -278,11 +291,11 @@ int tftpput_cb(FAR const char *remote, in_addr_t addr, bool binary,
 
   /* Allocate the buffer to used for socket/disk I/O */
 
-  packet = (FAR uint8_t *)zalloc(TFTP_IOBUFSIZE);
+  packet = (FAR uint8_t*)zalloc(TFTP_IOBUFSIZE);
   if (!packet)
     {
       nerr("ERROR: packet memory allocation failure\n");
-      errno = ENOMEM;
+      set_errno(ENOMEM);
       goto errout;
     }
 
@@ -302,10 +315,9 @@ int tftpput_cb(FAR const char *remote, in_addr_t addr, bool binary,
 
   blockno = 1;
   retry   = 0;
-  for (; ; )
+  for (;;)
     {
-      packetlen = tftp_mkreqpacket(packet, TFTP_IOBUFSIZE,
-                                   TFTP_WRQ, remote, binary);
+      packetlen = tftp_mkreqpacket(packet, TFTP_WRQ, remote, binary);
       ret = tftp_sendto(sd, packet, packetlen, &server);
       if (ret != packetlen)
         {
@@ -323,12 +335,12 @@ int tftpput_cb(FAR const char *remote, in_addr_t addr, bool binary,
 
       /* We are going to loop and re-send the request packet. Check the
        * retry count so that we do not loop forever.
-       */
+        */
 
       if (++retry > TFTP_RETRIES)
         {
           nerr("ERROR: Retry count exceeded\n");
-          errno = ETIMEDOUT;
+          set_errno(ETIMEDOUT);
           goto errout_with_sd;
         }
     }
@@ -338,7 +350,7 @@ int tftpput_cb(FAR const char *remote, in_addr_t addr, bool binary,
   offset     = 0;
   retry      = 0;
 
-  for (; ; )
+  for (;;)
     {
       /* Construct the next data packet */
 
@@ -367,24 +379,24 @@ int tftpput_cb(FAR const char *remote, in_addr_t addr, bool binary,
 
           if (rblockno == blockno)
             {
-              /* Yes.. If we are at the end of the file and if all of the
-               * packets have been ACKed, then we are done.
-               */
+               /* Yes.. If we are at the end of the file and if all of the
+                * packets have been ACKed, then we are done.
+                */
 
               if (packetlen < TFTP_PACKETSIZE)
                 {
                   break;
                 }
 
-              /* Not the last block.. set up for the next block */
+               /* Not the last block.. set up for the next block */
 
-              blockno += 1;
-              offset  += TFTP_DATASIZE;
-              retry    = 0;
+               blockno += 1;
+               offset  += TFTP_DATASIZE;
+               retry    = 0;
 
-              /* Skip the retry test */
+               /* Skip the retry test */
 
-              continue;
+               continue;
             }
         }
 
@@ -395,7 +407,7 @@ int tftpput_cb(FAR const char *remote, in_addr_t addr, bool binary,
       if (++retry > TFTP_RETRIES)
         {
           nerr("ERROR: Retry count exceeded\n");
-          errno = ETIMEDOUT;
+          set_errno(ETIMEDOUT);
           goto errout_with_sd;
         }
     }
@@ -470,7 +482,6 @@ static ssize_t tftp_read(FAR void *ctx, uint32_t offset, FAR uint8_t *buf,
       totalread += nbytesread;
       buf       += nbytesread;
     }
-
   return totalread;
 }
 

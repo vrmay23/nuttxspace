@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/input/cypress_mbr3108.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014 Haltian Ltd. All rights reserved.
+ *   Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +43,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <poll.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -186,19 +198,19 @@ struct mbr3108_dev_s
 {
   /* I2C bus and address for device. */
 
-  FAR struct i2c_master_s *i2c;
+  struct i2c_master_s *i2c;
   uint8_t addr;
 
   /* Configuration for device. */
 
-  FAR struct mbr3108_board_s *board;
-  FAR const struct mbr3108_sensor_conf_s *sensor_conf;
-  mutex_t devlock;
+  struct mbr3108_board_s *board;
+  const struct mbr3108_sensor_conf_s *sensor_conf;
+  sem_t devsem;
   uint8_t cref;
   struct mbr3108_debug_conf_s debug_conf;
   bool int_pending;
 
-  FAR struct pollfd *fds[CONFIG_INPUT_CYPRESS_MBR3108_NPOLLWAITERS];
+  struct pollfd *fds[CONFIG_INPUT_CYPRESS_MBR3108_NPOLLWAITERS];
 };
 
 /****************************************************************************
@@ -226,8 +238,6 @@ static const struct file_operations g_mbr3108_fileops =
   mbr3108_write,  /* write */
   NULL,           /* seek */
   NULL,           /* ioctl */
-  NULL,           /* mmap */
-  NULL,           /* truncate */
   mbr3108_poll    /* poll */
 };
 
@@ -236,17 +246,23 @@ static const struct file_operations g_mbr3108_fileops =
  ****************************************************************************/
 
 static int mbr3108_i2c_write(FAR struct mbr3108_dev_s *dev, uint8_t reg,
-                             FAR const uint8_t *buf, size_t buflen)
+                             const uint8_t *buf, size_t buflen)
 {
   struct i2c_msg_s msgv[2] =
   {
     {
-      CONFIG_MBR3108_I2C_FREQUENCY,
-      dev->addr, 0, &reg, sizeof(reg)
+      .frequency = CONFIG_MBR3108_I2C_FREQUENCY,
+      .addr      = dev->addr,
+      .flags     = 0,
+      .buffer    = &reg,
+      .length    = 1
     },
     {
-      CONFIG_MBR3108_I2C_FREQUENCY,
-      dev->addr, I2C_M_NOSTART, buf, buflen
+      .frequency = CONFIG_MBR3108_I2C_FREQUENCY,
+      .addr      = dev->addr,
+      .flags     = I2C_M_NOSTART,
+      .buffer    = (void *)buf,
+      .length    = buflen
     }
   };
 
@@ -284,17 +300,23 @@ static int mbr3108_i2c_write(FAR struct mbr3108_dev_s *dev, uint8_t reg,
 }
 
 static int mbr3108_i2c_read(FAR struct mbr3108_dev_s *dev, uint8_t reg,
-                            FAR uint8_t *buf, size_t buflen)
+                            uint8_t *buf, size_t buflen)
 {
   struct i2c_msg_s msgv[2] =
   {
     {
-      CONFIG_MBR3108_I2C_FREQUENCY,
-      dev->addr, 0, &reg, sizeof(reg)
+      .frequency = CONFIG_MBR3108_I2C_FREQUENCY,
+      .addr      = dev->addr,
+      .flags     = 0,
+      .buffer    = &reg,
+      .length    = 1
     },
     {
-      CONFIG_MBR3108_I2C_FREQUENCY,
-      dev->addr, I2C_M_READ, buf, buflen
+      .frequency = CONFIG_MBR3108_I2C_FREQUENCY,
+      .addr      = dev->addr,
+      .flags     = I2C_M_READ,
+      .buffer    = buf,
+      .length    = buflen
     }
   };
 
@@ -738,12 +760,13 @@ static ssize_t mbr3108_read(FAR struct file *filep, FAR char *buffer,
   irqstate_t flags;
   int ret;
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
+  DEBUGASSERT(inode && inode->i_private);
   priv = inode->i_private;
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -772,7 +795,7 @@ static ssize_t mbr3108_read(FAR struct file *filep, FAR char *buffer,
   priv->int_pending = false;
   leave_critical_section(flags);
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret < 0 ? ret : outlen;
 }
 
@@ -784,9 +807,10 @@ static ssize_t mbr3108_write(FAR struct file *filep, FAR const char *buffer,
   enum mbr3108_cmd_e type;
   int ret;
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
+  DEBUGASSERT(inode && inode->i_private);
   priv = inode->i_private;
 
   if (buflen < sizeof(enum mbr3108_cmd_e))
@@ -794,7 +818,7 @@ static ssize_t mbr3108_write(FAR struct file *filep, FAR const char *buffer,
       return -EINVAL;
     }
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -852,7 +876,7 @@ static ssize_t mbr3108_write(FAR struct file *filep, FAR const char *buffer,
     }
 
 out:
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
 
   return ret < 0 ? ret : buflen;
 }
@@ -864,12 +888,13 @@ static int mbr3108_open(FAR struct file *filep)
   unsigned int use_count;
   int ret;
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
+  DEBUGASSERT(inode && inode->i_private);
   priv = inode->i_private;
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -883,7 +908,7 @@ static int mbr3108_open(FAR struct file *filep)
       ret = priv->board->set_power(priv->board, true);
       if (ret < 0)
         {
-          goto out_lock;
+          goto out_sem;
         }
 
       /* Let chip to power up before probing */
@@ -898,7 +923,7 @@ static int mbr3108_open(FAR struct file *filep)
           /* No such device. Power off the switch. */
 
           priv->board->set_power(priv->board, false);
-          goto out_lock;
+          goto out_sem;
         }
 
       if (priv->sensor_conf)
@@ -911,7 +936,7 @@ static int mbr3108_open(FAR struct file *filep)
               /* Configuration failed. Power off the switch. */
 
               priv->board->set_power(priv->board, false);
-              goto out_lock;
+              goto out_sem;
             }
         }
 
@@ -925,8 +950,8 @@ static int mbr3108_open(FAR struct file *filep)
       ret = 0;
     }
 
-out_lock:
-  nxmutex_unlock(&priv->devlock);
+out_sem:
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -937,12 +962,13 @@ static int mbr3108_close(FAR struct file *filep)
   int use_count;
   int ret;
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
+  DEBUGASSERT(inode && inode->i_private);
   priv = inode->i_private;
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -973,8 +999,28 @@ static int mbr3108_close(FAR struct file *filep)
       priv->cref = use_count;
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
+
   return 0;
+}
+
+static void mbr3108_poll_notify(FAR struct mbr3108_dev_s *priv)
+{
+  int i;
+
+  DEBUGASSERT(priv != NULL);
+
+  for (i = 0; i < CONFIG_INPUT_CYPRESS_MBR3108_NPOLLWAITERS; i++)
+    {
+      struct pollfd *fds = priv->fds[i];
+      if (fds)
+        {
+          mbr3108_dbg("Report events: %02x\n", fds->revents);
+
+          fds->revents |= POLLIN;
+          nxsem_post(fds->sem);
+        }
+    }
 }
 
 static int mbr3108_poll(FAR struct file *filep, FAR struct pollfd *fds,
@@ -986,13 +1032,13 @@ static int mbr3108_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int ret = 0;
   int i;
 
-  DEBUGASSERT(fds);
+  DEBUGASSERT(filep && fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  priv = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  priv = (FAR struct mbr3108_dev_s *)inode->i_private;
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -1036,7 +1082,7 @@ static int mbr3108_poll(FAR struct file *filep, FAR struct pollfd *fds,
           pending = priv->int_pending;
           if (pending)
             {
-              poll_notify(&fds, 1, POLLIN);
+              mbr3108_poll_notify(priv);
             }
         }
     }
@@ -1054,7 +1100,7 @@ static int mbr3108_poll(FAR struct file *filep, FAR struct pollfd *fds,
     }
 
 out:
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -1069,7 +1115,7 @@ static int mbr3108_isr_handler(int irq, FAR void *context, FAR void *arg)
   priv->int_pending = true;
   leave_critical_section(flags);
 
-  poll_notify(priv->fds, CONFIG_INPUT_CYPRESS_MBR3108_NPOLLWAITERS, POLLIN);
+  mbr3108_poll_notify(priv);
   return 0;
 }
 
@@ -1077,14 +1123,13 @@ static int mbr3108_isr_handler(int irq, FAR void *context, FAR void *arg)
  * Public Functions
  ****************************************************************************/
 
-int
-cypress_mbr3108_register(FAR const char *devpath,
-                         FAR struct i2c_master_s *i2c_dev,
-                         uint8_t i2c_devaddr,
-                         FAR struct mbr3108_board_s *board_config,
-                         FAR const struct mbr3108_sensor_conf_s *sensor_conf)
+int cypress_mbr3108_register(FAR const char *devpath,
+                             FAR struct i2c_master_s *i2c_dev,
+                             uint8_t i2c_devaddr,
+                             struct mbr3108_board_s *board_config,
+                             const struct mbr3108_sensor_conf_s *sensor_conf)
 {
-  FAR struct mbr3108_dev_s *priv;
+  struct mbr3108_dev_s *priv;
   int ret = 0;
 
   /* Allocate device private structure. */
@@ -1103,12 +1148,11 @@ cypress_mbr3108_register(FAR const char *devpath,
   priv->board = board_config;
   priv->sensor_conf = sensor_conf;
 
-  nxmutex_init(&priv->devlock);
+  nxsem_init(&priv->devsem, 0, 1);
 
   ret = register_driver(devpath, &g_mbr3108_fileops, 0666, priv);
   if (ret < 0)
     {
-      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
       mbr3108_dbg("Error occurred during the driver registering\n");
       return ret;

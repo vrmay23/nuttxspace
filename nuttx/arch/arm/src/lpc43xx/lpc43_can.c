@@ -1,27 +1,38 @@
 /****************************************************************************
  * arch/arm/src/lpc43xx/lpc43_can.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright(C) 2017 Gregory Nutt. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *    Created on: 2 May 2017
+ *        Author: katherine
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- ****************************************************************************/
-
-/****************************************************************************
- * Included Files
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES(INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -30,7 +41,6 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -39,7 +49,9 @@
 #include <nuttx/arch.h>
 #include <nuttx/can/can.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 #include "lpc43_gpio.h"
 #include "hardware/lpc43_can.h"
@@ -116,17 +128,16 @@
 
 struct up_dev_s
 {
-  uint8_t port;   /* CAN port number */
+  uint8_t port; /* CAN port number */
   uint8_t clkdiv; /* CLKDIV register */
-  uint32_t baud;  /* Configured baud */
-  uint32_t base;  /* CAN register base address */
-  uint8_t irq;    /* IRQ associated with this CAN */
+  uint32_t baud; /* Configured baud */
+  uint32_t base; /* CAN register base address */
+  uint8_t irq; /* IRQ associated with this CAN */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
-
 /* CAN Register access */
 
 #ifdef CONFIG_LPC43_CAN_REGDEBUG
@@ -146,26 +157,26 @@ static void can_putcommon(uint32_t addr, uint32_t value);
 
 /* CAN methods */
 
-static void can_reset(struct can_dev_s *dev);
-static int can_setup(struct can_dev_s *dev);
-static void can_shutdown(struct can_dev_s *dev);
-static void can_rxint(struct can_dev_s *dev, bool enable);
-static void can_txint(struct can_dev_s *dev, bool enable);
-static int can_ioctl(struct can_dev_s *dev, int cmd, unsigned long arg);
-static int can_remoterequest(struct can_dev_s *dev, uint16_t id);
-static int can_send(struct can_dev_s *dev, struct can_msg_s *msg);
-static bool candev_txready(struct can_dev_s *dev);
-static bool candev_txempty(struct can_dev_s *dev);
+static void can_reset(FAR struct can_dev_s *dev);
+static int can_setup(FAR struct can_dev_s *dev);
+static void can_shutdown(FAR struct can_dev_s *dev);
+static void can_rxint(FAR struct can_dev_s *dev, bool enable);
+static void can_txint(FAR struct can_dev_s *dev, bool enable);
+static int can_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg);
+static int can_remoterequest(FAR struct can_dev_s *dev, uint16_t id);
+static int can_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg);
+static bool candev_txready(FAR struct can_dev_s *dev);
+static bool candev_txempty(FAR struct can_dev_s *dev);
 
 /* CAN interrupts */
 
 #ifdef CONFIG_LPC43_CAN0
-static int can0_interrupt(int irq, void *context, void *arg);
+static int can0_interrupt(int irq, void *context, FAR void *arg);
 #endif
 #ifdef CONFIG_LPC43_CAN1
-static int can1_interrupt(int irq, void *context, void *arg);
+static int can1_interrupt(int irq, void *context, FAR void *arg);
 #endif
-static void can_interrupt(struct can_dev_s *dev);
+static void can_interrupt(FAR struct can_dev_s *dev);
 
 /* Message Processing */
 
@@ -186,7 +197,7 @@ static int can_bittiming(struct up_dev_s *priv);
 static const struct can_ops_s g_canops =
 {
   .co_reset         = can_reset,
-  .co_setup         = can_setup,
+  .co_setup         =  can_setup,
   .co_shutdown      = can_shutdown,
   .co_rxint         = can_rxint,
   .co_txint         = can_txint,
@@ -274,7 +285,7 @@ static void can_printreg(uint32_t addr, uint32_t value)
         }
     }
 
-  /* No this is a new address or value */
+   /* No this is a new address or value */
 
   else
     {
@@ -284,7 +295,7 @@ static void can_printreg(uint32_t addr, uint32_t value)
         {
           /* Yes.. then show how many times the value repeated */
 
-          caninfo("[repeats %d more times]\n", count - 3);
+          caninfo("[repeats %d more times]\n", count-3);
         }
 
       /* Save the new address, value, and count */
@@ -440,9 +451,9 @@ static void can_putcommon(uint32_t addr, uint32_t value)
  *
  ****************************************************************************/
 
-static void can_reset(struct can_dev_s *dev)
+static void can_reset(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
   uint32_t regval;
 
   caninfo("CAN%d reset\n", priv->port);
@@ -483,9 +494,9 @@ static void can_reset(struct can_dev_s *dev)
  *
  ****************************************************************************/
 
-static int can_setup(struct can_dev_s *dev)
+static int can_setup(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *) dev->cd_priv;
   uint32_t regval;
   uint8_t i;
   int ret = ERROR;
@@ -558,9 +569,9 @@ static int can_setup(struct can_dev_s *dev)
  *
  ****************************************************************************/
 
-static void can_shutdown(struct can_dev_s *dev)
+static void can_shutdown(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *) dev->cd_priv;
   uint32_t regval;
 
   caninfo("CAN%d\n", priv->port);
@@ -589,9 +600,9 @@ static void can_shutdown(struct can_dev_s *dev)
  *
  * Description:
  *   Call to enable or disable RX interrupts.
- *   This function is called two times: from can_open and can_close.
- *   Therefore this function enables and disables not only RX interrupts
- *   but all message objects.
+ *   This function is called two times: from can_open and can_close. Therefore
+ *   this function enables and disables not only RX interrupts but all message
+ *   objects.
  *
  * Input Parameters:
  *   dev - An instance of the "upper half" can driver state structure.
@@ -601,9 +612,9 @@ static void can_shutdown(struct can_dev_s *dev)
  *
  ****************************************************************************/
 
-static void can_rxint(struct can_dev_s *dev, bool enable)
+static void can_rxint(FAR struct can_dev_s *dev, bool enable)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *) dev->cd_priv;
 
   if (enable == true)
     {
@@ -633,7 +644,7 @@ static void can_rxint(struct can_dev_s *dev, bool enable)
  *
  ****************************************************************************/
 
-static void can_txint(struct can_dev_s *dev, bool enable)
+static void can_txint(FAR struct can_dev_s *dev, bool enable)
 {
   /* The TX interrupt is automatically enabled in can_send within a
    * message object.
@@ -654,7 +665,7 @@ static void can_txint(struct can_dev_s *dev, bool enable)
  *
  ****************************************************************************/
 
-static int can_ioctl(struct can_dev_s *dev, int cmd, unsigned long arg)
+static int can_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
 {
   caninfo("Fix me:Not Implemented\n");
   return 0;
@@ -674,7 +685,7 @@ static int can_ioctl(struct can_dev_s *dev, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int can_remoterequest(struct can_dev_s *dev, uint16_t id)
+static int can_remoterequest(FAR struct can_dev_s *dev, uint16_t id)
 {
   caninfo("Fix me:Not Implemented\n");
   return 0;
@@ -703,9 +714,9 @@ static int can_remoterequest(struct can_dev_s *dev, uint16_t id)
  *
  ****************************************************************************/
 
-static int can_send(struct can_dev_s *dev, struct can_msg_s *msg)
+static int can_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *) dev->cd_priv;
   uint32_t regval;
   uint32_t clz;
   uint32_t id;
@@ -717,7 +728,7 @@ static int can_send(struct can_dev_s *dev, struct can_msg_s *msg)
       return ERROR;
     }
 
-  regval = (can_getreg(priv, LPC43_CAN_MSGV2_OFFSET) & 0xffff);
+  regval = (can_getreg(priv, LPC43_CAN_MSGV2_OFFSET) & 0xFFFF);
   clz    = arm_clz(regval);
 
   if (clz == 0x10)
@@ -734,11 +745,11 @@ static int can_send(struct can_dev_s *dev, struct can_msg_s *msg)
   caninfo("CAN%d ID: %d DLC: %d\n",
           priv->port, msg->cm_hdr.ch_id, msg->cm_hdr.ch_dlc);
 
-  can_putreg(priv, LPC43_CAN_IF1_MSK1_OFFSET, 0xffff);
-  can_putreg(priv, LPC43_CAN_IF1_MSK2_OFFSET, 0xffff);
+  can_putreg(priv, LPC43_CAN_IF1_MSK1_OFFSET, 0xFFFF);
+  can_putreg(priv, LPC43_CAN_IF1_MSK2_OFFSET, 0xFFFF);
 
   regval = ((dlc & CAN_MCTRL_DLC_MASK) | CAN_MCTRL_EOB | CAN_MCTRL_TXRQST
-                      | CAN_MCTRL_TXIE);
+                      | CAN_MCTRL_TXIE );
   can_putreg(priv, LPC43_CAN_IF1_MCTRL_OFFSET, regval);
 
   /* Write data to IF1 data registers */
@@ -756,7 +767,7 @@ static int can_send(struct can_dev_s *dev, struct can_msg_s *msg)
   can_putreg(priv, LPC43_CAN_IF1_DB2_OFFSET, regval);
 
 #ifdef CONFIG_CAN_EXTID
-  can_putreg(priv, LPC43_CAN_IF1_ARB1_OFFSET, id & 0x0000ffff);
+  can_putreg(priv, LPC43_CAN_IF1_ARB1_OFFSET, id & 0x0000FFFF);
   can_putreg(priv, LPC43_CAN_IF1_ARB2_OFFSET, CAN_MSK2_DIR | CAN_MSK2_XTD
                    | CAN_MSK2_MSGVAL | id >> 16);
 #else
@@ -765,10 +776,9 @@ static int can_send(struct can_dev_s *dev, struct can_msg_s *msg)
                    | id << 2);
 #endif
 
-  regval = (CAN_CMDMSKW_WRRD | CAN_CMDMSKW_MASK |
-            CAN_CMDMSKW_ARB | CAN_CMDMSKW_CTRL |
-            CAN_CMDMSKW_CLRINTPND | CAN_CMDMSKW_TXRQST |
-            CAN_CMDMSKW_DATAA | CAN_CMDMSKW_DATAB);
+  regval = (CAN_CMDMSKW_WRRD | CAN_CMDMSKW_MASK | CAN_CMDMSKW_ARB
+                       | CAN_CMDMSKW_CTRL | CAN_CMDMSKW_CLRINTPND | CAN_CMDMSKW_TXRQST
+                       | CAN_CMDMSKW_DATAA | CAN_CMDMSKW_DATAB);
   can_putreg(priv, LPC43_CAN_IF1_CMDMSKW_OFFSET, regval);
 
   /* Write to Message RAM */
@@ -796,9 +806,9 @@ static int can_send(struct can_dev_s *dev, struct can_msg_s *msg)
  *
  ****************************************************************************/
 
-static bool candev_txready(struct can_dev_s *dev)
+static bool candev_txready(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *) dev->cd_priv;
 
   if (can_getreg(priv, LPC43_CAN_MSGV2_OFFSET) & 0x8000)
     {
@@ -831,10 +841,10 @@ static bool candev_txready(struct can_dev_s *dev)
  *
  ****************************************************************************/
 
-static bool candev_txempty(struct can_dev_s *dev)
+static bool candev_txempty(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
-  return (!((can_getreg(priv, LPC43_CAN_MSGV2_OFFSET)) & 0xffff));
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *) dev->cd_priv;
+  return (!((can_getreg(priv, LPC43_CAN_MSGV2_OFFSET)) & 0xFFFF));
 }
 
 /****************************************************************************
@@ -852,8 +862,9 @@ static bool candev_txempty(struct can_dev_s *dev)
  *
  ****************************************************************************/
 
+
 #ifdef CONFIG_LPC43_CAN0
-static int can0_interrupt(int irq, void *context, void *arg)
+static int can0_interrupt(int irq, void *context, FAR void *arg)
 {
   can_interrupt(&g_can0dev);
   return OK;
@@ -861,7 +872,7 @@ static int can0_interrupt(int irq, void *context, void *arg)
 #endif
 
 #ifdef CONFIG_LPC43_CAN1
-static int can1_interrupt(int irq, void *context, void *arg)
+static int can1_interrupt(int irq, void *context, FAR void *arg)
 {
   can_interrupt(&g_can1dev);
   return OK;
@@ -877,9 +888,9 @@ static int can1_interrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-static void can_interrupt(struct can_dev_s *dev)
+static void can_interrupt(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *) dev->cd_priv;
   uint32_t regval = 0;
 
   uint32_t msgindex = 0;
@@ -892,7 +903,7 @@ static void can_interrupt(struct can_dev_s *dev)
 
   uint32_t stat = can_getreg(priv, LPC43_CAN_STAT_OFFSET);
 
-  if (interrupt & CAN_INT_STAT)
+  if ( interrupt & CAN_INT_STAT )
     {
       /* Clear all warning/error states except RXOK/TXOK */
 
@@ -902,7 +913,7 @@ static void can_interrupt(struct can_dev_s *dev)
     }
   else
     {
-      msgindex = interrupt & 0x7fff;
+      msgindex = interrupt & 0x7FFF;
 
       /* if no error detected */
 
@@ -935,7 +946,7 @@ static void can_interrupt(struct can_dev_s *dev)
 #else
               can_txdone(dev);
 #endif
-            }
+             }
         }
       else
         {
@@ -971,19 +982,19 @@ static void can_savemsg(struct up_dev_s *priv, struct can_hdr_s *hdr,
                         uint32_t *data)
 {
 #ifdef CONFIG_CAN_EXTID
-  hdr->ch_id  = (can_getreg(priv, LPC43_CAN_IF2_ARB1_OFFSET) & 0xffff) |
-                (can_getreg(priv, LPC43_CAN_IF2_ARB2_OFFSET) & 0x0fff) << 16;
+  hdr->ch_id    = (can_getreg(priv, LPC43_CAN_IF2_ARB1_OFFSET) & 0xFFFF) |
+                  (can_getreg(priv, LPC43_CAN_IF2_ARB2_OFFSET) & 0x0FFF) << 16;
   hdr->ch_extid = 1;
 #else
-  hdr->ch_id  = (can_getreg(priv, LPC43_CAN_IF2_ARB2_OFFSET) & 0x1fff) >> 2;
+  hdr->ch_id    = (can_getreg(priv, LPC43_CAN_IF2_ARB2_OFFSET) & 0x1FFF) >> 2;
 #endif
-  hdr->ch_dlc = can_getreg(priv, LPC43_CAN_IF2_MCTRL_OFFSET) & 0x000f;
-  hdr->ch_rtr = 0;
+  hdr->ch_dlc   = can_getreg(priv, LPC43_CAN_IF2_MCTRL_OFFSET) & 0x000F;
+  hdr->ch_rtr   = 0;
 
-  data[0]     = can_getreg(priv, LPC43_CAN_IF2_DA2_OFFSET) << 16 |
-                can_getreg(priv, LPC43_CAN_IF2_DA1_OFFSET);
-  data[1]     = can_getreg(priv, LPC43_CAN_IF2_DB2_OFFSET) << 16 |
-                can_getreg(priv, LPC43_CAN_IF2_DB1_OFFSET);
+  data[0]       = can_getreg(priv, LPC43_CAN_IF2_DA2_OFFSET) << 16 |
+                  can_getreg(priv, LPC43_CAN_IF2_DA1_OFFSET);
+  data[1]       = can_getreg(priv, LPC43_CAN_IF2_DB2_OFFSET) << 16 |
+                  can_getreg(priv, LPC43_CAN_IF2_DB1_OFFSET);
 }
 
 /****************************************************************************
@@ -1038,9 +1049,8 @@ static void can_invalobj(struct up_dev_s *priv, uint32_t index)
   /* Disable reception and transmission interrupts, clear transmit request */
 
   can_putreg(priv, LPC43_CAN_IF2_MCTRL_OFFSET, CAN_MCTRL_EOB);
-  can_putreg(priv, LPC43_CAN_IF2_CMDMSKW_OFFSET,
-                   CAN_CMDMSKW_WRRD | CAN_CMDMSKW_CLRINTPND |
-                   CAN_CMDMSKW_CTRL | CAN_CMDMSKW_ARB);
+  can_putreg(priv, LPC43_CAN_IF2_CMDMSKW_OFFSET, CAN_CMDMSKW_WRRD
+                       | CAN_CMDMSKW_CLRINTPND | CAN_CMDMSKW_CTRL | CAN_CMDMSKW_ARB);
   can_putreg(priv, LPC43_CAN_IF2_CMDREQ_OFFSET, index);
 }
 
@@ -1075,8 +1085,7 @@ static void can_setuprxobj(struct up_dev_s *priv)
 
   can_putreg(priv, LPC43_CAN_IF2_ARB1_OFFSET, 0x0000);
 #ifdef CONFIG_CAN_EXTID
-  can_putreg(priv, LPC43_CAN_IF2_ARB2_OFFSET,
-             CAN_MSK2_MSGVAL | CAN_MSK2_XTD);
+  can_putreg(priv, LPC43_CAN_IF2_ARB2_OFFSET, CAN_MSK2_MSGVAL | CAN_MSK2_XTD);
 #else
   can_putreg(priv, LPC43_CAN_IF2_ARB2_OFFSET, CAN_MSK2_MSGVAL);
 #endif
@@ -1088,8 +1097,7 @@ static void can_setuprxobj(struct up_dev_s *priv)
 
   for (i = CAN_RX_OBJ_FIRST; i <= CAN_RX_OBJ_LAST; ++i)
     {
-      while (can_getreg(priv, LPC43_CAN_IF2_CMDREQ_OFFSET) &
-             CAN_CMDREQ_BUSY);
+      while (can_getreg(priv, LPC43_CAN_IF2_CMDREQ_OFFSET) & CAN_CMDREQ_BUSY);
       can_putreg(priv, LPC43_CAN_IF2_CMDREQ_OFFSET, i);
     }
 }
@@ -1208,9 +1216,9 @@ static int can_bittiming(struct up_dev_s *priv)
  *
  ****************************************************************************/
 
-struct can_dev_s *lpc43_caninitialize(int port)
+FAR struct can_dev_s *lpc43_caninitialize(int port)
 {
-  struct can_dev_s *candev;
+  FAR struct can_dev_s *candev;
   irqstate_t flags;
   uint32_t regval;
 

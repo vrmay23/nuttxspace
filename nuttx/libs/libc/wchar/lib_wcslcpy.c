@@ -1,8 +1,8 @@
 /****************************************************************************
  * libs/libc/wchar/lib_wcslcpy.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 1998 Todd C. Miller <Todd.Miller@courtesan.com>
+ *   Copyright (c) 1998 Todd C. Miller <Todd.Miller@courtesan.com>
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -21,11 +21,11 @@
  * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL
  * THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,7 +33,11 @@
  * Included Files
  ****************************************************************************/
 
+#include <nuttx/config.h>
+#include <string.h>
 #include <wchar.h>
+
+#ifdef CONFIG_LIBC_WCHAR
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -47,17 +51,17 @@
  * Name: wcslen
  *
  * Description:
- *   Copy src to string dst of size "size".  At most size-1 characters
- *   will be copied.  Always NUL terminates (unless size == 0).
- *   Returns wcslen(src); if retval >= size, truncation occurred.
+ *   Copy src to string dst of size siz.  At most siz-1 characters
+ *   will be copied.  Always NUL terminates (unless siz == 0).
+ *   Returns wcslen(src); if retval >= siz, truncation occurred.
  *
  ****************************************************************************/
 
-size_t wcslcpy(FAR wchar_t *dst, FAR const wchar_t *src, size_t size)
+size_t wcslcpy(FAR wchar_t *dst, FAR const wchar_t *src, size_t siz)
 {
   FAR wchar_t *d = dst;
   FAR const wchar_t *s = src;
-  size_t n = size;
+  size_t n = siz;
 
   /* Copy as many bytes as will fit */
 
@@ -77,7 +81,7 @@ size_t wcslcpy(FAR wchar_t *dst, FAR const wchar_t *src, size_t size)
 
   if (n == 0)
     {
-      if (size != 0)
+      if (siz != 0)
         {
           *d = '\0';            /* NUL-terminate dst */
         }
@@ -86,3 +90,4 @@ size_t wcslcpy(FAR wchar_t *dst, FAR const wchar_t *src, size_t size)
 
   return (s - src - 1);         /* count does not include NUL */
 }
+#endif

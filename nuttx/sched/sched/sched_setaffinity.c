@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/sched/sched_setaffinity.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -40,7 +53,7 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: nxsched_set_affinity
+ * Name: nxsched_setaffinity
  *
  * Description:
  *   sched_setaffinity() sets the CPU affinity mask of the thread whose ID
@@ -53,7 +66,7 @@
  *   CPUs specified in mask, then that thread is migrated to one of the
  *   CPUs specified in mask.
  *
- *   nxsched_set_affinity() is identical to the function sched_setparam(),
+ *   nxsched_setaffinity() is identical to the function sched_setparam(),
  *   differing only in its return value:  This function does not modify
  *   the errno variable.  This is a non-standard, internal OS function and
  *   is not intended for use by application logic.  Applications should
@@ -71,8 +84,8 @@
  *
  ****************************************************************************/
 
-int nxsched_set_affinity(pid_t pid, size_t cpusetsize,
-                         FAR const cpu_set_t *mask)
+int nxsched_setaffinity(pid_t pid, size_t cpusetsize,
+                        FAR const cpu_set_t *mask)
 {
   FAR struct tcb_s *tcb;
   irqstate_t flags;
@@ -80,28 +93,22 @@ int nxsched_set_affinity(pid_t pid, size_t cpusetsize,
 
   DEBUGASSERT(cpusetsize == sizeof(cpu_set_t) && mask != NULL);
 
-  /* Make sure that affinity mask is valid */
-
-  if (*mask == 0)
-    {
-      return -EINVAL;
-    }
-
   /* Verify that the PID corresponds to a real task */
 
+  sched_lock();
   if (!pid)
     {
       tcb = this_task();
     }
   else
     {
-      tcb = nxsched_get_tcb(pid);
+      tcb = sched_gettcb(pid);
     }
 
   if (tcb == NULL)
     {
       ret = -ESRCH;
-      goto errout;
+      goto errout_with_lock;
     }
 
   /* Don't permit changing the affinity mask of any task locked to a CPU
@@ -126,8 +133,8 @@ int nxsched_set_affinity(pid_t pid, size_t cpusetsize,
    * First... is the task in an assigned task list?
    */
 
-  if (tcb->task_state >= FIRST_READY_TO_RUN_STATE &&
-      tcb->task_state <= LAST_READY_TO_RUN_STATE)
+  if (tcb->task_state >= FIRST_ASSIGNED_STATE &&
+      tcb->task_state <= LAST_ASSIGNED_STATE)
     {
       /* Yes... is the CPU associated with the assigned task in the new
        * affinity mask?
@@ -138,20 +145,21 @@ int nxsched_set_affinity(pid_t pid, size_t cpusetsize,
           /* No.. then we will need to move the task from the assigned
            * task list to some other ready to run list.
            *
-           * nxsched_set_priority() will do just what we want... it will
+           * nxsched_setpriority() will do just what we want... it will
            * remove the task from its current position in the some assigned
            * task list and then simply put it back in the right place.  This
            * works even if the task is this task.
            */
 
-          ret = nxsched_set_priority(tcb, tcb->sched_priority);
+          ret = nxsched_setpriority(tcb, tcb->sched_priority);
         }
     }
 
 errout_with_csection:
   leave_critical_section(flags);
 
-errout:
+errout_with_lock:
+  sched_unlock();
   return ret;
 }
 
@@ -169,8 +177,8 @@ errout:
  *   CPUs specified in mask, then that thread is migrated to one of the
  *   CPUs specified in mask.
  *
- *   This function is a simply wrapper around nxsched_set_affinity() that
- *   sets the errno value in the event of an error.
+ *   This function is a simply wrapper around nxsched_setaffinity() that sets
+ *   the errno value in the event of an error.
  *
  * Input Parameters:
  *   pid        - The ID of thread whose affinity set will be modified.
@@ -188,7 +196,7 @@ errout:
 int sched_setaffinity(pid_t pid, size_t cpusetsize,
                       FAR const cpu_set_t *mask)
 {
-  int ret = nxsched_set_affinity(pid, cpusetsize, mask);
+  int ret = nxsched_setaffinity(pid, cpusetsize, mask);
   if (ret < 0)
     {
       set_errno(-ret);

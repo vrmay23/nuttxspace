@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/audio/audio_i2s.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
+ *   Author: Zhong An <zhongan@pinecone.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,10 +38,6 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-
-#include <assert.h>
-#include <debug.h>
-
 #include <nuttx/audio/audio.h>
 #include <nuttx/audio/i2s.h>
 #include <nuttx/kmalloc.h>
@@ -40,7 +49,7 @@
 struct audio_i2s_s
 {
   struct audio_lowerhalf_s dev;
-  FAR struct i2s_dev_s *i2s;
+  struct i2s_dev_s *i2s;
   bool playback;
 };
 
@@ -93,7 +102,7 @@ static int audio_i2s_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
                                    FAR struct ap_buffer_s *apb);
 static int audio_i2s_ioctl(FAR struct audio_lowerhalf_s *dev, int cmd,
                            unsigned long arg);
-static void audio_i2s_callback(FAR struct i2s_dev_s *dev,
+static void audio_i2s_callback(struct i2s_dev_s *dev,
                                FAR struct ap_buffer_s *apb, FAR void *arg,
                                int result);
 
@@ -103,26 +112,23 @@ static void audio_i2s_callback(FAR struct i2s_dev_s *dev,
 
 static const struct audio_ops_s g_audio_i2s_ops =
 {
-  audio_i2s_getcaps,       /* getcaps        */
-  audio_i2s_configure,     /* configure      */
-  audio_i2s_shutdown,      /* shutdown       */
-  audio_i2s_start,         /* start          */
+  .getcaps       = audio_i2s_getcaps,
+  .configure     = audio_i2s_configure,
+  .shutdown      = audio_i2s_shutdown,
+  .start         = audio_i2s_start,
 #ifndef CONFIG_AUDIO_EXCLUDE_STOP
-  audio_i2s_stop,          /* stop           */
+  .stop          = audio_i2s_stop,
 #endif
 #ifndef CONFIG_AUDIO_EXCLUDE_PAUSE_RESUME
-  audio_i2s_pause,         /* pause          */
-  audio_i2s_resume,        /* resume         */
+  .pause         = audio_i2s_pause,
+  .resume        = audio_i2s_resume,
 #endif
-  audio_i2s_allocbuffer,   /* allocbuffer    */
-  audio_i2s_freebuffer,    /* freebuffer     */
-  audio_i2s_enqueuebuffer, /* enqueue_buffer */
-  NULL,                    /* cancel_buffer  */
-  audio_i2s_ioctl,         /* ioctl          */
-  NULL,                    /* read           */
-  NULL,                    /* write          */
-  audio_i2s_reserve,       /* reserve        */
-  audio_i2s_release        /* release        */
+  .allocbuffer   = audio_i2s_allocbuffer,
+  .freebuffer    = audio_i2s_freebuffer,
+  .enqueuebuffer = audio_i2s_enqueuebuffer,
+  .ioctl         = audio_i2s_ioctl,
+  .reserve       = audio_i2s_reserve,
+  .release       = audio_i2s_release,
 };
 
 /****************************************************************************
@@ -132,7 +138,7 @@ static const struct audio_ops_s g_audio_i2s_ops =
 static int audio_i2s_getcaps(FAR struct audio_lowerhalf_s *dev, int type,
                              FAR struct audio_caps_s *caps)
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   /* Validate the structure */
@@ -153,8 +159,10 @@ static int audio_i2s_getcaps(FAR struct audio_lowerhalf_s *dev, int type,
          * must then call us back for specific info for each capability.
          */
 
-        if (caps->ac_subtype == AUDIO_TYPE_QUERY)
+        switch (caps->ac_subtype)
           {
+            case AUDIO_TYPE_QUERY:
+
               /* We don't decode any formats!  Only something above us in
                * the audio stream can perform decoding on our behalf.
                */
@@ -172,31 +180,43 @@ static int audio_i2s_getcaps(FAR struct audio_lowerhalf_s *dev, int type,
 
               caps->ac_format.hw = 1 << (AUDIO_FMT_PCM - 1);
               break;
-          }
 
-         caps->ac_controls.b[0] = AUDIO_SUBFMT_END;
-         break;
+            default:
+              caps->ac_controls.b[0] = AUDIO_SUBFMT_END;
+              break;
+          }
+        break;
 
         /* Provide capabilities of our OUTPUT unit */
 
       case AUDIO_TYPE_OUTPUT:
       case AUDIO_TYPE_INPUT:
 
-        if (caps->ac_subtype == AUDIO_TYPE_QUERY)
+        switch (caps->ac_subtype)
           {
+            case AUDIO_TYPE_QUERY:
+
             /* Report the Sample rates we support */
 
-              caps->ac_controls.hw[0] = AUDIO_SAMP_RATE_DEF_ALL;
+              caps->ac_controls.hw[0] =
+                AUDIO_SAMP_RATE_8K   | AUDIO_SAMP_RATE_11K  |
+                AUDIO_SAMP_RATE_16K  | AUDIO_SAMP_RATE_22K  |
+                AUDIO_SAMP_RATE_32K  | AUDIO_SAMP_RATE_44K  |
+                AUDIO_SAMP_RATE_48K  | AUDIO_SAMP_RATE_96K  |
+                AUDIO_SAMP_RATE_128K | AUDIO_SAMP_RATE_160K |
+                AUDIO_SAMP_RATE_172K | AUDIO_SAMP_RATE_192K;
+              break;
 
-              caps->ac_channels = 2;
-
+            default:
+              I2S_IOCTL(i2s, AUDIOIOC_GETCAPS, (unsigned long)caps);
               break;
           }
+        break;
 
       default:
         I2S_IOCTL(i2s, AUDIOIOC_GETCAPS, (unsigned long)caps);
         break;
-    }
+   }
 
   return caps->ac_len;
 }
@@ -210,11 +230,9 @@ static int audio_i2s_configure(FAR struct audio_lowerhalf_s *dev,
                                FAR const struct audio_caps_s *caps)
 #endif
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s;
-  int samprate;
-  int nchannels;
-  int bpsamp;
+  int samprate, nchannels, bpsamp;
   int ret = OK;
 
   DEBUGASSERT(audio_i2s != NULL && caps != NULL);
@@ -259,7 +277,7 @@ static int audio_i2s_configure(FAR struct audio_lowerhalf_s *dev,
 
 static int audio_i2s_shutdown(FAR struct audio_lowerhalf_s *dev)
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   return I2S_IOCTL(i2s, AUDIOIOC_SHUTDOWN, audio_i2s->playback);
@@ -272,7 +290,7 @@ static int audio_i2s_start(FAR struct audio_lowerhalf_s *dev,
 static int audio_i2s_start(FAR struct audio_lowerhalf_s *dev)
 #endif
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   return I2S_IOCTL(i2s, AUDIOIOC_START, audio_i2s->playback);
@@ -286,7 +304,7 @@ static int audio_i2s_stop(FAR struct audio_lowerhalf_s *dev,
 static int audio_i2s_stop(FAR struct audio_lowerhalf_s *dev)
 #endif
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   return I2S_IOCTL(i2s, AUDIOIOC_STOP, audio_i2s->playback);
@@ -301,7 +319,7 @@ static int audio_i2s_pause(FAR struct audio_lowerhalf_s *dev,
 static int audio_i2s_pause(FAR struct audio_lowerhalf_s *dev)
 #endif
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   return I2S_IOCTL(i2s, AUDIOIOC_PAUSE, audio_i2s->playback);
@@ -314,7 +332,7 @@ static int audio_i2s_resume(FAR struct audio_lowerhalf_s *dev,
 static int audio_i2s_resume(FAR struct audio_lowerhalf_s *dev)
 #endif
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   return I2S_IOCTL(i2s, AUDIOIOC_RESUME, audio_i2s->playback);
@@ -324,7 +342,7 @@ static int audio_i2s_resume(FAR struct audio_lowerhalf_s *dev)
 static int audio_i2s_allocbuffer(FAR struct audio_lowerhalf_s *dev,
                                  FAR struct audio_buf_desc_s *bufdesc)
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   return I2S_IOCTL(i2s, AUDIOIOC_ALLOCBUFFER, (unsigned long)bufdesc);
@@ -333,7 +351,7 @@ static int audio_i2s_allocbuffer(FAR struct audio_lowerhalf_s *dev,
 static int audio_i2s_freebuffer(FAR struct audio_lowerhalf_s *dev,
                                 FAR struct audio_buf_desc_s *bufdesc)
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   return I2S_IOCTL(i2s, AUDIOIOC_FREEBUFFER, (unsigned long)bufdesc);
@@ -342,7 +360,7 @@ static int audio_i2s_freebuffer(FAR struct audio_lowerhalf_s *dev,
 static int audio_i2s_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
                                    FAR struct ap_buffer_s *apb)
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   if (audio_i2s->playback)
@@ -358,7 +376,7 @@ static int audio_i2s_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
 static int audio_i2s_ioctl(FAR struct audio_lowerhalf_s *dev, int cmd,
                            unsigned long arg)
 {
-  FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
+  FAR struct audio_i2s_s *audio_i2s = (struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
   return I2S_IOCTL(i2s, cmd, arg);
@@ -372,7 +390,7 @@ static int audio_i2s_reserve(FAR struct audio_lowerhalf_s *dev)
 #endif
 {
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-  *session = (FAR void *)audio_i2s->playback;
+  *session = (void *)audio_i2s->playback;
 #endif
   return OK;
 }
@@ -387,7 +405,7 @@ static int audio_i2s_release(FAR struct audio_lowerhalf_s *dev)
   return OK;
 }
 
-static void audio_i2s_callback(FAR struct i2s_dev_s *dev,
+static void audio_i2s_callback(struct i2s_dev_s *dev,
                                FAR struct ap_buffer_s *apb,
                                FAR void *arg, int result)
 {

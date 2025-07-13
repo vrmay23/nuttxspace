@@ -1,22 +1,35 @@
 /****************************************************************************
  * fs/procfs/fs_procfs.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013-2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,7 +49,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
-#include <fnmatch.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
@@ -47,33 +59,32 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/procfs.h>
+#include <nuttx/fs/dirent.h>
+#include <nuttx/lib/regex.h>
 
 #include "mount/mount.h"
-#include "sched/sched.h"
-#include "fs_heap.h"
+
+#if !defined(CONFIG_DISABLE_MOUNTPOINT) && defined(CONFIG_FS_PROCFS)
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#define PROCFS_NATTRS  2
 
 /****************************************************************************
  * External Definitions
  ****************************************************************************/
 
-extern const struct procfs_operations g_clk_operations;
-extern const struct procfs_operations g_cpuinfo_operations;
-extern const struct procfs_operations g_cpuload_operations;
-extern const struct procfs_operations g_critmon_operations;
-extern const struct procfs_operations g_fdt_operations;
-extern const struct procfs_operations g_iobinfo_operations;
-extern const struct procfs_operations g_irq_operations;
-extern const struct procfs_operations g_meminfo_operations;
-extern const struct procfs_operations g_memdump_operations;
-extern const struct procfs_operations g_mempool_operations;
-extern const struct procfs_operations g_module_operations;
-extern const struct procfs_operations g_pm_operations;
-extern const struct procfs_operations g_proc_operations;
-extern const struct procfs_operations g_tcbinfo_operations;
-extern const struct procfs_operations g_thermal_operations;
-extern const struct procfs_operations g_uptime_operations;
-extern const struct procfs_operations g_version_operations;
-extern const struct procfs_operations g_pressure_operations;
+extern const struct procfs_operations proc_operations;
+extern const struct procfs_operations irq_operations;
+extern const struct procfs_operations cpuload_operations;
+extern const struct procfs_operations critmon_operations;
+extern const struct procfs_operations meminfo_operations;
+extern const struct procfs_operations iobinfo_operations;
+extern const struct procfs_operations module_operations;
+extern const struct procfs_operations uptime_operations;
+extern const struct procfs_operations version_operations;
 
 /* This is not good.  These are implemented in other sub-systems.  Having to
  * deal with them here is not a good coupling. What is really needed is a
@@ -81,11 +92,20 @@ extern const struct procfs_operations g_pressure_operations;
  * configuration.
  */
 
-extern const struct procfs_operations g_mount_operations;
-extern const struct procfs_operations g_net_operations;
-extern const struct procfs_operations g_netroute_operations;
-extern const struct procfs_operations g_part_operations;
-extern const struct procfs_operations g_smartfs_procfs_operations;
+extern const struct procfs_operations net_procfsoperations;
+extern const struct procfs_operations net_procfs_routeoperations;
+extern const struct procfs_operations part_procfsoperations;
+extern const struct procfs_operations mount_procfsoperations;
+extern const struct procfs_operations smartfs_procfsoperations;
+
+/* And even worse, this one is specific to the STM32.  The solution to
+ * this nasty couple would be to replace this hard-coded, ROM-able
+ * operations table with a RAM-base registration table.
+ */
+
+#if defined(CONFIG_STM32_CCM_PROCFS) && !defined(CONFIG_FS_PROCFS_EXCLUDE_CCM)
+extern const struct procfs_operations ccm_procfsoperations;
+#endif
 
 /****************************************************************************
  * Private Types
@@ -100,113 +120,74 @@ static const struct procfs_entry_s g_procfs_entries[] =
 #endif
 {
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_PROCESS
-  { "[0-9]*/**",    &g_proc_operations,     PROCFS_UNKOWN_TYPE },
-  { "[0-9]*",       &g_proc_operations,     PROCFS_DIR_TYPE    },
+  { "[0-9]*/**",     &proc_operations,            PROCFS_UNKOWN_TYPE },
+  { "[0-9]*",        &proc_operations,            PROCFS_DIR_TYPE    },
 #endif
 
-#if defined(CONFIG_CLK) && !defined(CONFIG_FS_PROCFS_EXCLUDE_CLK)
-  { "clk",          &g_clk_operations,      PROCFS_FILE_TYPE   },
+#if defined(CONFIG_SCHED_CPULOAD) && !defined(CONFIG_FS_PROCFS_EXCLUDE_CPULOAD)
+  { "cpuload",       &cpuload_operations,         PROCFS_FILE_TYPE   },
 #endif
 
-#if defined(CONFIG_ARCH_HAVE_CPUINFO) && !defined(CONFIG_FS_PROCFS_EXCLUDE_CPUINFO)
-  { "cpuinfo",      &g_cpuinfo_operations,  PROCFS_FILE_TYPE   },
-#endif
-
-#if !defined(CONFIG_SCHED_CPULOAD_NONE) && \
-    !defined(CONFIG_FS_PROCFS_EXCLUDE_CPULOAD)
-  { "cpuload",      &g_cpuload_operations,  PROCFS_FILE_TYPE   },
-#endif
-
-#ifdef CONFIG_SCHED_CRITMONITOR
-  { "critmon",      &g_critmon_operations,  PROCFS_FILE_TYPE   },
-#endif
-
-#if defined(CONFIG_DEVICE_TREE) && !defined(CONFIG_FS_PROCFS_EXCLUDE_FDT)
-  { "fdt",          &g_fdt_operations,      PROCFS_FILE_TYPE   },
-#endif
-
-#ifndef CONFIG_FS_PROCFS_EXCLUDE_BLOCKS
-  { "fs/blocks",    &g_mount_operations,    PROCFS_FILE_TYPE   },
-#endif
-
-#ifndef CONFIG_FS_PROCFS_EXCLUDE_MOUNT
-  { "fs/mount",     &g_mount_operations,    PROCFS_FILE_TYPE   },
-#endif
-
-#if defined(CONFIG_FS_SMARTFS) && !defined(CONFIG_FS_PROCFS_EXCLUDE_SMARTFS)
-  { "fs/smartfs**", &g_smartfs_procfs_operations,  PROCFS_UNKOWN_TYPE },
-#endif
-
-#ifndef CONFIG_FS_PROCFS_EXCLUDE_USAGE
-  { "fs/usage",     &g_mount_operations,    PROCFS_FILE_TYPE   },
-#endif
-
-#if defined(CONFIG_MM_IOB) && !defined(CONFIG_FS_PROCFS_EXCLUDE_IOBINFO)
-  { "iobinfo",      &g_iobinfo_operations,  PROCFS_FILE_TYPE   },
+#if defined(CONFIG_SCHED_CRITMONITOR)
+  { "critmon",       &critmon_operations,         PROCFS_FILE_TYPE   },
 #endif
 
 #ifdef CONFIG_SCHED_IRQMONITOR
-  { "irqs",         &g_irq_operations,      PROCFS_FILE_TYPE   },
+  { "irqs",          &irq_operations,             PROCFS_FILE_TYPE   },
 #endif
 
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_MEMINFO
-#  ifndef CONFIG_FS_PROCFS_EXCLUDE_MEMDUMP
-  { "memdump",      &g_memdump_operations,  PROCFS_FILE_TYPE   },
-#  endif
-  { "meminfo",      &g_meminfo_operations,  PROCFS_FILE_TYPE   },
+  { "meminfo",       &meminfo_operations,         PROCFS_FILE_TYPE   },
 #endif
 
-#if defined(CONFIG_MM_HEAP_MEMPOOL) && !defined(CONFIG_FS_PROCFS_EXCLUDE_MEMPOOL)
-  { "mempool",      &g_mempool_operations,  PROCFS_FILE_TYPE   },
+#if defined(CONFIG_MM_IOB) && !defined(CONFIG_FS_PROCFS_EXCLUDE_IOBINFO)
+  { "iobinfo",       &iobinfo_operations,         PROCFS_FILE_TYPE   },
 #endif
 
 #if defined(CONFIG_MODULE) && !defined(CONFIG_FS_PROCFS_EXCLUDE_MODULE)
-  { "modules",      &g_module_operations,   PROCFS_FILE_TYPE   },
+  { "modules",       &module_operations,          PROCFS_FILE_TYPE   },
+#endif
+
+#ifndef CONFIG_FS_PROCFS_EXCLUDE_BLOCKS
+  { "fs/blocks",     &mount_procfsoperations,     PROCFS_FILE_TYPE   },
+#endif
+
+#ifndef CONFIG_FS_PROCFS_EXCLUDE_MOUNT
+  { "fs/mount",      &mount_procfsoperations,     PROCFS_FILE_TYPE   },
+#endif
+
+#ifndef CONFIG_FS_PROCFS_EXCLUDE_USAGE
+  { "fs/usage",      &mount_procfsoperations,     PROCFS_FILE_TYPE   },
+#endif
+
+#if defined(CONFIG_FS_SMARTFS) && !defined(CONFIG_FS_PROCFS_EXCLUDE_SMARTFS)
+  { "fs/smartfs**",  &smartfs_procfsoperations,   PROCFS_UNKOWN_TYPE },
 #endif
 
 #if defined(CONFIG_NET) && !defined(CONFIG_FS_PROCFS_EXCLUDE_NET)
-  { "net",          &g_net_operations,      PROCFS_DIR_TYPE    },
-#  if defined(CONFIG_NET_ROUTE) && !defined(CONFIG_FS_PROCFS_EXCLUDE_ROUTE)
-  { "net/route",    &g_netroute_operations, PROCFS_DIR_TYPE    },
-  { "net/route/**", &g_netroute_operations, PROCFS_UNKOWN_TYPE },
-#  endif
-  { "net/**",       &g_net_operations,      PROCFS_UNKOWN_TYPE },
+  { "net",           &net_procfsoperations,       PROCFS_DIR_TYPE    },
+#if defined(CONFIG_NET_ROUTE) && !defined(CONFIG_FS_PROCFS_EXCLUDE_ROUTE)
+  { "net/route",     &net_procfs_routeoperations, PROCFS_DIR_TYPE    },
+  { "net/route/**",  &net_procfs_routeoperations, PROCFS_UNKOWN_TYPE },
+#endif
+  { "net/**",        &net_procfsoperations,       PROCFS_UNKOWN_TYPE },
 #endif
 
 #if defined(CONFIG_MTD_PARTITION) && !defined(CONFIG_FS_PROCFS_EXCLUDE_PARTITIONS)
-  { "partitions",   &g_part_operations,     PROCFS_FILE_TYPE   },
-#endif
-
-#if defined(CONFIG_PM) && defined(CONFIG_PM_PROCFS)
-  { "pm",           &g_pm_operations,       PROCFS_DIR_TYPE    },
-  { "pm/**",        &g_pm_operations,       PROCFS_UNKOWN_TYPE },
-#endif
-
-#ifdef CONFIG_FS_PROCFS_INCLUDE_PRESSURE
-  { "pressure",     &g_pressure_operations, PROCFS_DIR_TYPE    },
-  { "pressure/**",  &g_pressure_operations, PROCFS_FILE_TYPE   },
+  { "partitions",    &part_procfsoperations,      PROCFS_FILE_TYPE   },
 #endif
 
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_PROCESS
-  { "self",         &g_proc_operations,     PROCFS_DIR_TYPE    },
-  { "self/**",      &g_proc_operations,     PROCFS_UNKOWN_TYPE },
+  { "self",          &proc_operations,            PROCFS_DIR_TYPE    },
+  { "self/**",       &proc_operations,            PROCFS_UNKOWN_TYPE },
 #endif
 
-#if defined(CONFIG_ARCH_HAVE_TCBINFO) && !defined(CONFIG_FS_PROCFS_EXCLUDE_TCBINFO)
-  { "tcbinfo",      &g_tcbinfo_operations,  PROCFS_FILE_TYPE   },
+#if !defined(CONFIG_FS_PROCFS_EXCLUDE_UPTIME)
+  { "uptime",        &uptime_operations,          PROCFS_FILE_TYPE   },
 #endif
 
-#ifdef CONFIG_THERMAL_PROCFS
-  { "thermal",      &g_thermal_operations,  PROCFS_DIR_TYPE    },
-  { "thermal/**",   &g_thermal_operations,  PROCFS_UNKOWN_TYPE },
-#endif
-
-#ifndef CONFIG_FS_PROCFS_EXCLUDE_UPTIME
-  { "uptime",       &g_uptime_operations,   PROCFS_FILE_TYPE   },
-#endif
-
-#ifndef CONFIG_FS_PROCFS_EXCLUDE_VERSION
-  { "version",      &g_version_operations,  PROCFS_FILE_TYPE   },
+#if !defined(CONFIG_FS_PROCFS_EXCLUDE_VERSION)
+  { "version",       &version_operations,         PROCFS_FILE_TYPE   },
 #endif
 };
 
@@ -225,6 +206,10 @@ static const uint8_t g_procfs_entrycount = sizeof(g_procfs_entries) /
  * Private Function Prototypes
  ****************************************************************************/
 
+/* Helpers */
+
+static void    procfs_enum(FAR struct tcb_s *tcb, FAR void *arg);
+
 /* File system methods */
 
 static int     procfs_open(FAR struct file *filep, FAR const char *relpath,
@@ -234,8 +219,6 @@ static ssize_t procfs_read(FAR struct file *filep, FAR char *buffer,
                  size_t buflen);
 static ssize_t procfs_write(FAR struct file *filep, FAR const char *buffer,
                  size_t buflen);
-static int     procfs_poll(FAR struct file *filep, FAR struct pollfd *fds,
-                 bool setup);
 static int     procfs_ioctl(FAR struct file *filep, int cmd,
                  unsigned long arg);
 
@@ -244,12 +227,12 @@ static int     procfs_dup(FAR const struct file *oldp,
 static int     procfs_fstat(FAR const struct file *filep,
                  FAR struct stat *buf);
 
-static int     procfs_opendir(FAR struct inode *mountpt,
-                 FAR const char *relpath, FAR struct fs_dirent_s **dir);
+static int     procfs_opendir(FAR struct inode *mountpt, const char *relpath,
+                 FAR struct fs_dirent_s *dir);
 static int     procfs_closedir(FAR struct inode *mountpt,
                  FAR struct fs_dirent_s *dir);
 static int     procfs_readdir(FAR struct inode *mountpt,
-                 FAR struct fs_dirent_s *dir, FAR struct dirent *entry);
+                 FAR struct fs_dirent_s *dir);
 static int     procfs_rewinddir(FAR struct inode *mountpt,
                  FAR struct fs_dirent_s *dir);
 
@@ -278,7 +261,7 @@ static int     procfs_initialize(void);
  * with any compiler.
  */
 
-const struct mountpt_operations g_procfs_operations =
+const struct mountpt_operations procfs_operations =
 {
   procfs_open,       /* open */
   procfs_close,      /* close */
@@ -286,16 +269,11 @@ const struct mountpt_operations g_procfs_operations =
   procfs_write,      /* write */
   NULL,              /* seek */
   procfs_ioctl,      /* ioctl */
-  NULL,              /* mmap */
-  NULL,              /* truncate */
-  procfs_poll,       /* poll */
-  NULL,              /* readv */
-  NULL,              /* writev */
 
   NULL,              /* sync */
   procfs_dup,        /* dup */
   procfs_fstat,      /* fstat */
-  NULL,              /* fchstat */
+  NULL,              /* truncate */
 
   procfs_opendir,    /* opendir */
   procfs_closedir,   /* closedir */
@@ -310,8 +288,7 @@ const struct mountpt_operations g_procfs_operations =
   NULL,              /* mkdir */
   NULL,              /* rmdir */
   NULL,              /* rename */
-  procfs_stat,       /* stat */
-  NULL               /* chstat */
+  procfs_stat        /* stat */
 };
 
 /* Level 0 contains the directory of active tasks in addition to other
@@ -322,13 +299,13 @@ const struct mountpt_operations g_procfs_operations =
 
 struct procfs_level0_s
 {
-  struct procfs_dir_priv_s base;         /* Base struct for ProcFS dir */
+  struct procfs_dir_priv_s base;    /* Base struct for ProcFS dir */
 
   /* Our private data */
 
-  uint8_t lastlen;                       /* length of last reported static dir */
-  FAR const char *lastread;              /* Pointer to last static dir read */
-  pid_t pid[1];                          /* Snapshot of all active task IDs */
+  uint8_t lastlen;                   /* length of last reported static dir */
+  pid_t pid[CONFIG_MAX_TASKS];       /* Snapshot of all active task IDs */
+  FAR const char *lastread;          /* Pointer to last static dir read */
 };
 
 /* Level 1 is an internal virtual directory (such as /proc/fs) which
@@ -338,7 +315,7 @@ struct procfs_level0_s
 
 struct procfs_level1_s
 {
-  struct procfs_dir_priv_s base;     /* Base struct for ProcFS dir */
+  struct procfs_dir_priv_s base;    /* Base struct for ProcFS dir */
 
   /* Our private data */
 
@@ -367,42 +344,11 @@ static void procfs_enum(FAR struct tcb_s *tcb, FAR void *arg)
 
   /* Add the PID to the list */
 
-  if (dir->base.index >= dir->base.nentries)
-    {
-      return;
-    }
+  index = dir->base.nentries;
+  DEBUGASSERT(index < CONFIG_MAX_TASKS);
 
-  index = dir->base.index;
   dir->pid[index] = tcb->pid;
-  dir->base.index = index + 1;
-}
-
-/****************************************************************************
- * Name: procfs_sort_pid
- ****************************************************************************/
-
-static void procfs_sort_pid(FAR struct procfs_level0_s *level0)
-{
-  pid_t pid;
-  int i;
-  int j;
-
-  /* Sort the process id by Bubble.
-   * FIXME: improve searching algorithm.
-   */
-
-  for (i = 0; i < level0->base.nentries; i++)
-    {
-      for (j = 0; j < level0->base.nentries - 1 - i; j++)
-        {
-          if (level0->pid[j] > level0->pid[j + 1])
-            {
-              pid = level0->pid[j];
-              level0->pid[j] = level0->pid[j + 1];
-              level0->pid[j + 1] = pid;
-            }
-        }
-    }
+  dir->base.nentries = index + 1;
 }
 #endif
 
@@ -411,7 +357,7 @@ static void procfs_sort_pid(FAR struct procfs_level0_s *level0)
  ****************************************************************************/
 
 static int procfs_open(FAR struct file *filep, FAR const char *relpath,
-                       int oflags, mode_t mode)
+                      int oflags, mode_t mode)
 {
   int x;
   int ret = -ENOENT;
@@ -424,24 +370,20 @@ static int procfs_open(FAR struct file *filep, FAR const char *relpath,
     {
       /* Test if the path matches this entry's specification */
 
-      if (fnmatch(g_procfs_entries[x].pathpattern, relpath, 0) == 0)
+      if (match(g_procfs_entries[x].pathpattern, relpath))
         {
-          if (g_procfs_entries[x].type == PROCFS_DIR_TYPE)
-            {
-              return -EISDIR;
-            }
-
           /* Match found!  Stat using this procfs entry */
 
           DEBUGASSERT(g_procfs_entries[x].ops &&
-                      g_procfs_entries[x].ops->open);
+              g_procfs_entries[x].ops->open);
 
           ret = g_procfs_entries[x].ops->open(filep, relpath, oflags, mode);
+
           if (ret == OK)
             {
               DEBUGASSERT(filep->f_priv);
 
-              ((FAR struct procfs_file_s *)filep->f_priv)->procfsentry =
+              ((struct procfs_file_s *) filep->f_priv)->procfsentry =
                                     &g_procfs_entries[x];
               break;
             }
@@ -458,7 +400,6 @@ static int procfs_open(FAR struct file *filep, FAR const char *relpath,
 static int procfs_close(FAR struct file *filep)
 {
   FAR struct procfs_file_s *attr;
-  int ret = OK;
 
   /* Recover our private data from the struct file instance */
 
@@ -467,17 +408,9 @@ static int procfs_close(FAR struct file *filep)
 
   /* Release the file attributes structure */
 
-  if (attr->procfsentry->ops->close != NULL)
-    {
-      ret = attr->procfsentry->ops->close(filep);
-    }
-  else
-    {
-      fs_heap_free(attr);
-    }
-
+  kmm_free(attr);
   filep->f_priv = NULL;
-  return ret;
+  return OK;
 }
 
 /****************************************************************************
@@ -488,6 +421,7 @@ static ssize_t procfs_read(FAR struct file *filep, FAR char *buffer,
                            size_t buflen)
 {
   FAR struct procfs_file_s *handler;
+  ssize_t ret = 0;
 
   finfo("buffer=%p buflen=%d\n", buffer, (int)buflen);
 
@@ -498,7 +432,9 @@ static ssize_t procfs_read(FAR struct file *filep, FAR char *buffer,
 
   /* Call the handler's read routine */
 
-  return handler->procfsentry->ops->read(filep, buffer, buflen);
+  ret = handler->procfsentry->ops->read(filep, buffer, buflen);
+
+  return ret;
 }
 
 /****************************************************************************
@@ -506,9 +442,10 @@ static ssize_t procfs_read(FAR struct file *filep, FAR char *buffer,
  ****************************************************************************/
 
 static ssize_t procfs_write(FAR struct file *filep, FAR const char *buffer,
-                            size_t buflen)
+                           size_t buflen)
 {
   FAR struct procfs_file_s *handler;
+  ssize_t ret = 0;
 
   finfo("buffer=%p buflen=%d\n", buffer, (int)buflen);
 
@@ -517,36 +454,14 @@ static ssize_t procfs_write(FAR struct file *filep, FAR const char *buffer,
   handler = (FAR struct procfs_file_s *)filep->f_priv;
   DEBUGASSERT(handler);
 
-  /* Call the handler's write routine */
+  /* Call the handler's read routine */
 
   if (handler->procfsentry->ops->write)
     {
-      return handler->procfsentry->ops->write(filep, buffer, buflen);
+      ret = handler->procfsentry->ops->write(filep, buffer, buflen);
     }
 
-  return 0;
-}
-
-static int procfs_poll(FAR struct file *filep, FAR struct pollfd *fds,
-                       bool setup)
-{
-  FAR struct procfs_file_s *handler;
-
-  finfo("fds=%p setup=%d\n", fds, setup);
-
-  /* Recover our private data from the struct file instance */
-
-  handler = (FAR struct procfs_file_s *)filep->f_priv;
-  DEBUGASSERT(handler);
-
-  /* Call the handler's poll routine */
-
-  if (handler->procfsentry->ops->poll)
-    {
-      return handler->procfsentry->ops->poll(filep, fds, setup);
-    }
-
-  return -ENOSYS;
+  return ret;
 }
 
 /****************************************************************************
@@ -635,12 +550,14 @@ static int procfs_fstat(FAR const struct file *filep, FAR struct stat *buf)
  ****************************************************************************/
 
 static int procfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
-                          FAR struct fs_dirent_s **dir)
+                          FAR struct fs_dirent_s *dir)
 {
   FAR struct procfs_level0_s *level0;
+  FAR struct procfs_dir_priv_s *dirpriv;
+  FAR void *priv = NULL;
 
   finfo("relpath: \"%s\"\n", relpath ? relpath : "NULL");
-  DEBUGASSERT(mountpt && dir && relpath);
+  DEBUGASSERT(mountpt && relpath && dir && !dir->u.procfs);
 
   /* The relative must be either:
    *
@@ -650,18 +567,13 @@ static int procfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
 
   if (!relpath || relpath[0] == '\0')
     {
-      size_t num = 0;
-
       /* The path refers to the top level directory.  Allocate the level0
        * dirent structure.
        */
 
-#ifndef CONFIG_FS_PROCFS_EXCLUDE_PROCESS
-      num = g_npidhash;
-#endif
-
       level0 = (FAR struct procfs_level0_s *)
-      fs_heap_zalloc(sizeof(struct procfs_level0_s) + sizeof(pid_t) * num);
+         kmm_zalloc(sizeof(struct procfs_level0_s));
+
       if (!level0)
         {
           ferr("ERROR: Failed to allocate the level0 directory structure\n");
@@ -676,12 +588,7 @@ static int procfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
        */
 
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_PROCESS
-      level0->base.index = 0;
-      level0->base.nentries = num;
-      nxsched_foreach(procfs_enum, level0);
-      level0->base.nentries = level0->base.index;
-      level0->base.index = 0;
-      procfs_sort_pid(level0);
+      sched_foreach(procfs_enum, level0);
 #else
       level0->base.index = 0;
       level0->base.nentries = 0;
@@ -693,12 +600,11 @@ static int procfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
       level0->lastlen = 0;
       level0->base.procfsentry = NULL;
 
-      *dir = (FAR struct fs_dirent_s *)level0;
+      priv = (FAR void *)level0;
     }
   else
     {
-      int x;
-      int ret;
+      int x, ret;
       int len = strlen(relpath);
 
       /* Search the static array of procfs_entries */
@@ -707,30 +613,25 @@ static int procfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
         {
           /* Test if the path matches this entry's specification */
 
-          if (fnmatch(g_procfs_entries[x].pathpattern, relpath, 0) == 0)
+          if (match(g_procfs_entries[x].pathpattern, relpath))
             {
               /* Match found!  Call the handler's opendir routine.  If
                * successful, this opendir routine will create an entry
-               * derived from struct procfs_dir_priv_s as dir.
+               * derived from struct procfs_dir_priv_s as dir->u.procfs.
                */
 
-              DEBUGASSERT(g_procfs_entries[x].ops != NULL);
-
-              if (g_procfs_entries[x].ops->opendir == NULL)
-                {
-                  return -ENOENT;
-                }
+              DEBUGASSERT(g_procfs_entries[x].ops != NULL &&
+                          g_procfs_entries[x].ops->opendir != NULL);
 
               ret = g_procfs_entries[x].ops->opendir(relpath, dir);
+
               if (ret == OK)
                 {
-                  FAR struct procfs_dir_priv_s *dirpriv;
-
-                  DEBUGASSERT(*dir);
+                  DEBUGASSERT(dir->u.procfs);
 
                   /* Set the procfs_entry handler */
 
-                  dirpriv = (FAR struct procfs_dir_priv_s *)(*dir);
+                  dirpriv = (FAR struct procfs_dir_priv_s *)dir->u.procfs;
                   dirpriv->procfsentry = &g_procfs_entries[x];
                 }
 
@@ -740,8 +641,7 @@ static int procfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
           /* Test for a sub-string match (e.g. "ls /proc/fs") */
 
           else if (strncmp(g_procfs_entries[x].pathpattern, relpath,
-                           len) == 0 &&
-                   g_procfs_entries[x].pathpattern[len] == '/')
+                           len) == 0)
             {
               FAR struct procfs_level1_s *level1;
 
@@ -752,7 +652,8 @@ static int procfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
                */
 
               level1 = (FAR struct procfs_level1_s *)
-                 fs_heap_zalloc(sizeof(struct procfs_level1_s));
+                 kmm_zalloc(sizeof(struct procfs_level1_s));
+
               if (!level1)
                 {
                   ferr("ERROR: Failed to allocate the level0 directory "
@@ -768,17 +669,13 @@ static int procfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
               level1->lastlen = 0;
               level1->base.procfsentry = NULL;
 
-              *dir = (FAR struct fs_dirent_s *)level1;
+              priv = (FAR void *)level1;
               break;
             }
         }
-
-      if (x == g_procfs_entrycount)
-        {
-          return -ENOENT;
-        }
     }
 
+  dir->u.procfs = priv;
   return OK;
 }
 
@@ -792,24 +689,18 @@ static int procfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
 static int procfs_closedir(FAR struct inode *mountpt,
                            FAR struct fs_dirent_s *dir)
 {
-  FAR struct procfs_dir_priv_s *dirpriv;
-  int ret = OK;
+  FAR struct procfs_dir_priv_s *priv;
 
-  DEBUGASSERT(mountpt && dir);
+  DEBUGASSERT(mountpt && dir && dir->u.procfs);
+  priv = dir->u.procfs;
 
-  dirpriv = (FAR struct procfs_dir_priv_s *)dir;
-
-  if (dirpriv->procfsentry != NULL &&
-      dirpriv->procfsentry->ops->closedir != NULL)
+  if (priv)
     {
-      ret = dirpriv->procfsentry->ops->closedir(dir);
-    }
-  else
-    {
-      fs_heap_free(dir);
+      kmm_free(priv);
     }
 
-  return ret;
+  dir->u.procfs = NULL;
+  return OK;
 }
 
 /****************************************************************************
@@ -819,19 +710,19 @@ static int procfs_closedir(FAR struct inode *mountpt,
  *
  ****************************************************************************/
 
-static int procfs_readdir(FAR struct inode *mountpt,
-                          FAR struct fs_dirent_s *dir,
-                          FAR struct dirent *entry)
+static int procfs_readdir(struct inode *mountpt, struct fs_dirent_s *dir)
 {
-  FAR const struct procfs_entry_s *pentry = NULL;
+  FAR const struct procfs_entry_s *entry = NULL;
   FAR struct procfs_dir_priv_s *priv;
   FAR struct procfs_level0_s *level0;
+  FAR struct tcb_s *tcb;
   FAR const char *name = NULL;
   unsigned int index;
+  pid_t pid;
   int ret = -ENOENT;
 
-  DEBUGASSERT(mountpt && dir);
-  priv = (FAR struct procfs_dir_priv_s *)dir;
+  DEBUGASSERT(mountpt && dir && dir->u.procfs);
+  priv = dir->u.procfs;
 
   /* Are we reading the 1st directory level with dynamic PID and static
    * entries?
@@ -846,17 +737,15 @@ static int procfs_readdir(FAR struct inode *mountpt,
       index = priv->index;
       if (index >= priv->nentries)
         {
-          index -= priv->nentries;
-
           /* We must report the next static entry ... no more PID entries.
            * skip any entries with wildcards in the first segment of the
            * directory name.
            */
 
-          while (index < g_procfs_entrycount)
+          while (index < priv->nentries + g_procfs_entrycount)
             {
-              pentry = &g_procfs_entries[index];
-              name = pentry->pathpattern;
+              entry = &g_procfs_entries[index - priv->nentries];
+              name  = entry->pathpattern;
 
               while (*name != '/' && *name != '\0')
                 {
@@ -876,19 +765,18 @@ static int procfs_readdir(FAR struct inode *mountpt,
 
               if (name != NULL)
                 {
-                  /* This entry is okay to report. Test if it has a
-                   * duplicate first level name as the one we just reported.
-                   * This could happen in the event of procfs_entry_s such
-                   * as:
+                  /* This entry is okay to report. Test if it has a duplicate
+                   * first level name as the one we just reported.  This could
+                   * happen in the event of procfs_entry_s such as:
                    *
                    *    fs/smartfs
                    *    fs/nfs
                    *    fs/nxffs
                    */
 
-                  name = g_procfs_entries[index].pathpattern;
-                  if (!level0->lastlen ||
-                      strncmp(name, level0->lastread, level0->lastlen) != 0)
+                  name = g_procfs_entries[index - priv->nentries].pathpattern;
+                  if (!level0->lastlen || (strncmp(name, level0->lastread,
+                      level0->lastlen) != 0))
                     {
                       /* Not a duplicate, return the first segment of this
                        * entry
@@ -907,32 +795,42 @@ static int procfs_readdir(FAR struct inode *mountpt,
 
           /* Test if we are at the end of the directory */
 
-          if (index < g_procfs_entrycount)
+          if (index >= priv->nentries + g_procfs_entrycount)
+            {
+              /* We signal the end of the directory by returning the special
+               * error -ENOENT
+               */
+
+              finfo("Entry %d: End of directory\n", index);
+              ret = -ENOENT;
+            }
+          else
             {
               /* Report the next static entry */
 
               level0->lastlen = strcspn(name, "/");
               level0->lastread = name;
-              strlcpy(entry->d_name, name, level0->lastlen + 1);
+              strncpy(dir->fd_dir.d_name, name, level0->lastlen);
+              dir->fd_dir.d_name[level0->lastlen] = '\0';
 
               /* If the entry is a directory type OR if the reported name is
                * only a sub-string of the entry (meaning that it contains
                * '/'), then report this entry as a directory.
                */
 
-              if (pentry->type == PROCFS_DIR_TYPE ||
+              if (entry->type == PROCFS_DIR_TYPE ||
                   level0->lastlen != strlen(name))
                 {
-                  entry->d_type = DTYPE_DIRECTORY;
+                  dir->fd_dir.d_type = DTYPE_DIRECTORY;
                 }
               else
                 {
-                  entry->d_type = DTYPE_FILE;
+                  dir->fd_dir.d_type = DTYPE_FILE;
                 }
 
               /* Advance to next entry for the next read */
 
-              priv->index = priv->nentries + index;
+              priv->index = index;
               ret = OK;
             }
         }
@@ -941,18 +839,19 @@ static int procfs_readdir(FAR struct inode *mountpt,
         {
           /* Verify that the pid still refers to an active task/thread */
 
-          pid_t pid = level0->pid[index];
-          FAR struct tcb_s *tcb = nxsched_get_tcb(pid);
+          pid = level0->pid[index];
+
+          tcb = sched_gettcb(pid);
           if (!tcb)
             {
-              ferr("ERROR: PID %d is no longer valid\n", pid);
+              ferr("ERROR: PID %d is no longer valid\n", (int)pid);
               return -ENOENT;
             }
 
           /* Save the filename=pid and file type=directory */
 
-          entry->d_type = DTYPE_DIRECTORY;
-          procfs_snprintf(entry->d_name, NAME_MAX + 1, "%d", pid);
+          dir->fd_dir.d_type = DTYPE_DIRECTORY;
+          snprintf(dir->fd_dir.d_name, NAME_MAX + 1, "%d", (int)pid);
 
           /* Set up the next directory entry offset.  NOTE that we could use
            * the standard f_pos instead of our own private index.
@@ -970,49 +869,53 @@ static int procfs_readdir(FAR struct inode *mountpt,
     {
       FAR struct procfs_level1_s *level1;
 
-      level1 = (FAR struct procfs_level1_s *)priv;
+      level1 = (FAR struct procfs_level1_s *) priv;
 
       /* Test if this entry matches.  We assume all entries of the same
        * subdirectory are listed in order in the procfs_entry array.
        */
 
-      if (level1->base.index < g_procfs_entrycount &&
-          level1->firstindex < g_procfs_entrycount &&
-          strncmp(g_procfs_entries[level1->base.index].pathpattern,
+      if (strncmp(g_procfs_entries[level1->base.index].pathpattern,
                   g_procfs_entries[level1->firstindex].pathpattern,
                   level1->subdirlen) == 0)
         {
           /* This entry matches.  Report the subdir entry */
 
-          name = &g_procfs_entries[level1->base.index].
-                    pathpattern[level1->subdirlen + 1];
+          name = &g_procfs_entries[level1->base.index].pathpattern[
+                    level1->subdirlen + 1];
           level1->lastlen = strcspn(name, "/");
           level1->lastread = name;
-          strlcpy(entry->d_name, name, level1->lastlen + 1);
+          strncpy(dir->fd_dir.d_name, name, level1->lastlen);
 
           /* Some of the search entries contain '**' wildcards.  When we
            * report the entry name, we must remove this wildcard search
            * specifier.
            */
 
-          while (entry->d_name[level1->lastlen - 1] == '*')
+          while (dir->fd_dir.d_name[level1->lastlen - 1] == '*')
             {
               level1->lastlen--;
             }
 
-          entry->d_name[level1->lastlen] = '\0';
+          dir->fd_dir.d_name[level1->lastlen] = '\0';
 
           if (name[level1->lastlen] == '/')
             {
-              entry->d_type = DTYPE_DIRECTORY;
+              dir->fd_dir.d_type = DTYPE_DIRECTORY;
             }
           else
             {
-              entry->d_type = DTYPE_FILE;
+              dir->fd_dir.d_type = DTYPE_FILE;
             }
 
           level1->base.index++;
           ret = OK;
+        }
+      else
+        {
+          /* No more entries in the subdirectory */
+
+          ret = -ENOENT;
         }
     }
   else
@@ -1022,7 +925,7 @@ static int procfs_readdir(FAR struct inode *mountpt,
        */
 
       DEBUGASSERT(priv->procfsentry && priv->procfsentry->ops->readdir);
-      ret = priv->procfsentry->ops->readdir(dir, entry);
+      ret = priv->procfsentry->ops->readdir(dir);
     }
 
   return ret;
@@ -1035,17 +938,16 @@ static int procfs_readdir(FAR struct inode *mountpt,
  *
  ****************************************************************************/
 
-static int procfs_rewinddir(FAR struct inode *mountpt,
-                            FAR struct fs_dirent_s *dir)
+static int procfs_rewinddir(struct inode *mountpt, struct fs_dirent_s *dir)
 {
   FAR struct procfs_dir_priv_s *priv;
 
-  DEBUGASSERT(mountpt && dir);
-  priv = (FAR struct procfs_dir_priv_s *)dir;
+  DEBUGASSERT(mountpt && dir && dir->u.procfs);
+  priv = dir->u.procfs;
 
   if (priv->level > 0 && priv->procfsentry == NULL)
     {
-      priv->index = ((FAR struct procfs_level1_s *)priv)->firstindex;
+      priv->index = ((struct procfs_level1_s *) priv)->firstindex;
     }
   else
     {
@@ -1066,8 +968,8 @@ static int procfs_rewinddir(FAR struct inode *mountpt,
  *
  ****************************************************************************/
 
-static int procfs_bind(FAR struct inode *blkdriver, FAR const void *data,
-                       FAR void **handle)
+static int procfs_bind(FAR struct inode *blkdriver, const void *data,
+                       void **handle)
 {
 #ifdef CONFIG_FS_PROCFS_REGISTER
   /* Make sure that we are properly initialized */
@@ -1086,7 +988,7 @@ static int procfs_bind(FAR struct inode *blkdriver, FAR const void *data,
  *
  ****************************************************************************/
 
-static int procfs_unbind(FAR void *handle, FAR struct inode **blkdriver,
+static int procfs_unbind(void *handle, FAR struct inode **blkdriver,
                          unsigned int flags)
 {
   return OK;
@@ -1099,10 +1001,11 @@ static int procfs_unbind(FAR void *handle, FAR struct inode **blkdriver,
  *
  ****************************************************************************/
 
-static int procfs_statfs(FAR struct inode *mountpt, FAR struct statfs *buf)
+static int procfs_statfs(struct inode *mountpt, struct statfs *buf)
 {
   /* Fill in the statfs info */
 
+  memset(buf, 0, sizeof(struct statfs));
   buf->f_type    = PROCFS_MAGIC;
   buf->f_bsize   = 0;
   buf->f_blocks  = 0;
@@ -1119,10 +1022,10 @@ static int procfs_statfs(FAR struct inode *mountpt, FAR struct statfs *buf)
  *
  ****************************************************************************/
 
-static int procfs_stat(FAR struct inode *mountpt, FAR const char *relpath,
-                       FAR struct stat *buf)
+static int procfs_stat(struct inode *mountpt, const char *relpath,
+                       struct stat *buf)
 {
-  int ret = -ENOENT;
+  int ret = -ENOSYS;
 
   /* Three path forms are accepted:
    *
@@ -1154,12 +1057,12 @@ static int procfs_stat(FAR struct inode *mountpt, FAR const char *relpath,
         {
           /* Test if the path matches this entry's specification */
 
-          if (fnmatch(g_procfs_entries[x].pathpattern, relpath, 0) == 0)
+          if (match(g_procfs_entries[x].pathpattern, relpath))
             {
               /* Match found!  Stat using this procfs entry */
 
               DEBUGASSERT(g_procfs_entries[x].ops &&
-                          g_procfs_entries[x].ops->stat);
+                  g_procfs_entries[x].ops->stat);
 
               return g_procfs_entries[x].ops->stat(relpath, buf);
             }
@@ -1167,8 +1070,7 @@ static int procfs_stat(FAR struct inode *mountpt, FAR const char *relpath,
           /* Test for an internal subdirectory stat */
 
           else if (strncmp(g_procfs_entries[x].pathpattern, relpath,
-                           len) == 0 &&
-                   g_procfs_entries[x].pathpattern[len] == '/')
+                           len) == 0)
             {
               /* It's an internal subdirectory */
 
@@ -1206,7 +1108,8 @@ int procfs_initialize(void)
       /* No.. allocate a modifiable list of entries */
 
       g_procfs_entries = (FAR struct procfs_entry_s *)
-        fs_heap_malloc(sizeof(g_base_entries));
+        kmm_malloc(sizeof(g_base_entries));
+
       if (g_procfs_entries == NULL)
         {
           return -ENOMEM;
@@ -1250,7 +1153,7 @@ int procfs_register(FAR const struct procfs_entry_s *entry)
   FAR struct procfs_entry_s *newtable;
   unsigned int newcount;
   size_t newsize;
-  int ret = -ENOMEM;
+  int ret;
 
   /* Make sure that we are properly initialized */
 
@@ -1271,9 +1174,17 @@ int procfs_register(FAR const struct procfs_entry_s *entry)
   newcount = g_procfs_entrycount + 1;
   newsize  = newcount * sizeof(struct procfs_entry_s);
 
+  sched_lock();
   newtable = (FAR struct procfs_entry_s *)
-    fs_heap_realloc(g_procfs_entries, newsize);
-  if (newtable != NULL)
+    kmm_realloc(g_procfs_entries, newsize);
+
+  if (newtable == NULL)
+    {
+      /* Reallocation failed! */
+
+      ret = -ENOMEM;
+    }
+  else
     {
       /* Copy the new entry at the end of the reallocated table */
 
@@ -1287,6 +1198,9 @@ int procfs_register(FAR const struct procfs_entry_s *entry)
       ret = OK;
     }
 
+  sched_unlock();
   return ret;
 }
 #endif
+
+#endif /* !CONFIG_DISABLE_MOUNTPOINT && CONFIG_FS_PROCFS */

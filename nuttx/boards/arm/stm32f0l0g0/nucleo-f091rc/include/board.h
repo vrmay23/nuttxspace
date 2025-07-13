@@ -1,22 +1,36 @@
 /****************************************************************************
  * boards/arm/stm32f0l0g0/nucleo-f091rc/include/board.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *           Alan Carvalho de Assis <acassis@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +44,7 @@
 #include <nuttx/config.h>
 
 #ifndef __ASSEMBLY__
-#  include <stdint.h>
+# include <stdint.h>
 #endif
 
 /****************************************************************************
@@ -39,19 +53,18 @@
 
 /* Clocking *****************************************************************/
 
-/* Four different clock sources can be used to drive the system clock
- * (SYSCLK):
+/* Four different clock sources can be used to drive the system clock (SYSCLK):
  *
  * - HSI high-speed internal oscillator clock
  *   Generated from an internal 8 MHz RC oscillator
  * - HSE high-speed external oscillator clock
- *   Normally driven by an external crystal (X3). However, this crystal is
- *   not fitted on the Nucleo-F091RC board.
+ *   Normally driven by an external crystal (X3).  However, this crystal is not
+ *   fitted on the Nucleo-F091RC board.
  * - PLL clock
  * - MSI multispeed internal oscillator clock
- *   The MSI clock signal is generated from an internal RC oscillator. Seven
- *   frequency ranges are available: 65.536 kHz, 131.072 kHz, 262.144 kHz,
- *   524.288 kHz, 1.048 MHz, 2.097 MHz (default value) and 4.194 MHz.
+ *   The MSI clock signal is generated from an internal RC oscillator. Seven frequency
+ *   ranges are available: 65.536 kHz, 131.072 kHz, 262.144 kHz, 524.288 kHz, 1.048 MHz,
+ *   2.097 MHz (default value) and 4.194 MHz.
  *
  * The devices have the following two secondary clock sources
  * - LSI low-speed internal RC clock
@@ -73,7 +86,7 @@
  *
  *   - PLL source is HSI       -> 8MHz input (nominal)
  *   - PLL source predivider 2 -> 4MHz divided down PLL VCO clock output
- *   - PLL multiplier is 12    -> 48MHz PLL VCO clock output (for USB)
+ *   - PLL multipler is 12     -> 48MHz PLL VCO clock output (for USB)
  *
  * Resulting SYSCLK frequency is 8MHz x 12 / 2 = 48MHz
  *
@@ -111,8 +124,8 @@
 #  define STM32_PLL_FREQUENCY    (12*STM32_PLLSRC_FREQUENCY) /* PLL VCO Frequency is 48MHz */
 #endif
 
-/* Use the PLL and set the SYSCLK source to be the divided down PLL VCO
- * output frequency (STM32_PLL_FREQUENCY divided by the PLLDIV value).
+/* Use the PLL and set the SYSCLK source to be the divided down PLL VCO output
+ * frequency (STM32_PLL_FREQUENCY divided by the PLLDIV value).
  */
 
 #define STM32_SYSCLK_SW          RCC_CFGR_SW_PLL     /* Use the PLL as the SYSCLK */
@@ -125,6 +138,7 @@
 
 #define STM32_RCC_CFGR_HPRE      RCC_CFGR_HPRE_SYSCLK
 #define STM32_HCLK_FREQUENCY     STM32_SYSCLK_FREQUENCY
+#define STM32_BOARD_HCLK         STM32_HCLK_FREQUENCY    /* Same as above, to satisfy compiler */
 
 /* APB1 clock (PCLK1) is HCLK (48MHz) */
 
@@ -218,28 +232,25 @@
 
 /* Alternate Pin Functions **************************************************/
 
-/* I2C
- *   PB8 - D15
- *   PB9 - D14
- */
+/* I2C */
 
-#define GPIO_I2C1_SCL  (GPIO_I2C1_SCL_2|GPIO_SPEED_LOW)     /* PB8 */
-#define GPIO_I2C1_SDA  (GPIO_I2C1_SDA_2|GPIO_SPEED_LOW)     /* PB9 */
+#define GPIO_I2C1_SCL GPIO_I2C1_SCL_2 /* D15 - PB8 */
+#define GPIO_I2C1_SDA GPIO_I2C1_SDA_2 /* D14 - PB9 */
 
 /* SPI */
 
-#define GPIO_SPI1_MISO (GPIO_SPI1_MISO_1|GPIO_SPEED_MEDIUM) /* D12 - PA6 */
-#define GPIO_SPI1_MOSI (GPIO_SPI1_MOSI_1|GPIO_SPEED_MEDIUM) /* D11 - PA7 */
-#define GPIO_SPI1_SCK  (GPIO_SPI1_SCK_1|GPIO_SPEED_MEDIUM)  /* D13 - PA5 */
+#define GPIO_SPI1_MISO GPIO_SPI1_MISO_1 /* D12 - PA6 */
+#define GPIO_SPI1_MOSI GPIO_SPI1_MOSI_1 /* D11 - PA7 */
+#define GPIO_SPI1_SCK  GPIO_SPI1_SCK_1  /* D13 - PA5 */
 
 /* USART 1 */
 
-#define GPIO_USART1_TX (GPIO_USART1_TX_2|GPIO_SPEED_HIGH)   /* PA9 */
-#define GPIO_USART1_RX (GPIO_USART1_RX_2|GPIO_SPEED_HIGH)   /* PA10 */
+#define GPIO_USART1_TX           GPIO_USART1_TX_2
+#define GPIO_USART1_RX           GPIO_USART1_RX_2
 
 /* USART 2 */
 
-#define GPIO_USART2_TX (GPIO_USART2_TX_3|GPIO_SPEED_HIGH)   /* PA2 */
-#define GPIO_USART2_RX (GPIO_USART2_RX_3|GPIO_SPEED_HIGH)   /* PA3 */
+#define GPIO_USART2_TX           GPIO_USART2_TX_3
+#define GPIO_USART2_RX           GPIO_USART2_RX_3
 
 #endif /* __BOARDS_ARM_STM32F0L0G0_NUCLEO_F091RC_INCLUDE_BOARD_H */

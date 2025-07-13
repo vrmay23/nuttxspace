@@ -1,10 +1,9 @@
 /****************************************************************************
  * boards/arm/stm32l4/stm32l476-mdk/include/stm32l476-mdk-clocking.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2016 Motorola Mobility, LLC. All rights reserved.
- * SPDX-FileContributor: Author: dev@ziggurat29.com
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2016 Motorola Mobility, LLC. All rights reserved.
+ *   Author: dev@ziggurat29.com
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,7 +43,7 @@
 
 #include <nuttx/config.h>
 #ifndef __ASSEMBLY__
-#  include <stdint.h>
+# include <stdint.h>
 #endif
 
 /****************************************************************************
@@ -82,18 +81,16 @@
 #define STM32L4_BOARD_USEHSI           1
 
 /* Prescaler common to all PLL inputs; will be 1 (XXX source is implicitly
- * as per comment above HSI)
- */
+ as per comment above HSI) */
 
 #define STM32L4_PLLCFG_PLLM             RCC_PLLCFG_PLLM(1)
 
 /* 'main' PLL config; we use this to generate our system clock via the R
  *  output.  We set it up as 16 MHz / 1 * 10 / 2 = 80 MHz
  *
- * XXX NOTE:
- * currently the main PLL is implicitly turned on and is implicitly the
- * system clock; this should be configurable since not all applications
- * may want things done this way.
+ * XXX NOTE:  currently the main PLL is implicitly turned on and is implicitly
+ * the system clock; this should be configurable since not all applications may
+ * want things done this way.
  */
 
 #define STM32L4_PLLCFG_PLLN             RCC_PLLCFG_PLLN(10)
@@ -147,6 +144,7 @@
 
 #define STM32L4_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK      /* HCLK  = SYSCLK / 1 */
 #define STM32L4_HCLK_FREQUENCY    STM32L4_SYSCLK_FREQUENCY
+#define STM32L4_BOARD_HCLK        STM32L4_HCLK_FREQUENCY    /* Same as above, to satisfy compiler */
 
 /* APB1 clock (PCLK1) is HCLK/1 (80MHz) */
 
@@ -235,6 +233,7 @@
 
 #define STM32L4_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK      /* HCLK  = SYSCLK / 1 */
 #define STM32L4_HCLK_FREQUENCY    STM32L4_SYSCLK_FREQUENCY
+#define STM32L4_BOARD_HCLK        STM32L4_HCLK_FREQUENCY      /* Same as above, to satisfy compiler */
 
 /* Configure the APB1 prescaler */
 

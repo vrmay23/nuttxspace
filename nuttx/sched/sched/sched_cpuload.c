@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/sched/sched_cpuload.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,9 +44,10 @@
 
 #include <nuttx/clock.h>
 #include <nuttx/irq.h>
-#include <nuttx/wdog.h>
 
 #include "sched/sched.h"
+
+#ifdef CONFIG_SCHED_CPULOAD
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -57,18 +71,19 @@
  * will be incremented multiple times per tick.
  */
 
-#define CPULOAD_TIMECONSTANT \
+#ifdef CONFIG_SMP
+#  define CPULOAD_TIMECONSTANT \
      (CONFIG_SMP_NCPUS * \
       CONFIG_SCHED_CPULOAD_TIMECONSTANT * \
       CPULOAD_TICKSPERSEC)
-
-/* The sampling period in system timer ticks */
-
-#define CPULOAD_SAMPLING_PERIOD \
-     (TICK_PER_SEC / CONFIG_SCHED_CPULOAD_TICKSPERSEC)
+#else
+#  define CPULOAD_TIMECONSTANT \
+     (CONFIG_SCHED_CPULOAD_TIMECONSTANT * \
+      CPULOAD_TICKSPERSEC)
+#endif
 
 /****************************************************************************
- * Public Data
+ * Private Data
  ****************************************************************************/
 
 /* This is the total number of clock tick counts.  Essentially the
@@ -84,103 +99,20 @@
  * each would have a load of 25% of the total.
  */
 
-volatile clock_t g_cpuload_total;
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
-
-#ifdef CONFIG_SCHED_CPULOAD_SYSCLK
-static struct wdog_s g_cpuload_wdog;
-#endif
+volatile uint32_t g_cpuload_total;
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: cpuload_callback
+ * Name: nxsched_cpu_process_cpuload
  *
  * Description:
- *   This is the callback function that will be invoked when the watchdog
- *   timer expires.
+ *   Collect data that can be used for CPU load measurements.
  *
  * Input Parameters:
- *   argc - the argument passed with the timer when the timer was started.
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-#ifdef CONFIG_SCHED_CPULOAD_SYSCLK
-static void cpuload_callback(wdparm_t arg)
-{
-  FAR struct wdog_s *wdog = (FAR struct wdog_s *)arg;
-  nxsched_process_cpuload_ticks(CPULOAD_SAMPLING_PERIOD);
-  wd_start_next(wdog, CPULOAD_SAMPLING_PERIOD, cpuload_callback, arg);
-}
-#endif
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: nxsched_process_taskload_ticks
- *
- * Description:
- *   Collect data that can be used for task load measurements.
- *
- * Input Parameters:
- *   tcb   - The task that we are performing the load operations on.
- *   ticks - The ticks that we process in this cpuload.
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-void nxsched_process_taskload_ticks(FAR struct tcb_s *tcb, clock_t ticks)
-{
-  tcb->ticks += ticks;
-  g_cpuload_total += ticks;
-
-  if (g_cpuload_total > CPULOAD_TIMECONSTANT)
-    {
-      uint32_t total = 0;
-      int i;
-
-      /* Divide the tick count for every task by two and recalculate the
-       * total.
-       */
-
-      for (i = 0; i < g_npidhash; i++)
-        {
-          if (g_pidhash[i])
-            {
-              g_pidhash[i]->ticks >>= 1;
-              total += g_pidhash[i]->ticks;
-            }
-        }
-
-      /* Save the new total. */
-
-      g_cpuload_total = total;
-    }
-}
-
-/****************************************************************************
- * Name: nxsched_process_cpuload_ticks
- *
- * Description:
- *   Collect data that can be used for CPU load measurements.  When
- *   CONFIG_SCHED_CPULOAD_EXTCLK is defined, this is an exported interface,
- *   use the the external clock logic.  Otherwise, it is an OS Internal
- *   interface.
- *
- * Input Parameters:
- *   ticks - The ticks that we increment in this cpuload
+ *   cpu - The CPU that we are performing the load operations on.
  *
  * Returned Value:
  *   None
@@ -191,17 +123,103 @@ void nxsched_process_taskload_ticks(FAR struct tcb_s *tcb, clock_t ticks)
  *
  ****************************************************************************/
 
-void nxsched_process_cpuload_ticks(clock_t ticks)
+static inline void nxsched_cpu_process_cpuload(int cpu)
+{
+  FAR struct tcb_s *rtcb  = current_task(cpu);
+  int hash_index;
+
+  /* Increment the count on the currently executing thread
+   *
+   * NOTE also that CPU load measurement data is retained in the g_pidhash
+   * table vs. in the TCB which would seem to be the more logic place.  It
+   * is place in the hash table, instead, to facilitate CPU load adjustments
+   * on all threads during timer interrupt handling. sched_foreach() could
+   * do this too, but this would require a little more overhead.
+   */
+
+  hash_index = PIDHASH(rtcb->pid);
+  g_pidhash[hash_index].ticks++;
+
+  /* Increment tick count.  NOTE that the count is increment once for each
+   * CPU on each sample interval.
+   */
+
+  g_cpuload_total++;
+}
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: nxsched_process_cpuload
+ *
+ * Description:
+ *   Collect data that can be used for CPU load measurements.  When
+ *   CONFIG_SCHED_CPULOAD_EXTCLK is defined, this is an exported interface,
+ *   use the the external clock logic.  Otherwise, it is an OS Internal
+ *   interface.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ * Assumptions/Limitations:
+ *   This function is called from a timer interrupt handler with all
+ *   interrupts disabled.
+ *
+ ****************************************************************************/
+
+void weak_function nxsched_process_cpuload(void)
 {
   int i;
 
+#ifdef CONFIG_SMP
+  irqstate_t flags;
+
   /* Perform scheduler operations on all CPUs. */
 
+  flags = enter_critical_section();
   for (i = 0; i < CONFIG_SMP_NCPUS; i++)
     {
-      FAR struct tcb_s *rtcb = current_task(i);
-      nxsched_process_taskload_ticks(rtcb, ticks);
+      nxsched_cpu_process_cpuload(i);
     }
+
+#else
+  /* Perform scheduler operations on the single CPU. */
+
+  nxsched_cpu_process_cpuload(0);
+
+#endif
+
+  /* If the accumulated tick value exceed a time constant, then shift the
+   * accumulators and recalculate the total.
+   */
+
+  if (g_cpuload_total > CPULOAD_TIMECONSTANT)
+    {
+      uint32_t total = 0;
+
+      /* Divide the tick count for every task by two and recalculate the
+       * total.
+       */
+
+      for (i = 0; i < CONFIG_MAX_TASKS; i++)
+        {
+          g_pidhash[i].ticks >>= 1;
+          total += g_pidhash[i].ticks;
+        }
+
+      /* Save the new total. */
+
+      g_cpuload_total = total;
+    }
+
+#ifdef CONFIG_SMP
+  leave_critical_section(flags);
+#endif
 }
 
 /****************************************************************************
@@ -227,16 +245,10 @@ void nxsched_process_cpuload_ticks(clock_t ticks)
 int clock_cpuload(int pid, FAR struct cpuload_s *cpuload)
 {
   irqstate_t flags;
-  int hash_index;
+  int hash_index = PIDHASH(pid);
   int ret = -ESRCH;
 
   DEBUGASSERT(cpuload);
-
-#ifdef CONFIG_SCHED_CPULOAD_CRITMONITOR
-  /* Update critmon in case of the target thread busyloop */
-
-  nxsched_update_critmon(nxsched_get_tcb(pid));
-#endif
 
   /* Momentarily disable interrupts.  We need (1) the task to stay valid
    * while we are doing these operations and (2) the tick counts to be
@@ -244,7 +256,6 @@ int clock_cpuload(int pid, FAR struct cpuload_s *cpuload)
    */
 
   flags = enter_critical_section();
-  hash_index = PIDHASH(pid);
 
   /* Make sure that the entry is valid (TCB field is not NULL) and matches
    * the requested PID.  The first check is needed if the thread has exited.
@@ -255,14 +266,14 @@ int clock_cpuload(int pid, FAR struct cpuload_s *cpuload)
    * NOTE also that CPU load measurement data is retained in the g_pidhash
    * table vs. in the TCB which would seem to be the more logic place.  It
    * is place in the hash table, instead, to facilitate CPU load adjustments
-   * on all threads during timer interrupt handling. nxsched_foreach() could
+   * on all threads during timer interrupt handling. sched_foreach() could
    * do this too, but this would require a little more overhead.
    */
 
-  if (g_pidhash[hash_index] && g_pidhash[hash_index]->pid == pid)
+  if (g_pidhash[hash_index].tcb && g_pidhash[hash_index].pid == pid)
     {
       cpuload->total  = g_cpuload_total;
-      cpuload->active = g_pidhash[hash_index]->ticks;
+      cpuload->active = g_pidhash[hash_index].ticks;
       ret = OK;
     }
 
@@ -270,24 +281,4 @@ int clock_cpuload(int pid, FAR struct cpuload_s *cpuload)
   return ret;
 }
 
-/****************************************************************************
- * Name: cpuload_init
- *
- * Description:
- *   Initialize the CPU load measurement logic.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-#ifdef CONFIG_SCHED_CPULOAD_SYSCLK
-void cpuload_init(void)
-{
-  wd_start(&g_cpuload_wdog, CPULOAD_SAMPLING_PERIOD, cpuload_callback,
-           (wdparm_t)&g_cpuload_wdog);
-}
-#endif
+#endif /* CONFIG_SCHED_CPULOAD */

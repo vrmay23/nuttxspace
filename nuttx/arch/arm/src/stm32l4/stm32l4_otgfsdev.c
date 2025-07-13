@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_otgfsdev.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012-2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *           dev@ziggurat29.com
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,13 +40,11 @@
 
 #include <nuttx/config.h>
 
-#include <sys/param.h>
 #include <sys/types.h>
-#include <inttypes.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -46,7 +58,9 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "stm32l4_otgfs.h"
 #include "stm32l4_pwr.h"
 
@@ -108,10 +122,13 @@
 #  define CONFIG_USBDEV_EP5_TXFIFO_SIZE 128
 #endif
 
-/* Adjust actual number of endpoints based upon size;
- * 0 means 'not available', and we expect that the first 0-length endpoint
- * implies that all others after are unused as well (irrespective of what
- * their size is set to be).
+/* Number of endpoints */
+
+#define STM32L4_NENDPOINTS  (6)          /* ep0-5 x 2 for IN and OUT */
+
+/* Adjust actual number of endpoints based upon size; 0 means 'not available',
+ * and we expect that the first 0-length endpoint implies that all others
+ * after are unused as well (irrespective of what their size is set to be).
  */
 
 #if CONFIG_USBDEV_EP1_TXFIFO_SIZE == 0
@@ -164,8 +181,8 @@
 #  error "FIFO allocations exceed FIFO memory size"
 #endif
 
-/* The actual FIFO addresses that we use must be aligned to 4-byte
- * boundaries; FIFO sizes must be provided in units of 32-bit words.
+/* The actual FIFO addresses that we use must be aligned to 4-byte boundaries;
+ * FIFO sizes must be provided in units of 32-bit words.
  */
 
 #define STM32L4_RXFIFO_BYTES     ((CONFIG_USBDEV_RXFIFO_SIZE + 3) & ~3)
@@ -234,7 +251,7 @@
                           OTGFS_GINT_SRQ      | \
                           OTGFS_GINT_WKUP)
 
-/* Debug ********************************************************************/
+/* Debug ***********************************************************************/
 
 /* Trace error codes */
 
@@ -321,7 +338,7 @@
 #define STM32L4_TRACEINTID_SETUPDONE          (90 + 3)
 #define STM32L4_TRACEINTID_SETUPRECVD         (90 + 4)
 
-/* Endpoints ****************************************************************/
+/* Endpoints ******************************************************************/
 
 /* Odd physical endpoint numbers are IN; even are OUT */
 
@@ -342,15 +359,25 @@
 
 #define STM32L4_MAXPACKET              (64)         /* Max packet size (1-64) */
 
-/* Delays *******************************************************************/
+/* Delays **********************************************************************/
 
 #define STM32L4_READY_DELAY            200000
 #define STM32L4_FLUSH_DELAY            200000
 
-/* Request queue operations *************************************************/
+/* Request queue operations ****************************************************/
 
 #define stm32l4_rqempty(ep)            ((ep)->head == NULL)
 #define stm32l4_rqpeek(ep)             ((ep)->head)
+
+/* Standard stuff **************************************************************/
+
+#ifndef MIN
+#  define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#  define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
 
 /****************************************************************************
  * Private Types
@@ -546,206 +573,191 @@ struct stm32l4_usbdev_s
  * Private Function Prototypes
  ****************************************************************************/
 
-/* Register operations ******************************************************/
+/* Register operations ********************************************************/
 
 #if defined(CONFIG_STM32L4_USBDEV_REGDEBUG) && defined(CONFIG_DEBUG_FEATURES)
 static uint32_t    stm32l4_getreg(uint32_t addr);
 static void        stm32l4_putreg(uint32_t val, uint32_t addr);
 #else
-#  define stm32l4_getreg(addr)     getreg32(addr)
-#  define stm32l4_putreg(val,addr) putreg32(val,addr)
+# define stm32l4_getreg(addr)     getreg32(addr)
+# define stm32l4_putreg(val,addr) putreg32(val,addr)
 #endif
 
-/* Request queue operations *************************************************/
+/* Request queue operations ****************************************************/
 
-static struct
-stm32l4_req_s *stm32l4_req_remfirst(struct stm32l4_ep_s *privep);
-static bool       stm32l4_req_addlast(struct stm32l4_ep_s *privep,
-                                      struct stm32l4_req_s *req);
+static FAR struct stm32l4_req_s *stm32l4_req_remfirst(FAR struct stm32l4_ep_s *privep);
+static bool       stm32l4_req_addlast(FAR struct stm32l4_ep_s *privep,
+                    FAR struct stm32l4_req_s *req);
 
-/* Low level data transfers and request operations **************************/
+/* Low level data transfers and request operations *****************************/
 
 /* Special endpoint 0 data transfer logic */
 
-static
-void stm32l4_ep0in_setupresponse(struct stm32l4_usbdev_s *priv,
-                            uint8_t *data, uint32_t nbytes);
-static inline
-void stm32l4_ep0in_transmitzlp(struct stm32l4_usbdev_s *priv);
+static void        stm32l4_ep0in_setupresponse(FAR struct stm32l4_usbdev_s *priv,
+                     FAR uint8_t *data, uint32_t nbytes);
+static inline void stm32l4_ep0in_transmitzlp(FAR struct stm32l4_usbdev_s *priv);
 static void        stm32l4_ep0in_activate(void);
 
-static
-void stm32l4_ep0out_ctrlsetup(struct stm32l4_usbdev_s *priv);
+static void        stm32l4_ep0out_ctrlsetup(FAR struct stm32l4_usbdev_s *priv);
 
 /* IN request and TxFIFO handling */
 
-static void        stm32l4_txfifo_write(struct stm32l4_ep_s *privep,
-                     uint8_t *buf, int nbytes);
-static void        stm32l4_epin_transfer(struct stm32l4_ep_s *privep,
-                     uint8_t *buf, int nbytes);
-static void        stm32l4_epin_request(struct stm32l4_usbdev_s *priv,
-                     struct stm32l4_ep_s *privep);
+static void        stm32l4_txfifo_write(FAR struct stm32l4_ep_s *privep,
+                     FAR uint8_t *buf, int nbytes);
+static void        stm32l4_epin_transfer(FAR struct stm32l4_ep_s *privep,
+                     FAR uint8_t *buf, int nbytes);
+static void        stm32l4_epin_request(FAR struct stm32l4_usbdev_s *priv,
+                     FAR struct stm32l4_ep_s *privep);
 
 /* OUT request and RxFIFO handling */
 
-static void        stm32l4_rxfifo_read(struct stm32l4_ep_s *privep,
-                     uint8_t *dest, uint16_t len);
-static void        stm32l4_rxfifo_discard(struct stm32l4_ep_s *privep,
+static void        stm32l4_rxfifo_read(FAR struct stm32l4_ep_s *privep,
+                     FAR uint8_t *dest, uint16_t len);
+static void        stm32l4_rxfifo_discard(FAR struct stm32l4_ep_s *privep,
                      int len);
-static void        stm32l4_epout_complete(struct stm32l4_usbdev_s *priv,
-                     struct stm32l4_ep_s *privep);
-static inline void stm32l4_ep0out_receive(struct stm32l4_ep_s *privep,
+static void        stm32l4_epout_complete(FAR struct stm32l4_usbdev_s *priv,
+                     FAR struct stm32l4_ep_s *privep);
+static inline void stm32l4_ep0out_receive(FAR struct stm32l4_ep_s *privep,
                      int bcnt);
-static inline void stm32l4_epout_receive(struct stm32l4_ep_s *privep,
+static inline void stm32l4_epout_receive(FAR struct stm32l4_ep_s *privep,
                      int bcnt);
-static void        stm32l4_epout_request(struct stm32l4_usbdev_s *priv,
-                     struct stm32l4_ep_s *privep);
+static void        stm32l4_epout_request(FAR struct stm32l4_usbdev_s *priv,
+                     FAR struct stm32l4_ep_s *privep);
 
 /* General request handling */
 
-static void        stm32l4_ep_flush(struct stm32l4_ep_s *privep);
-static void        stm32l4_req_complete(struct stm32l4_ep_s *privep,
+static void        stm32l4_ep_flush(FAR struct stm32l4_ep_s *privep);
+static void        stm32l4_req_complete(FAR struct stm32l4_ep_s *privep,
                      int16_t result);
-static void        stm32l4_req_cancel(struct stm32l4_ep_s *privep,
+static void        stm32l4_req_cancel(FAR struct stm32l4_ep_s *privep,
                      int16_t status);
 
-/* Interrupt handling *******************************************************/
+/* Interrupt handling **********************************************************/
 
-static
-struct stm32l4_ep_s *stm32l4_ep_findbyaddr(struct stm32l4_usbdev_s *priv,
-                                           uint16_t eplog);
-static int         stm32l4_req_dispatch(struct stm32l4_usbdev_s *priv,
-                     const struct usb_ctrlreq_s *ctrl);
-static void        stm32l4_usbreset(struct stm32l4_usbdev_s *priv);
+static struct      stm32l4_ep_s *stm32l4_ep_findbyaddr(struct stm32l4_usbdev_s *priv,
+                     uint16_t eplog);
+static int         stm32l4_req_dispatch(FAR struct stm32l4_usbdev_s *priv,
+                     FAR const struct usb_ctrlreq_s *ctrl);
+static void        stm32l4_usbreset(FAR struct stm32l4_usbdev_s *priv);
 
 /* Second level OUT endpoint interrupt processing */
 
-static inline void stm32l4_ep0out_testmode(struct stm32l4_usbdev_s *priv,
+static inline void stm32l4_ep0out_testmode(FAR struct stm32l4_usbdev_s *priv,
                      uint16_t index);
 static inline void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
-                     struct stm32l4_ctrlreq_s *ctrlreq);
+                     FAR struct stm32l4_ctrlreq_s *ctrlreq);
 static inline void stm32l4_ep0out_setup(struct stm32l4_usbdev_s *priv);
-static inline void stm32l4_epout(struct stm32l4_usbdev_s *priv,
+static inline void stm32l4_epout(FAR struct stm32l4_usbdev_s *priv,
                      uint8_t epno);
-static inline
-void stm32l4_epout_interrupt(struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_epout_interrupt(FAR struct stm32l4_usbdev_s *priv);
 
 /* Second level IN endpoint interrupt processing */
 
-static inline
-void stm32l4_epin_runtestmode(struct stm32l4_usbdev_s *priv);
-static inline
-void stm32l4_epin(struct stm32l4_usbdev_s *priv, uint8_t epno);
-static inline
-void stm32l4_epin_txfifoempty(struct stm32l4_usbdev_s *priv,
-                              int epno);
-static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_epin_runtestmode(FAR struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_epin(FAR struct stm32l4_usbdev_s *priv, uint8_t epno);
+static inline void stm32l4_epin_txfifoempty(FAR struct stm32l4_usbdev_s *priv,
+                                            int epno);
+static inline void stm32l4_epin_interrupt(FAR struct stm32l4_usbdev_s *priv);
 
 /* Other second level interrupt processing */
 
-static inline
-void stm32l4_resumeinterrupt(struct stm32l4_usbdev_s *priv);
-static inline
-void stm32l4_suspendinterrupt(struct stm32l4_usbdev_s *priv);
-static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv);
-static inline void stm32l4_enuminterrupt(struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_resumeinterrupt(FAR struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_suspendinterrupt(FAR struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_rxinterrupt(FAR struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_enuminterrupt(FAR struct stm32l4_usbdev_s *priv);
 #ifdef CONFIG_USBDEV_ISOCHRONOUS
-static inline
-void stm32l4_isocininterrupt(struct stm32l4_usbdev_s *priv);
-static inline
-void stm32l4_isocoutinterrupt(struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_isocininterrupt(FAR struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_isocoutinterrupt(FAR struct stm32l4_usbdev_s *priv);
 #endif
 #ifdef CONFIG_USBDEV_VBUSSENSING
-static inline
-void stm32l4_sessioninterrupt(struct stm32l4_usbdev_s *priv);
-static inline void stm32l4_otginterrupt(struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_sessioninterrupt(FAR struct stm32l4_usbdev_s *priv);
+static inline void stm32l4_otginterrupt(FAR struct stm32l4_usbdev_s *priv);
 #endif
 
 /* First level interrupt processing */
 
-static int         stm32l4_usbinterrupt(int irq, void *context,
-                     void *arg);
+static int         stm32l4_usbinterrupt(int irq, FAR void *context,
+                     FAR void *arg);
 
-/* Endpoint operations ******************************************************/
+/* Endpoint operations *********************************************************/
 
 /* Global OUT NAK controls */
 
-static void        stm32l4_enablegonak(struct stm32l4_ep_s *privep);
-static void        stm32l4_disablegonak(struct stm32l4_ep_s *privep);
+static void        stm32l4_enablegonak(FAR struct stm32l4_ep_s *privep);
+static void        stm32l4_disablegonak(FAR struct stm32l4_ep_s *privep);
 
 /* Endpoint configuration */
 
-static int         stm32l4_epout_configure(struct stm32l4_ep_s *privep,
+static int         stm32l4_epout_configure(FAR struct stm32l4_ep_s *privep,
                      uint8_t eptype, uint16_t maxpacket);
-static int         stm32l4_epin_configure(struct stm32l4_ep_s *privep,
+static int         stm32l4_epin_configure(FAR struct stm32l4_ep_s *privep,
                      uint8_t eptype, uint16_t maxpacket);
-static int         stm32l4_ep_configure(struct usbdev_ep_s *ep,
-                     const struct usb_epdesc_s *desc, bool last);
-static void        stm32l4_ep0_configure(struct stm32l4_usbdev_s *priv);
+static int         stm32l4_ep_configure(FAR struct usbdev_ep_s *ep,
+                     FAR const struct usb_epdesc_s *desc, bool last);
+static void        stm32l4_ep0_configure(FAR struct stm32l4_usbdev_s *priv);
 
 /* Endpoint disable */
 
-static void        stm32l4_epout_disable(struct stm32l4_ep_s *privep);
-static void        stm32l4_epin_disable(struct stm32l4_ep_s *privep);
-static int         stm32l4_ep_disable(struct usbdev_ep_s *ep);
+static void        stm32l4_epout_disable(FAR struct stm32l4_ep_s *privep);
+static void        stm32l4_epin_disable(FAR struct stm32l4_ep_s *privep);
+static int         stm32l4_ep_disable(FAR struct usbdev_ep_s *ep);
 
 /* Endpoint request management */
 
-static struct usbdev_req_s *stm32l4_ep_allocreq(struct usbdev_ep_s *ep);
-static void        stm32l4_ep_freereq(struct usbdev_ep_s *ep,
-                     struct usbdev_req_s *);
+static FAR struct usbdev_req_s *stm32l4_ep_allocreq(FAR struct usbdev_ep_s *ep);
+static void        stm32l4_ep_freereq(FAR struct usbdev_ep_s *ep,
+                     FAR struct usbdev_req_s *);
 
 /* Endpoint buffer management */
 
 #ifdef CONFIG_USBDEV_DMA
-static void       *stm32l4_ep_allocbuffer(struct usbdev_ep_s *ep,
+static void       *stm32l4_ep_allocbuffer(FAR struct usbdev_ep_s *ep,
                      uint16_t bytes);
-static void        stm32l4_ep_freebuffer(struct usbdev_ep_s *ep,
-                     void *buf);
+static void        stm32l4_ep_freebuffer(FAR struct usbdev_ep_s *ep,
+                     FAR void *buf);
 #endif
 
 /* Endpoint request submission */
 
-static int         stm32l4_ep_submit(struct usbdev_ep_s *ep,
+static int         stm32l4_ep_submit(FAR struct usbdev_ep_s *ep,
                      struct usbdev_req_s *req);
 
 /* Endpoint request cancellation */
 
-static int         stm32l4_ep_cancel(struct usbdev_ep_s *ep,
+static int         stm32l4_ep_cancel(FAR struct usbdev_ep_s *ep,
                      struct usbdev_req_s *req);
 
 /* Stall handling */
 
-static int         stm32l4_epout_setstall(struct stm32l4_ep_s *privep);
-static int         stm32l4_epin_setstall(struct stm32l4_ep_s *privep);
-static int         stm32l4_ep_setstall(struct stm32l4_ep_s *privep);
-static int         stm32l4_ep_clrstall(struct stm32l4_ep_s *privep);
-static int         stm32l4_ep_stall(struct usbdev_ep_s *ep, bool resume);
-static void        stm32l4_ep0_stall(struct stm32l4_usbdev_s *priv);
+static int         stm32l4_epout_setstall(FAR struct stm32l4_ep_s *privep);
+static int         stm32l4_epin_setstall(FAR struct stm32l4_ep_s *privep);
+static int         stm32l4_ep_setstall(FAR struct stm32l4_ep_s *privep);
+static int         stm32l4_ep_clrstall(FAR struct stm32l4_ep_s *privep);
+static int         stm32l4_ep_stall(FAR struct usbdev_ep_s *ep, bool resume);
+static void        stm32l4_ep0_stall(FAR struct stm32l4_usbdev_s *priv);
 
 /* Endpoint allocation */
 
-static struct usbdev_ep_s *stm32l4_ep_alloc(struct usbdev_s *dev,
+static FAR struct usbdev_ep_s *stm32l4_ep_alloc(FAR struct usbdev_s *dev,
                      uint8_t epno, bool in, uint8_t eptype);
-static void        stm32l4_ep_free(struct usbdev_s *dev,
-                     struct usbdev_ep_s *ep);
+static void        stm32l4_ep_free(FAR struct usbdev_s *dev,
+                     FAR struct usbdev_ep_s *ep);
 
-/* USB device controller operations *****************************************/
+/* USB device controller operations ********************************************/
 
 static int         stm32l4_getframe(struct usbdev_s *dev);
 static int         stm32l4_wakeup(struct usbdev_s *dev);
-static int         stm32l4_selfpowered(struct usbdev_s *dev,
-                                       bool selfpowered);
+static int         stm32l4_selfpowered(struct usbdev_s *dev, bool selfpowered);
 static int         stm32l4_pullup(struct usbdev_s *dev, bool enable);
 static void        stm32l4_setaddress(struct stm32l4_usbdev_s *priv,
                      uint16_t address);
 static int         stm32l4_txfifo_flush(uint32_t txfnum);
 static int         stm32l4_rxfifo_flush(void);
 
-/* Initialization ***********************************************************/
+/* Initialization **************************************************************/
 
-static void        stm32l4_swinitialize(struct stm32l4_usbdev_s *priv);
-static void        stm32l4_hwinitialize(struct stm32l4_usbdev_s *priv);
+static void        stm32l4_swinitialize(FAR struct stm32l4_usbdev_s *priv);
+static void        stm32l4_hwinitialize(FAR struct stm32l4_usbdev_s *priv);
 
 /****************************************************************************
  * Private Data
@@ -789,37 +801,37 @@ static const struct usbdev_ops_s g_devops =
 #ifdef CONFIG_USBDEV_TRACE_STRINGS
 const struct trace_msg_t g_usb_trace_strings_deverror[] =
 {
-  TRACE_STR(STM32L4_TRACEERR_ALLOCFAIL),
-  TRACE_STR(STM32L4_TRACEERR_BADCLEARFEATURE),
-  TRACE_STR(STM32L4_TRACEERR_BADDEVGETSTATUS),
-  TRACE_STR(STM32L4_TRACEERR_BADEPNO),
-  TRACE_STR(STM32L4_TRACEERR_BADEPGETSTATUS),
-  TRACE_STR(STM32L4_TRACEERR_BADGETCONFIG),
-  TRACE_STR(STM32L4_TRACEERR_BADGETSETDESC),
-  TRACE_STR(STM32L4_TRACEERR_BADGETSTATUS),
-  TRACE_STR(STM32L4_TRACEERR_BADSETADDRESS),
-  TRACE_STR(STM32L4_TRACEERR_BADSETCONFIG),
-  TRACE_STR(STM32L4_TRACEERR_BADSETFEATURE),
-  TRACE_STR(STM32L4_TRACEERR_BADTESTMODE),
-  TRACE_STR(STM32L4_TRACEERR_BINDFAILED),
-  TRACE_STR(STM32L4_TRACEERR_DISPATCHSTALL),
-  TRACE_STR(STM32L4_TRACEERR_DRIVER),
+  TRACE_STR(STM32L4_TRACEERR_ALLOCFAIL       ),
+  TRACE_STR(STM32L4_TRACEERR_BADCLEARFEATURE ),
+  TRACE_STR(STM32L4_TRACEERR_BADDEVGETSTATUS ),
+  TRACE_STR(STM32L4_TRACEERR_BADEPNO         ),
+  TRACE_STR(STM32L4_TRACEERR_BADEPGETSTATUS  ),
+  TRACE_STR(STM32L4_TRACEERR_BADGETCONFIG    ),
+  TRACE_STR(STM32L4_TRACEERR_BADGETSETDESC   ),
+  TRACE_STR(STM32L4_TRACEERR_BADGETSTATUS    ),
+  TRACE_STR(STM32L4_TRACEERR_BADSETADDRESS   ),
+  TRACE_STR(STM32L4_TRACEERR_BADSETCONFIG    ),
+  TRACE_STR(STM32L4_TRACEERR_BADSETFEATURE   ),
+  TRACE_STR(STM32L4_TRACEERR_BADTESTMODE     ),
+  TRACE_STR(STM32L4_TRACEERR_BINDFAILED      ),
+  TRACE_STR(STM32L4_TRACEERR_DISPATCHSTALL   ),
+  TRACE_STR(STM32L4_TRACEERR_DRIVER          ),
   TRACE_STR(STM32L4_TRACEERR_DRIVERREGISTERED),
-  TRACE_STR(STM32L4_TRACEERR_EP0NOSETUP),
-  TRACE_STR(STM32L4_TRACEERR_EP0SETUPSTALLED),
-  TRACE_STR(STM32L4_TRACEERR_EPINNULLPACKET),
-  TRACE_STR(STM32L4_TRACEERR_EPINUNEXPECTED),
-  TRACE_STR(STM32L4_TRACEERR_EPOUTNULLPACKET),
-  TRACE_STR(STM32L4_TRACEERR_EPOUTUNEXPECTED),
-  TRACE_STR(STM32L4_TRACEERR_INVALIDCTRLREQ),
-  TRACE_STR(STM32L4_TRACEERR_INVALIDPARMS),
-  TRACE_STR(STM32L4_TRACEERR_IRQREGISTRATION),
-  TRACE_STR(STM32L4_TRACEERR_NOEP),
-  TRACE_STR(STM32L4_TRACEERR_NOTCONFIGURED),
-  TRACE_STR(STM32L4_TRACEERR_EPOUTQEMPTY),
-  TRACE_STR(STM32L4_TRACEERR_EPINREQEMPTY),
-  TRACE_STR(STM32L4_TRACEERR_NOOUTSETUP),
-  TRACE_STR(STM32L4_TRACEERR_POLLTIMEOUT),
+  TRACE_STR(STM32L4_TRACEERR_EP0NOSETUP      ),
+  TRACE_STR(STM32L4_TRACEERR_EP0SETUPSTALLED ),
+  TRACE_STR(STM32L4_TRACEERR_EPINNULLPACKET  ),
+  TRACE_STR(STM32L4_TRACEERR_EPINUNEXPECTED  ),
+  TRACE_STR(STM32L4_TRACEERR_EPOUTNULLPACKET ),
+  TRACE_STR(STM32L4_TRACEERR_EPOUTUNEXPECTED ),
+  TRACE_STR(STM32L4_TRACEERR_INVALIDCTRLREQ  ),
+  TRACE_STR(STM32L4_TRACEERR_INVALIDPARMS    ),
+  TRACE_STR(STM32L4_TRACEERR_IRQREGISTRATION ),
+  TRACE_STR(STM32L4_TRACEERR_NOEP            ),
+  TRACE_STR(STM32L4_TRACEERR_NOTCONFIGURED   ),
+  TRACE_STR(STM32L4_TRACEERR_EPOUTQEMPTY     ),
+  TRACE_STR(STM32L4_TRACEERR_EPINREQEMPTY    ),
+  TRACE_STR(STM32L4_TRACEERR_NOOUTSETUP      ),
+  TRACE_STR(STM32L4_TRACEERR_POLLTIMEOUT     ),
   TRACE_STR_END
 };
 #endif
@@ -831,48 +843,48 @@ const struct trace_msg_t g_usb_trace_strings_deverror[] =
 #ifdef CONFIG_USBDEV_TRACE_STRINGS
 const struct trace_msg_t g_usb_trace_strings_intdecode[] =
 {
-  TRACE_STR(STM32L4_TRACEINTID_USB),
-  TRACE_STR(STM32L4_TRACEINTID_INTPENDING),
-  TRACE_STR(STM32L4_TRACEINTID_EPOUT),
-  TRACE_STR(STM32L4_TRACEINTID_EPIN),
-  TRACE_STR(STM32L4_TRACEINTID_MISMATCH),
-  TRACE_STR(STM32L4_TRACEINTID_WAKEUP),
-  TRACE_STR(STM32L4_TRACEINTID_SUSPEND),
-  TRACE_STR(STM32L4_TRACEINTID_SOF),
-  TRACE_STR(STM32L4_TRACEINTID_RXFIFO),
-  TRACE_STR(STM32L4_TRACEINTID_DEVRESET),
-  TRACE_STR(STM32L4_TRACEINTID_ENUMDNE),
-  TRACE_STR(STM32L4_TRACEINTID_IISOIXFR),
-  TRACE_STR(STM32L4_TRACEINTID_IISOOXFR),
-  TRACE_STR(STM32L4_TRACEINTID_SRQ),
-  TRACE_STR(STM32L4_TRACEINTID_OTG),
-  TRACE_STR(STM32L4_TRACEINTID_EPOUT_XFRC),
+  TRACE_STR(STM32L4_TRACEINTID_USB         ),
+  TRACE_STR(STM32L4_TRACEINTID_INTPENDING  ),
+  TRACE_STR(STM32L4_TRACEINTID_EPOUT       ),
+  TRACE_STR(STM32L4_TRACEINTID_EPIN        ),
+  TRACE_STR(STM32L4_TRACEINTID_MISMATCH    ),
+  TRACE_STR(STM32L4_TRACEINTID_WAKEUP      ),
+  TRACE_STR(STM32L4_TRACEINTID_SUSPEND     ),
+  TRACE_STR(STM32L4_TRACEINTID_SOF         ),
+  TRACE_STR(STM32L4_TRACEINTID_RXFIFO      ),
+  TRACE_STR(STM32L4_TRACEINTID_DEVRESET    ),
+  TRACE_STR(STM32L4_TRACEINTID_ENUMDNE     ),
+  TRACE_STR(STM32L4_TRACEINTID_IISOIXFR    ),
+  TRACE_STR(STM32L4_TRACEINTID_IISOOXFR    ),
+  TRACE_STR(STM32L4_TRACEINTID_SRQ         ),
+  TRACE_STR(STM32L4_TRACEINTID_OTG         ),
+  TRACE_STR(STM32L4_TRACEINTID_EPOUT_XFRC  ),
   TRACE_STR(STM32L4_TRACEINTID_EPOUT_EPDISD),
-  TRACE_STR(STM32L4_TRACEINTID_EPOUT_SETUP),
-  TRACE_STR(STM32L4_TRACEINTID_DISPATCH),
-  TRACE_STR(STM32L4_TRACEINTID_GETSTATUS),
-  TRACE_STR(STM32L4_TRACEINTID_EPGETSTATUS),
+  TRACE_STR(STM32L4_TRACEINTID_EPOUT_SETUP ),
+  TRACE_STR(STM32L4_TRACEINTID_DISPATCH    ),
+  TRACE_STR(STM32L4_TRACEINTID_GETSTATUS   ),
+  TRACE_STR(STM32L4_TRACEINTID_EPGETSTATUS ),
   TRACE_STR(STM32L4_TRACEINTID_DEVGETSTATUS),
-  TRACE_STR(STM32L4_TRACEINTID_IFGETSTATUS),
+  TRACE_STR(STM32L4_TRACEINTID_IFGETSTATUS ),
   TRACE_STR(STM32L4_TRACEINTID_CLEARFEATURE),
-  TRACE_STR(STM32L4_TRACEINTID_SETFEATURE),
-  TRACE_STR(STM32L4_TRACEINTID_SETADDRESS),
-  TRACE_STR(STM32L4_TRACEINTID_GETSETDESC),
-  TRACE_STR(STM32L4_TRACEINTID_GETCONFIG),
-  TRACE_STR(STM32L4_TRACEINTID_SETCONFIG),
-  TRACE_STR(STM32L4_TRACEINTID_GETSETIF),
-  TRACE_STR(STM32L4_TRACEINTID_SYNCHFRAME),
-  TRACE_STR(STM32L4_TRACEINTID_EPIN_XFRC),
-  TRACE_STR(STM32L4_TRACEINTID_EPIN_TOC),
-  TRACE_STR(STM32L4_TRACEINTID_EPIN_ITTXFE),
-  TRACE_STR(STM32L4_TRACEINTID_EPIN_EPDISD),
-  TRACE_STR(STM32L4_TRACEINTID_EPIN_TXFE),
+  TRACE_STR(STM32L4_TRACEINTID_SETFEATURE  ),
+  TRACE_STR(STM32L4_TRACEINTID_SETADDRESS  ),
+  TRACE_STR(STM32L4_TRACEINTID_GETSETDESC  ),
+  TRACE_STR(STM32L4_TRACEINTID_GETCONFIG   ),
+  TRACE_STR(STM32L4_TRACEINTID_SETCONFIG   ),
+  TRACE_STR(STM32L4_TRACEINTID_GETSETIF    ),
+  TRACE_STR(STM32L4_TRACEINTID_SYNCHFRAME  ),
+  TRACE_STR(STM32L4_TRACEINTID_EPIN_XFRC   ),
+  TRACE_STR(STM32L4_TRACEINTID_EPIN_TOC    ),
+  TRACE_STR(STM32L4_TRACEINTID_EPIN_ITTXFE ),
+  TRACE_STR(STM32L4_TRACEINTID_EPIN_EPDISD ),
+  TRACE_STR(STM32L4_TRACEINTID_EPIN_TXFE   ),
   TRACE_STR(STM32L4_TRACEINTID_EPIN_EMPWAIT),
-  TRACE_STR(STM32L4_TRACEINTID_OUTNAK),
-  TRACE_STR(STM32L4_TRACEINTID_OUTRECVD),
-  TRACE_STR(STM32L4_TRACEINTID_OUTDONE),
-  TRACE_STR(STM32L4_TRACEINTID_SETUPDONE),
-  TRACE_STR(STM32L4_TRACEINTID_SETUPRECVD),
+  TRACE_STR(STM32L4_TRACEINTID_OUTNAK      ),
+  TRACE_STR(STM32L4_TRACEINTID_OUTRECVD    ),
+  TRACE_STR(STM32L4_TRACEINTID_OUTDONE     ),
+  TRACE_STR(STM32L4_TRACEINTID_SETUPDONE   ),
+  TRACE_STR(STM32L4_TRACEINTID_SETUPRECVD  ),
   TRACE_STR_END
 };
 #endif
@@ -931,7 +943,7 @@ static uint32_t stm32l4_getreg(uint32_t addr)
         {
           /* Yes.. then show how many times the value repeated */
 
-          uinfo("[repeats %d more times]\n", count - 3);
+          uinfo("[repeats %d more times]\n", count-3);
         }
 
       /* Save the new address, value, and count */
@@ -977,10 +989,10 @@ static void stm32l4_putreg(uint32_t val, uint32_t addr)
  *
  ****************************************************************************/
 
-static struct stm32l4_req_s *
-stm32l4_req_remfirst(struct stm32l4_ep_s *privep)
+static FAR struct stm32l4_req_s *
+  stm32l4_req_remfirst(FAR struct stm32l4_ep_s *privep)
 {
-  struct stm32l4_req_s *ret = privep->head;
+  FAR struct stm32l4_req_s *ret = privep->head;
 
   if (ret)
     {
@@ -1004,8 +1016,8 @@ stm32l4_req_remfirst(struct stm32l4_ep_s *privep)
  *
  ****************************************************************************/
 
-static bool stm32l4_req_addlast(struct stm32l4_ep_s *privep,
-                                struct stm32l4_req_s *req)
+static bool stm32l4_req_addlast(FAR struct stm32l4_ep_s *privep,
+                                FAR struct stm32l4_req_s *req)
 {
   bool is_empty = !privep->head;
 
@@ -1032,8 +1044,8 @@ static bool stm32l4_req_addlast(struct stm32l4_ep_s *privep,
  *
  ****************************************************************************/
 
-static void stm32l4_ep0in_setupresponse(struct stm32l4_usbdev_s *priv,
-                                        uint8_t *buf, uint32_t nbytes)
+static void stm32l4_ep0in_setupresponse(FAR struct stm32l4_usbdev_s *priv,
+                                        FAR uint8_t *buf, uint32_t nbytes)
 {
   stm32l4_epin_transfer(&priv->epin[EP0], buf, nbytes);
   priv->ep0state = EP0STATE_SETUPRESPONSE;
@@ -1049,7 +1061,7 @@ static void stm32l4_ep0in_setupresponse(struct stm32l4_usbdev_s *priv,
  ****************************************************************************/
 
 static inline void
-stm32l4_ep0in_transmitzlp(struct stm32l4_usbdev_s *priv)
+  stm32l4_ep0in_transmitzlp(FAR struct stm32l4_usbdev_s *priv)
 {
   stm32l4_ep0in_setupresponse(priv, NULL, 0);
 }
@@ -1100,7 +1112,7 @@ static void stm32l4_ep0in_activate(void)
  *
  ****************************************************************************/
 
-static void stm32l4_ep0out_ctrlsetup(struct stm32l4_usbdev_s *priv)
+static void stm32l4_ep0out_ctrlsetup(FAR struct stm32l4_usbdev_s *priv)
 {
   uint32_t regval;
 
@@ -1126,8 +1138,8 @@ static void stm32l4_ep0out_ctrlsetup(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static void stm32l4_txfifo_write(struct stm32l4_ep_s *privep,
-                                 uint8_t *buf, int nbytes)
+static void stm32l4_txfifo_write(FAR struct stm32l4_ep_s *privep,
+                                 FAR uint8_t *buf, int nbytes)
 {
   uint32_t regaddr;
   uint32_t regval;
@@ -1169,8 +1181,8 @@ static void stm32l4_txfifo_write(struct stm32l4_ep_s *privep,
  *
  ****************************************************************************/
 
-static void stm32l4_epin_transfer(struct stm32l4_ep_s *privep,
-                                  uint8_t *buf, int nbytes)
+static void stm32l4_epin_transfer(FAR struct stm32l4_ep_s *privep,
+                                  FAR uint8_t *buf, int nbytes)
 {
   uint32_t pktcnt;
   uint32_t regval;
@@ -1188,9 +1200,7 @@ static void stm32l4_epin_transfer(struct stm32l4_ep_s *privep,
 
   if (nbytes == 0)
     {
-      /* Yes..
-       * leave the transfer size at zero and set the packet count to 1
-       */
+      /* Yes.. leave the transfer size at zero and set the packet count to 1 */
 
       pktcnt = 1;
     }
@@ -1257,8 +1267,8 @@ static void stm32l4_epin_transfer(struct stm32l4_ep_s *privep,
   stm32l4_putreg(regval, STM32L4_OTGFS_DIEPCTL(privep->epphy));
 
   /* Transfer the data to the TxFIFO.  At this point, the caller has already
-   * assured that there is sufficient space in the TxFIFO to hold the
-   * transfer we can just blindly continue.
+   * assured that there is sufficient space in the TxFIFO to hold the transfer
+   * we can just blindly continue.
    */
 
   stm32l4_txfifo_write(privep, buf, nbytes);
@@ -1272,8 +1282,8 @@ static void stm32l4_epin_transfer(struct stm32l4_ep_s *privep,
  *
  ****************************************************************************/
 
-static void stm32l4_epin_request(struct stm32l4_usbdev_s *priv,
-                                 struct stm32l4_ep_s *privep)
+static void stm32l4_epin_request(FAR struct stm32l4_usbdev_s *priv,
+                                 FAR struct stm32l4_ep_s *privep)
 {
   struct stm32l4_req_s *privreq;
   uint32_t regaddr;
@@ -1286,15 +1296,13 @@ static void stm32l4_epin_request(struct stm32l4_usbdev_s *priv,
   /* We get here in one of four possible ways.  From three interrupting
    * events:
    *
-   * 1. From stm32l4_epin as part of the transfer complete interrupt
-   *    processing This interrupt indicates that the last transfer has
-   *    completed.
+   * 1. From stm32l4_epin as part of the transfer complete interrupt processing
+   *    This interrupt indicates that the last transfer has completed.
    * 2. As part of the ITTXFE interrupt processing.  That interrupt indicates
    *    that an IN token was received when the associated TxFIFO was empty.
-   * 3. From stm32l4_epin_txfifoempty as part of the TXFE interrupt
-   *    processing. The TXFE interrupt is only enabled when the TxFIFO is
-   *    full and the software must wait for space to become available in the
-   *    TxFIFO.
+   * 3. From stm32l4_epin_txfifoempty as part of the TXFE interrupt processing.
+   *    The TXFE interrupt is only enabled when the TxFIFO is full and the
+   *    software must wait for space to become available in the TxFIFO.
    *
    * And this function may be called immediately when the write request is
    * queue to start up the next transaction.
@@ -1327,7 +1335,7 @@ static void stm32l4_epin_request(struct stm32l4_usbdev_s *priv,
       return;
     }
 
-  uinfo("EP%d req=%p: len=%zu xfrd=%zu zlp=%d\n",
+  uinfo("EP%d req=%p: len=%d xfrd=%d zlp=%d\n",
         privep->epphy, privreq, privreq->req.len,
         privreq->req.xfrd, privep->zlp);
 
@@ -1440,19 +1448,6 @@ static void stm32l4_epin_request(struct stm32l4_usbdev_s *priv,
           empmsk |= OTGFS_DIEPEMPMSK(privep->epphy);
           stm32l4_putreg(empmsk, STM32L4_OTGFS_DIEPEMPMSK);
 
-#ifdef CONFIG_DEBUG_FEATURES
-          /* Check if the configured TXFIFO size is sufficient for a given
-           * request. If not, raise an assertion here.
-           */
-
-          regval = stm32l4_getreg(STM32L4_OTG_DIEPTXF(privep->epphy));
-          regval &= OTGFS_DIEPTXF_INEPTXFD_MASK;
-          regval >>= OTGFS_DIEPTXF_INEPTXFD_SHIFT;
-          uerr("EP%" PRId8 " TXLEN=%" PRId32 " nwords=%d\n",
-               privep->epphy, regval, nwords);
-          DEBUGASSERT(regval >= nwords);
-#endif
-
           /* Terminate the transfer.  We will try again when the TxFIFO empty
            * interrupt is received.
            */
@@ -1483,10 +1478,9 @@ static void stm32l4_epin_request(struct stm32l4_usbdev_s *priv,
       privreq->req.xfrd += nbytes;
     }
 
-  /* Note that the ZLP, if any, must be sent as a separate transfer.  The
-   * need for a ZLP is indicated by privep->zlp.  If all of the bytes were
-   * sent (including any final null packet) then we are finished with the
-   * transfer
+  /* Note that the ZLP, if any, must be sent as a separate transfer.  The need
+   * for a ZLP is indicated by privep->zlp.  If all of the bytes were sent
+   * (including any final null packet) then we are finished with the transfer
    */
 
   if (privreq->req.xfrd >= privreq->req.len && !privep->zlp)
@@ -1509,8 +1503,8 @@ static void stm32l4_epin_request(struct stm32l4_usbdev_s *priv,
  *
  ****************************************************************************/
 
-static void stm32l4_rxfifo_read(struct stm32l4_ep_s *privep,
-                                uint8_t *dest, uint16_t len)
+static void stm32l4_rxfifo_read(FAR struct stm32l4_ep_s *privep,
+                                FAR uint8_t *dest, uint16_t len)
 {
   uint32_t regaddr;
   int i;
@@ -1521,9 +1515,7 @@ static void stm32l4_rxfifo_read(struct stm32l4_ep_s *privep,
 
   regaddr = STM32L4_OTGFS_DFIFO_DEP(EP0);
 
-  /* Read 32-bits and write 4 x 8-bits at time
-   * (to avoid unaligned accesses)
-   */
+  /* Read 32-bits and write 4 x 8-bits at time (to avoid unaligned accesses) */
 
   for (i = 0; i < len; i += 4)
     {
@@ -1554,7 +1546,7 @@ static void stm32l4_rxfifo_read(struct stm32l4_ep_s *privep,
  *
  ****************************************************************************/
 
-static void stm32l4_rxfifo_discard(struct stm32l4_ep_s *privep, int len)
+static void stm32l4_rxfifo_discard(FAR struct stm32l4_ep_s *privep, int len)
 {
   if (len > 0)
     {
@@ -1589,13 +1581,13 @@ static void stm32l4_rxfifo_discard(struct stm32l4_ep_s *privep, int len)
  *
  ****************************************************************************/
 
-static void stm32l4_epout_complete(struct stm32l4_usbdev_s *priv,
-                                   struct stm32l4_ep_s *privep)
+static void stm32l4_epout_complete(FAR struct stm32l4_usbdev_s *priv,
+                                   FAR struct stm32l4_ep_s *privep)
 {
   struct stm32l4_req_s *privreq;
 
-  /* Since a transfer just completed, there must be a read request at the
-   * head of the endpoint request queue.
+  /* Since a transfer just completed, there must be a read request at the head of
+   * the endpoint request queue.
    */
 
   privreq = stm32l4_rqpeek(privep);
@@ -1612,7 +1604,7 @@ static void stm32l4_epout_complete(struct stm32l4_usbdev_s *priv,
       return;
     }
 
-  uinfo("EP%d: len=%zu xfrd=%zu\n",
+  uinfo("EP%d: len=%d xfrd=%d\n",
         privep->epphy, privreq->req.len, privreq->req.xfrd);
 
   /* Return the completed read request to the class driver and mark the state
@@ -1632,21 +1624,21 @@ static void stm32l4_epout_complete(struct stm32l4_usbdev_s *priv,
  * Name: stm32l4_ep0out_receive
  *
  * Description:
- *   This function is called from the RXFLVL interrupt handler when new
- *   incoming data is available in the endpoint's RxFIFO.  This function
- *   will simply copy the incoming data into pending request's data buffer.
+ *   This function is called from the RXFLVL interrupt handler when new incoming
+ *   data is available in the endpoint's RxFIFO.  This function will simply
+ *   copy the incoming data into pending request's data buffer.
  *
  ****************************************************************************/
 
-static inline void stm32l4_ep0out_receive(struct stm32l4_ep_s *privep,
+static inline void stm32l4_ep0out_receive(FAR struct stm32l4_ep_s *privep,
                                           int bcnt)
 {
-  struct stm32l4_usbdev_s *priv;
+  FAR struct stm32l4_usbdev_s *priv;
 
   /* Sanity Checking */
 
-  DEBUGASSERT(privep && privep->dev);
-  priv = (struct stm32l4_usbdev_s *)privep->dev;
+  DEBUGASSERT(privep && privep->ep.priv);
+  priv = (FAR struct stm32l4_usbdev_s *)privep->ep.priv;
 
   uinfo("EP0: bcnt=%d\n", bcnt);
   usbtrace(TRACE_READ(EP0), bcnt);
@@ -1691,13 +1683,13 @@ static inline void stm32l4_ep0out_receive(struct stm32l4_ep_s *privep,
  * Name: stm32l4_epout_receive
  *
  * Description:
- *   This function is called from the RXFLVL interrupt handler when new
- *   incoming data is available in the endpoint's RxFIFO.  This function
- *   will simply copy the incoming data into pending request's data buffer.
+ *   This function is called from the RXFLVL interrupt handler when new incoming
+ *   data is available in the endpoint's RxFIFO.  This function will simply
+ *   copy the incoming data into pending request's data buffer.
  *
  ****************************************************************************/
 
-static inline void stm32l4_epout_receive(struct stm32l4_ep_s *privep,
+static inline void stm32l4_epout_receive(FAR struct stm32l4_ep_s *privep,
                                          int bcnt)
 {
   struct stm32l4_req_s *privreq;
@@ -1714,12 +1706,11 @@ static inline void stm32l4_epout_receive(struct stm32l4_ep_s *privep,
     {
       /* Incoming data is available in the RxFIFO, but there is no read setup
        * to receive the receive the data.  This should not happen for data
-       * endpoints; those endpoints should have been NAKing any OUT data
-       * tokens.
+       * endpoints; those endpoints should have been NAKing any OUT data tokens.
        *
        * We should get here normally on OUT data phase following an OUT
-       * SETUP command.  EP0 data will still receive data in this case
-       * and it should not be NAKing.
+       * SETUP command.  EP0 data will still receive data in this case and it
+       * should not be NAKing.
        */
 
       if (privep->epphy == 0)
@@ -1732,8 +1723,7 @@ static inline void stm32l4_epout_receive(struct stm32l4_ep_s *privep,
            * NAKing is working as expected.
            */
 
-          usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_EPOUTQEMPTY),
-                   privep->epphy);
+          usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_EPOUTQEMPTY), privep->epphy);
 
           /* Discard the data in the RxFIFO */
 
@@ -1744,8 +1734,7 @@ static inline void stm32l4_epout_receive(struct stm32l4_ep_s *privep,
       return;
     }
 
-  uinfo("EP%d: len=%zu xfrd=%zu\n",
-         privep->epphy, privreq->req.len, privreq->req.xfrd);
+  uinfo("EP%d: len=%d xfrd=%d\n", privep->epphy, privreq->req.len, privreq->req.xfrd);
   usbtrace(TRACE_READ(privep->epphy), bcnt);
 
   /* Get the number of bytes to transfer from the RxFIFO */
@@ -1777,15 +1766,14 @@ static inline void stm32l4_epout_receive(struct stm32l4_ep_s *privep,
  * Name: stm32l4_epout_request
  *
  * Description:
- *  This function is called when either
- * (1) new read request is received, or
- * (2) a pending receive request completes.  If there is no read in pending,
- *  then this function will initiate the next OUT (read) operation.
+ *   This function is called when either (1) new read request is received, or
+ *   (2) a pending receive request completes.  If there is no read in pending,
+ *   then this function will initiate the next OUT (read) operation.
  *
  ****************************************************************************/
 
-static void stm32l4_epout_request(struct stm32l4_usbdev_s *priv,
-                                  struct stm32l4_ep_s *privep)
+static void stm32l4_epout_request(FAR struct stm32l4_usbdev_s *priv,
+                                  FAR struct stm32l4_ep_s *privep)
 {
   struct stm32l4_req_s *privreq;
   uint32_t regaddr;
@@ -1793,34 +1781,30 @@ static void stm32l4_epout_request(struct stm32l4_usbdev_s *priv,
   uint32_t xfrsize;
   uint32_t pktcnt;
 
-  /* Make sure that there is not already a pending request request.
-   *  If there is, just return, leaving the newly received request
-   * in the request queue.
+  /* Make sure that there is not already a pending request request.  If there is,
+   * just return, leaving the newly received request in the request queue.
    */
 
   if (!privep->active)
     {
       /* Loop until a valid request is found (or the request queue is empty).
-       * The loop is only need to look at the request queue again is an
-       * invalid read request is encountered.
+       * The loop is only need to look at the request queue again is an invalid
+       * read request is encountered.
        */
 
       for (; ; )
         {
-          /* Get a reference to the request at the head of the endpoint's
-           * request queue
-           */
+          /* Get a reference to the request at the head of the endpoint's request queue */
 
           privreq = stm32l4_rqpeek(privep);
           if (!privreq)
             {
-              usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_EPOUTQEMPTY),
-                       privep->epphy);
+              usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_EPOUTQEMPTY), privep->epphy);
 
-              /* There are no read requests to be setup.  Configure the
-               * hardware to NAK any incoming packets.  (This should already
-               * be the case.  I think that the hardware will automatically
-               * NAK after a transfer is completed until SNAK is cleared).
+              /* There are no read requests to be setup.  Configure the hardware to
+               * NAK any incoming packets.  (This should already be the case.  I
+               * think that the hardware will automatically NAK after a transfer is
+               * completed until SNAK is cleared).
                */
 
               regaddr = STM32L4_OTGFS_DOEPCTL(privep->epphy);
@@ -1846,9 +1830,7 @@ static void stm32l4_epout_request(struct stm32l4_usbdev_s *priv,
               stm32l4_req_complete(privep, OK);
             }
 
-          /* Otherwise, we have a usable read request...
-           * break out of the loop
-           */
+          /* Otherwise, we have a usable read request... break out of the loop */
 
           else
             {
@@ -1864,8 +1846,7 @@ static void stm32l4_epout_request(struct stm32l4_usbdev_s *priv,
        *   maxpacket bytes).
        */
 
-      pktcnt  = (privreq->req.len + (privep->ep.maxpacket - 1)) /
-                 privep->ep.maxpacket;
+      pktcnt  = (privreq->req.len + (privep->ep.maxpacket - 1)) / privep->ep.maxpacket;
       xfrsize = pktcnt * privep->ep.maxpacket;
 
       /* Then setup the hardware to perform this transfer */
@@ -1944,15 +1925,13 @@ static void stm32l4_ep_flush(struct stm32l4_ep_s *privep)
  * Name: stm32l4_req_complete
  *
  * Description:
- *   Handle termination of the request at the head of the endpoint request
- *   queue.
+ *   Handle termination of the request at the head of the endpoint request queue.
  *
  ****************************************************************************/
 
-static void stm32l4_req_complete(struct stm32l4_ep_s *privep,
-                                 int16_t result)
+static void stm32l4_req_complete(struct stm32l4_ep_s *privep, int16_t result)
 {
-  struct stm32l4_req_s *privreq;
+  FAR struct stm32l4_req_s *privreq;
 
   /* Remove the request at the head of the request list */
 
@@ -2014,9 +1993,8 @@ static void stm32l4_req_cancel(struct stm32l4_ep_s *privep, int16_t status)
  *
  ****************************************************************************/
 
-static
-struct stm32l4_ep_s *stm32l4_ep_findbyaddr(struct stm32l4_usbdev_s *priv,
-                                           uint16_t eplog)
+static struct stm32l4_ep_s *stm32l4_ep_findbyaddr(struct stm32l4_usbdev_s *priv,
+                                                  uint16_t eplog)
 {
   struct stm32l4_ep_s *privep;
   uint8_t epphy = USB_EPNO(eplog);
@@ -2047,8 +2025,8 @@ struct stm32l4_ep_s *stm32l4_ep_findbyaddr(struct stm32l4_usbdev_s *priv,
  * Name: stm32l4_req_dispatch
  *
  * Description:
- *   Provide unhandled setup actions to the class driver. This is logically
- *   part of the USB interrupt handler.
+ *   Provide unhandled setup actions to the class driver. This is logically part
+ *   of the USB interrupt handler.
  *
  ****************************************************************************/
 
@@ -2087,7 +2065,7 @@ static int stm32l4_req_dispatch(struct stm32l4_usbdev_s *priv,
 
 static void stm32l4_usbreset(struct stm32l4_usbdev_s *priv)
 {
-  struct stm32l4_ep_s *privep;
+  FAR struct stm32l4_ep_s *privep;
   uint32_t regval;
   int i;
 
@@ -2183,7 +2161,7 @@ static void stm32l4_usbreset(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static inline void stm32l4_ep0out_testmode(struct stm32l4_usbdev_s *priv,
+static inline void stm32l4_ep0out_testmode(FAR struct stm32l4_usbdev_s *priv,
                                            uint16_t index)
 {
   uint8_t testmode;
@@ -2226,16 +2204,15 @@ static inline void stm32l4_ep0out_testmode(struct stm32l4_usbdev_s *priv,
  * Name: stm32l4_ep0out_stdrequest
  *
  * Description:
- *   Handle a standard request on EP0.  Pick off the things of interest to
- *   the USB device controller driver; pass what is left to the class driver.
+ *   Handle a standard request on EP0.  Pick off the things of interest to the
+ *   USB device controller driver; pass what is left to the class driver.
  *
  ****************************************************************************/
 
-static inline
-void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
-                               struct stm32l4_ctrlreq_s *ctrlreq)
+static inline void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
+                                             FAR struct stm32l4_ctrlreq_s *ctrlreq)
 {
-  struct stm32l4_ep_s *privep;
+  FAR struct stm32l4_ep_s *privep;
 
   /* Handle standard request */
 
@@ -2263,13 +2240,11 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
               {
               case USB_REQ_RECIPIENT_ENDPOINT:
                 {
-                  usbtrace(TRACE_INTDECODE(
-                           STM32L4_TRACEINTID_EPGETSTATUS), 0);
+                  usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPGETSTATUS), 0);
                   privep = stm32l4_ep_findbyaddr(priv, ctrlreq->index);
                   if (!privep)
                     {
-                      usbtrace(TRACE_DEVERROR(
-                               STM32L4_TRACEERR_BADEPGETSTATUS), 0);
+                      usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_BADEPGETSTATUS), 0);
                       priv->stalled = true;
                     }
                   else
@@ -2293,23 +2268,19 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
                 {
                   if (ctrlreq->index == 0)
                     {
-                      usbtrace(TRACE_INTDECODE(
-                               STM32L4_TRACEINTID_DEVGETSTATUS), 0);
+                      usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_DEVGETSTATUS), 0);
 
                       /* Features:  Remote Wakeup and self-powered */
 
-                      priv->ep0data[0]  = (priv->selfpowered <<
-                                           USB_FEATURE_SELFPOWERED);
-                      priv->ep0data[0] |= (priv->wakeup      <<
-                                           USB_FEATURE_REMOTEWAKEUP);
+                      priv->ep0data[0]  = (priv->selfpowered << USB_FEATURE_SELFPOWERED);
+                      priv->ep0data[0] |= (priv->wakeup      << USB_FEATURE_REMOTEWAKEUP);
                       priv->ep0data[1]  = 0;
 
                       stm32l4_ep0in_setupresponse(priv, priv->ep0data, 2);
                     }
                   else
                     {
-                      usbtrace(TRACE_DEVERROR(
-                               STM32L4_TRACEERR_BADDEVGETSTATUS), 0);
+                      usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_BADDEVGETSTATUS), 0);
                       priv->stalled = true;
                     }
                 }
@@ -2317,8 +2288,7 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
 
               case USB_REQ_RECIPIENT_INTERFACE:
                 {
-                  usbtrace(TRACE_INTDECODE(
-                           STM32L4_TRACEINTID_IFGETSTATUS), 0);
+                  usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_IFGETSTATUS), 0);
                   priv->ep0data[0] = 0;
                   priv->ep0data[1] = 0;
 
@@ -2328,8 +2298,7 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
 
               default:
                 {
-                  usbtrace(TRACE_DEVERROR(
-                           STM32L4_TRACEERR_BADGETSTATUS), 0);
+                  usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_BADGETSTATUS), 0);
                   priv->stalled = true;
                 }
                 break;
@@ -2352,8 +2321,7 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
             uint8_t recipient = ctrlreq->type & USB_REQ_RECIPIENT_MASK;
             if (recipient == USB_REQ_RECIPIENT_ENDPOINT &&
                 ctrlreq->value == USB_FEATURE_ENDPOINTHALT &&
-                (privep = stm32l4_ep_findbyaddr(priv, ctrlreq->index)) !=
-                 NULL)
+                (privep = stm32l4_ep_findbyaddr(priv, ctrlreq->index)) != NULL)
               {
                 stm32l4_ep_clrstall(privep);
                 stm32l4_ep0in_transmitzlp(priv);
@@ -2393,8 +2361,7 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
             uint8_t recipient = ctrlreq->type & USB_REQ_RECIPIENT_MASK;
             if (recipient == USB_REQ_RECIPIENT_ENDPOINT &&
                 ctrlreq->value == USB_FEATURE_ENDPOINTHALT &&
-                (privep = stm32l4_ep_findbyaddr(priv, ctrlreq->index)) !=
-                 NULL)
+                (privep = stm32l4_ep_findbyaddr(priv, ctrlreq->index)) != NULL)
               {
                 stm32l4_ep_setstall(privep);
                 stm32l4_ep0in_transmitzlp(priv);
@@ -2439,17 +2406,15 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
          * len:   0; data = none
          */
 
-        usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SETADDRESS),
-                 ctrlreq->value);
-        if ((ctrlreq->type & USB_REQ_RECIPIENT_MASK) ==
-             USB_REQ_RECIPIENT_DEVICE &&
-             ctrlreq->index  == 0 &&
-             ctrlreq->len == 0 &&
-             ctrlreq->value < 128 &&
-             priv->devstate != DEVSTATE_CONFIGURED)
+        usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SETADDRESS), ctrlreq->value);
+        if ((ctrlreq->type & USB_REQ_RECIPIENT_MASK) == USB_REQ_RECIPIENT_DEVICE &&
+            ctrlreq->index  == 0 &&
+            ctrlreq->len == 0 &&
+            ctrlreq->value < 128 &&
+            priv->devstate != DEVSTATE_CONFIGURED)
           {
-            /* Save the address.  We cannot actually change to the next
-             * address until the completion of the status phase.
+            /* Save the address.  We cannot actually change to the next address until
+             * the completion of the status phase.
              */
 
             stm32l4_setaddress(priv, (uint16_t)priv->ctrlreq.value[0]);
@@ -2479,8 +2444,7 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
 
       {
         usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_GETSETDESC), 0);
-        if ((ctrlreq->type & USB_REQ_RECIPIENT_MASK) ==
-             USB_REQ_RECIPIENT_DEVICE)
+        if ((ctrlreq->type & USB_REQ_RECIPIENT_MASK) == USB_REQ_RECIPIENT_DEVICE)
           {
             stm32l4_req_dispatch(priv, &priv->ctrlreq);
           }
@@ -2502,8 +2466,7 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
       {
         usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_GETCONFIG), 0);
         if (priv->addressed &&
-           (ctrlreq->type & USB_REQ_RECIPIENT_MASK) ==
-            USB_REQ_RECIPIENT_DEVICE &&
+           (ctrlreq->type & USB_REQ_RECIPIENT_MASK) == USB_REQ_RECIPIENT_DEVICE &&
             ctrlreq->value == 0 &&
             ctrlreq->index == 0 &&
             ctrlreq->len == 1)
@@ -2528,8 +2491,7 @@ void stm32l4_ep0out_stdrequest(struct stm32l4_usbdev_s *priv,
       {
         usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SETCONFIG), 0);
         if (priv->addressed &&
-            (ctrlreq->type & USB_REQ_RECIPIENT_MASK) ==
-             USB_REQ_RECIPIENT_DEVICE &&
+            (ctrlreq->type & USB_REQ_RECIPIENT_MASK) == USB_REQ_RECIPIENT_DEVICE &&
             ctrlreq->index == 0 &&
             ctrlreq->len == 0)
           {
@@ -2651,8 +2613,7 @@ static inline void stm32l4_ep0out_setup(struct stm32l4_usbdev_s *priv)
   ctrlreq.len   = GETUINT16(priv->ctrlreq.len);
 
   uinfo("type=%02x req=%02x value=%04x index=%04x len=%04x\n",
-          ctrlreq.type, ctrlreq.req, ctrlreq.value,
-          ctrlreq.index, ctrlreq.len);
+          ctrlreq.type, ctrlreq.req, ctrlreq.value, ctrlreq.index, ctrlreq.len);
 
   /* Check for a standard request */
 
@@ -2673,14 +2634,13 @@ static inline void stm32l4_ep0out_setup(struct stm32l4_usbdev_s *priv)
 
   if (priv->stalled)
     {
-      usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_EP0SETUPSTALLED),
-               priv->ep0state);
+      usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_EP0SETUPSTALLED), priv->ep0state);
       stm32l4_ep0_stall(priv);
     }
 
   /* Reset state/data associated with the SETUP request */
 
-  priv->ep0datlen = 0;
+   priv->ep0datlen = 0;
 }
 
 /****************************************************************************
@@ -2692,10 +2652,10 @@ static inline void stm32l4_ep0out_setup(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static inline void stm32l4_epout(struct stm32l4_usbdev_s *priv,
+static inline void stm32l4_epout(FAR struct stm32l4_usbdev_s *priv,
                                  uint8_t epno)
 {
-  struct stm32l4_ep_s *privep;
+  FAR struct stm32l4_ep_s *privep;
 
   /* Endpoint 0 is a special case. */
 
@@ -2740,25 +2700,24 @@ static inline void stm32l4_epout(struct stm32l4_usbdev_s *priv,
  * Name: stm32l4_epout_interrupt
  *
  * Description:
- *   USB OUT endpoint interrupt handler.
- *   The core generates this interrupt when  there is an interrupt is pending
- *   on one of the OUT endpoints of the core.
- *   The driver must read the OTGFS DAINT register to determine the exact
- *   number of the OUT endpoint on which the interrupt occurred, and then
- *   read the corresponding OTGFS DOEPINTx register to determine the exact
- *   cause of the interrupt.
+ *   USB OUT endpoint interrupt handler.  The core generates this interrupt when
+ *   there is an interrupt is pending on one of the OUT endpoints of the core.
+ *   The driver must read the OTGFS DAINT register to determine the exact number
+ *   of the OUT endpoint on which the interrupt occurred, and then read the
+ *   corresponding OTGFS DOEPINTx register to determine the exact cause of the
+ *   interrupt.
  *
  ****************************************************************************/
 
-static inline void stm32l4_epout_interrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_epout_interrupt(FAR struct stm32l4_usbdev_s *priv)
 {
   uint32_t daint;
   uint32_t regval;
   uint32_t doepint;
   int epno;
 
-  /* Get the pending, enabled interrupts for the OUT endpoint from the
-   * endpoint interrupt status register.
+  /* Get the pending, enabled interrupts for the OUT endpoint from the endpoint
+   * interrupt status register.
    */
 
   regval  = stm32l4_getreg(STM32L4_OTGFS_DAINT);
@@ -2773,8 +2732,8 @@ static inline void stm32l4_epout_interrupt(struct stm32l4_usbdev_s *priv)
        *
        * This shouldn't happen if we are diligent about handling timing
        * issues when masking endpoint interrupts. However, this workaround
-       * avoids infinite loop and allows operation to continue normally.
-       * It works by clearing each endpoint flags, masked or not.
+       * avoids infinite loop and allows operation to continue normally.  It
+       * works by clearing each endpoint flags, masked or not.
        */
 
       regval  = stm32l4_getreg(STM32L4_OTGFS_DAINT);
@@ -2789,8 +2748,8 @@ static inline void stm32l4_epout_interrupt(struct stm32l4_usbdev_s *priv)
           if ((daint & 1) != 0)
             {
               regval = stm32l4_getreg(STM32L4_OTGFS_DOEPINT(epno));
-              uinfo("DOEPINT(%d) = %08" PRIx32 "\n", epno, regval);
-              stm32l4_putreg(0xff, STM32L4_OTGFS_DOEPINT(epno));
+              uinfo("DOEPINT(%d) = %08x\n", epno, regval);
+              stm32l4_putreg(0xFF, STM32L4_OTGFS_DOEPINT(epno));
             }
 
           epno++;
@@ -2814,11 +2773,10 @@ static inline void stm32l4_epout_interrupt(struct stm32l4_usbdev_s *priv)
           doepint  = stm32l4_getreg(STM32L4_OTGFS_DOEPINT(epno));
           doepint &= stm32l4_getreg(STM32L4_OTGFS_DOEPMSK);
 
-          /* Transfer completed interrupt.
-           * This interrupt is triggered when stm32l4_rxinterrupt() removes
-           * the last packet data from the RxFIFO.
-           * In this case, core internally sets the NAK bit for this endpoint
-           * to prevent it from receiving any more packets.
+          /* Transfer completed interrupt.  This interrupt is triggered when
+           * stm32l4_rxinterrupt() removes the last packet data from the RxFIFO.
+           * In this case, core internally sets the NAK bit for this endpoint to
+           * prevent it from receiving any more packets.
            */
 
           if ((doepint & OTGFS_DOEPINT_XFRC) != 0)
@@ -2828,8 +2786,7 @@ static inline void stm32l4_epout_interrupt(struct stm32l4_usbdev_s *priv)
 
               /* Clear the bit in DOEPINTn for this interrupt */
 
-              stm32l4_putreg(OTGFS_DOEPINT_XFRC,
-                             STM32L4_OTGFS_DOEPINT(epno));
+              stm32l4_putreg(OTGFS_DOEPINT_XFRC, STM32L4_OTGFS_DOEPINT(epno));
 
               /* Handle the RX transfer data ready event */
 
@@ -2849,11 +2806,9 @@ static inline void stm32l4_epout_interrupt(struct stm32l4_usbdev_s *priv)
 
               /* Clear the bit in DOEPINTn for this interrupt */
 
-              stm32l4_putreg(OTGFS_DOEPINT_EPDISD,
-                             STM32L4_OTGFS_DOEPINT(epno));
+              stm32l4_putreg(OTGFS_DOEPINT_EPDISD, STM32L4_OTGFS_DOEPINT(epno));
             }
 #endif
-
           /* Setup Phase Done (control EPs) */
 
           if ((doepint & OTGFS_DOEPINT_SETUP) != 0)
@@ -2871,8 +2826,7 @@ static inline void stm32l4_epout_interrupt(struct stm32l4_usbdev_s *priv)
                   stm32l4_ep0out_setup(priv);
                 }
 
-              stm32l4_putreg(OTGFS_DOEPINT_SETUP,
-                             STM32L4_OTGFS_DOEPINT(epno));
+              stm32l4_putreg(OTGFS_DOEPINT_SETUP, STM32L4_OTGFS_DOEPINT(epno));
             }
         }
 
@@ -2889,8 +2843,7 @@ static inline void stm32l4_epout_interrupt(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static inline
-void stm32l4_epin_runtestmode(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_epin_runtestmode(FAR struct stm32l4_usbdev_s *priv)
 {
   uint32_t regval = stm32l4_getreg(STM32L4_OTGFS_DCTL);
   regval &= OTGFS_DCTL_TCTL_MASK;
@@ -2910,10 +2863,10 @@ void stm32l4_epin_runtestmode(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static inline void stm32l4_epin(struct stm32l4_usbdev_s *priv,
+static inline void stm32l4_epin(FAR struct stm32l4_usbdev_s *priv,
                                 uint8_t epno)
 {
-  struct stm32l4_ep_s *privep = &priv->epin[epno];
+  FAR struct stm32l4_ep_s *privep = &priv->epin[epno];
 
   /* Endpoint 0 is a special case. */
 
@@ -2968,10 +2921,10 @@ static inline void stm32l4_epin(struct stm32l4_usbdev_s *priv,
  *
  ****************************************************************************/
 
-static inline
-void stm32l4_epin_txfifoempty(struct stm32l4_usbdev_s *priv, int epno)
+static inline void stm32l4_epin_txfifoempty(FAR struct stm32l4_usbdev_s *priv,
+                                            int epno)
 {
-  struct stm32l4_ep_s *privep = &priv->epin[epno];
+  FAR struct stm32l4_ep_s *privep = &priv->epin[epno];
 
   /* Continue processing the write request queue.  This may mean sending
    * more data from the existing request or terminating the current requests
@@ -2985,16 +2938,15 @@ void stm32l4_epin_txfifoempty(struct stm32l4_usbdev_s *priv, int epno)
  * Name: stm32l4_epin_interrupt
  *
  * Description:
- *   USB IN endpoint interrupt handler.  The core generates this interrupt
- *   when an interrupt is pending on one of the IN endpoints of the core.
- *   The driver must read the OTGFS DAINT register to determine the exact
- *   number of the IN endpoint on which the interrupt occurred, and then
- *   read the corresponding OTGFS DIEPINTx register to determine the exact
- *   cause of the interrupt.
+ *   USB IN endpoint interrupt handler.  The core generates this interrupt when
+ *   an interrupt is pending on one of the IN endpoints of the core. The driver
+ *   must read the OTGFS DAINT register to determine the exact number of the IN
+ *   endpoint on which the interrupt occurred, and then read the corresponding
+ *   OTGFS DIEPINTx register to determine the exact cause of the interrupt.
  *
  ****************************************************************************/
 
-static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_epin_interrupt(FAR struct stm32l4_usbdev_s *priv)
 {
   uint32_t diepint;
   uint32_t daint;
@@ -3002,8 +2954,8 @@ static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv)
   uint32_t empty;
   int epno;
 
-  /* Get the pending, enabled interrupts for the IN endpoint from the
-   * endpoint interrupt status register.
+  /* Get the pending, enabled interrupts for the IN endpoint from the endpoint
+   * interrupt status register.
    */
 
   daint  = stm32l4_getreg(STM32L4_OTGFS_DAINT);
@@ -3018,8 +2970,8 @@ static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv)
        *
        * This shouldn't happen if we are diligent about handling timing
        * issues when masking endpoint interrupts. However, this workaround
-       * avoids infinite loop and allows operation to continue normally.
-       * It works by clearing each endpoint flags, masked or not.
+       * avoids infinite loop and allows operation to continue normally.  It
+       * works by clearing each endpoint flags, masked or not.
        */
 
       daint  = stm32l4_getreg(STM32L4_OTGFS_DAINT);
@@ -3033,9 +2985,9 @@ static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv)
         {
           if ((daint & 1) != 0)
             {
-              uerr("DIEPINT(%d) = %08" PRIx32 "\n",
+              uerr("DIEPINT(%d) = %08x\n",
                      epno, stm32l4_getreg(STM32L4_OTGFS_DIEPINT(epno)));
-              stm32l4_putreg(0xff, STM32L4_OTGFS_DIEPINT(epno));
+              stm32l4_putreg(0xFF, STM32L4_OTGFS_DIEPINT(epno));
             }
 
           epno++;
@@ -3097,8 +3049,7 @@ static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv)
 
               empty &= ~OTGFS_DIEPEMPMSK(epno);
               stm32l4_putreg(empty, STM32L4_OTGFS_DIEPEMPMSK);
-              stm32l4_putreg(OTGFS_DIEPINT_XFRC,
-                             STM32L4_OTGFS_DIEPINT(epno));
+              stm32l4_putreg(OTGFS_DIEPINT_XFRC, STM32L4_OTGFS_DIEPINT(epno));
 
               /* IN transfer complete */
 
@@ -3109,25 +3060,22 @@ static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv)
 
           if ((diepint & OTGFS_DIEPINT_TOC) != 0)
             {
-              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_TOC),
-                      (uint16_t)diepint);
+              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_TOC), (uint16_t)diepint);
               stm32l4_putreg(OTGFS_DIEPINT_TOC, STM32L4_OTGFS_DIEPINT(epno));
             }
 
-          /* IN token received when TxFIFO is empty.  Applies to non-periodic
-           * IN endpoints only.  This interrupt indicates that an IN token
-           * was received when the associated TxFIFO (periodic/non-periodic)
-           * was empty. This interrupt is asserted on the endpoint for which
-           * the IN token was received.
+          /* IN token received when TxFIFO is empty.  Applies to non-periodic IN
+           * endpoints only.  This interrupt indicates that an IN token was received
+           * when the associated TxFIFO (periodic/non-periodic) was empty. This
+           * interrupt is asserted on the endpoint for which the IN token was
+           * received.
            */
 
           if ((diepint & OTGFS_DIEPINT_ITTXFE) != 0)
             {
-              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_ITTXFE),
-                      (uint16_t)diepint);
+              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_ITTXFE), (uint16_t)diepint);
               stm32l4_epin_request(priv, &priv->epin[epno]);
-              stm32l4_putreg(OTGFS_DIEPINT_ITTXFE,
-                             STM32L4_OTGFS_DIEPINT(epno));
+              stm32l4_putreg(OTGFS_DIEPINT_ITTXFE, STM32L4_OTGFS_DIEPINT(epno));
             }
 
           /* IN endpoint NAK effective (ignored as this used only in polled
@@ -3136,43 +3084,35 @@ static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv)
 #if 0
           if ((diepint & OTGFS_DIEPINT_INEPNE) != 0)
             {
-              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_INEPNE),
-                      (uint16_t)diepint);
-              stm32l4_putreg(OTGFS_DIEPINT_INEPNE,
-                             STM32L4_OTGFS_DIEPINT(epno));
+              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_INEPNE), (uint16_t)diepint);
+              stm32l4_putreg(OTGFS_DIEPINT_INEPNE, STM32L4_OTGFS_DIEPINT(epno));
             }
 #endif
-
-          /* Endpoint disabled interrupt (ignored as this used only in
-           * polled mode)
+          /* Endpoint disabled interrupt (ignored as this used only in polled
+           * mode)
            */
 #if 0
           if ((diepint & OTGFS_DIEPINT_EPDISD) != 0)
             {
-              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_EPDISD),
-                      (uint16_t)diepint);
-              stm32l4_putreg(OTGFS_DIEPINT_EPDISD,
-                             STM32L4_OTGFS_DIEPINT(epno));
+              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_EPDISD), (uint16_t)diepint);
+              stm32l4_putreg(OTGFS_DIEPINT_EPDISD, STM32L4_OTGFS_DIEPINT(epno));
             }
 #endif
-
           /* Transmit FIFO empty */
 
           if ((diepint & OTGFS_DIEPINT_TXFE) != 0)
             {
-              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_TXFE),
-                      (uint16_t)diepint);
+              usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN_TXFE), (uint16_t)diepint);
 
-              /* If we were waiting for TxFIFO to become empty, the we might
-               * have both XFRC and TXFE interrupts pending.  Since we do the
-               * same thing for both cases, ignore the TXFE if we have
-               * already processed the XFRC.
+              /* If we were waiting for TxFIFO to become empty, the we might have both
+               * XFRC and TXFE interrupts pending.  Since we do the same thing for both
+               * cases, ignore the TXFE if we have already processed the XFRC.
                */
 
               if ((diepint & OTGFS_DIEPINT_XFRC) == 0)
                 {
-                  /* Mask further FIFO empty interrupts.  This will be
-                   * re-enabled whenever we need to wait for a FIFO event.
+                  /* Mask further FIFO empty interrupts.  This will be re-enabled
+                   * whenever we need to wait for a FIFO event.
                    */
 
                   empty &= ~OTGFS_DIEPEMPMSK(epno);
@@ -3185,8 +3125,7 @@ static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv)
 
               /* Clear the pending TxFIFO empty interrupt */
 
-              stm32l4_putreg(OTGFS_DIEPINT_TXFE,
-                             STM32L4_OTGFS_DIEPINT(epno));
+              stm32l4_putreg(OTGFS_DIEPINT_TXFE, STM32L4_OTGFS_DIEPINT(epno));
             }
         }
 
@@ -3203,7 +3142,7 @@ static inline void stm32l4_epin_interrupt(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static inline void stm32l4_resumeinterrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_resumeinterrupt(FAR struct stm32l4_usbdev_s *priv)
 {
   uint32_t regval;
 
@@ -3241,8 +3180,7 @@ static inline void stm32l4_resumeinterrupt(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static inline
-void stm32l4_suspendinterrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_suspendinterrupt(FAR struct stm32l4_usbdev_s *priv)
 {
 #ifdef CONFIG_USBDEV_LOWPOWER
   uint32_t regval;
@@ -3286,7 +3224,7 @@ void stm32l4_suspendinterrupt(struct stm32l4_usbdev_s *priv)
    * state
    */
 
-  stm32l4_usbsuspend((struct usbdev_s *)priv, false);
+  stm32l4_usbsuspend((FAR struct usbdev_s *)priv, false);
 }
 
 /****************************************************************************
@@ -3298,9 +3236,9 @@ void stm32l4_suspendinterrupt(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_rxinterrupt(FAR struct stm32l4_usbdev_s *priv)
 {
-  struct stm32l4_ep_s *privep;
+  FAR struct stm32l4_ep_s *privep;
   uint32_t regval;
   int bcnt;
   int epphy;
@@ -3313,11 +3251,10 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
 
       /* Decode status fields */
 
-      epphy  = (regval & OTGFS_GRXSTSD_EPNUM_MASK) >>
-                OTGFS_GRXSTSD_EPNUM_SHIFT;
+      epphy  = (regval & OTGFS_GRXSTSD_EPNUM_MASK) >> OTGFS_GRXSTSD_EPNUM_SHIFT;
 
-      /* Workaround for bad values read from the STM32L4_OTGFS_GRXSTSP
-       * register happens regval is 0xb4e48168 or 0xa80c9367 or 267E781c
+      /* Workaround for bad values read from the STM32L4_OTGFS_GRXSTSP register
+       * happens regval is 0xb4e48168 or 0xa80c9367 or 267E781c
        * All of which provide out of range indexes for  epout[epphy]
        */
 
@@ -3329,11 +3266,11 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
 
           switch (regval & OTGFS_GRXSTSD_PKTSTS_MASK)
             {
-            /* Global OUT NAK.
-             * This indicate that the global OUT NAK bit has taken effect.
+            /* Global OUT NAK.  This indicate that the global OUT NAK bit has taken
+             * effect.
              *
-             * PKTSTS = Global OUT NAK, BCNT = 0, EPNUM = Don't Care,
-             *          DPID = Don't Care.
+             * PKTSTS = Global OUT NAK, BCNT = 0, EPNUM = Don't Care, DPID = Don't
+             * Care.
              */
 
             case OTGFS_GRXSTSD_PKTSTS_OUTNAK:
@@ -3345,16 +3282,13 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
             /* OUT data packet received.
              *
              * PKTSTS = DataOUT, BCNT = size of the received data OUT packet,
-             * EPNUM = EPNUM on which the packet was received,
-             *         DPID = Actual Data PID.
+             * EPNUM = EPNUM on which the packet was received, DPID = Actual Data PID.
              */
 
             case OTGFS_GRXSTSD_PKTSTS_OUTRECVD:
               {
-                usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_OUTRECVD),
-                         epphy);
-                bcnt = (regval & OTGFS_GRXSTSD_BCNT_MASK) >>
-                        OTGFS_GRXSTSD_BCNT_SHIFT;
+                usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_OUTRECVD), epphy);
+                bcnt = (regval & OTGFS_GRXSTSD_BCNT_MASK) >> OTGFS_GRXSTSD_BCNT_SHIFT;
                 if (bcnt > 0)
                   {
                     stm32l4_epout_receive(privep, bcnt);
@@ -3362,14 +3296,12 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
               }
               break;
 
-            /* OUT transfer completed.
-             * This indicates that an OUT data transfer for the specified
-             * OUT endpoint has completed. After this entry is popped from
-             * the receive FIFO, the core asserts a Transfer Completed
-             * interrupt on the specified OUT endpoint.
+            /* OUT transfer completed.  This indicates that an OUT data transfer for
+             * the specified OUT endpoint has completed. After this entry is popped
+             * from the receive FIFO, the core asserts a Transfer Completed interrupt
+             * on the specified OUT endpoint.
              *
-             * PKTSTS = Data OUT Transfer Done, BCNT = 0,
-             * EPNUM = OUT EP Num on
+             * PKTSTS = Data OUT Transfer Done, BCNT = 0, EPNUM = OUT EP Num on
              * which the data transfer is complete, DPID = Don't Care.
              */
 
@@ -3379,12 +3311,11 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
               }
               break;
 
-            /* SETUP transaction completed.
-             * This indicates that the Setup stage for the specified endpoint
-             * has completed and the Data stage has started.
-             * After this entry is popped from the receive FIFO, the core
-             * asserts a Setup interrupt on the specified control OUT
-             * endpoint (triggers an interrupt).
+            /* SETUP transaction completed. This indicates that the Setup stage for
+             * the specified endpoint has completed and the Data stage has started.
+             * After this entry is popped from the receive FIFO, the core asserts a
+             * Setup interrupt on the specified control OUT endpoint (triggers an
+             * interrupt).
              *
              * PKTSTS = Setup Stage Done, BCNT = 0, EPNUM = Control EP Num,
              * DPID = Don't Care.
@@ -3392,8 +3323,7 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
 
             case OTGFS_GRXSTSD_PKTSTS_SETUPDONE:
               {
-                usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SETUPDONE),
-                         epphy);
+                usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SETUPDONE), epphy);
 
                 /* On the L4 This event does not occur on the next SETUP
                  * after a SETUP OUT.
@@ -3401,9 +3331,8 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
               }
               break;
 
-            /* SETUP data packet received.
-             * This indicates that a SETUP packet for the specified endpoint
-             * is now available for reading from the receive FIFO.
+            /* SETUP data packet received.  This indicates that a SETUP packet for the
+             * specified endpoint is now available for reading from the receive FIFO.
              *
              * PKTSTS = SETUP, BCNT = 8, EPNUM = Control EP Num, DPID = D0.
              */
@@ -3412,26 +3341,23 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
               {
                 uint16_t datlen;
 
-                usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SETUPRECVD),
-                         epphy);
+                usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SETUPRECVD), epphy);
 
-                /* Read EP0 setup data.  NOTE:  If multiple SETUP packets are
-                 * received, the last one overwrites the previous setup
-                 * packets and only that last SETUP packet will be processed.
+                /* Read EP0 setup data.  NOTE:  If multiple SETUP packets are received,
+                 * the last one overwrites the previous setup packets and only that
+                 * last SETUP packet will be processed.
                  */
 
-                stm32l4_rxfifo_read(&priv->epout[EP0],
-                                    (uint8_t *)&priv->ctrlreq,
+                stm32l4_rxfifo_read(&priv->epout[EP0], (FAR uint8_t *)&priv->ctrlreq,
                                     USB_SIZEOF_CTRLREQ);
 
-                /* Was this an IN or an OUT SETUP packet.  If it is an OUT
-                 * SETUP, then we need to wait for the completion of the data
-                 * phase to process the setup command.  If it is an IN SETUP
-                 * packet, then we must processing the command BEFORE we
-                 * enter the DATA phase.
+                /* Was this an IN or an OUT SETUP packet.  If it is an OUT SETUP,
+                 * then we need to wait for the completion of the data phase to
+                 * process the setup command.  If it is an IN SETUP packet, then
+                 * we must processing the command BEFORE we enter the DATA phase.
                  *
-                 * If the data associated with the OUT SETUP packet is zero
-                 * length, then, of course, we don't need to wait.
+                 * If the data associated with the OUT SETUP packet is zero length,
+                 * then, of course, we don't need to wait.
                  */
 
                 datlen = GETUINT16(priv->ctrlreq.len);
@@ -3447,8 +3373,8 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
                   }
                 else
                   {
-                    /* We can process the setup data Now no need to wait for
-                     * SETUP done word to be popped of the RxFIFO.
+                    /* We can process the setup data Now no need to wait for SETUP done word
+                     * to be popped of the RxFIFO.
                      */
 
                     priv->ep0state = EP0STATE_SETUP_READY;
@@ -3477,7 +3403,7 @@ static inline void stm32l4_rxinterrupt(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static inline void stm32l4_enuminterrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_enuminterrupt(FAR struct stm32l4_usbdev_s *priv)
 {
   uint32_t regval;
 
@@ -3485,9 +3411,7 @@ static inline void stm32l4_enuminterrupt(struct stm32l4_usbdev_s *priv)
 
   stm32l4_ep0in_activate();
 
-  /* Set USB turn-around time for the full speed device with internal
-   * PHY interface.
-   */
+  /* Set USB turn-around time for the full speed device with internal PHY interface. */
 
   regval  = stm32l4_getreg(STM32L4_OTGFS_GUSBCFG);
   regval &= ~OTGFS_GUSBCFG_TRDT_MASK;
@@ -3499,20 +3423,19 @@ static inline void stm32l4_enuminterrupt(struct stm32l4_usbdev_s *priv)
  * Name: stm32l4_isocininterrupt
  *
  * Description:
- *   Incomplete isochronous IN transfer interrupt.  Assertion of the
- *   incomplete isochronous IN transfer interrupt indicates an incomplete
- *   isochronous IN transfer on at least one of the isochronous IN endpoints.
+ *   Incomplete isochronous IN transfer interrupt.  Assertion of the incomplete
+ *   isochronous IN transfer interrupt indicates an incomplete isochronous IN
+ *   transfer on at least one of the isochronous IN endpoints.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_ISOCHRONOUS
-static inline void stm32l4_isocininterrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_isocininterrupt(FAR struct stm32l4_usbdev_s *priv)
 {
   int i;
 
-  /* The application must read the endpoint control register for all
-   * isochronous IN endpoints to detect endpoints with incomplete IN data
-   * transfers.
+  /* The application must read the endpoint control register for all isochronous
+   * IN endpoints to detect endpoints with incomplete IN data transfers.
    */
 
   for (i = 0; i < STM32L4_NENDPOINTS; i++)
@@ -3578,11 +3501,10 @@ static inline void stm32l4_isocininterrupt(struct stm32l4_usbdev_s *priv)
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_ISOCHRONOUS
-static inline
-void stm32l4_isocoutinterrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_isocoutinterrupt(FAR struct stm32l4_usbdev_s *priv)
 {
-  struct stm32l4_ep_s *privep;
-  struct stm32l4_req_s *privreq;
+  FAR struct stm32l4_ep_s *privep;
+  FAR struct stm32l4_req_s *privreq;
   uint32_t regaddr;
   uint32_t doepctl;
   uint32_t dsts;
@@ -3662,8 +3584,7 @@ void stm32l4_isocoutinterrupt(struct stm32l4_usbdev_s *priv)
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_VBUSSENSING
-static inline
-void stm32l4_sessioninterrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_sessioninterrupt(FAR struct stm32l4_usbdev_s *priv)
 {
 #warning "Missing logic"
 }
@@ -3678,7 +3599,7 @@ void stm32l4_sessioninterrupt(struct stm32l4_usbdev_s *priv)
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_VBUSSENSING
-static inline void stm32l4_otginterrupt(struct stm32l4_usbdev_s *priv)
+static inline void stm32l4_otginterrupt(FAR struct stm32l4_usbdev_s *priv)
 {
   uint32_t regval;
 
@@ -3704,16 +3625,15 @@ static inline void stm32l4_otginterrupt(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
+static int stm32l4_usbinterrupt(int irq, FAR void *context, FAR void *arg)
 {
   /* At present, there is only a single OTG FS device support. Hence it is
    * pre-allocated as g_otgfsdev.  However, in most code, the private data
    * structure will be referenced using the 'priv' pointer (rather than the
-   * global data) in order to simplify any future support for multiple
-   * devices.
+   * global data) in order to simplify any future support for multiple devices.
    */
 
-  struct stm32l4_usbdev_s *priv = &g_otgfsdev;
+  FAR struct stm32l4_usbdev_s *priv = &g_otgfsdev;
   uint32_t regval;
   uint32_t reserved;
 
@@ -3721,14 +3641,12 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
   /* Assure that we are in device mode */
 
-  DEBUGASSERT((stm32l4_getreg(STM32L4_OTGFS_GINTSTS) & OTGFS_GINTSTS_CMOD) ==
-               OTGFS_GINTSTS_DEVMODE);
+  DEBUGASSERT((stm32l4_getreg(STM32L4_OTGFS_GINTSTS) & OTGFS_GINTSTS_CMOD) == OTGFS_GINTSTS_DEVMODE);
 
   /* Get the state of all enabled interrupts.  We will do this repeatedly
    * some interrupts (like RXFLVL) will generate additional interrupting
    * events.
    */
-
   for (; ; )
     {
       /* Get the set of pending, un-masked interrupts */
@@ -3741,8 +3659,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
        * **Writable** pending irqs we will service below
        */
 
-      stm32l4_putreg(((regval | reserved) & OTGFS_GINT_RC_W1),
-                       STM32L4_OTGFS_GINTSTS);
+      stm32l4_putreg(((regval | reserved) & OTGFS_GINT_RC_W1), STM32L4_OTGFS_GINTSTS);
 
       /* Break out of the loop when there are no further pending (and
        * unmasked) interrupts to be processes.
@@ -3752,9 +3669,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
         {
           break;
         }
-
-      usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_INTPENDING),
-              (uint16_t)regval);
+      usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_INTPENDING), (uint16_t)regval);
 
       /* OUT endpoint interrupt. The core sets this bit to indicate that an
        * interrupt is pending on one of the OUT endpoints of the core.
@@ -3762,8 +3677,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
       if ((regval & OTGFS_GINT_OEP) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPOUT),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPOUT), (uint16_t)regval);
           stm32l4_epout_interrupt(priv);
         }
 
@@ -3773,8 +3687,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
       if ((regval & OTGFS_GINT_IEP) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_EPIN), (uint16_t)regval);
           stm32l4_epin_interrupt(priv);
         }
 
@@ -3783,8 +3696,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 #ifdef CONFIG_DEBUG_FEATURES
       if ((regval & OTGFS_GINT_MMIS) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_MISMATCH),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_MISMATCH), (uint16_t)regval);
         }
 #endif
 
@@ -3792,8 +3704,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
       if ((regval & OTGFS_GINT_WKUP) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_WAKEUP),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_WAKEUP), (uint16_t)regval);
           stm32l4_resumeinterrupt(priv);
         }
 
@@ -3801,8 +3712,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
       if ((regval & OTGFS_GINT_USBSUSP) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SUSPEND),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SUSPEND), (uint16_t)regval);
           stm32l4_suspendinterrupt(priv);
         }
 
@@ -3811,9 +3721,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 #ifdef CONFIG_USBDEV_SOFINTERRUPT
       if ((regval & OTGFS_GINT_SOF) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SOF),
-                  (uint16_t)regval);
-          usbdev_sof_irq(&priv->usbdev, stm32l4_getframe(&priv->usbdev));
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SOF), (uint16_t)regval);
         }
 #endif
 
@@ -3823,8 +3731,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
       if ((regval & OTGFS_GINT_RXFLVL) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_RXFIFO),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_RXFIFO), (uint16_t)regval);
           stm32l4_rxinterrupt(priv);
         }
 
@@ -3832,8 +3739,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
       if ((regval & (OTGFS_GINT_USBRST | OTGFS_GINT_RSTDET)) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_DEVRESET),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_DEVRESET), (uint16_t)regval);
 
           /* Perform the device reset */
 
@@ -3846,8 +3752,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
       if ((regval & OTGFS_GINT_ENUMDNE) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_ENUMDNE),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_ENUMDNE), (uint16_t)regval);
           stm32l4_enuminterrupt(priv);
         }
 
@@ -3860,8 +3765,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 #ifdef CONFIG_USBDEV_ISOCHRONOUS
       if ((regval & OTGFS_GINT_IISOIXFR) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_IISOIXFR),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_IISOIXFR), (uint16_t)regval);
           stm32l4_isocininterrupt(priv);
         }
 
@@ -3877,8 +3781,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
       if ((regval & OTGFS_GINT_IISOOXFR) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_IISOOXFR),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_IISOOXFR), (uint16_t)regval);
           stm32l4_isocoutinterrupt(priv);
         }
 #endif
@@ -3888,8 +3791,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 #ifdef CONFIG_USBDEV_VBUSSENSING
       if ((regval & OTGFS_GINT_SRQ) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SRQ),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_SRQ), (uint16_t)regval);
           stm32l4_sessioninterrupt(priv);
         }
 
@@ -3897,8 +3799,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 
       if ((regval & OTGFS_GINT_OTG) != 0)
         {
-          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_OTG),
-                  (uint16_t)regval);
+          usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_OTG), (uint16_t)regval);
           stm32l4_otginterrupt(priv);
         }
 #endif
@@ -3920,7 +3821,7 @@ static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-static void stm32l4_enablegonak(struct stm32l4_ep_s *privep)
+static void stm32l4_enablegonak(FAR struct stm32l4_ep_s *privep)
 {
   uint32_t regval;
 
@@ -3947,11 +3848,11 @@ static void stm32l4_enablegonak(struct stm32l4_ep_s *privep)
 
 #else
   /* Since we are in the interrupt handler, we cannot wait inline for the
-   * GONAKEFF because it cannot occur until service the RXFLVL global
-   * interrupt and pop the OUTNAK word from the RxFIFO.
+   * GONAKEFF because it cannot occur until service the RXFLVL global interrupt
+   * and pop the OUTNAK word from the RxFIFO.
    *
-   * Perhaps it is sufficient to wait for Global OUT NAK status to be
-   * reported in OTGFS DCTL register?
+   * Perhaps it is sufficient to wait for Global OUT NAK status to be reported
+   * in OTGFS DCTL register?
    */
 
   while ((stm32l4_getreg(STM32L4_OTGFS_DCTL) & OTGFS_DCTL_GONSTS) == 0);
@@ -3966,7 +3867,7 @@ static void stm32l4_enablegonak(struct stm32l4_ep_s *privep)
  *
  ****************************************************************************/
 
-static void stm32l4_disablegonak(struct stm32l4_ep_s *privep)
+static void stm32l4_disablegonak(FAR struct stm32l4_ep_s *privep)
 {
   uint32_t regval;
 
@@ -3990,7 +3891,7 @@ static void stm32l4_disablegonak(struct stm32l4_ep_s *privep)
  *
  ****************************************************************************/
 
-static int stm32l4_epout_configure(struct stm32l4_ep_s *privep,
+static int stm32l4_epout_configure(FAR struct stm32l4_ep_s *privep,
                                    uint8_t eptype, uint16_t maxpacket)
 {
   uint32_t mpsiz;
@@ -4085,8 +3986,7 @@ static int stm32l4_epout_configure(struct stm32l4_ep_s *privep,
  *
  ****************************************************************************/
 
-static int stm32l4_epin_configure(struct stm32l4_ep_s *privep,
-                                  uint8_t eptype,
+static int stm32l4_epin_configure(FAR struct stm32l4_ep_s *privep, uint8_t eptype,
                                   uint16_t maxpacket)
 {
   uint32_t mpsiz;
@@ -4186,11 +4086,11 @@ static int stm32l4_epin_configure(struct stm32l4_ep_s *privep,
  *
  ****************************************************************************/
 
-static int stm32l4_ep_configure(struct usbdev_ep_s *ep,
-                                const struct usb_epdesc_s *desc,
+static int stm32l4_ep_configure(FAR struct usbdev_ep_s *ep,
+                                FAR const struct usb_epdesc_s *desc,
                                 bool last)
 {
-  struct stm32l4_ep_s *privep = (struct stm32l4_ep_s *)ep;
+  FAR struct stm32l4_ep_s *privep = (FAR struct stm32l4_ep_s *)ep;
   uint16_t maxpacket;
   uint8_t  eptype;
   int ret;
@@ -4225,7 +4125,7 @@ static int stm32l4_ep_configure(struct usbdev_ep_s *ep,
  *
  ****************************************************************************/
 
-static void stm32l4_ep0_configure(struct stm32l4_usbdev_s *priv)
+static void stm32l4_ep0_configure(FAR struct stm32l4_usbdev_s *priv)
 {
   /* Enable EP0 IN and OUT */
 
@@ -4243,7 +4143,7 @@ static void stm32l4_ep0_configure(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static void stm32l4_epout_disable(struct stm32l4_ep_s *privep)
+static void stm32l4_epout_disable(FAR struct stm32l4_ep_s *privep)
 {
   uint32_t regaddr;
   uint32_t regval;
@@ -4314,7 +4214,7 @@ static void stm32l4_epout_disable(struct stm32l4_ep_s *privep)
  *
  ****************************************************************************/
 
-static void stm32l4_epin_disable(struct stm32l4_ep_s *privep)
+static void stm32l4_epin_disable(FAR struct stm32l4_ep_s *privep)
 {
   uint32_t regaddr;
   uint32_t regval;
@@ -4352,9 +4252,7 @@ static void stm32l4_epin_disable(struct stm32l4_ep_s *privep)
   regval |= (OTGFS_DIEPCTL_EPDIS | OTGFS_DIEPCTL_SNAK);
   stm32l4_putreg(regval, regaddr);
 
-  /* Wait for the INEPNE interrupt that indicates that we are now in
-   * NAK mode
-   */
+  /* Wait for the INEPNE interrupt that indicates that we are now in NAK mode */
 
   regaddr = STM32L4_OTGFS_DIEPINT(privep->epphy);
   while ((stm32l4_getreg(regaddr) & OTGFS_DIEPINT_INEPNE) == 0);
@@ -4410,9 +4308,9 @@ static void stm32l4_epin_disable(struct stm32l4_ep_s *privep)
  *
  ****************************************************************************/
 
-static int stm32l4_ep_disable(struct usbdev_ep_s *ep)
+static int stm32l4_ep_disable(FAR struct usbdev_ep_s *ep)
 {
-  struct stm32l4_ep_s *privep = (struct stm32l4_ep_s *)ep;
+  FAR struct stm32l4_ep_s *privep = (FAR struct stm32l4_ep_s *)ep;
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!ep)
@@ -4450,9 +4348,9 @@ static int stm32l4_ep_disable(struct usbdev_ep_s *ep)
  *
  ****************************************************************************/
 
-static struct usbdev_req_s *stm32l4_ep_allocreq(struct usbdev_ep_s *ep)
+static FAR struct usbdev_req_s *stm32l4_ep_allocreq(FAR struct usbdev_ep_s *ep)
 {
-  struct stm32l4_req_s *privreq;
+  FAR struct stm32l4_req_s *privreq;
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!ep)
@@ -4462,10 +4360,9 @@ static struct usbdev_req_s *stm32l4_ep_allocreq(struct usbdev_ep_s *ep)
     }
 #endif
 
-  usbtrace(TRACE_EPALLOCREQ, ((struct stm32l4_ep_s *)ep)->epphy);
+  usbtrace(TRACE_EPALLOCREQ, ((FAR struct stm32l4_ep_s *)ep)->epphy);
 
-  privreq = (struct stm32l4_req_s *)
-                   kmm_malloc(sizeof(struct stm32l4_req_s));
+  privreq = (FAR struct stm32l4_req_s *)kmm_malloc(sizeof(struct stm32l4_req_s));
   if (!privreq)
     {
       usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_ALLOCFAIL), 0);
@@ -4484,10 +4381,9 @@ static struct usbdev_req_s *stm32l4_ep_allocreq(struct usbdev_ep_s *ep)
  *
  ****************************************************************************/
 
-static void stm32l4_ep_freereq(struct usbdev_ep_s *ep,
-                               struct usbdev_req_s *req)
+static void stm32l4_ep_freereq(FAR struct usbdev_ep_s *ep, FAR struct usbdev_req_s *req)
 {
-  struct stm32l4_req_s *privreq = (struct stm32l4_req_s *)req;
+  FAR struct stm32l4_req_s *privreq = (FAR struct stm32l4_req_s *)req;
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!ep || !req)
@@ -4497,7 +4393,7 @@ static void stm32l4_ep_freereq(struct usbdev_ep_s *ep,
     }
 #endif
 
-  usbtrace(TRACE_EPFREEREQ, ((struct stm32l4_ep_s *)ep)->epphy);
+  usbtrace(TRACE_EPFREEREQ, ((FAR struct stm32l4_ep_s *)ep)->epphy);
   kmm_free(privreq);
 }
 
@@ -4510,10 +4406,9 @@ static void stm32l4_ep_freereq(struct usbdev_ep_s *ep,
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_DMA
-static void *stm32l4_ep_allocbuffer(struct usbdev_ep_s *ep,
-                                    uint16_t bytes)
+static void *stm32l4_ep_allocbuffer(FAR struct usbdev_ep_s *ep, uint16_t bytes)
 {
-  usbtrace(TRACE_EPALLOCBUFFER, ((struct stm32l4_ep_s *)ep)->epphy);
+  usbtrace(TRACE_EPALLOCBUFFER, ((FAR struct stm32l4_ep_s *)ep)->epphy);
 
 #ifdef CONFIG_USBDEV_DMAMEMORY
   return usbdev_dma_alloc(bytes);
@@ -4532,9 +4427,9 @@ static void *stm32l4_ep_allocbuffer(struct usbdev_ep_s *ep,
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_DMA
-static void stm32l4_ep_freebuffer(struct usbdev_ep_s *ep, void *buf)
+static void stm32l4_ep_freebuffer(FAR struct usbdev_ep_s *ep, FAR void *buf)
 {
-  usbtrace(TRACE_EPFREEBUFFER, ((struct stm32l4_ep_s *)ep)->epphy);
+  usbtrace(TRACE_EPFREEBUFFER, ((FAR struct stm32l4_ep_s *)ep)->epphy);
 
 #ifdef CONFIG_USBDEV_DMAMEMORY
   usbdev_dma_free(buf);
@@ -4552,12 +4447,12 @@ static void stm32l4_ep_freebuffer(struct usbdev_ep_s *ep, void *buf)
  *
  ****************************************************************************/
 
-static int stm32l4_ep_submit(struct usbdev_ep_s *ep,
-                             struct usbdev_req_s *req)
+static int stm32l4_ep_submit(FAR struct usbdev_ep_s *ep,
+                             FAR struct usbdev_req_s *req)
 {
-  struct stm32l4_req_s *privreq = (struct stm32l4_req_s *)req;
-  struct stm32l4_ep_s *privep = (struct stm32l4_ep_s *)ep;
-  struct stm32l4_usbdev_s *priv;
+  FAR struct stm32l4_req_s *privreq = (FAR struct stm32l4_req_s *)req;
+  FAR struct stm32l4_ep_s *privep = (FAR struct stm32l4_ep_s *)ep;
+  FAR struct stm32l4_usbdev_s *priv;
   irqstate_t flags;
   int ret = OK;
 
@@ -4567,8 +4462,7 @@ static int stm32l4_ep_submit(struct usbdev_ep_s *ep,
   if (!req || !req->callback || !req->buf || !ep)
     {
       usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_INVALIDPARMS), 0);
-      uinfo("req=%p callback=%p buf=%p ep=%p\n",
-             req, req->callback, req->buf, ep);
+      uinfo("req=%p callback=%p buf=%p ep=%p\n", req, req->callback, req->buf, ep);
       return -EINVAL;
     }
 #endif
@@ -4579,8 +4473,7 @@ static int stm32l4_ep_submit(struct usbdev_ep_s *ep,
 #ifdef CONFIG_DEBUG_FEATURES
   if (!priv->driver)
     {
-      usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_NOTCONFIGURED),
-               priv->usbdev.speed);
+      usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_NOTCONFIGURED), priv->usbdev.speed);
       return -ESHUTDOWN;
     }
 #endif
@@ -4649,10 +4542,10 @@ static int stm32l4_ep_submit(struct usbdev_ep_s *ep,
  *
  ****************************************************************************/
 
-static int stm32l4_ep_cancel(struct usbdev_ep_s *ep,
-                             struct usbdev_req_s *req)
+static int stm32l4_ep_cancel(FAR struct usbdev_ep_s *ep,
+                             FAR struct usbdev_req_s *req)
 {
-  struct stm32l4_ep_s *privep = (struct stm32l4_ep_s *)ep;
+  FAR struct stm32l4_ep_s *privep = (FAR struct stm32l4_ep_s *)ep;
   irqstate_t flags;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -4686,7 +4579,7 @@ static int stm32l4_ep_cancel(struct usbdev_ep_s *ep,
  *
  ****************************************************************************/
 
-static int stm32l4_epout_setstall(struct stm32l4_ep_s *privep)
+static int stm32l4_epout_setstall(FAR struct stm32l4_ep_s *privep)
 {
 #if 1
   /* This implementation follows the requirements from the STM32 F4 reference
@@ -4732,15 +4625,12 @@ static int stm32l4_epout_setstall(struct stm32l4_ep_s *privep)
   return OK;
 #else
   /* This implementation follows the STMicro code example. */
-
   /* REVISIT: */
 
   uint32_t regaddr;
   uint32_t regval;
 
-  /* Stall the OUT endpoint by setting the STALL bit in the DOECPTL
-   * register.
-   */
+  /* Stall the OUT endpoint by setting the STALL bit in the DOECPTL register. */
 
   regaddr = STM32L4_OTGFS_DOEPCTL(privep->epphy);
   regval  = stm32l4_getreg(regaddr);
@@ -4762,7 +4652,7 @@ static int stm32l4_epout_setstall(struct stm32l4_ep_s *privep)
  *
  ****************************************************************************/
 
-static int stm32l4_epin_setstall(struct stm32l4_ep_s *privep)
+static int stm32l4_epin_setstall(FAR struct stm32l4_ep_s *privep)
 {
   uint32_t regaddr;
   uint32_t regval;
@@ -4791,7 +4681,7 @@ static int stm32l4_epin_setstall(struct stm32l4_ep_s *privep)
  *
  ****************************************************************************/
 
-static int stm32l4_ep_setstall(struct stm32l4_ep_s *privep)
+static int stm32l4_ep_setstall(FAR struct stm32l4_ep_s *privep)
 {
   usbtrace(TRACE_EPSTALL, privep->epphy);
 
@@ -4815,7 +4705,7 @@ static int stm32l4_ep_setstall(struct stm32l4_ep_s *privep)
  *
  ****************************************************************************/
 
-static int stm32l4_ep_clrstall(struct stm32l4_ep_s *privep)
+static int stm32l4_ep_clrstall(FAR struct stm32l4_ep_s *privep)
 {
   uint32_t regaddr;
   uint32_t regval;
@@ -4874,9 +4764,9 @@ static int stm32l4_ep_clrstall(struct stm32l4_ep_s *privep)
  *
  ****************************************************************************/
 
-static int stm32l4_ep_stall(struct usbdev_ep_s *ep, bool resume)
+static int stm32l4_ep_stall(FAR struct usbdev_ep_s *ep, bool resume)
 {
-  struct stm32l4_ep_s *privep = (struct stm32l4_ep_s *)ep;
+  FAR struct stm32l4_ep_s *privep = (FAR struct stm32l4_ep_s *)ep;
   irqstate_t flags;
   int ret;
 
@@ -4891,7 +4781,6 @@ static int stm32l4_ep_stall(struct usbdev_ep_s *ep, bool resume)
     {
       ret = stm32l4_ep_setstall(privep);
     }
-
   leave_critical_section(flags);
 
   return ret;
@@ -4905,7 +4794,7 @@ static int stm32l4_ep_stall(struct usbdev_ep_s *ep, bool resume)
  *
  ****************************************************************************/
 
-static void stm32l4_ep0_stall(struct stm32l4_usbdev_s *priv)
+static void stm32l4_ep0_stall(FAR struct stm32l4_usbdev_s *priv)
 {
   stm32l4_epin_setstall(&priv->epin[EP0]);
   stm32l4_epout_setstall(&priv->epout[EP0]);
@@ -4924,20 +4813,20 @@ static void stm32l4_ep0_stall(struct stm32l4_usbdev_s *priv)
  *   Allocate an endpoint matching the parameters.
  *
  * Input Parameters:
- *   eplog  - 7-bit logical endpoint number (direction bit ignored).  Zero
- *            means that any endpoint matching the other requirements will
- *            suffice. The assigned endpoint can be found in the eplog field.
+ *   eplog  - 7-bit logical endpoint number (direction bit ignored).  Zero means
+ *            that any endpoint matching the other requirements will suffice.  The
+ *            assigned endpoint can be found in the eplog field.
  *   in     - true: IN (device-to-host) endpoint requested
- *   eptype - Endpoint type.  One of {USB_EP_ATTR_XFER_ISOC,
- *            USB_EP_ATTR_XFER_BULK, USB_EP_ATTR_XFER_INT}
+ *   eptype - Endpoint type.  One of {USB_EP_ATTR_XFER_ISOC, USB_EP_ATTR_XFER_BULK,
+ *            USB_EP_ATTR_XFER_INT}
  *
  ****************************************************************************/
 
-static struct usbdev_ep_s *stm32l4_ep_alloc(struct usbdev_s *dev,
+static FAR struct usbdev_ep_s *stm32l4_ep_alloc(FAR struct usbdev_s *dev,
                                                 uint8_t eplog, bool in,
                                                 uint8_t eptype)
 {
-  struct stm32l4_usbdev_s *priv = (struct stm32l4_usbdev_s *)dev;
+  FAR struct stm32l4_usbdev_s *priv = (FAR struct stm32l4_usbdev_s *)dev;
   uint8_t epavail;
   irqstate_t flags;
   int epphy;
@@ -4958,9 +4847,8 @@ static struct usbdev_ep_s *stm32l4_ep_alloc(struct usbdev_s *dev,
 
   if (epphy > 0)
     {
-      /* Otherwise, we will return the endpoint structure only for the
-       * requested 'logical' endpoint.  All of the other checks will still
-       * be performed.
+      /* Otherwise, we will return the endpoint structure only for the requested
+       * 'logical' endpoint.  All of the other checks will still be performed.
        *
        * First, verify that the logical endpoint is in the range supported by
        * by the hardware.
@@ -4968,8 +4856,7 @@ static struct usbdev_ep_s *stm32l4_ep_alloc(struct usbdev_s *dev,
 
       if (epphy >= STM32L4_NENDPOINTS)
         {
-          usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_BADEPNO),
-                  (uint16_t)epphy);
+          usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_BADEPNO), (uint16_t)epphy);
           return NULL;
         }
 
@@ -5020,11 +4907,11 @@ static struct usbdev_ep_s *stm32l4_ep_alloc(struct usbdev_s *dev,
  *
  ****************************************************************************/
 
-static void stm32l4_ep_free(struct usbdev_s *dev,
-                            struct usbdev_ep_s *ep)
+static void stm32l4_ep_free(FAR struct usbdev_s *dev,
+                            FAR struct usbdev_ep_s *ep)
 {
-  struct stm32l4_usbdev_s *priv = (struct stm32l4_usbdev_s *)dev;
-  struct stm32l4_ep_s *privep = (struct stm32l4_ep_s *)ep;
+  FAR struct stm32l4_usbdev_s *priv = (FAR struct stm32l4_usbdev_s *)dev;
+  FAR struct stm32l4_ep_s *privep = (FAR struct stm32l4_ep_s *)ep;
   irqstate_t flags;
 
   usbtrace(TRACE_DEVFREEEP, (uint16_t)privep->epphy);
@@ -5069,7 +4956,7 @@ static int stm32l4_getframe(struct usbdev_s *dev)
 
 static int stm32l4_wakeup(struct usbdev_s *dev)
 {
-  struct stm32l4_usbdev_s *priv = (struct stm32l4_usbdev_s *)dev;
+  FAR struct stm32l4_usbdev_s *priv = (FAR struct stm32l4_usbdev_s *)dev;
   uint32_t regval;
   irqstate_t flags;
 
@@ -5117,7 +5004,7 @@ static int stm32l4_wakeup(struct usbdev_s *dev)
 
 static int stm32l4_selfpowered(struct usbdev_s *dev, bool selfpowered)
 {
-  struct stm32l4_usbdev_s *priv = (struct stm32l4_usbdev_s *)dev;
+  FAR struct stm32l4_usbdev_s *priv = (FAR struct stm32l4_usbdev_s *)dev;
 
   usbtrace(TRACE_DEVSELFPOWERED, (uint16_t)selfpowered);
 
@@ -5284,9 +5171,9 @@ static int stm32l4_rxfifo_flush(void)
  *
  ****************************************************************************/
 
-static void stm32l4_swinitialize(struct stm32l4_usbdev_s *priv)
+static void stm32l4_swinitialize(FAR struct stm32l4_usbdev_s *priv)
 {
-  struct stm32l4_ep_s *privep;
+  FAR struct stm32l4_ep_s *privep;
   int i;
 
   /* Initialize the device state structure */
@@ -5298,6 +5185,9 @@ static void stm32l4_swinitialize(struct stm32l4_usbdev_s *priv)
 
   priv->epavail[0] = STM32L4_EP_AVAILABLE;
   priv->epavail[1] = STM32L4_EP_AVAILABLE;
+
+  priv->epin[EP0].ep.priv  = priv;
+  priv->epout[EP0].ep.priv = priv;
 
   /* Initialize the IN endpoint list */
 
@@ -5363,7 +5253,7 @@ static void stm32l4_swinitialize(struct stm32l4_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static void stm32l4_hwinitialize(struct stm32l4_usbdev_s *priv)
+static void stm32l4_hwinitialize(FAR struct stm32l4_usbdev_s *priv)
 {
   uint32_t regval;
   uint32_t timeout;
@@ -5378,14 +5268,12 @@ static void stm32l4_hwinitialize(struct stm32l4_usbdev_s *priv)
 
   /* Disable global interrupts by clearing the GINTMASK bit in the GAHBCFG
    * register; Set the TXFELVL bit in the GAHBCFG register so that TxFIFO
-   * interrupts will occur when the TxFIFO is truly empty
-   * (not just half full).
+   * interrupts will occur when the TxFIFO is truly empty (not just half full).
    */
 
   stm32l4_putreg(OTGFS_GAHBCFG_TXFELVL, STM32L4_OTGFS_GAHBCFG);
 
   /* Common USB OTG core initialization */
-
   /* Reset after a PHY select and set Host mode.  First, wait for AHB master
    * IDLE state.
    */
@@ -5420,22 +5308,22 @@ static void stm32l4_hwinitialize(struct stm32l4_usbdev_s *priv)
 
   regval  = OTGFS_GCCFG_PWRDWN;
 
-#ifdef CONFIG_USBDEV_VBUSSENSING
+# ifdef CONFIG_USBDEV_VBUSSENSING
   /* Enable Vbus sensing */
 
   regval |= OTGFS_GCCFG_VBDEN;
-#endif
+# endif
 
   stm32l4_putreg(regval, STM32L4_OTGFS_GCCFG);
   up_mdelay(20);
 
   /* When VBUS sensing is not used we need to force the B session valid */
 
-#ifndef CONFIG_USBDEV_VBUSSENSING
+# ifndef CONFIG_USBDEV_VBUSSENSING
   regval  =  stm32l4_getreg(STM32L4_OTGFS_GOTGCTL);
   regval |= (OTGFS_GOTGCTL_BVALOEN | OTGFS_GOTGCTL_BVALOVAL);
   stm32l4_putreg(regval, STM32L4_OTGFS_GOTGCTL);
-#endif
+# endif
 
   /* Force Device Mode */
 
@@ -5446,7 +5334,6 @@ static void stm32l4_hwinitialize(struct stm32l4_usbdev_s *priv)
   up_mdelay(50);
 
   /* Initialize device mode */
-
   /* Restart the PHY Clock */
 
   stm32l4_putreg(0, STM32L4_OTGFS_PCGCCTL);
@@ -5630,7 +5517,7 @@ static void stm32l4_hwinitialize(struct stm32l4_usbdev_s *priv)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_usbinitialize
+ * Name: up_usbinitialize
  *
  * Description:
  *   Initialize USB hardware.
@@ -5638,22 +5525,21 @@ static void stm32l4_hwinitialize(struct stm32l4_usbdev_s *priv)
  * Assumptions:
  * - This function is called very early in the initialization sequence
  * - PLL and GIO pin initialization is not performed here but should been in
- *   the low-level  boot logic:  PLL1 must be configured for operation at
- *   48MHz and P0.23 and PO.31 in PINSEL1 must be configured for Vbus and USB
- *   connect LED.
+ *   the low-level  boot logic:  PLL1 must be configured for operation at 48MHz
+ *   and P0.23 and PO.31 in PINSEL1 must be configured for Vbus and USB connect
+ *   LED.
  *
  ****************************************************************************/
 
-void arm_usbinitialize(void)
+void up_usbinitialize(void)
 {
   /* At present, there is only a single OTG FS device support. Hence it is
    * pre-allocated as g_otgfsdev.  However, in most code, the private data
    * structure will be referenced using the 'priv' pointer (rather than the
-   * global data) in order to simplify any future support for multiple
-   * devices.
+   * global data) in order to simplify any future support for multiple devices.
    */
 
-  struct stm32l4_usbdev_s *priv = &g_otgfsdev;
+  FAR struct stm32l4_usbdev_s *priv = &g_otgfsdev;
   int ret;
 
   usbtrace(TRACE_DEVINIT, 0);
@@ -5695,7 +5581,7 @@ void arm_usbinitialize(void)
    * known state.
    */
 
-  arm_usbuninitialize();
+  up_usbuninitialize();
 
   /* Initialize the driver data structure */
 
@@ -5706,7 +5592,7 @@ void arm_usbinitialize(void)
   ret = irq_attach(STM32L4_IRQ_OTGFS, stm32l4_usbinterrupt, NULL);
   if (ret < 0)
     {
-      uerr("ERROR: irq_attach failed: %d\n", ret);
+      uerr("irq_attach failed\n", ret);
       goto errout;
     }
 
@@ -5728,23 +5614,22 @@ void arm_usbinitialize(void)
   return;
 
 errout:
-  arm_usbuninitialize();
+  up_usbuninitialize();
 }
 
 /****************************************************************************
- * Name: arm_usbuninitialize
+ * Name: up_usbuninitialize
  ****************************************************************************/
 
-void arm_usbuninitialize(void)
+void up_usbuninitialize(void)
 {
   /* At present, there is only a single OTG FS device support. Hence it is
    * pre-allocated as g_otgfsdev.  However, in most code, the private data
    * structure will be referenced using the 'priv' pointer (rather than the
-   * global data) in order to simplify any future support for multiple
-   * devices.
+   * global data) in order to simplify any future support for multiple devices.
    */
 
-  struct stm32l4_usbdev_s *priv = &g_otgfsdev;
+  FAR struct stm32l4_usbdev_s *priv = &g_otgfsdev;
   irqstate_t flags;
   int i;
 
@@ -5796,8 +5681,8 @@ void arm_usbuninitialize(void)
  * Name: usbdev_register
  *
  * Description:
- *   Register a USB device class driver. The class driver's bind() method
- *   will be called to bind it to a USB device driver.
+ *   Register a USB device class driver. The class driver's bind() method will be
+ *   called to bind it to a USB device driver.
  *
  ****************************************************************************/
 
@@ -5806,11 +5691,10 @@ int usbdev_register(struct usbdevclass_driver_s *driver)
   /* At present, there is only a single OTG FS device support. Hence it is
    * pre-allocated as g_otgfsdev.  However, in most code, the private data
    * structure will be referenced using the 'priv' pointer (rather than the
-   * global data) in order to simplify any future support for multiple
-   * devices.
+   * global data) in order to simplify any future support for multiple devices.
    */
 
-  struct stm32l4_usbdev_s *priv = &g_otgfsdev;
+  FAR struct stm32l4_usbdev_s *priv = &g_otgfsdev;
   int ret;
 
   usbtrace(TRACE_DEVREGISTER, 0);
@@ -5867,10 +5751,9 @@ int usbdev_register(struct usbdevclass_driver_s *driver)
  * Name: usbdev_unregister
  *
  * Description:
- *   Un-register usbdev class driver.If the USB device is connected to a USB
- *   host, it will first disconnect().  The driver is also requested to
- *   unbind() and clean up any device state, before this procedure finally
- *   returns.
+ *   Un-register usbdev class driver.If the USB device is connected to a USB host,
+ *   it will first disconnect().  The driver is also requested to unbind() and clean
+ *   up any device state, before this procedure finally returns.
  *
  ****************************************************************************/
 
@@ -5879,11 +5762,10 @@ int usbdev_unregister(struct usbdevclass_driver_s *driver)
   /* At present, there is only a single OTG FS device support. Hence it is
    * pre-allocated as g_otgfsdev.  However, in most code, the private data
    * structure will be referenced using the 'priv' pointer (rather than the
-   * global data) in order to simplify any future support for multiple
-   * devices.
+   * global data) in order to simplify any future support for multiple devices.
    */
 
-  struct stm32l4_usbdev_s *priv = &g_otgfsdev;
+  FAR struct stm32l4_usbdev_s *priv = &g_otgfsdev;
   irqstate_t flags;
 
   usbtrace(TRACE_DEVUNREGISTER, 0);

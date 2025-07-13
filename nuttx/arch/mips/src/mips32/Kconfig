@@ -36,19 +36,16 @@ config MIPS32_TOOLCHAIN_MICROCHIPL_LITE
 config MIPS32_TOOLCHAIN_MICROCHIPW_XC32
 	bool "Microchip XC32 toolchain under Windows"
 	depends on TOOLCHAIN_WINDOWS
-	select CYGWIN_WINTOOL if WINDOWS_CYGWIN
 	select ARCH_TOOLCHAIN_GNU
 
 config MIPS32_TOOLCHAIN_MICROCHIPW
 	bool "Microchip C32 toolchain under Windows"
 	depends on TOOLCHAIN_WINDOWS
-	select CYGWIN_WINTOOL if WINDOWS_CYGWIN
 	select ARCH_TOOLCHAIN_GNU
 
 config MIPS32_TOOLCHAIN_MICROCHIPW_LITE
 	bool "Microchip C32 toolchain under Windows (Lite edition)"
 	depends on TOOLCHAIN_WINDOWS
-	select CYGWIN_WINTOOL if WINDOWS_CYGWIN
 	select ARCH_TOOLCHAIN_GNU
 
 config MIPS32_TOOLCHAIN_MICROCHIPOPENL
@@ -58,18 +55,12 @@ config MIPS32_TOOLCHAIN_MICROCHIPOPENL
 
 config MIPS32_TOOLCHAIN_PINGUINOW
 	bool "Pinguino mips-elf toolchain under Windows"
-	depends on TOOLCHAIN_WINDOWS
-	select CYGWIN_WINTOOL if WINDOWS_CYGWIN
+	depends on TOOLCHAIN_WINDOWS || WINDOWS_UBUNTU
 	select ARCH_TOOLCHAIN_GNU
 
 config MIPS32_TOOLCHAIN_PINGUINOL
-	bool "Pinguino mips-elf toolchain under macOS or Linux"
+	bool "Pinguino mips-elf toolchain under OS X or Linux"
 	depends on HOST_LINUX || HOST_MACOS
-	select ARCH_TOOLCHAIN_GNU
-
-config MIPS32_TOOLCHAIN_SOURCERY_CODEBENCH_LITE
-	bool "Sourcery CodeBench Lite for MIPS ELF toolchain under Linux"
-	depends on HOST_LINUX
 	select ARCH_TOOLCHAIN_GNU
 
 endchoice
@@ -87,10 +78,10 @@ config MIPS32_TOOLCHAIN_MICROCHIP_XC32_LICENSED
 config MIPS32_FRAMEPOINTER
 	bool "ABI Uses Frame Pointer"
 	default n
-	depends on ARCH_HAVE_FORK
+	depends on ARCH_HAVE_VFORK
 	---help---
 		Register r30 may be a frame pointer in some ABIs.  Or may just be
-		saved register s8.  It makes a difference for fork handling.
+		saved register s8.  It makes a difference for vfork handling.
 
 config MIPS32_HAVE_ICACHE
 	bool

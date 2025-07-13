@@ -1,8 +1,6 @@
 /****************************************************************************
  * include/elf.h
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -35,7 +33,7 @@
 
 /* NOTE: elf64.h and elf32.h refer EI_NIDENT defined above */
 
-#ifdef CONFIG_LIBC_ARCH_ELF_64BIT
+#ifdef CONFIG_ELF_64BIT
 #  include <elf64.h>
 #else
 #  include <elf32.h>
@@ -84,7 +82,6 @@
 #define EM_V850            87     /* NEC v850 */
 #define EM_M32R            88     /* Renesas M32R */
 #define EM_XTENSA          94     /* Tensilica Xtensa */
-#define EM_AARCH64         183    /* ARM-64 Architecture */
 #define EM_RISCV           243    /* RISC-V */
 #define EM_ALPHA           0x9026
 #define EM_CYGNUS_V850     0x9080
@@ -106,19 +103,12 @@
 #define EI_CLASS           4      /* File class */
 #define EI_DATA            5      /* Data encoding */
 #define EI_VERSION         6      /* File version */
-#define EI_OSABI           7      /* OS ABI */
-#define EI_PAD             8      /* Start of padding bytes */
+#define EI_PAD             7      /* Start of padding bytes */
 
 /* EI_NIDENT is defined in "Included Files" section */
 
 #define EI_MAGIC_SIZE      4
 #define EI_MAGIC           {0x7f, 'E', 'L', 'F'}
-
-#define ELFMAG0            0x7f    /* EI_MAG */
-#define ELFMAG1            'E'
-#define ELFMAG2            'L'
-#define ELFMAG3            'F'
-#define ELFMAG             "\177ELF"
 
 /* Table 3. Values for EI_CLASS */
 
@@ -131,30 +121,6 @@
 #define ELFDATANONE        0     /* Invalid data encoding */
 #define ELFDATA2LSB        1     /* Least significant byte occupying the lowest address */
 #define ELFDATA2MSB        2     /* Most significant byte occupying the lowest address */
-
-/* Table 6. Values for EI_OSABI */
-
-#define ELFOSABI_NONE      0     /* UNIX System V ABI */
-#define ELFOSABI_SYSV      0     /* Alias.  */
-#define ELFOSABI_HPUX      1     /* HP-UX */
-#define ELFOSABI_NETBSD    2     /* NetBSD.  */
-#define ELFOSABI_GNU       3     /* Object uses GNU ELF extensions.  */
-#define ELFOSABI_LINUX     ELFOSABI_GNU
-                                 /* Compatibility alias.  */
-#define ELFOSABI_SOLARIS   6     /* Sun Solaris.  */
-#define ELFOSABI_AIX       7     /* IBM AIX.  */
-#define ELFOSABI_IRIX      8     /* SGI Irix.  */
-#define ELFOSABI_FREEBSD   9     /* FreeBSD.  */
-#define ELFOSABI_TRU64     10    /* Compaq TRU64 UNIX.  */
-#define ELFOSABI_MODESTO   11    /* Novell Modesto.  */
-#define ELFOSABI_OPENBSD   12    /* OpenBSD.  */
-#define ELFOSABI_ARM_AEABI 64    /* ARM EABI */
-#define ELFOSABI_ARM       97    /* ARM */
-#define ELFOSABI_STANDALONE 255  /* Standalone (embedded) application */
-
-#ifndef ELF_OSABI
-#define ELF_OSABI          ELFOSABI_NONE
-#endif
 
 /* Table 7: Special Section Indexes */
 
@@ -178,9 +144,6 @@
 #define SHT_REL            9
 #define SHT_SHLIB          10
 #define SHT_DYNSYM         11
-#define SHT_INIT_ARRAY     14
-#define SHT_FINI_ARRAY     15
-#define SHT_PREINIT_ARRAY  16
 #define SHT_LOPROC         0x70000000
 #define SHT_HIPROC         0x7fffffff
 #define SHT_LOUSER         0x80000000
@@ -191,7 +154,6 @@
 #define SHF_WRITE          1
 #define SHF_ALLOC          2
 #define SHF_EXECINSTR      4
-#define SHF_INFO_LINK      0x40
 #define SHF_MASKPROC       0xf0000000
 
 /* Figure 4-16: Symbol Binding, ELF_ST_BIND */
@@ -212,13 +174,6 @@
 #define STT_LOPROC         13
 #define STT_HIPROC         15
 
-/* Table 7-21 ELF Symbol Visibility */
-
-#define STV_DEFAULT        0
-#define STV_INTERNAL       1
-#define STV_HIDDEN         2
-#define STV_PROTECTED      3
-
 /* Figure 5-2: Segment Types, p_type */
 
 #define PT_NULL            0
@@ -228,13 +183,6 @@
 #define PT_NOTE            4
 #define PT_SHLIB           5
 #define PT_PHDR            6
-
-/* GCC specific */
-
-#define PT_GNU_EH_FRAME    0x6474e550 /* GCC exception handler frame */
-#define PT_GNU_STACK       0x6474e551 /* Stack executability */
-#define PT_GNU_RELRO       0x6474e552 /* Read-only after relocation */
-
 #define PT_LOPROC          0x70000000
 #define PT_HIPROC          0x7fffffff
 
@@ -243,12 +191,6 @@
 #define PF_X               1          /* Execute */
 #define PF_W               2          /* Write */
 #define PF_R               4          /* Read */
-#define PF_MASKOS          0x0ff00000 /* All bits included in the PF_MASKOS
-                                       * mask are reserved for operating system-specific
-                                       * semantics.
-                                       */
-#define PF_REGISTER        0x00100000 /* Register, need pointer aligned access */
-
 #define PF_MASKPROC        0xf0000000 /* Unspecified */
 
 /* Figure 5-10: Dynamic Array Tags, d_tag */
@@ -280,112 +222,5 @@
 #define DT_BINDNOW         24         /* d_un=ignored */
 #define DT_LOPROC          0x70000000 /* d_un=unspecified */
 #define DT_HIPROC          0x7fffffff /* d_un= unspecified */
-
-/* Legal values for note segment descriptor types for core files. */
-
-#define NT_PRSTATUS        1      /* Contains copy of prstatus struct */
-#define NT_PRFPREG         2      /* Contains copy of fpregset struct. */
-#define NT_FPREGSET        2      /* Contains copy of fpregset struct */
-#define NT_PRPSINFO        3      /* Contains copy of prpsinfo struct */
-#define NT_PRXREG          4      /* Contains copy of prxregset struct */
-#define NT_TASKSTRUCT      4      /* Contains copy of task structure */
-#define NT_PLATFORM        5      /* String from sysinfo(SI_PLATFORM) */
-#define NT_AUXV            6      /* Contains copy of auxv array */
-#define NT_GWINDOWS        7      /* Contains copy of gwindows struct */
-#define NT_ASRS            8      /* Contains copy of asrset struct */
-#define NT_PSTATUS         10     /* Contains copy of pstatus struct */
-#define NT_PSINFO          13     /* Contains copy of psinfo struct */
-#define NT_PRCRED          14     /* Contains copy of prcred struct */
-#define NT_UTSNAME         15     /* Contains copy of utsname struct */
-#define NT_LWPSTATUS       16     /* Contains copy of lwpstatus struct */
-#define NT_LWPSINFO        17     /* Contains copy of lwpinfo struct */
-#define NT_PRFPXREG        20     /* Contains copy of fprxregset struct */
-#define NT_SIGINFO         0x53494749
-                                  /* Contains copy of siginfo_t,
-                                   * size might increase
-                                   */
-#define NT_FILE            0x46494c45
-                                  /* Contains information about mapped
-                                   * files
-                                   */
-#define NT_PRXFPREG        0x46e62b7f
-                                  /* Contains copy of user_fxsr_struct */
-#define NT_PPC_VMX         0x100  /* PowerPC Altivec/VMX registers */
-#define NT_PPC_SPE         0x101  /* PowerPC SPE/EVR registers */
-#define NT_PPC_VSX         0x102  /* PowerPC VSX registers */
-#define NT_PPC_TAR         0x103  /* Target Address Register */
-#define NT_PPC_PPR         0x104  /* Program Priority Register */
-#define NT_PPC_DSCR        0x105  /* Data Stream Control Register */
-#define NT_PPC_EBB         0x106  /* Event Based Branch Registers */
-#define NT_PPC_PMU         0x107  /* Performance Monitor Registers */
-#define NT_PPC_TM_CGPR     0x108  /* TM checkpointed GPR Registers */
-#define NT_PPC_TM_CFPR     0x109  /* TM checkpointed FPR Registers */
-#define NT_PPC_TM_CVMX     0x10a  /* TM checkpointed VMX Registers */
-#define NT_PPC_TM_CVSX     0x10b  /* TM checkpointed VSX Registers */
-#define NT_PPC_TM_SPR      0x10c  /* TM Special Purpose Registers */
-#define NT_PPC_TM_CTAR     0x10d  /* TM checkpointed Target Address
-                                   * Register
-                                   */
-#define NT_PPC_TM_CPPR     0x10e  /* TM checkpointed Program Priority
-                                   * Register
-                                   */
-#define NT_PPC_TM_CDSCR    0x10f  /* TM checkpointed Data Stream Control
-                                   * Register
-                                   */
-#define NT_PPC_PKEY        0x110  /* Memory Protection Keys
-                                   * registers.
-                                   */
-#define NT_386_TLS         0x200  /* i386 TLS slots (struct user_desc) */
-#define NT_386_IOPERM      0x201  /* x86 io permission bitmap (1=deny) */
-#define NT_X86_XSTATE      0x202  /* x86 extended state using xsave */
-#define NT_S390_HIGH_GPRS  0x300  /* s390 upper register halves */
-#define NT_S390_TIMER      0x301  /* s390 timer register */
-#define NT_S390_TODCMP     0x302  /* s390 TOD clock comparator register */
-#define NT_S390_TODPREG    0x303  /* s390 TOD programmable register */
-#define NT_S390_CTRS       0x304  /* s390 control registers */
-#define NT_S390_PREFIX     0x305  /* s390 prefix register */
-#define NT_S390_LAST_BREAK 0x306  /* s390 breaking event address */
-#define NT_S390_SYSTEM_CALL 0x307 /* s390 system call restart data */
-#define NT_S390_TDB        0x308  /* s390 transaction diagnostic block */
-#define NT_S390_VXRS_LOW   0x309  /* s390 vector registers 0-15
-                                   * upper half.
-                                   */
-#define NT_S390_VXRS_HIGH  0x30a  /* s390 vector registers 16-31.  */
-#define NT_S390_GS_CB      0x30b  /* s390 guarded storage registers.  */
-#define NT_S390_GS_BC      0x30c  /* s390 guarded storage
-                                   * broadcast control block.
-                                   */
-#define NT_S390_RI_CB      0x30d  /* s390 runtime instrumentation.  */
-#define NT_ARM_VFP         0x400  /* ARM VFP/NEON registers */
-#define NT_ARM_TLS         0x401  /* ARM TLS register */
-#define NT_ARM_HW_BREAK    0x402  /* ARM hardware breakpoint registers */
-#define NT_ARM_HW_WATCH    0x403  /* ARM hardware watchpoint registers */
-#define NT_ARM_SYSTEM_CALL 0x404  /* ARM system call number */
-#define NT_ARM_SVE         0x405  /* ARM Scalable Vector Extension
-                                   * registers
-                                   */
-#define NT_ARM_PAC_MASK    0x406  /* ARM pointer authentication
-                                   * code masks.
-                                   */
-#define NT_ARM_PACA_KEYS   0x407  /* ARM pointer authentication
-                                   * address keys.
-                                   */
-#define NT_ARM_PACG_KEYS   0x408  /* ARM pointer authentication
-                                   * generic key.
-                                   */
-#define NT_VMCOREDD        0x700  /* Vmcore Device Dump Note.  */
-#define NT_MIPS_DSP        0x800  /* MIPS DSP ASE registers.  */
-#define NT_MIPS_FP_MODE    0x801  /* MIPS floating-point mode.  */
-#define NT_MIPS_MSA        0x802  /* MIPS SIMD registers.  */
-
-/* Legal values for the note segment descriptor types for object files.  */
-
-#define NT_VERSION         1      /* Contains a version string.  */
-
-#ifdef CONFIG_ENDIAN_BIG
-#  define ELF_DATA         ELFDATA2MSB
-#else
-#  define ELF_DATA         ELFDATA2LSB
-#endif
 
 #endif /* __INCLUDE_ELF_H */

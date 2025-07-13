@@ -1,40 +1,52 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/sama5/hardware/sam_xdmac.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_SAMA5_HARDWARE_SAM_XDMAC_H
 #define __ARCH_ARM_SRC_SAMA5_HARDWARE_SAM_XDMAC_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 #include <arch/sama5/chip.h>
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
-
-/* XDMAC Register Offsets ***************************************************/
+ ************************************************************************************/
+/* XDMAC Register Offsets ***********************************************************/
 
 #define SAM_XDMAC_GTYPE_OFFSET      0x0000 /* Global Type Register */
 #define SAM_XDMAC_GCFG_OFFSET       0x0004 /* Global Configuration Register */
@@ -53,7 +65,7 @@
 #define SAM_XDMAC_GSWR_OFFSET       0x0038 /* Global Channel Software Request Register */
 #define SAM_XDMAC_GSWS_OFFSET       0x003c /* Global Channel Software Request Status Register */
 #define SAM_XDMAC_GSWF_OFFSET       0x0040 /* Global Channel Software Flush Request Register */
-                                           /* 0x0044-0x004c Reserved */
+                                           /* 0x0044–0x004c Reserved */
 
 /* Offsets to the base of the DMA channel registers */
 
@@ -75,9 +87,7 @@
 #  define SAM_XDMAC_CH14_OFFSET    0x03d0
 #  define SAM_XDMAC_CH15_OFFSET    0x0410
 
-/* Offsets to channel registers relative to the base of the DMA channel
- * registers
- */
+/* Offsets to channel registers relative to the base of the DMA channel registers */
 
 #define SAM_XDMACH_CIE_OFFSET       0x0000 /* Channel Interrupt Enable Register */
 #define SAM_XDMACH_CID_OFFSET       0x0004 /* Channel Interrupt Disable Register */
@@ -94,9 +104,9 @@
 #define SAM_XDMACH_CSUS_OFFSET      0x0030 /* Channel Source Microblock Stride */
 #define SAM_XDMACH_CDUS_OFFSET      0x0034 /* Channel Destination Microblock Stride */
                                            /* 0x0038-0x003c Reserved */
-                                           /* 0x0fec-0x0ffc Reserved */
+                                           /* 0x0fec–0x0ffc Reserved */
 
-/* XDMAC Register Addresses *************************************************/
+/* XDMAC Register Addresses *********************************************************/
 
 #define SAM_XDMAC0_GTYPE            (SAM_XDMAC0_VBASE+SAM_XDMAC_GTYPE_OFFSET)
 #define SAM_XDMAC0_GCFG             (SAM_XDMAC0_VBASE+SAM_XDMAC_GCFG_OFFSET)
@@ -208,13 +218,13 @@
 #define SAM_XDMACH1_CSUS(n)         (SAM_XDMACH1_CH_BASE(n)+SAM_XDMACH_CSUS_OFFSET)
 #define SAM_XDMACH1_CDUS(n)         (SAM_XDMACH1_CH_BASE(n)+SAM_XDMACH_CDUS_OFFSET)
 
-/* XDMAC Register Bit Definitions *******************************************/
+/* XDMAC Register Bit Definitions ***************************************************/
 
 /* Global Type Register */
 
 #define XDMAC_GTYPE_NB_CH_SHIFT     (0)       /* Bits 0-4: Number of Channels Minus One */
 #define XDMAC_GTYPE_NB_CH_MASK      (31 << XDMAC_GTYPE_NB_CH_SHIFT)
-#  define XDMAC_GTYPE_NB_CH(n)      ((uint32_t)(n) << XDMAC_GTYPE_NB_CH_SHIFT)
+  #define XDMAC_GTYPE_NB_CH(n)      ((uint32_t)(n) << XDMAC_GTYPE_NB_CH_SHIFT)
 #define XDMAC_GTYPE_FIFO_SZ_SHIFT   (5)       /* Bits 5-15: Number of Bytes */
 #define XDMAC_GTYPE_FIFO_SZ_MASK    (0x7ff << XDMAC_GTYPE_FIFO_SZ_SHIFT)
 #  define XDMAC_GTYPE_FIFO_SZ(n)    ((uint32_t)(n) << XDMAC_GTYPE_FIFO_SZ_SHIFT)
@@ -247,26 +257,25 @@
 
 /* All of these registers have the same layout:
  *
- * - Global Interrupt Enable Register, Global Interrupt Disable Register,
- *   Interrupt Mask Register, and Global Interrupt Status Register.
+ * - Global Interrupt Enable Register, Global Interrupt Disable Register, Interrupt
+ *   Mask Register, and Global Interrupt Status Register.
  *
- * - Global Channel Enable Register, Global Channel Disable Register, and
- *   Global Channel Status Register
+ * - Global Channel Enable Register, Global Channel Disable Register, and Global
+ *   Channel Status Register
  *
- * - Global Channel Read Suspend Register, Global Channel Write Suspend
- *   Register, Channel Read Write Suspend Register, and Global Channel Read
- *   Write Resume Register
- *
- * - Global Channel Software Request Register, Global Channel Software
- *   Request Status Register, and Global Channel Software Flush Request
+ * - Global Channel Read Suspend Register, Global Channel Write Suspend Register,
+ *   Channel Read Write Suspend Register, and Global Channel Read Write Resume
  *   Register
+ *
+ * - Global Channel Software Request Register, Global Channel Software Request
+ *   Status Register, and Global Channel Software Flush Request Register
  */
 
 #define XDMAC_CHAN(n)               (1 << (n))
 #define XDMAC_CHAN_ALL              (0x0000ffff)
 
-/* Channel Interrupt Enable Register, Channel Interrupt Disable Register,
- * Channel Interrupt Mask Register, and Channel Interrupt Status Register.
+/* Channel Interrupt Enable Register, Channel Interrupt Disable Register, Channel
+ * Interrupt Mask Register, and Channel Interrupt Status Register.
  */
 
 #define XDMAC_CHINT_BI              (1 << 0)  /* Bit 0:  End of Block Interrupt  */
@@ -281,12 +290,9 @@
 #define XDMAC_CHINT_ALL             (0x0000007f)
 
 /* Channel Source Address (SA) Register (aligned 32-bit address) */
-
 /* Channel Destination Address (DA) Register (aligned 32-bit address) */
 
-/* Channel Next Descriptor Address (CNDA) Register
- * (aligned 32-bit address)
- */
+/* Channel Next Descriptor Address (CNDA) Register (aligned 32-bit address) */
 
 #define XDMACH_CNDA_NDAIF           (1 << 0)  /* Bit 0:  Channel Next Descriptor Interface */
 
@@ -318,12 +324,10 @@
 #define XDMACH_CC_MBSIZE_SHIFT      (1)       /* Bits 1-2: Channel Memory Burst Size */
 #define XDMACH_CC_MBSIZE_MASK       (3 << XDMACH_CC_MBSIZE_SHIFT)
 #  define XDMACH_CC_MBSIZE(n)       ((uint32_t)(n) << XDMACH_CC_MBSIZE_SHIFT) /* n=0-3 */
-
 #  define XDMACH_CC_MBSIZE_1        (0 << XDMACH_CC_MBSIZE_SHIFT) /* The memory burst size is set to one */
 #  define XDMACH_CC_MBSIZE_4        (1 << XDMACH_CC_MBSIZE_SHIFT) /* The memory burst size is set to four */
 #  define XDMACH_CC_MBSIZE_8        (2 << XDMACH_CC_MBSIZE_SHIFT) /* The memory burst size is set to eight */
 #  define XDMACH_CC_MBSIZE_16       (3 << XDMACH_CC_MBSIZE_SHIFT) /* The memory burst size is set to sixteen */
-
 #define XDMACH_CC_DSYNC             (1 << 4)  /* Bit 4:  Channel Synchronization */
 #define XDMACH_CC_PROT              (1 << 5)  /* Bit 5:  Channel Protection */
 #define XDMACH_CC_SWREQ             (1 << 6)  /* Bit 6:  Channel Software Request Trigger */
@@ -335,14 +339,12 @@
 #  define XDMACH_CC_CSIZE_4         (2 << XDMACH_CC_CSIZE_SHIFT) /* 4 data transferred */
 #  define XDMACH_CC_CSIZE_8         (3 << XDMACH_CC_CSIZE_SHIFT) /* 8 data transferred */
 #  define XDMACH_CC_CSIZE_16        (4 << XDMACH_CC_CSIZE_SHIFT) /* 16 data transferred */
-
 #define XDMACH_CC_DWIDTH_SHIFT      (11)      /* Bits 11-12: Channel Data Width */
 #define XDMACH_CC_DWIDTH_MASK       (3 << XDMACH_CC_DWIDTH_SHIFT)
 #  define XDMACH_CC_DWIDTH_BYTE     (0 << XDMACH_CC_DWIDTH_SHIFT) /* The data size is set to 8 bits */
 #  define XDMACH_CC_DWIDTH_HWORD    (1 << XDMACH_CC_DWIDTH_SHIFT) /* The data size is set to 16 bits */
 #  define XDMACH_CC_DWIDTH_WORD     (2 << XDMACH_CC_DWIDTH_SHIFT) /* The data size is set to 32 bits */
 #  define XDMACH_CC_DWIDTH_DWORD    (3 << XDMACH_CC_DWIDTH_SHIFT) /* The data size is set to 64 bits */
-
 #define XDMACH_CC_SIF               (1 << 13) /* Bit 13: Channel Source Interface Identifier */
 #define XDMACH_CC_DIF               (1 << 14) /* Bit 14: Channel Destination Interface Identifier */
 #define XDMACH_CC_SAM_SHIFT         (16)      /* Bits 16-17: Channel Source Addressing Mode */
@@ -351,14 +353,12 @@
 #  define XDMACH_CC_SAM_INCR        (1 << XDMACH_CC_SAM_SHIFT) /* Address is incremented */
 #  define XDMACH_CC_SAM_UBS         (2 << XDMACH_CC_SAM_SHIFT) /* Microblock stride is added */
 #  define XDMACH_CC_SAM_UBSDS       (3 << XDMACH_CC_SAM_SHIFT) /* Microblock stride and data stride is added */
-
 #define XDMACH_CC_DAM_SHIFT         (18)      /* Bits 18-19: Channel Destination Addressing Mode */
 #define XDMACH_CC_DAM_MASK          (3 << XDMACH_CC_DAM_SHIFT)
 #  define XDMACH_CC_DAM_FIXED       (0 << XDMACH_CC_DAM_SHIFT) /* The address remains unchanged */
 #  define XDMACH_CC_DAM_INCR        (1 << XDMACH_CC_DAM_SHIFT) /* Address is incremented */
 #  define XDMACH_CC_DAM_UBS         (2 << XDMACH_CC_DAM_SHIFT) /* Microblock stride is added */
 #  define XDMACH_CC_DAM_UBSDS       (3 << XDMACH_CC_DAM_SHIFT) /* Microblock stride and data stride is added */
-
 #define XDMACH_CC_INITD             (1 << 21) /* Bit 21: Channel Initialization Terminated */
 #define XDMACH_CC_RDIP              (1 << 22) /* Bit 22: Read in Progress */
 #define XDMACH_CC_WRIP              (1 << 23) /* Bit 23: Write in Progress */
@@ -383,63 +383,9 @@
 
 #define XDMACH_CDUS_DUBS_MASK       (0x00ffffff)       /* Bits 0-23: Channel Destination Microblock Stride */
 
-/* XDMA Channel Definitions *************************************************/
-
+/* XDMA Channel Definitions *************************************************************/
 /* XDMA Controller 0 Channel Definitions (always secure) */
 
-#if defined(ATSAMA5D2)
-#define XDMAC0_CH_TWI0_TX           0  /* TWI0 Transmit */
-#define XDMAC0_CH_TWI0_RX           1  /* TWI0 Receive */
-#define XDMAC0_CH_TWI1_TX           2  /* TWI1 Transmit */
-#define XDMAC0_CH_TWI1_RX           3  /* TWI1 Receive */
-#define XDMAC0_CH_QSPI0_TX          4  /* QSPI0 Transmit */
-#define XDMAC0_CH_QSPI0_RX          5  /* QSPI0 Receive */
-#define XDMAC0_CH_SPI0_TX           6  /* SPI0 Transmit */
-#define XDMAC0_CH_SPI0_RX           7  /* SPI0 Receive */
-#define XDMAC0_CH_SPI1_TX           8  /* SPI1 Transmit */
-#define XDMAC0_CH_SPI1_RX           9  /* SPI1 Receive */
-#define XDMAC0_CH_PWM_TX            10 /* PWM Transmit */
-#define XDMAC0_CH_FLEXCOM0_TX       11 /* FLEXCOM0 Transmit */
-#define XDMAC0_CH_FLEXCOM0_RX       12 /* FLEXCOM0 Receive */
-#define XDMAC0_CH_FLEXCOM1_TX       13 /* FLEXCOM1 Transmit */
-#define XDMAC0_CH_FLEXCOM1_RX       14 /* FLEXCOM1 Receive */
-#define XDMAC0_CH_FLEXCOM2_TX       15 /* FLEXCOM2 Transmit */
-#define XDMAC0_CH_FLEXCOM2_RX       16 /* FLEXCOM2 Receive */
-#define XDMAC0_CH_FLEXCOM3_TX       17 /* FLEXCOM3 Transmit */
-#define XDMAC0_CH_FLEXCOM3_RX       18 /* FLEXCOM3 Receive */
-#define XDMAC0_CH_FLEXCOM4_TX       19 /* FLEXCOM4 Transmit */
-#define XDMAC0_CH_FLEXCOM4_RX       20 /* FLEXCOM4 Receive */
-#define XDMAC0_CH_SSC0_TX           21 /* SSC0 Transmit */
-#define XDMAC0_CH_SSC0_RX           22 /* SSC0 Receive */
-#define XDMAC0_CH_SSC1_TX           23 /* SSC1 Transmit */
-#define XDMAC0_CH_SSC1_RX           24 /* SSC1 Receive */
-#define XDMAC0_CH_ADC_RX            25 /* ADC Receive */
-#define XDMAC0_CH_AES_TX            26 /* AES Receive */
-#define XDMAC0_CH_AES_RX            27 /* AES Transmit */
-#define XDMAC0_CH_TDES_TX           28 /* TDES Transmit */
-#define XDMAC0_CH_TDES_RX           29 /* TDES Receive */
-#define XDMAC0_CH_SHA_TX            30 /* SHA Transmit */
-#define XDMAC0_CH_I2SC0_TX          31 /* I2SC0 Transmit */
-#define XDMAC0_CH_I2SC0_RX          32 /* I2SC0 Receive */
-#define XDMAC0_CH_I2SC1_TX          33 /* I2SC1 Transmit */
-#define XDMAC0_CH_I2SC1_RX          34 /* I2SC1 Receive */
-#define XDMAC0_CH_UART0_TX          35 /* UART0 Transmit */
-#define XDMAC0_CH_UART0_RX          36 /* UART0 Receive */
-#define XDMAC0_CH_UART1_TX          37 /* UART1 Transmit */
-#define XDMAC0_CH_UART1_RX          38 /* UART1 Receive */
-#define XDMAC0_CH_UART2_TX          39 /* UART2 Transmit */
-#define XDMAC0_CH_UART2_RX          40 /* UART2 Receive */
-#define XDMAC0_CH_UART3_TX          41 /* UART3 Transmit */
-#define XDMAC0_CH_UART3_RX          42 /* UART3 Receive */
-#define XDMAC0_CH_UART4_TX          43 /* UART4 Transmit */
-#define XDMAC0_CH_UART4_RX          44 /* UART4 Receive */
-#define XDMAC0_CH_TC0_RX            45 /* TC0 Receive */
-#define XDMAC0_CH_TC1_RX            46 /* TC1 Receive */
-#define XDMAC0_CH_CLASSD_TX         47 /* CLASSD Transmit */
-#define XDMAC0_CH_QSPI1_TX          48 /* QSPI1 Transmit */
-#define XDMAC0_CH_QSPI1_RX          49 /* QSPI1 Receive */
-#define XDMAC0_CH_PDMIC_RX          50 /* PDMIC Receive */
-#elif defined(ATSAMA5D4)
 #define XDMAC0_CH_HSMCI0            0  /* HSMCI0 Receive/Transmit */
 #define XDMAC0_CH_HSMCI1            1  /* HSMCI1 Receive/Transmit */
 #define XDMAC0_CH_TWI0_TX           2  /* TWI0 Transmit */
@@ -486,63 +432,9 @@
 #define XDMAC0_CH_SHA_TX            44 /* SHA Transmit */
 #define XDMAC0_CH_CATB_TX           46 /* CATB Transmit */
 #define XDMAC0_CH_CATB_RX           47 /* CATB Receive */
-#endif
 
 /* XDMA Controller 1 Channel Definitions (never secure) */
 
-#if defined(ATSAMA5D2)
-#define XDMAC1_CH_TWI0_TX           0  /* TWI0 Transmit */
-#define XDMAC1_CH_TWI0_RX           1  /* TWI0 Receive */
-#define XDMAC1_CH_TWI1_TX           2  /* TWI1 Transmit */
-#define XDMAC1_CH_TWI1_RX           3  /* TWI1 Receive */
-#define XDMAC1_CH_QSPI0_TX          4  /* QSPI0 Transmit */
-#define XDMAC1_CH_QSPI0_RX          5  /* QSPI0 Receive */
-#define XDMAC1_CH_SPI0_TX           6  /* SPI0 Transmit */
-#define XDMAC1_CH_SPI0_RX           7  /* SPI0 Receive */
-#define XDMAC1_CH_SPI1_TX           8  /* SPI1 Transmit */
-#define XDMAC1_CH_SPI1_RX           9  /* SPI1 Receive */
-#define XDMAC1_CH_PWM_TX            10 /* PWM Transmit */
-#define XDMAC1_CH_FLEXCOM0_TX       11 /* FLEXCOM0 Transmit */
-#define XDMAC1_CH_FLEXCOM0_RX       12 /* FLEXCOM0 Receive */
-#define XDMAC1_CH_FLEXCOM1_TX       13 /* FLEXCOM1 Transmit */
-#define XDMAC1_CH_FLEXCOM1_RX       14 /* FLEXCOM1 Receive */
-#define XDMAC1_CH_FLEXCOM2_TX       15 /* FLEXCOM2 Transmit */
-#define XDMAC1_CH_FLEXCOM2_RX       16 /* FLEXCOM2 Receive */
-#define XDMAC1_CH_FLEXCOM3_TX       17 /* FLEXCOM3 Transmit */
-#define XDMAC1_CH_FLEXCOM3_RX       18 /* FLEXCOM3 Receive */
-#define XDMAC1_CH_FLEXCOM4_TX       19 /* FLEXCOM4 Transmit */
-#define XDMAC1_CH_FLEXCOM4_RX       20 /* FLEXCOM4 Receive */
-#define XDMAC1_CH_SSC0_TX           21 /* SSC0 Transmit */
-#define XDMAC1_CH_SSC0_RX           22 /* SSC0 Receive */
-#define XDMAC1_CH_SSC1_TX           23 /* SSC1 Transmit */
-#define XDMAC1_CH_SSC1_RX           24 /* SSC1 Receive */
-#define XDMAC1_CH_ADC_RX            25 /* ADC Receive */
-#define XDMAC1_CH_AES_TX            26 /* AES Receive */
-#define XDMAC1_CH_AES_RX            27 /* AES Transmit */
-#define XDMAC1_CH_TDES_TX           28 /* TDES Transmit */
-#define XDMAC1_CH_TDES_RX           29 /* TDES Receive */
-#define XDMAC1_CH_SHA_TX            30 /* SHA Transmit */
-#define XDMAC1_CH_I2SC0_TX          31 /* I2SC0 Transmit */
-#define XDMAC1_CH_I2SC0_RX          32 /* I2SC0 Receive */
-#define XDMAC1_CH_I2SC1_TX          33 /* I2SC1 Transmit */
-#define XDMAC1_CH_I2SC1_RX          34 /* I2SC1 Receive */
-#define XDMAC1_CH_UART0_TX          35 /* UART0 Transmit */
-#define XDMAC1_CH_UART0_RX          36 /* UART0 Receive */
-#define XDMAC1_CH_UART1_TX          37 /* UART1 Transmit */
-#define XDMAC1_CH_UART1_RX          38 /* UART1 Receive */
-#define XDMAC1_CH_UART2_TX          39 /* UART2 Transmit */
-#define XDMAC1_CH_UART2_RX          40 /* UART2 Receive */
-#define XDMAC1_CH_UART3_TX          41 /* UART3 Transmit */
-#define XDMAC1_CH_UART3_RX          42 /* UART3 Receive */
-#define XDMAC1_CH_UART4_TX          43 /* UART4 Transmit */
-#define XDMAC1_CH_UART4_RX          44 /* UART4 Receive */
-#define XDMAC1_CH_TC0_RX            45 /* TC0 Receive */
-#define XDMAC1_CH_TC1_RX            46 /* TC1 Receive */
-#define XDMAC1_CH_CLASSD_TX         47 /* CLASSD Transmit */
-#define XDMAC1_CH_QSPI1_TX          48 /* QSPI1 Transmit */
-#define XDMAC1_CH_QSPI1_RX          49 /* QSPI1 Receive */
-#define XDMAC1_CH_PDMIC_RX          50 /* PDMIC Receive */
-#elif defined(ATSAMA5D4)
 #define XDMAC1_CH_HSMCI0            0  /* HSMCI0 Receive/Transmit */
 #define XDMAC1_CH_HSMCI1            1  /* HSMCI1 Receive/Transmit */
 #define XDMAC1_CH_TWI0_TX           2  /* TWI0 Transmit */
@@ -578,9 +470,8 @@
 #define XDMAC1_CH_ADC_RX            32 /* ADC Receive */
 #define XDMAC1_CH_SMD_TX            33 /* SMD Transmit */
 #define XDMAC1_CH_SMD_RX            34 /* SMD Receive */
-#endif
 
-/* Descriptor structure member definitions **********************************/
+/* Descriptor structure member definitions **********************************************/
 
 /* Next Descriptor Address (32-bit address) */
 
@@ -600,22 +491,18 @@
 #  define CHNEXT_UBC_NVIEW_3        (3 << CHNEXT_UBC_NVIEW_SHIFT) /* Next Descriptor View 3 */
 
 /* Source Address (32-bit address) */
-
 /* Destination Address (32-bit address) */
 
 /* Configuration Register */
-
 /* Block Control */
 
 /* Data Stride (32-bit value) */
-
 /* Source Microblock Stride (32-bit value) */
-
 /* Destination Microblock Stride (32-bit value) */
 
-/****************************************************************************
+/****************************************************************************************
  * Public Types
- ****************************************************************************/
+ ****************************************************************************************/
 
 struct chnext_view0_s
 {

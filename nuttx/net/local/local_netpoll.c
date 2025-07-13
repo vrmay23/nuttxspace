@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/local/local_netpoll.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +43,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
-#include <poll.h>
 
 #include <nuttx/semaphore.h>
 #include <nuttx/net/net.h>
@@ -39,84 +51,81 @@
 #include "socket/socket.h"
 #include "local/local.h"
 
+#ifdef HAVE_LOCAL_POLL
+
 /****************************************************************************
- * Name: local_event_pollsetup
+ * Name: local_accept_pollsetup
  ****************************************************************************/
 
 #ifdef CONFIG_NET_LOCAL_STREAM
-static int local_event_pollsetup(FAR struct local_conn_s *conn,
-                                 FAR struct pollfd *fds,
-                                 bool setup)
+static int local_accept_pollsetup(FAR struct local_conn_s *conn,
+                                  FAR struct pollfd *fds,
+                                  bool setup)
 {
+  pollevent_t eventset;
+  int ret = OK;
   int i;
 
+  net_lock();
   if (setup)
     {
       /* This is a request to set up the poll.  Find an available
        * slot for the poll structure reference
        */
 
-      nxmutex_lock(&conn->lc_polllock);
-
       for (i = 0; i < LOCAL_NPOLLWAITERS; i++)
         {
           /* Find an available slot */
 
-          if (!conn->lc_event_fds[i])
+          if (!conn->lc_accept_fds[i])
             {
               /* Bind the poll structure and this slot */
 
-              conn->lc_event_fds[i] = fds;
-              fds->priv = &conn->lc_event_fds[i];
+              conn->lc_accept_fds[i] = fds;
+              fds->priv = &conn->lc_accept_fds[i];
               break;
             }
         }
 
-      nxmutex_unlock(&conn->lc_polllock);
-
       if (i >= LOCAL_NPOLLWAITERS)
         {
           fds->priv = NULL;
-          return -EBUSY;
+          ret = -EBUSY;
+          goto errout;
         }
 
-      if (conn->lc_state == LOCAL_STATE_LISTENING &&
-          dq_peek(&conn->u.server.lc_waiters) != NULL)
+      eventset = 0;
+      if (dq_peek(&conn->u.server.lc_waiters) != NULL)
         {
-          poll_notify(&fds, 1, POLLIN);
+          eventset |= POLLIN;
+        }
+
+      if (eventset)
+        {
+          local_accept_pollnotify(conn, eventset);
         }
     }
   else
     {
       /* This is a request to tear down the poll. */
 
-      FAR struct pollfd **slot = (FAR struct pollfd **)fds->priv;
+      struct pollfd **slot = (struct pollfd **)fds->priv;
 
-      nxmutex_lock(&conn->lc_polllock);
+      if (!slot)
+        {
+          ret = -EIO;
+          goto errout;
+        }
 
       /* Remove all memory of the poll setup */
 
-      if (slot != NULL)
-        {
-          *slot = NULL;
-          fds->priv = NULL;
-        }
-
-      nxmutex_unlock(&conn->lc_polllock);
+      *slot = NULL;
+      fds->priv = NULL;
     }
 
-  return OK;
-}
-
-/****************************************************************************
- * Name: local_inout_poll_cb
- ****************************************************************************/
-
-static void local_inout_poll_cb(FAR struct pollfd *fds)
-{
-  FAR struct pollfd *originfds = fds->arg;
-
-  poll_notify(&originfds, 1, fds->revents);
+errout:
+  net_unlock();
+  return ret;
 }
 #endif
 
@@ -125,16 +134,28 @@ static void local_inout_poll_cb(FAR struct pollfd *fds)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: local_event_pollnotify
+ * Name: local_accept_pollnotify
  ****************************************************************************/
 
-void local_event_pollnotify(FAR struct local_conn_s *conn,
-                            pollevent_t eventset)
+void local_accept_pollnotify(FAR struct local_conn_s *conn,
+                             pollevent_t eventset)
 {
 #ifdef CONFIG_NET_LOCAL_STREAM
-  nxmutex_lock(&conn->lc_polllock);
-  poll_notify(conn->lc_event_fds, LOCAL_NPOLLWAITERS, eventset);
-  nxmutex_unlock(&conn->lc_polllock);
+  int i;
+
+  for (i = 0; i < LOCAL_NPOLLWAITERS; i++)
+    {
+      struct pollfd *fds = conn->lc_accept_fds[i];
+      if (fds)
+        {
+          fds->revents |= (fds->events & eventset);
+          if (fds->revents != 0)
+            {
+              ninfo("Report events: %02x\n", fds->revents);
+              nxsem_post(fds->sem);
+            }
+        }
+    }
 #endif
 }
 
@@ -156,18 +177,21 @@ void local_event_pollnotify(FAR struct local_conn_s *conn,
 
 int local_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 {
-  FAR struct local_conn_s *conn = psock->s_conn;
-  int ret = OK;
+  FAR struct local_conn_s *conn;
+  int ret = -ENOSYS;
+
+  conn = (FAR struct local_conn_s *)psock->s_conn;
 
   if (conn->lc_proto == SOCK_DGRAM)
     {
-      return -ENOSYS;
+      return ret;
     }
 
 #ifdef CONFIG_NET_LOCAL_STREAM
-  if (conn->lc_state == LOCAL_STATE_LISTENING)
+  if (conn->lc_state == LOCAL_STATE_LISTENING &&
+      conn->lc_type  == LOCAL_TYPE_PATHNAME)
     {
-      return local_event_pollsetup(conn, fds, true);
+      return local_accept_pollsetup(conn, fds, true);
     }
 
   if (conn->lc_state == LOCAL_STATE_DISCONNECTED)
@@ -193,7 +217,7 @@ int local_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 
           /* Find shadow pollfds. */
 
-          nxmutex_lock(&conn->lc_polllock);
+          net_lock();
 
           shadowfds = conn->lc_inout_fds;
           while (shadowfds->fd != 0)
@@ -201,24 +225,20 @@ int local_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
               shadowfds += 2;
               if (shadowfds >= &conn->lc_inout_fds[2*LOCAL_NPOLLWAITERS])
                 {
-                  nxmutex_unlock(&conn->lc_polllock);
+                  net_unlock();
                   return -ENOMEM;
                 }
             }
 
-          shadowfds[0]         = *fds;
-          shadowfds[0].fd      = 1; /* Does not matter */
-          shadowfds[0].cb      = local_inout_poll_cb;
-          shadowfds[0].arg     = fds;
-          shadowfds[0].events &= ~POLLOUT;
+          shadowfds[0].fd     = 1; /* Does not matter */
+          shadowfds[0].sem    = fds->sem;
+          shadowfds[0].events = fds->events & ~POLLOUT;
 
-          shadowfds[1]         = *fds;
-          shadowfds[1].fd      = 0; /* Does not matter */
-          shadowfds[1].cb      = local_inout_poll_cb;
-          shadowfds[1].arg     = fds;
-          shadowfds[1].events &= ~POLLIN;
+          shadowfds[1].fd     = 0; /* Does not matter */
+          shadowfds[1].sem    = fds->sem;
+          shadowfds[1].events = fds->events & ~POLLIN;
 
-          nxmutex_unlock(&conn->lc_polllock);
+          net_unlock();
 
           /* Setup poll for both shadow pollfds. */
 
@@ -274,6 +294,7 @@ int local_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
         break;
 
       default:
+        ret = OK;
         break;
     }
 #endif
@@ -282,7 +303,8 @@ int local_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 
 #ifdef CONFIG_NET_LOCAL_STREAM
 pollerr:
-  poll_notify(&fds, 1, POLLERR);
+  fds->revents |= POLLERR;
+  nxsem_post(fds->sem);
   return OK;
 #endif
 }
@@ -305,8 +327,10 @@ pollerr:
 
 int local_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds)
 {
-  FAR struct local_conn_s *conn = psock->s_conn;
+  FAR struct local_conn_s *conn;
   int ret = OK;
+
+  conn = (FAR struct local_conn_s *)psock->s_conn;
 
   if (conn->lc_proto == SOCK_DGRAM)
     {
@@ -314,9 +338,10 @@ int local_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds)
     }
 
 #ifdef CONFIG_NET_LOCAL_STREAM
-  if (conn->lc_state == LOCAL_STATE_LISTENING)
+  if (conn->lc_state == LOCAL_STATE_LISTENING &&
+      conn->lc_type  == LOCAL_TYPE_PATHNAME)
     {
-      return local_event_pollsetup(conn, fds, false);
+      return local_accept_pollsetup(conn, fds, false);
     }
 
   if (conn->lc_state == LOCAL_STATE_DISCONNECTED)
@@ -380,3 +405,5 @@ int local_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds)
 
   return ret;
 }
+
+#endif /* HAVE_LOCAL_POLL */

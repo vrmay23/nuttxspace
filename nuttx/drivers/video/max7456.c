@@ -1,34 +1,49 @@
 /****************************************************************************
  * drivers/video/max7456.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Support for the Maxim MAX7456 Single-Channel Monochrome On-Screen
+ * Display with Integrated EEPROM (datasheet 19-0576; Rev 1; 8/08).
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright (C) 2019 Bill Gatliff. All rights reserved.
+ *   Author: Bill Gatliff <bgat@billgatliff.com>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- ****************************************************************************/
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ *****************************************************************************/
 
-/****************************************************************************
+/*****************************************************************************
  * Theory of Operation
  *
  * The MAX7456 is a single-channel, monochrome, on-screen-display generator
  * that accepts an NTSC or PAL video input signal, overlays user-defined
  * character data, and renders the combined stream to CVBS (analog) output.
- * The typical use case then forwards that CVBS output to a video
- * transmitter, analog display, recording device, and/or other external
- * components.
+ * The typical use case then forwards that CVBS output to a video transmitter,
+ * analog display, recording device, and/or other external components.
  *
  * The chip is fundamentally an SPI slave device with a register bank to
  * configure the chip's analog components, update values in the display frame
@@ -57,8 +72,8 @@
  *
  * Note: Although we use the term "frame buffer", we cannot use the NuttX
  * standard /dev/fbN interface because our buffer memory is accessible only
- * across SPI. This is an inexpensive, slow, simple chip, and you wouldn't
- * use it for intensive work, but you WOULD use it on a memory-constrained
+ * across SPI. This is an inexpensive, slow, simple chip, and you wouldn't use
+ * it for intensive work, but you WOULD use it on a memory-constrained
  * device. We keep our RAM footprint small by not keeping a local copy of the
  * framebuffer data.
  *
@@ -74,12 +89,10 @@
 #include <debug.h>
 #include <string.h>
 #include <limits.h>
+#include <nuttx/mutex.h>
 
-#include <nuttx/arch.h>
-#include <nuttx/bits.h>
 #include <nuttx/compiler.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/video/max7456.h>
@@ -91,6 +104,10 @@
 /* Enables debug-related interfaces. Leave undefined otherwise. */
 
 #define DEBUG 1
+
+/* Sets bit @n */
+
+#define BIT(n) (1 << (n))
 
 /* Creates a mask of @m bits, i.e. MASK(2) -> 00000011 */
 
@@ -311,12 +328,17 @@ struct mx7_dev_s
  ****************************************************************************/
 
 static int mx7_open(FAR struct file *filep);
+static int mx7_close(FAR struct file *filep);
 static ssize_t mx7_read(FAR struct file *filep,
                         FAR char *buf, size_t len);
 static ssize_t mx7_write(FAR struct file *filep,
                          FAR const char *buf, size_t len);
+static int mx7_ioctl(FAR struct file *filep,
+                     int cmd, unsigned long arg);
 
 #if defined(DEBUG)
+static int mx7_debug_open(FAR struct file *filep);
+static int mx7_debug_close(FAR struct file *filep);
 static ssize_t mx7_debug_read(FAR struct file *filep,
                               FAR char *buf, size_t len);
 static ssize_t mx7_debug_write(FAR struct file *filep,
@@ -331,13 +353,15 @@ static ssize_t mx7_debug_write(FAR struct file *filep,
 
 static const struct file_operations g_mx7_fops =
 {
-  mx7_open,      /* open */
-  NULL,          /* close */
-  mx7_read,      /* read */
-  mx7_write,     /* write */
-  NULL,          /* seek */
-  NULL,          /* ioctl */
-  NULL           /* poll */
+  .poll   = NULL,
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  .unlink = NULL,
+#endif
+  .open   = mx7_open,
+  .close  = mx7_close,
+  .read   = mx7_read,
+  .write  = mx7_write,
+  .ioctl  = mx7_ioctl
 };
 
 #if defined(DEBUG)
@@ -346,10 +370,14 @@ static const struct file_operations g_mx7_fops =
 
 static const struct file_operations g_mx7_debug_fops =
 {
-  NULL,                /* open */
-  NULL,                /* close */
-  mx7_debug_read,      /* read */
-  mx7_debug_write,     /* write */
+  .poll   = NULL,
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  .unlink = NULL,
+#endif
+  .open   = mx7_debug_open,
+  .close  = mx7_debug_close,
+  .read   = mx7_debug_read,
+  .write  = mx7_debug_write,
 };
 #endif
 
@@ -411,10 +439,10 @@ static int regaddr_from_name(FAR const char *name)
  *
  * Description:
  *   Reads @len bytes into @buf from @dev, starting at register address
- *   @addr. This is a low-level function used for reading a sequence of one
- *   or more register values, and isn't usually called directly unless you
- *   REALLY know what you are doing. Consider one of the register-specific
- *   helper functions defined below whenever possible.
+ *   @addr. This is a low-level function used for reading a sequence of one or
+ *   more register values, and isn't usually called directly unless you REALLY
+ *   know what you are doing. Consider one of the register-specific helper
+ *   functions defined below whenever possible.
  *
  * Note: The caller must hold @dev->lock before calling this function.
  *
@@ -477,8 +505,8 @@ static int __mx7_read_reg(FAR struct mx7_dev_s *dev,
  *   Writes @len bytes from @buf to @dev, starting at @addr. This is a
  *   low-level function used for updating a sequence of one or more register
  *   values, and it DOES NOT check that the register being requested is
- *   write-capable. This function isn't called directly unless you REALLY
- *   know what you are doing.
+ *   write-capable. This function isn't called directly unless you REALLY know
+ *   what you are doing.
  *
  *   Consider one of the register-specific helper functions defined below
  *   whenever possible. If a helper function for the register you desire to
@@ -600,8 +628,7 @@ static inline int __mx7_read_reg__dmm(FAR struct mx7_dev_s *dev)
  *
  ****************************************************************************/
 
-static inline int __mx7_write_reg__vm0(FAR struct mx7_dev_s *dev,
-                                       uint8_t val)
+static inline int __mx7_write_reg__vm0(FAR struct mx7_dev_s *dev, uint8_t val)
 {
   return __mx7_write_reg(dev, VM0, &val, sizeof(val));
 }
@@ -660,8 +687,7 @@ static inline int __mx7_write_reg__cmah(FAR struct mx7_dev_s *dev,
  *
  ****************************************************************************/
 
-static inline int __mx7_write_reg__cmm(FAR struct mx7_dev_s *dev,
-                                       uint8_t val)
+static inline int __mx7_write_reg__cmm(FAR struct mx7_dev_s *dev, uint8_t val)
 {
   return __mx7_write_reg(dev, CMM, &val, sizeof(val));
 }
@@ -753,6 +779,73 @@ static inline int __mx7_read_reg__cmdo(FAR struct mx7_dev_s *dev)
 }
 
 /****************************************************************************
+ * Name: __mx7_read_reg__dmm
+ *
+ * Description:
+ *   Returns the contents of DMM. A simple helper around __mx7_read_reg().
+ *
+ * Returned value:
+ *   Returns the register value, or a negative errno.
+ *
+ ****************************************************************************/
+
+static inline int __mx7_write_reg__dmm(FAR struct mx7_dev_s *dev, uint8_t val)
+{
+  return __mx7_write_reg(dev, DMM, &val, sizeof(val));
+}
+
+/****************************************************************************
+ * Name: __mx7_read_reg__dmdi
+ *
+ * Description:
+ *   Returns the contents of DMDI. A simple helper around __mx7_read_reg().
+ *
+ * Returned value:
+ *   Returns the register value, or a negative errno.
+ *
+ ****************************************************************************/
+
+static inline int __mx7_write_reg__dmdi(FAR struct mx7_dev_s *dev,
+                                        uint8_t val)
+{
+  return __mx7_write_reg(dev, DMDI, &val, sizeof(val));
+}
+
+/****************************************************************************
+ * Name: __mx7_read_reg__dmah
+ *
+ * Description:
+ *   Returns the contents of DMAH. A simple helper around __mx7_read_reg().
+ *
+ * Returned value:
+ *   Returns the register value, or a negative errno.
+ *
+ ****************************************************************************/
+
+static inline int __mx7_write_reg__dmah(FAR struct mx7_dev_s *dev,
+                                        uint8_t val)
+{
+  return __mx7_write_reg(dev, DMAH, &val, sizeof(val));
+}
+
+/****************************************************************************
+ * Name: __mx7_read_reg__dmal
+ *
+ * Description:
+ *   Returns the contents of DMAL. A simple helper around __mx7_read_reg().
+ *
+ * Returned value:
+ *   Returns the register value, or a negative errno.
+ *
+ ****************************************************************************/
+
+static inline int __mx7_write_reg__dmal(FAR struct mx7_dev_s *dev,
+                                        uint8_t val)
+{
+  return __mx7_write_reg(dev, DMAL, &val, sizeof(val));
+}
+
+/****************************************************************************
  * Name: __mx7_wait_reset
  *
  * Description:
@@ -812,6 +905,41 @@ static inline void __mx7_read_nvm(FAR struct mx7_dev_s *dev)
 }
 
 /****************************************************************************
+ * Name: __lock
+ *
+ * Description:
+ *   Locks the @dev data structure (mutex) to protect it against concurrent
+ *   access. This is necessary, because @dev has some state information in it
+ *   that has to be kept consistent with the chip. This lock also protects
+ *   operations that must not be interrupted by other access to the chip.
+ *
+ *   Use this function before calling one of the lock-dependent helper
+ *   functions defined above (there are some defined below here, too).
+ *
+ ****************************************************************************/
+
+static void inline __lock(FAR struct mx7_dev_s *dev)
+{
+  nxmutex_lock(&dev->lock);
+}
+
+/****************************************************************************
+ * Name: __unlock
+ *
+ * Description:
+ *   Unlocks the @dev data structure (mutex).
+ *
+ *   Use this function after calling one of the lock-dependent helper
+ *   functions defined above (there are some defined below here, too).
+ *
+ ****************************************************************************/
+
+static void inline __unlock(FAR struct mx7_dev_s *dev)
+{
+  nxmutex_unlock(&dev->lock);
+}
+
+/****************************************************************************
  * Name: mx7_reset
  *
  * Description:
@@ -823,7 +951,7 @@ static inline void __mx7_read_nvm(FAR struct mx7_dev_s *dev)
 
 static void mx7_reset(FAR struct mx7_dev_s *dev)
 {
-  nxmutex_lock(&dev->lock);
+  __lock(dev);
 
   /* Issue the reset command. */
 
@@ -835,10 +963,10 @@ static void mx7_reset(FAR struct mx7_dev_s *dev)
 
   /* All done. */
 
-  nxmutex_unlock(&dev->lock);
+  __unlock(dev);
 }
 
-/****************************************************************************
+/************************************************************************
  * Name: __write_fb
  *
  * Description:
@@ -1015,8 +1143,7 @@ static ssize_t __write_fb(FAR struct mx7_dev_s *dev,
  *    Each row in the CA EEPROM is 64 bytes wide, but only the first 54 bytes
  *    are used. The rest are marked as "unused memory" in the datasheet. All
  *    64 bytes of each row are included in the data we return, if the user's
- *    request spans that area. We assume that the user understands the
- *    format.
+ *    request spans that area. We assume that the user understands the format.
  *
  *    In total, the chip has 64 bytes per row x 256 rows of EEPROM.
  *
@@ -1086,7 +1213,7 @@ static ssize_t __read_cm(FAR struct mx7_dev_s *dev,
 
   while (len != 0)
     {
-      /* "2) Write CMAH[7:0] = xxH to select the character (0-255) to be
+      /* "2) Write CMAH[7:0] = xxH to select the character (0–255) to be
        *     read (Figures 10 and 13)."
        *
        * Put another way: CMAH is the row number in the EEPROM.
@@ -1103,7 +1230,7 @@ static ssize_t __read_cm(FAR struct mx7_dev_s *dev,
 
       __mx7_read_nvm(dev);
 
-      /* "4) Write CMAL[7:0] = xxH to select the 4-pixel byte (0-63) in
+      /* "4) Write CMAL[7:0] = xxH to select the 4-pixel byte (0–63) in
        *     the character to be read (Figures 10 and 13)."
        *
        * That means CMAL is the column number.
@@ -1114,7 +1241,6 @@ static ssize_t __read_cm(FAR struct mx7_dev_s *dev,
       /* The shadow RAM is large enough to hold an entire row, so we don't
        * need to go back for another until we've read all of this one.
        */
-
       do
         {
           __mx7_write_reg__cmal(dev, cmal);
@@ -1171,6 +1297,19 @@ static int mx7_open(FAR struct file *filep)
 }
 
 /****************************************************************************
+ * Name: mx7_close
+ *
+ * Description:
+ *   The usual file-operations close() method.
+ ****************************************************************************/
+
+static int mx7_close(FAR struct file *filep)
+{
+  UNUSED(filep);
+  return 0;
+}
+
+/****************************************************************************
  * Name: mx7_read_cm
  *
  * Description:
@@ -1184,9 +1323,9 @@ static ssize_t mx7_read_cm(FAR struct file *filep, FAR char *buf, size_t len)
   FAR struct mx7_dev_s *dev = inode->i_private;
   ssize_t ret;
 
-  nxmutex_lock(&dev->lock);
-  ret = __read_cm(dev, filep->f_pos, (FAR uint8_t *)buf, len);
-  nxmutex_unlock(&dev->lock);
+  __lock(dev);
+  ret = __read_cm(dev, filep->f_pos, (FAR uint8_t *) buf, len);
+  __unlock(dev);
 
   return ret;
 }
@@ -1268,9 +1407,9 @@ static ssize_t mx7_write_fb(FAR struct file *filep, FAR const char *buf,
   FAR struct mx7_dev_s *dev = inode->i_private;
   ssize_t ret;
 
-  nxmutex_lock(&dev->lock);
-  ret = __write_fb(dev, (FAR uint8_t *)buf, len, dev->ca, filep->f_pos);
-  nxmutex_unlock(&dev->lock);
+  __lock(dev);
+  ret = __write_fb(dev, (FAR uint8_t *) buf, len, dev->ca, filep->f_pos);
+  __unlock(dev);
 
   return ret;
 }
@@ -1285,14 +1424,14 @@ static ssize_t mx7_write_fb(FAR struct file *filep, FAR const char *buf,
  *
  *   We use the approach you see here so that we don't have to have one
  *   distinct function (and a separate file_operations structure) for each of
- *   the many interfaces we're likely to create for interacting with this
- *   chip in its various useful ways. This schema also lets us reuse the
- *   interface code internally (see the test-pattern generator at startup.)
+ *   the many interfaces we're likely to create for interacting with this chip
+ *   in its various useful ways. This schema also lets us re-use the interface
+ *   code internally (see the test-pattern generator at startup.)
  *
- *   In general, any function we call from here uses the combination of
- *   seek() and write() to implement a zero-copy frame buffer. The seek()
- *   parameter sets the current cursor position, and successive write()s
- *   provide the character data starting at that position.
+ *   In general, any function we call from here uses the combination of seek()
+ *   and write() to implement a zero-copy frame buffer. The seek() parameter
+ *   sets the current cursor position, and successive write()s provide the
+ *   character data starting at that position.
  *
  *   TODO: At the moment, we have no mechanism for setting the character
  *   attribute (the LBC, BLK, and INV fields in DMM) for the data arriving
@@ -1300,9 +1439,9 @@ static ssize_t mx7_write_fb(FAR struct file *filep, FAR const char *buf,
  *   for the basic stuff.
  *
  *   The above isn't a hard problem to solve, I just don't need to solve it
- *   right now. And, I don't know what the most convenient solution would
- *   look like: the obvious choice is ioctl(), but I don't like ioctl()
- *   because I can't test it from the command line.
+ *   right now. And, I don't know what the most convenient solution would look
+ *   like: the obvious choice is ioctl(), but I don't like ioctl() because I
+ *   can't test it from the command line.
  *
  *   One idea is to have "fb", "blink", "inv", and other entry points for
  *   writing data with specific attributes. That has a nice feel to it,
@@ -1342,6 +1481,24 @@ static ssize_t mx7_write(FAR struct file *filep,
     }
 
   return ret;
+}
+
+/****************************************************************************
+ * Name: mx7_ioctl
+ *
+ * Description:
+ *   Does nothing, because I don't like ioctls.
+ *
+ ****************************************************************************/
+
+static int mx7_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
+{
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct mx7_dev_s *dev = inode->i_private;
+
+  UNUSED(inode);
+  UNUSED(dev);
+  return -ENOTTY;               /* unsupported ioctl */
 }
 
 #if defined(DEBUG)
@@ -1393,6 +1550,39 @@ static int hex_to_uint8(FAR const char *buf)
 }
 
 /****************************************************************************
+ * Name: mx7_debug_open
+ *
+ * Description:
+ *   Ordinary file-operations open() for debug-related interfaces.
+ *
+ ****************************************************************************/
+
+static int mx7_debug_open(FAR struct file *filep)
+{
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct mx7_dev_s *dev = inode->i_private;
+  FAR const char *name = inode->i_name;
+
+  UNUSED(inode);
+  UNUSED(dev);
+  UNUSED(name);
+  return 0;
+}
+
+/****************************************************************************
+ * Name: mx7_debug_close
+ *
+ * Description:
+ *   Ordinary file-operations close() for debug-related interfaces.
+ *
+ ****************************************************************************/
+
+static int mx7_debug_close(FAR struct file *filep)
+{
+  return 0;
+}
+
+/****************************************************************************
  * Name: mx7_debug_read
  *
  * Description:
@@ -1408,18 +1598,18 @@ static int hex_to_uint8(FAR const char *buf)
  *   "/dev/osd0/VM0", etc., and reads from all of those interfaces arrive
  *   here.
  *
- *   Utilities like cat(1) will exit automatically at EOF, which can be
- *   tricky to deliver at the right time. We achieve this by reading the
- *   associated register value only once, when filep->f_pos is at the
- *   beginning of the "file" we're emulating. The value obtained is stored
- *   in dev->debug[], and we work our way through that and increment the
- *   "file position" accordingly to keep track (because the user may ask for
- *   only one byte at a time, and our register values require two bytes to
- *   express as ascii-hex text).
+ *   Utilities like cat(1) will exit automatically at EOF, which can be tricky
+ *   to deliver at the right time. We achieve this by reading the associated
+ *   register value only once, when filep->f_pos is at the beginning of the
+ *   "file" we're emulating. The value obtained is stored in dev->debug[], and
+ *   we work our way through that and increment the "file position"
+ *   accordingly to keep track (because the user may ask for only one byte
+ *   at a time, and our register values require two bytes to express as
+ *   ascii-hex text).
  *
- *   When we reach the end of dev->debug[], we return EOF. If the user wants
- *   a fresh copy, they can either close and reopen the interface, or move
- *   the file pointer back to 0 via a seek operation.
+ *   When we reach the end of dev->debug[], we return EOF. If the user wants a
+ *   fresh copy, they can either close and reopen the interface, or move the
+ *   file pointer back to 0 via a seek operation.
  *
  ****************************************************************************/
 
@@ -1455,9 +1645,9 @@ static ssize_t mx7_debug_read(FAR struct file *filep,
 
       /* Read the register. */
 
-      nxmutex_lock(&dev->lock);
+      __lock(dev);
       ret = __mx7_read_reg(dev, addr, &val, 1);
-      nxmutex_unlock(&dev->lock);
+      __unlock(dev);
 
       if (ret != 1)
         {
@@ -1510,9 +1700,9 @@ static ssize_t mx7_debug_write(FAR struct file *filep, FAR const char *buf,
 
   /* Write the register value. */
 
-  nxmutex_lock(&dev->lock);
+  __lock(dev);
   __mx7_write_reg(dev, addr, &val, 1);
-  nxmutex_unlock(&dev->lock);
+  __unlock(dev);
 
   return len;
 }
@@ -1529,7 +1719,7 @@ static ssize_t mx7_debug_write(FAR struct file *filep, FAR const char *buf,
  *   path    - The full path to the interface to register. E.g., "/dev/osd0"
  *   name    - Entry underneath @path (making the latter a directory)
  *   fops    - File operations for the interface
- *   mode    - Access permissions
+ *   mode    - Access permisisons
  *   private - Opaque pointer to forward to the file operation handlers
  *
  * Returned value:
@@ -1546,7 +1736,7 @@ static int add_interface(FAR const char *path,
 
   /* Start with calling @path the interface name. */
 
-  strlcpy(buf, path, sizeof(buf));
+  strcpy(buf, path);
 
   /* Is the interface actually in a directory named @path? */
 
@@ -1554,11 +1744,11 @@ static int add_interface(FAR const char *path,
     {
       /* Convert @path to a directory name. */
 
-      strlcat(buf, "/", sizeof(buf));
+      strcat(buf, "/");
 
       /* Append the real interface name. */
 
-      strlcat(buf, name, sizeof(buf));
+      strcat(buf, name);
     }
 
   /* Register the interface in the usual way. NuttX will build the
@@ -1603,7 +1793,7 @@ int max7456_register(FAR const char *path, FAR struct mx7_config_s *config)
 
   /* Initialize the device structure. */
 
-  dev = kmm_malloc(sizeof(struct mx7_dev_s));
+  dev = (FAR struct mx7_dev_s *)kmm_malloc(sizeof(struct mx7_dev_s));
   if (dev == NULL)
     {
       return -ENOMEM;
@@ -1629,7 +1819,7 @@ int max7456_register(FAR const char *path, FAR struct mx7_config_s *config)
    * I'm doing it anyway for consistency.
    */
 
-  nxmutex_lock(&dev->lock);
+  __lock(dev);
 
   /* Thus sayeth the datasheet (pp. 38):
    *
@@ -1704,7 +1894,7 @@ int max7456_register(FAR const char *path, FAR struct mx7_config_s *config)
 
   /* Release the device to the world. */
 
-  nxmutex_unlock(&dev->lock);
+  __unlock(dev);
 
   return 0;
 }

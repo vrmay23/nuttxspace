@@ -1,9 +1,10 @@
 /****************************************************************************
  * apps/examples/webserver/cgi.h
+ * Web server script interface header file
+ * Author: Adam Dunkels <adam@sics.se>
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2001-2006, Adam Dunkels. All rights reserved.
- * SPDX-FileContributor: Adam Dunkels <adam@sics.se>
+ * Copyright (c) 2001, Adam Dunkels.
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +31,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  ****************************************************************************/
 
-#ifndef __APPS_EXAMPLES_WEBSERVER_CGI_H
-#define __APPS_EXAMPLES_WEBSERVER_CGI_H
+#ifndef __EXAMPLES_WEBSERVER_CGI_H
+#define __EXAMPLES_WEBSERVER_CGI_H
 
 /****************************************************************************
  * Public Function Prototypes
@@ -39,4 +40,4 @@
 
 void cgi_register(void);
 
-#endif /* __APPS_EXAMPLES_WEBSERVER_CGI_H */
+#endif /* __EXAMPLES_WEBSERVER_CGI_H */

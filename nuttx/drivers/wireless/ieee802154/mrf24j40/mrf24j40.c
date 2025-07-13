@@ -1,22 +1,37 @@
 /****************************************************************************
  * drivers/wireless/ieee802154/mrf24j40/mrf24j40.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2016 Sebastien Lorquet. All rights reserved.
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
+ *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
+ *   Author: Anthony Merlino <anthony@vergeaero.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -90,17 +105,17 @@ static int mrf24j40_energydetect(FAR struct mrf24j40_radio_s *dev,
   reg |= 0x30;
   mrf24j40_setreg(dev->spi, MRF24J40_TXBCON1, reg);
 
-  /* 1. Set RSSIMODE1 0x3E<7> - Initiate RSSI calculation. */
+  /* 1. Set RSSIMODE1 0x3E<7> – Initiate RSSI calculation. */
 
   mrf24j40_setreg(dev->spi, MRF24J40_BBREG6, 0x80);
 
-  /* 2. Wait until RSSIRDY 0x3E<0> is set to '1' - RSSI calculation is
+  /* 2. Wait until RSSIRDY 0x3E<0> is set to ‘1’ – RSSI calculation is
    *    complete.
    */
 
   while (!(mrf24j40_getreg(dev->spi, MRF24J40_BBREG6) & 0x01));
 
-  /* 3. Read RSSI 0x210<7:0> - The RSSI register contains the averaged RSSI
+  /* 3. Read RSSI 0x210<7:0> – The RSSI register contains the averaged RSSI
    *    received power level for 8 symbol periods.
    */
 
@@ -148,7 +163,7 @@ void mrf24j40_dopoll_csma(FAR void *arg)
 
   /* Get exclusive access to the driver */
 
-  while (nxmutex_lock(&dev->lock) < 0)
+  while (nxsem_wait(&dev->exclsem) < 0)
     {
     }
 
@@ -174,7 +189,7 @@ void mrf24j40_dopoll_csma(FAR void *arg)
         }
     }
 
-  nxmutex_unlock(&dev->lock);
+  nxsem_post(&dev->exclsem);
 }
 
 /****************************************************************************
@@ -207,7 +222,7 @@ void mrf24j40_dopoll_gts(FAR void *arg)
 
   /* Get exclusive access to the driver */
 
-  while (nxmutex_lock(&dev->lock) < 0)
+  while (nxsem_wait(&dev->exclsem) < 0)
     {
     }
 
@@ -230,7 +245,7 @@ void mrf24j40_dopoll_gts(FAR void *arg)
         }
     }
 
-  nxmutex_unlock(&dev->lock);
+  nxsem_post(&dev->exclsem);
 }
 
 /****************************************************************************
@@ -433,13 +448,15 @@ FAR struct ieee802154_radio_s *
 
   if (lower->attach(lower, mrf24j40_interrupt, dev) != OK)
     {
-      kmm_free(dev);
+#if 0
+      free(dev);
+#endif
       return NULL;
     }
 
   /* Allow exclusive access to the privmac struct */
 
-  nxmutex_init(&dev->lock);
+  nxsem_init(&dev->exclsem, 0, 1);
 
   dev->radio.bind         = mrf24j40_bind;
   dev->radio.reset        = mrf24j40_reset;

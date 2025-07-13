@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/x86_64/include/intel64/io.h
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -52,7 +50,7 @@
 
 static inline void outb(uint8_t regval, uint16_t port)
 {
-  __asm__ volatile(
+  asm volatile(
     "\toutb %0,%1\n"
     :
     : "a" (regval), "dN" (port)
@@ -62,17 +60,17 @@ static inline void outb(uint8_t regval, uint16_t port)
 static inline uint8_t inb(uint16_t port)
 {
   uint8_t regval;
-  __asm__ volatile(
+  asm volatile(
     "\tinb %1,%0\n"
     : "=a" (regval)
     : "dN" (port)
-    );
+  );
   return regval;
 }
 
 static inline void outw(uint16_t regval, uint16_t port)
 {
-  __asm__ volatile(
+  asm volatile(
     "\toutw %0,%1\n"
     :
     : "a" (regval), "dN" (port)
@@ -83,7 +81,7 @@ static inline uint16_t inw(uint16_t port)
 {
   uint16_t regval;
 
-  __asm__ volatile(
+  asm volatile(
     "\tinw %1,%0\n"
     : "=a" (regval)
     : "dN" (port)
@@ -93,7 +91,7 @@ static inline uint16_t inw(uint16_t port)
 
 static inline void outl(uint32_t regval, uint16_t port)
 {
-  __asm__ volatile(
+  asm volatile(
     "\toutl %0,%1\n"
     :
     : "a" (regval), "dN" (port)
@@ -103,7 +101,7 @@ static inline void outl(uint32_t regval, uint16_t port)
 static inline uint32_t inl(uint16_t port)
 {
   uint32_t regval;
-  __asm__ volatile(
+  asm volatile(
     "\tinl %1,%0\n"
     : "=a" (regval)
     : "dN" (port)
@@ -129,7 +127,7 @@ static inline uint32_t mmio_read32(void *address)
 
   /* Assembly-encoded to match the hypervisor MMIO parser support */
 
-  __asm__ volatile("movl (%1),%0" : "=r" (value) : "r" (address));
+  asm volatile("movl (%1),%0" : "=r" (value) : "r" (address));
   return value;
 }
 
@@ -152,7 +150,7 @@ static inline void mmio_write32(void *address, uint32_t value)
 {
   /* Assembly-encoded to match the hypervisor MMIO parser support */
 
-  __asm__ volatile("movl %0,(%1)" : : "r" (value), "r" (address));
+  asm volatile("movl %0,(%1)" : : "r" (value), "r" (address));
 }
 
 static inline void mmio_write64(void *address, uint64_t value)
@@ -164,13 +162,13 @@ static inline void up_trash_cpu(void)
 {
   for (; ; )
     {
-      __asm__ volatile ("cli;hlt;");
+      asm volatile ("cli;hlt;");
     }
 
-  __asm__ volatile ("ud2":::"memory");
+  asm("ud2":::"memory");
 }
 
-static inline void up_invalid_tlb(uintptr_t start, uintptr_t end)
+static inline void up_invalid_TLB(uintptr_t start, uintptr_t end)
 {
   uintptr_t i;
 
@@ -179,7 +177,7 @@ static inline void up_invalid_tlb(uintptr_t start, uintptr_t end)
 
   for (i = start; i < end; i += PAGE_SIZE)
     {
-      __asm__ volatile ("invlpg %0;":: "m"(i):"memory");
+      asm("invlpg %0;":: "m"(i):"memory");
     }
 }
 

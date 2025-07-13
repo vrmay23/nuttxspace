@@ -1,8 +1,6 @@
 /****************************************************************************
  * drivers/sensors/dhtxx.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -35,8 +33,9 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/signal.h>
+#include <nuttx/time.h>
 #include <nuttx/clock.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/sensors/dhtxx.h>
 
 /****************************************************************************
@@ -71,13 +70,13 @@
 #define DHT22_MAX_TEMP                    80.0F
 
 /****************************************************************************
- * Private Type
+ * Private Type Definitions
  ****************************************************************************/
 
 struct dhtxx_dev_s
 {
   FAR struct dhtxx_config_s *config;
-  mutex_t devlock;
+  sem_t devsem;
   uint8_t raw_data[5];
 };
 
@@ -94,15 +93,18 @@ static bool dht_check_data(FAR struct dhtxx_sensor_data_s *data,
                            float min_hum, float max_hum,
                            float min_temp, float max_temp);
 static int  dht_parse_data(FAR struct dhtxx_dev_s *priv,
-                           FAR struct dhtxx_sensor_data_s *data);
+                          FAR struct dhtxx_sensor_data_s *data);
 
 /* Character driver methods */
 
 static int     dhtxx_open(FAR struct file *filep);
+static int     dhtxx_close(FAR struct file *filep);
 static ssize_t dhtxx_read(FAR struct file *filep, FAR char *buffer,
                           size_t buflen);
 static ssize_t dhtxx_write(FAR struct file *filep, FAR const char *buffer,
                           size_t buflen);
+static int     dhtxx_ioctl(FAR struct file *filep, int cmd,
+                          unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -111,9 +113,15 @@ static ssize_t dhtxx_write(FAR struct file *filep, FAR const char *buffer,
 static const struct file_operations g_dhtxxfops =
 {
   dhtxx_open,   /* open */
-  NULL,         /* close */
+  dhtxx_close,  /* close */
   dhtxx_read,   /* read */
   dhtxx_write,  /* write */
+  NULL,         /* seek */
+  dhtxx_ioctl,  /* ioctl */
+  NULL          /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL        /* unlink */
+#endif
 };
 
 /****************************************************************************
@@ -340,11 +348,11 @@ static int dht_parse_data(FAR struct dhtxx_dev_s *priv,
       data->temp = priv->raw_data[2];
 
       /* if data is not within sensor's measurement range,
-       * an error must have occurred.
+       * an error must have accured.
        */
 
       if (!dht_check_data(data, DHT11_MIN_HUM, DHT11_MAX_HUM,
-                          DHT11_MIN_TEMP, DHT11_MAX_TEMP))
+                        DHT11_MIN_TEMP, DHT11_MAX_TEMP))
         {
           ret = -1;
         }
@@ -361,7 +369,7 @@ static int dht_parse_data(FAR struct dhtxx_dev_s *priv,
         }
 
       if (!dht_check_data(data, DHT12_MIN_HUM, DHT12_MAX_HUM,
-                          DHT12_MIN_TEMP, DHT12_MAX_TEMP))
+                         DHT12_MIN_TEMP, DHT12_MAX_TEMP))
         {
           ret = -1;
         }
@@ -407,11 +415,11 @@ static int dhtxx_open(FAR struct file *filep)
   FAR struct dhtxx_dev_s  *priv  = inode->i_private;
   int ret;
 
-  /* Acquire the mutex, wait the sampling time before sending anything to
+  /* Acquire the semaphore, wait the sampling time before sending anything to
    * pass unstable state.
    */
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -423,7 +431,20 @@ static int dhtxx_open(FAR struct file *filep)
 
   /* Sensor ready. */
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
+  return OK;
+}
+
+/****************************************************************************
+ * Name: dhtxx_close
+ *
+ * Description:
+ *   This routine is called when the Dhtxx device is closed.
+ *
+ ****************************************************************************/
+
+static int dhtxx_close(FAR struct file *filep)
+{
   return OK;
 }
 
@@ -432,7 +453,7 @@ static int dhtxx_open(FAR struct file *filep)
  ****************************************************************************/
 
 static ssize_t dhtxx_read(FAR struct file *filep, FAR char *buffer,
-                          size_t buflen)
+                         size_t buflen)
 {
   int ret = OK;
   FAR struct inode                *inode = filep->f_inode;
@@ -454,7 +475,7 @@ static ssize_t dhtxx_read(FAR struct file *filep, FAR char *buffer,
 
   memset(priv->raw_data, 0u, sizeof(priv->raw_data));
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait_uninterruptible(&priv->devsem);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -507,7 +528,7 @@ out:
 
   /* Sensor ready for new reading */
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -519,6 +540,27 @@ static ssize_t dhtxx_write(FAR struct file *filep, FAR const char *buffer,
                           size_t buflen)
 {
   return -ENOSYS;
+}
+
+/****************************************************************************
+ * Name: dhtxx_ioctl
+ ****************************************************************************/
+
+static int dhtxx_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
+{
+  int ret = OK;
+
+  switch (cmd)
+    {
+      /* Command was not recognized */
+
+    default:
+      snerr("ERROR: Unrecognized cmd: %d\n", cmd);
+      ret = -ENOTTY;
+      break;
+    }
+
+  return ret;
 }
 
 /****************************************************************************
@@ -547,7 +589,7 @@ int dhtxx_register(FAR const char *devpath,
 
   /* Initialize the Dhtxx device structure */
 
-  priv = kmm_malloc(sizeof(struct dhtxx_dev_s));
+  priv = (FAR struct dhtxx_dev_s *)kmm_malloc(sizeof(struct dhtxx_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");
@@ -556,14 +598,11 @@ int dhtxx_register(FAR const char *devpath,
 
   priv->config = config;
 
-  nxmutex_init(&priv->devlock);
-
   /* Register the character driver */
 
   ret = register_driver(devpath, &g_dhtxxfops, 0666, priv);
   if (ret < 0)
     {
-      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
       snerr("ERROR: Failed to register driver: %d\n", ret);
     }

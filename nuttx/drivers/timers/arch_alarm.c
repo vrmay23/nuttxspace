@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/timers/arch_alarm.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Pinecone Inc. All rights reserved.
+ *   Author: Xiang Xiao <xiaoxiang@pinecone.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,9 +47,24 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+#ifdef CONFIG_SCHED_TICKLESS
+
+#  ifndef CONFIG_SCHED_TICKLESS_ALARM
+#    error CONFIG_SCHED_TICKLESS_ALARM must be set to use CONFIG_SCHED_TICKLESS
+#  endif
+
+#  ifndef CONFIG_SCHED_TICKLESS_LIMIT_MAX_SLEEP
+#    error CONFIG_SCHED_TICKLESS_LIMIT_MAX_SLEEP must be set to use CONFIG_SCHED_TICKLESS
+#  endif
+
+#endif
+
 #define CONFIG_BOARD_LOOPSPER100USEC ((CONFIG_BOARD_LOOPSPERMSEC+5)/10)
 #define CONFIG_BOARD_LOOPSPER10USEC  ((CONFIG_BOARD_LOOPSPERMSEC+50)/100)
 #define CONFIG_BOARD_LOOPSPERUSEC    ((CONFIG_BOARD_LOOPSPERMSEC+500)/1000)
+
+#define timespec_to_usec(ts) \
+    ((uint64_t)(ts)->tv_sec * USEC_PER_SEC + (ts)->tv_nsec / NSEC_PER_USEC)
 
 /****************************************************************************
  * Private Data
@@ -44,13 +72,33 @@
 
 static FAR struct oneshot_lowerhalf_s *g_oneshot_lower;
 
-#ifndef CONFIG_SCHED_TICKLESS
-static clock_t g_current_tick;
-#endif
-
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+static inline void timespec_from_usec(FAR struct timespec *ts,
+                                      uint64_t microseconds)
+{
+  ts->tv_sec    = microseconds / USEC_PER_SEC;
+  microseconds -= (uint64_t)ts->tv_sec * USEC_PER_SEC;
+  ts->tv_nsec   = microseconds * NSEC_PER_USEC;
+}
+
+static void udelay_accurate(useconds_t microseconds)
+{
+  struct timespec now;
+  struct timespec end;
+  struct timespec delta;
+
+  ONESHOT_CURRENT(g_oneshot_lower, &now);
+  timespec_from_usec(&delta, microseconds);
+  clock_timespec_add(&now, &delta, &end);
+
+  while (clock_timespec_compare(&now, &end) < 0)
+    {
+      ONESHOT_CURRENT(g_oneshot_lower, &now);
+    }
+}
 
 static void udelay_coarse(useconds_t microseconds)
 {
@@ -102,34 +150,27 @@ static void udelay_coarse(useconds_t microseconds)
 static void oneshot_callback(FAR struct oneshot_lowerhalf_s *lower,
                              FAR void *arg)
 {
-  clock_t now = 0;
+  struct timespec now;
 
-  ONESHOT_TICK_CURRENT(g_oneshot_lower, &now);
 #ifdef CONFIG_SCHED_TICKLESS
-  nxsched_alarm_tick_expiration(now);
+  ONESHOT_CURRENT(g_oneshot_lower, &now);
+  nxsched_alarm_expiration(&now);
 #else
-  /* Start the next tick first, in order to minimize latency. Ideally
-   * the ONESHOT_TICK_START would also return the current tick so that
-   * the retrieving the current tick and starting the new one could be done
-   * atomically w. respect to a HW timer
-   */
+  struct timespec delta;
 
-  ONESHOT_TICK_START(g_oneshot_lower, oneshot_callback, NULL, 1);
-
-  /* It is always an error if this progresses more than 1 tick at a time.
-   * That would break any timer based on wdog; such timers might timeout
-   * early. Add a DEBUGASSERT here to catch those errors. It is not added
-   * here by default, since it would break debugging. These errors
-   * would occur due to HW timers possibly running while CPU is being halted.
-   */
-
-  /* DEBUGASSERT(now - g_current_tick <= 1); */
-
-  while (now - g_current_tick > 0)
+  do
     {
-      g_current_tick++;
+      static uint64_t tick = 1;
+      struct timespec next;
+
       nxsched_process_timer();
+      timespec_from_usec(&next, ++tick * USEC_PER_TICK);
+      ONESHOT_CURRENT(g_oneshot_lower, &now);
+      clock_timespec_subtract(&next, &now, &delta);
     }
+  while (delta.tv_sec == 0 && delta.tv_nsec == 0);
+
+  ONESHOT_START(g_oneshot_lower, oneshot_callback, NULL, &delta);
 #endif
 }
 
@@ -140,17 +181,19 @@ static void oneshot_callback(FAR struct oneshot_lowerhalf_s *lower,
 void up_alarm_set_lowerhalf(FAR struct oneshot_lowerhalf_s *lower)
 {
 #ifdef CONFIG_SCHED_TICKLESS
-  clock_t ticks = 0;
-#endif
+  struct timespec maxts;
+  uint64_t maxticks;
 
   g_oneshot_lower = lower;
-
-#ifdef CONFIG_SCHED_TICKLESS
-  ONESHOT_TICK_MAX_DELAY(g_oneshot_lower, &ticks);
-  g_oneshot_maxticks = ticks < UINT32_MAX ? ticks : UINT32_MAX;
+  ONESHOT_MAX_DELAY(g_oneshot_lower, &maxts);
+  maxticks = timespec_to_usec(&maxts) / USEC_PER_TICK;
+  g_oneshot_maxticks = maxticks < UINT32_MAX ? maxticks : UINT32_MAX;
 #else
-  ONESHOT_TICK_CURRENT(g_oneshot_lower, &g_current_tick);
-  ONESHOT_TICK_START(g_oneshot_lower, oneshot_callback, NULL, 1);
+  struct timespec ts;
+
+  g_oneshot_lower = lower;
+  timespec_from_usec(&ts, USEC_PER_TICK);
+  ONESHOT_START(g_oneshot_lower, oneshot_callback, NULL, &ts);
 #endif
 }
 
@@ -159,7 +202,7 @@ void up_alarm_set_lowerhalf(FAR struct oneshot_lowerhalf_s *lower)
  *
  * Description:
  *   Return the elapsed time since power-up (or, more correctly, since
- *   the architecture-specific timer was initialized).  This function is
+ *   the archtecture-specific timer was initialized).  This function is
  *   functionally equivalent to:
  *
  *      int clock_gettime(clockid_t clockid, FAR struct timespec *ts);
@@ -187,19 +230,40 @@ void up_alarm_set_lowerhalf(FAR struct oneshot_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-void weak_function up_timer_getmask(FAR clock_t *mask)
+#ifdef CONFIG_CLOCK_TIMEKEEPING
+int up_timer_getcounter(FAR uint64_t *cycles)
+{
+  int ret = -EAGAIN;
+
+  if (g_oneshot_lower != NULL)
+    {
+      struct timespec now;
+
+      ret = ONESHOT_CURRENT(g_oneshot_lower, &now);
+      if (ret == 0)
+        {
+          *cycles = timespec_to_usec(&now) / USEC_PER_TICK;
+        }
+    }
+
+  return ret;
+}
+
+void up_timer_getmask(FAR uint64_t *mask)
 {
   *mask = 0;
 
   if (g_oneshot_lower != NULL)
     {
-      clock_t maxticks = 0;
+      struct timespec maxts;
+      uint64_t maxticks;
 
-      ONESHOT_TICK_MAX_DELAY(g_oneshot_lower, &maxticks);
+      ONESHOT_MAX_DELAY(g_oneshot_lower, &maxts);
+      maxticks = timespec_to_usec(&maxts) / USEC_PER_TICK;
 
       for (; ; )
         {
-          clock_t next = (*mask << 1) | 1;
+          uint64_t next = (*mask << 1) | 1;
           if (next > maxticks)
             {
               break;
@@ -209,20 +273,8 @@ void weak_function up_timer_getmask(FAR clock_t *mask)
         }
     }
 }
-
-int weak_function up_timer_gettick(FAR clock_t *ticks)
-{
-  int ret = -EAGAIN;
-
-  if (g_oneshot_lower != NULL)
-    {
-      ret = ONESHOT_TICK_CURRENT(g_oneshot_lower, ticks);
-    }
-
-  return ret;
-}
-
-int weak_function up_timer_gettime(struct timespec *ts)
+#elif defined(CONFIG_SCHED_TICKLESS)
+int up_timer_gettime(FAR struct timespec *ts)
 {
   int ret = -EAGAIN;
 
@@ -233,6 +285,7 @@ int weak_function up_timer_gettime(struct timespec *ts)
 
   return ret;
 }
+#endif
 
 /****************************************************************************
  * Name: up_alarm_cancel
@@ -269,14 +322,14 @@ int weak_function up_timer_gettime(struct timespec *ts)
  ****************************************************************************/
 
 #ifdef CONFIG_SCHED_TICKLESS
-int weak_function up_alarm_tick_cancel(FAR clock_t *ticks)
+int up_alarm_cancel(FAR struct timespec *ts)
 {
   int ret = -EAGAIN;
 
   if (g_oneshot_lower != NULL)
     {
-      ret = ONESHOT_TICK_CANCEL(g_oneshot_lower, ticks);
-      ONESHOT_TICK_CURRENT(g_oneshot_lower, ticks);
+      ret = ONESHOT_CANCEL(g_oneshot_lower, ts);
+      ONESHOT_CURRENT(g_oneshot_lower, ts);
     }
 
   return ret;
@@ -293,8 +346,8 @@ int weak_function up_alarm_tick_cancel(FAR clock_t *ticks)
  *   Provided by platform-specific code and called from the RTOS base code.
  *
  * Input Parameters:
- *   ts - The time in the future at the alarm is expected to occur. When the
- *        alarm occurs the timer logic will call nxsched_alarm_expiration().
+ *   ts - The time in the future at the alarm is expected to occur.  When
+ *        the alarm occurs the timer logic will call nxsched_alarm_expiration().
  *
  * Returned Value:
  *   Zero (OK) is returned on success; a negated errno value is returned on
@@ -308,24 +361,18 @@ int weak_function up_alarm_tick_cancel(FAR clock_t *ticks)
  ****************************************************************************/
 
 #ifdef CONFIG_SCHED_TICKLESS
-int weak_function up_alarm_tick_start(clock_t ticks)
+int up_alarm_start(FAR const struct timespec *ts)
 {
   int ret = -EAGAIN;
 
   if (g_oneshot_lower != NULL)
     {
-      clock_t now = 0;
-      clock_t delta;
+      struct timespec now;
+      struct timespec delta;
 
-      ONESHOT_TICK_CURRENT(g_oneshot_lower, &now);
-      delta = ticks - now;
-      if ((sclock_t)delta < 0)
-        {
-          delta = 0;
-        }
-
-      ret = ONESHOT_TICK_START(g_oneshot_lower, oneshot_callback,
-                               NULL, delta);
+      ONESHOT_CURRENT(g_oneshot_lower, &now);
+      clock_timespec_subtract(ts, &now, &delta);
+      ret = ONESHOT_START(g_oneshot_lower, oneshot_callback, NULL, &delta);
     }
 
   return ret;
@@ -333,7 +380,7 @@ int weak_function up_alarm_tick_start(clock_t ticks)
 #endif
 
 /****************************************************************************
- * Name: up_perf_*
+ * Name: up_critmon_*
  *
  * Description:
  *   The first interface simply provides the current time value in unknown
@@ -351,37 +398,27 @@ int weak_function up_alarm_tick_start(clock_t ticks)
  *   units.
  ****************************************************************************/
 
-#ifndef CONFIG_ARCH_HAVE_PERF_EVENTS
-void up_perf_init(FAR void *arg)
+#ifdef CONFIG_SCHED_CRITMONITOR
+uint32_t up_critmon_gettime(void)
 {
-  UNUSED(arg);
-}
-
-clock_t up_perf_gettime(void)
-{
-  clock_t ret = 0;
+  uint32_t ret = 0;
 
   if (g_oneshot_lower != NULL)
     {
       struct timespec ts;
 
       ONESHOT_CURRENT(g_oneshot_lower, &ts);
-      ret = clock_time2nsec(&ts);
+      ret = timespec_to_usec(&ts);
     }
 
   return ret;
 }
 
-unsigned long up_perf_getfreq(void)
+void up_critmon_convert(uint32_t elapsed, FAR struct timespec *ts)
 {
-  return NSEC_PER_SEC;
+  timespec_from_usec(ts, elapsed);
 }
-
-void up_perf_convert(clock_t elapsed, FAR struct timespec *ts)
-{
-  clock_nsec2time(ts, elapsed);
-}
-#endif /* CONFIG_ARCH_PERF_EVENTS */
+#endif
 
 /****************************************************************************
  * Name: up_mdelay
@@ -392,7 +429,7 @@ void up_perf_convert(clock_t elapsed, FAR struct timespec *ts)
  *
  ****************************************************************************/
 
-void weak_function up_mdelay(unsigned int milliseconds)
+void up_mdelay(unsigned int milliseconds)
 {
   up_udelay(USEC_PER_MSEC * milliseconds);
 }
@@ -407,22 +444,14 @@ void weak_function up_mdelay(unsigned int milliseconds)
  *
  ****************************************************************************/
 
-void weak_function up_udelay(useconds_t microseconds)
+void up_udelay(useconds_t microseconds)
 {
-  up_ndelay(NSEC_PER_USEC * microseconds);
-}
-
-/****************************************************************************
- * Name: up_ndelay
- *
- * Description:
- *   Delay inline for the requested number of nanoseconds.
- *
- *   *** NOT multi-tasking friendly ***
- *
- ****************************************************************************/
-
-void weak_function up_ndelay(unsigned long nanoseconds)
-{
-  udelay_coarse((nanoseconds + NSEC_PER_USEC - 1) / NSEC_PER_USEC);
+  if (g_oneshot_lower != NULL)
+    {
+      udelay_accurate(microseconds);
+    }
+  else /* Oneshot timer hasn't been initialized yet */
+    {
+      udelay_coarse(microseconds);
+    }
 }

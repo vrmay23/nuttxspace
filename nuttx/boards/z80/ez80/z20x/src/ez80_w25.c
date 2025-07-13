@@ -1,8 +1,6 @@
 /****************************************************************************
  * boards/z80/ez80/z20x/src/ez80_w25.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -25,6 +23,8 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+
+#include <sys/mount.h>
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -94,7 +94,6 @@ int ez80_w25_initialize(int minor)
       return ret;
     }
 
-#if defined(CONFIG_BCH)
   /* Create a character device on the block device */
 
   ret = bchdev_register(W25_BLOCKDEV, W25_CHARDEV, false);
@@ -103,7 +102,6 @@ int ez80_w25_initialize(int minor)
       ferr("ERROR: bchdev_register %s failed: %d\n", W25_CHARDEV, ret);
       return ret;
     }
-#endif /* defined(CONFIG_BCH) */
 #endif
 
   return OK;

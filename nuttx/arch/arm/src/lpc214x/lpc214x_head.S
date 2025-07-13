@@ -1,28 +1,41 @@
-/****************************************************************************
+/*****************************************************************************
  * arch/arm/src/lpc214x/lpc214x_head.S
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-/****************************************************************************
+/*****************************************************************************
  * Included Files
- ****************************************************************************/
+ *****************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -33,10 +46,12 @@
 #include "lpc214x_pll.h"
 #include "lpc214x_apb.h"
 #include "lpc214x_pinsel.h"
+#include "up_internal.h"
+#include "up_arch.h"
 
-/****************************************************************************
+/*****************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ *****************************************************************************/
 
 /* This file holds the NuttX start logic that runs when the LPC2148
  * is reset.  This logic must be located at address 0x0000:0000 in
@@ -256,9 +271,9 @@
 #  define CONFIG_PINSEL2_VALUE 0x0e6149e4
 #endif
 
-/****************************************************************************
+/*****************************************************************************
  * Macros
- ****************************************************************************/
+ *****************************************************************************/
 
 /* Print a character on the UART to show boot status. This macro will
  * modify r0, r1, r2 and r14
@@ -267,7 +282,7 @@
 	.macro	showprogress, code
 #ifdef CONFIG_DEBUG_FEATURES
 	mov	r0, #\code
-	bl	arm_lowputc
+	bl	up_lowputc
 #endif
 	.endm
 
@@ -381,6 +396,7 @@
 #endif
 	.endm
 
+
 /* Configure the Memory Accelerator Module (MAM) */
 
 	.macro	configmam, base, val
@@ -427,13 +443,13 @@
 #endif
 	.endm
 
-/****************************************************************************
+/*****************************************************************************
  * Text
- ****************************************************************************/
+ *****************************************************************************/
 
 	.text
 
-/****************************************************************************
+/*****************************************************************************
  * Name: _vector_table
  *
  * Description:
@@ -442,7 +458,7 @@
  *   the vector table is the reset vector and this is the code that
  *   will execute when the processor is reset.
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 	.globl	_vector_table
 	.type	_vector_table, %function
@@ -456,31 +472,31 @@ _vector_table:
 	ldr	pc, .Lirqhandler		/* 0x18: IRQ */
 	ldr	pc, .Lfiqhandler		/* 0x1c: FIQ */
 
-	.globl	__start
-	.globl	arm_vectorundefinsn
-	.globl	arm_vectorsvc
-	.globl	arm_vectorprefetch
-	.globl	arm_vectordata
-	.globl	arm_vectorirq
-	.globl	arm_vectorfiq
+	.globl   __start
+	.globl	up_vectorundefinsn
+	.globl	up_vectorswi
+	.globl	up_vectorprefetch
+	.globl	up_vectordata
+	.globl	up_vectorirq
+	.globl	up_vectorfiq
 
 .Lresethandler:
-	.long	__start
+	.long   __start
 .Lundefinedhandler:
-	.long	arm_vectorundefinsn
+	.long	up_vectorundefinsn
 .Lswihandler:
-	.long	arm_vectorsvc
+	.long	up_vectorswi
 .Lprefetchaborthandler:
-	.long	arm_vectorprefetch
+	.long	up_vectorprefetch
 .Ldataaborthandler:
-	.long	arm_vectordata
+	.long	up_vectordata
 .Lirqhandler:
-	.long	arm_vectorirq
+	.long	up_vectorirq
 .Lfiqhandler:
-	.long	arm_vectorfiq
+	.long	up_vectorfiq
 	.size	_vector_table, . - _vector_table
 
-/****************************************************************************
+/*****************************************************************************
  * Name: __start
  *
  * Description:
@@ -488,15 +504,15 @@ _vector_table:
  *   the processor is reset.  It initializes hardware and then gives
  *   control to NuttX.
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-	.global	__start
+	.global __start
 	.type	__start, #function
 
 __start:
 	/* Setup the initial processor mode */
 
-	mov	r0, #(PSR_MODE_SYS | PSR_I_BIT | PSR_F_BIT )
+	mov	r0, #(SVC_MODE | PSR_I_BIT | PSR_F_BIT )
 	msr	cpsr, r0
 
 	/* Set up external memory mode (if so selected) */
@@ -530,7 +546,7 @@ __start:
 
 	/* Configure Fast GPIO Port */
 
-	configfastport	r0, r1
+	configfastport  r0, r1
 
 	/* Configure the uart so that we can get debug output as soon
 	 * as possible.  Modifies r0, r1, r2, and r14.
@@ -542,7 +558,7 @@ __start:
 	/* Setup system stack (and get the BSS range) */
 
 	adr	r0, LC0
-	ldmia	r0, {r4, r5, sp}
+	ldmia   r0, {r4, r5, sp}
 
 	/* Clear system BSS section */
 
@@ -567,7 +583,7 @@ __start:
 
 	mov	fp, #0
 #ifdef USE_EARLYSERIALINIT
-	bl	arm_earlyserialinit
+	bl	up_earlyserialinit
 #endif
 
 	showprogress 'C'
@@ -594,7 +610,7 @@ __start:
 
 LC0:	.long	_sbss
 	.long	_ebss
-	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE
+	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE-4
 
 LC2:	.long	_eronly	/* Where .data defaults are stored in FLASH */
 	.long	_sdata	/* Where .data needs to reside in SDRAM */

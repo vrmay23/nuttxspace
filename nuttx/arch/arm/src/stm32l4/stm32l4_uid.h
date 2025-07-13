@@ -1,10 +1,9 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/stm32l4/stm32l4_uid.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Marawan Ragab. All rights reserved.
- * SPDX-FileContributor: Marawan Ragab <marawan31@gmail.com>
- * SPDX-FileContributor: dev@ziggurat9.com
+ *   Copyright (C) 2015 Marawan Ragab. All rights reserved.
+ *   Author: Marawan Ragab <marawan31@gmail.com>
+ *           dev@ziggurat9.com
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,20 +32,20 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_STM32L4_STM32L4_UID_H
 #define __ARCH_ARM_SRC_STM32L4_STM32L4_UID_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <stdint.h>
 
-/****************************************************************************
+/************************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ************************************************************************************/
 
 void stm32l4_get_uniqueid(uint8_t uniqueid[12]);
 

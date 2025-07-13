@@ -1,22 +1,35 @@
 /****************************************************************************
  * fs/driver/fs_blockpartition.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
+ *   Author: Xiang Xiao <xiaoxiang@pinecone.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -37,7 +50,6 @@
 
 #include "driver/driver.h"
 #include "inode/inode.h"
-#include "fs_heap.h"
 
 /****************************************************************************
  * Private Types
@@ -46,9 +58,8 @@
 struct part_struct_s
 {
   FAR struct inode *parent;
-  size_t sectorsize;
-  off_t firstsector;
-  off_t nsectors;
+  size_t firstsector;
+  size_t nsectors;
 };
 
 /****************************************************************************
@@ -58,14 +69,14 @@ struct part_struct_s
 static int     part_open(FAR struct inode *inode);
 static int     part_close(FAR struct inode *inode);
 static ssize_t part_read(FAR struct inode *inode, FAR unsigned char *buffer,
-                         blkcnt_t start_sector, unsigned int nsectors);
+                 size_t start_sector, unsigned int nsectors);
 static ssize_t part_write(FAR struct inode *inode,
-                          FAR const unsigned char *buffer,
-                          blkcnt_t start_sector, unsigned int nsectors);
+                 FAR const unsigned char *buffer, size_t start_sector,
+                 unsigned int nsectors);
 static int     part_geometry(FAR struct inode *inode,
-                             FAR struct geometry *geometry);
+                 FAR struct geometry *geometry);
 static int     part_ioctl(FAR struct inode *inode, int cmd,
-                          unsigned long arg);
+                 unsigned long arg);
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
 static int     part_unlink(FAR struct inode *inode);
 #endif
@@ -142,8 +153,8 @@ static int part_close(FAR struct inode *inode)
  *
  ****************************************************************************/
 
-static ssize_t part_read(FAR struct inode *inode, FAR unsigned char *buffer,
-                         blkcnt_t start_sector, unsigned int nsectors)
+static ssize_t part_read(FAR struct inode *inode, unsigned char *buffer,
+                         size_t start_sector, unsigned int nsectors)
 {
   FAR struct part_struct_s *dev = inode->i_private;
   FAR struct inode *parent = dev->parent;
@@ -167,7 +178,7 @@ static ssize_t part_read(FAR struct inode *inode, FAR unsigned char *buffer,
 
 static ssize_t part_write(FAR struct inode *inode,
                           FAR const unsigned char *buffer,
-                          blkcnt_t start_sector, unsigned int nsectors)
+                          size_t start_sector, unsigned int nsectors)
 {
   FAR struct part_struct_s *dev = inode->i_private;
   FAR struct inode *parent = dev->parent;
@@ -189,8 +200,7 @@ static ssize_t part_write(FAR struct inode *inode,
  *
  ****************************************************************************/
 
-static int part_geometry(FAR struct inode *inode,
-                         FAR struct geometry *geometry)
+static int part_geometry(FAR struct inode *inode, struct geometry *geometry)
 {
   FAR struct part_struct_s *dev = inode->i_private;
   FAR struct inode *parent = dev->parent;
@@ -214,63 +224,43 @@ static int part_geometry(FAR struct inode *inode,
 
 static int part_ioctl(FAR struct inode *inode, int cmd, unsigned long arg)
 {
-  uintptr_t ptr_arg = (uintptr_t)arg;
   FAR struct part_struct_s *dev = inode->i_private;
   FAR struct inode *parent = dev->parent;
   int ret = -ENOTTY;
 
-  switch (cmd)
+  if (parent->u.i_bops->ioctl)
     {
-      case BIOC_PARTINFO:
+      if (cmd == MTDIOC_PROTECT || cmd == MTDIOC_UNPROTECT)
         {
-          FAR struct partition_info_s *info =
-            (FAR struct partition_info_s *)ptr_arg;
-          if (info != NULL)
-            {
-              info->numsectors  = dev->nsectors;
-              info->sectorsize  = dev->sectorsize;
-              info->startsector = dev->firstsector;
+          FAR struct mtd_protect_s *prot = (FAR struct mtd_protect_s *)arg;
 
-              strlcpy(info->parent, dev->parent->i_name,
-                      sizeof(info->parent));
-
-              ret = OK;
-          }
+          prot->startblock += dev->firstsector;
         }
-        break;
 
-      default:
-        if (parent->u.i_bops->ioctl)
-          {
-            if (cmd == MTDIOC_PROTECT || cmd == MTDIOC_UNPROTECT)
-              {
-                FAR struct mtd_protect_s *prot =
-                  (FAR struct mtd_protect_s *)ptr_arg;
+      ret = parent->u.i_bops->ioctl(parent, cmd, arg);
+      if (ret >= 0)
+        {
+          if (cmd == BIOC_XIPBASE || cmd == MTDIOC_XIPBASE)
+            {
+              FAR void **base = (FAR void **)arg;
+              struct geometry geo;
 
-                prot->startblock += dev->firstsector;
-              }
+              ret = parent->u.i_bops->geometry(parent, &geo);
+              if (ret >= 0)
+                {
+                  *(FAR uint8_t *)base +=
+                    dev->firstsector * geo.geo_sectorsize;
+                }
+            }
+          else if (cmd == MTDIOC_GEOMETRY)
+            {
+              FAR struct mtd_geometry_s *mgeo =
+                (FAR struct mtd_geometry_s *)arg;
+              uint32_t blkper = mgeo->erasesize / mgeo->blocksize;
 
-            ret = parent->u.i_bops->ioctl(parent, cmd, arg);
-            if (ret >= 0)
-              {
-                if (cmd == BIOC_XIPBASE)
-                  {
-                    FAR void **base = (FAR void **)ptr_arg;
-
-                    *(FAR uint8_t *)base +=
-                          dev->firstsector * dev->sectorsize;
-                  }
-                else if (cmd == MTDIOC_GEOMETRY)
-                  {
-                    FAR struct mtd_geometry_s *mgeo =
-                      (FAR struct mtd_geometry_s *)ptr_arg;
-                    uint32_t blkper = mgeo->erasesize / mgeo->blocksize;
-
-                    mgeo->neraseblocks = dev->nsectors / blkper;
-                  }
-              }
-          }
-        break;
+              mgeo->neraseblocks = dev->nsectors / blkper;
+            }
+        }
     }
 
   return ret;
@@ -287,7 +277,7 @@ static int part_unlink(FAR struct inode *inode)
   FAR struct inode *parent = dev->parent;
 
   inode_release(parent);
-  fs_heap_free(dev);
+  kmm_free(dev);
 
   return OK;
 }
@@ -298,14 +288,14 @@ static int part_unlink(FAR struct inode *inode)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: register_blockpartition/register_partition_with_inode
+ * Name: register_blockpartition
  *
  * Description:
  *   Register a block partition driver inode the pseudo file system.
  *
  * Input Parameters:
  *   partition   - The path to the partition inode
- *   parent      - The parent path or inode
+ *   parent      - The path to the parent inode
  *   firstsector - The offset in sectors to the partition
  *   nsectors    - The number of sectors in the partition
  *
@@ -320,84 +310,53 @@ static int part_unlink(FAR struct inode *inode)
  *
  ****************************************************************************/
 
-int register_partition_with_inode(FAR const char *partition,
-                                  mode_t mode, FAR struct inode *parent,
-                                  off_t firstsector, off_t nsectors)
+int register_blockpartition(FAR const char *partition,
+                            mode_t mode, FAR const char *parent,
+                            size_t firstsector, size_t nsectors)
 {
   FAR struct part_struct_s *dev;
-  struct geometry geo;
   int ret;
-
-  if (parent == NULL)
-    {
-      return -EINVAL;
-    }
 
   /* Allocate a partition device structure */
 
-  dev = fs_heap_zalloc(sizeof(*dev));
-  if (dev == NULL)
+  dev = kmm_zalloc(sizeof(*dev));
+  if (!dev)
     {
       return -ENOMEM;
     }
 
-  inode_addref(parent);
-  dev->parent      = parent;
   dev->firstsector = firstsector;
   dev->nsectors    = nsectors;
 
-  /* Get sector size */
+  /* Find the block driver */
 
-  ret = parent->u.i_bops->geometry(parent, &geo);
+  if (mode & (S_IWOTH | S_IWGRP | S_IWUSR))
+    {
+      ret = find_blockdriver(parent, 0, &dev->parent);
+    }
+  else
+    {
+      ret = find_blockdriver(parent, MS_RDONLY, &dev->parent);
+    }
+
   if (ret < 0)
     {
       goto errout_free;
     }
-
-  dev->sectorsize = geo.geo_sectorsize;
 
   /* Inode private data is a reference to the partition device structure */
 
   ret = register_blockdriver(partition, &g_part_bops, mode, dev);
   if (ret < 0)
     {
-      goto errout_free;
+      goto errout_release;
     }
 
   return OK;
 
+errout_release:
+  inode_release(dev->parent);
 errout_free:
-  inode_release(parent);
-  fs_heap_free(dev);
-  return ret;
-}
-
-int register_blockpartition(FAR const char *partition,
-                            mode_t mode, FAR const char *parent,
-                            off_t firstsector, off_t nsectors)
-{
-  FAR struct inode *inode;
-  int ret;
-
-  /* Find the block driver */
-
-  if (mode & (S_IWOTH | S_IWGRP | S_IWUSR))
-    {
-      ret = find_blockdriver(parent, 0, &inode);
-    }
-  else
-    {
-      ret = find_blockdriver(parent, MS_RDONLY, &inode);
-    }
-
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  ret = register_partition_with_inode(partition, mode,
-                                      inode, firstsector, nsectors);
-  inode_release(inode);
-
+  kmm_free(dev);
   return ret;
 }

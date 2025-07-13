@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/max326xx/max32660/max32660_spim.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -53,16 +66,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 #include "hardware/max326_pinmux.h"
 #include "max326_clockconfig.h"
@@ -99,7 +113,7 @@ struct max326_spidev_s
   uint32_t         base;         /* SPI base address */
   uint32_t         frequency;    /* Requested clock frequency */
   uint32_t         actual;       /* Actual clock frequency */
-  mutex_t          lock;         /* Held while chip is selected for mutual exclusion */
+  sem_t            exclsem;      /* Held while chip is selected for mutual exclusion */
   uint16_t         rxbytes;      /* Number of bytes received into rxbuffer */
   uint16_t         txbytes;      /* Number of bytes sent from txbuffer */
   uint16_t         xfrlen;       /* Transfer length */
@@ -191,7 +205,7 @@ static void spi_recvblock(struct spi_dev_s *dev, void *rxbuffer,
 
 /* Initialization */
 
-static void spi_bus_initialize(struct max326_spidev_s *priv);
+static void        spi_bus_initialize(struct max326_spidev_s *priv);
 
 /****************************************************************************
  * Private Data
@@ -234,11 +248,10 @@ static const struct spi_ops_s g_sp0iops =
 static struct max326_spidev_s g_spi0dev =
 {
   .dev      =
-  {
-    .ops    = &g_sp0iops,
-  },
+    {
+      &g_sp0iops
+    },
   .base     = MAX326_SPI0_BASE,
-  .lock     = NXMUTEX_INITIALIZER,
 #ifdef CONFIG_MAX326_SPI_INTERRUPTS
   .irq      = MAX326_IRQ_SPI,
 #endif
@@ -695,9 +708,7 @@ static int spi_poll(struct max326_spidev_s *priv)
           inten |= SPI_INT_RXLEVEL;
         }
 
-      /* Break out if we've received all the bytes and we're not
-       * transmitting.
-       */
+      /* Break out if we've received all the bytes and we're not transmitting */
 
       if (priv->txbuffer == NULL && priv->rxbytes == length)
         {
@@ -705,7 +716,7 @@ static int spi_poll(struct max326_spidev_s *priv)
         }
     }
 
-  /* Break out once we've transmitted and received all of the data. */
+  /* Break out once we've transmitted and received all of the data */
 
   if (priv->rxbytes == length && priv->txbytes == length)
     {
@@ -823,11 +834,11 @@ static int spi_lock(struct spi_dev_s *dev, bool lock)
 
   if (lock)
     {
-      ret = nxmutex_lock(&priv->lock);
+      ret = nxsem_wait_uninterruptible(&priv->exclsem);
     }
   else
     {
-      ret = nxmutex_unlock(&priv->lock);
+      ret = nxsem_post(&priv->exclsem);
     }
 
   return ret;
@@ -1069,9 +1080,7 @@ static void spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
 
         spi_modify_ctrl2(priv, setbits, clrbits);
 
-        /* Save the mode so that subsequent re-configurations will be
-         * faster.
-         */
+        /* Save the mode so that subsequent re-configurations will be faster */
 
         priv->mode = mode;
     }
@@ -1112,8 +1121,8 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
 
       priv->data16 = (nbits > 8);
 
-      /* Save the selection so that subsequent re-configurations will be
-       * faster.
+      /* Save the selection so the subsequence re-configurations will be
+       * faster
        */
 
       priv->nbits  = nbits;
@@ -1436,6 +1445,10 @@ static void spi_bus_initialize(struct max326_spidev_s *priv)
   regval = priv->wire3 ? SPI_CTRL2_DATWIDTH_SINGLE : SPI_CTRL2_DATWIDTH_DUAL;
   spi_modify_ctrl2(priv, regval, SPI_CTRL2_DATWIDTH_MASK);
 
+  /* Initialize the SPI semaphore that enforces mutually exclusive access */
+
+  nxsem_init(&priv->exclsem, 0, 1);
+
   /* Disable all interrupts at the peripheral */
 
   spi_putreg(priv, MAX326_SPI_INTEN_OFFSET, 0);
@@ -1513,6 +1526,7 @@ struct spi_dev_s *max326_spibus_initialize(int bus)
 #endif
     {
       spierr("ERROR: Unsupported SPI bus: %d\n", bus);
+      return NULL;
     }
 
   leave_critical_section(flags);

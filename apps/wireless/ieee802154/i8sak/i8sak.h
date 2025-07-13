@@ -1,27 +1,46 @@
 /****************************************************************************
  * apps/wireless/ieee802154/i8sak/i8sak.h
+ * IEEE 802.15.4 Swiss Army Knife
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2015, 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2014-2015 Sebastien Lorquet. All rights reserved.
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
+ *   Author: Anthony Merlino <anthony@vergeaero.com>
+ *   Author: Gregory Nuttx <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-#ifndef __APPS_WIRELESS_IEEE802154_I8SAK_I8SAK_H
-#define __APPS_WIRELESS_IEEE802154_I8SAK_I8SAK_H
+#ifndef __APPS_EXAMPLES_WIRELESS_IEEE802154_I8SAK_I8SAK_H
+#define __APPS_EXAMPLES_WIRELESS_IEEE802154_I8SAK_I8SAK_H
 
 /****************************************************************************
  * Included Files
@@ -39,7 +58,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Configuration ************************************************************/
 
 #if !defined(CONFIG_IEEE802154_I8SAK_DEFAULT_EP_EADDR)
@@ -124,8 +142,7 @@ struct i8sak_s
   sem_t eventsem;  /* For synchronizing access to the event receiver list */
   sq_queue_t eventreceivers;
   sq_queue_t eventreceivers_free;
-  struct i8sak_eventreceiver_s
-  eventreceiver_pool[CONFIG_I8SAK_NEVENTRECEIVERS];
+  struct i8sak_eventreceiver_s eventreceiver_pool[CONFIG_I8SAK_NEVENTRECEIVERS];
 
   /* MAC related fields */
 
@@ -148,10 +165,10 @@ struct i8sak_s
   struct sockaddr_in6 ep_in6addr;
 #endif
 
-  /* For the Coordinator, we keep a Short Address that will be handed out
-   * next. After assigning the address to a device requesting association,
-   * this field is simply incremented.  This means short addresses will be
-   * assigned to associating devices in order.
+  /* For the Coordinator, we keep a Short Address that will be handed out next.
+   * After assigning the address to a device requesting association, this field
+   * is simply incremented.  This means short addresses will be assigned to
+   * associating devices in order.
    */
 
   uint8_t next_saddr[IEEE802154_SADDRSIZE];
@@ -203,32 +220,18 @@ void      i8sak_str2panid   (FAR const char *str, FAR uint8_t *panid);
 
 /* Command Functions. Alphabetical Order */
 
-void i8sak_acceptassoc_cmd (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_assoc_cmd       (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_blaster_cmd     (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_get_cmd         (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_poll_cmd        (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_regdump_cmd     (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_tracedump_cmd   (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_reset_cmd       (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_scan_cmd        (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_set_cmd         (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_sniffer_cmd     (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_startpan_cmd    (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
-void i8sak_tx_cmd          (FAR struct i8sak_s *i8sak,
-                            int argc, FAR char *argv[]);
+void i8sak_acceptassoc_cmd (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_assoc_cmd       (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_blaster_cmd     (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_get_cmd         (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_poll_cmd        (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_regdump_cmd     (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_reset_cmd       (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_scan_cmd        (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_set_cmd         (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_sniffer_cmd     (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_startpan_cmd    (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
+void i8sak_tx_cmd          (FAR struct i8sak_s *i8sak, int argc, FAR char *argv[]);
 
 /* Command background threads */
 
@@ -267,17 +270,13 @@ static inline void i8sak_update_ep_ip(FAR struct i8sak_s *i8sak)
   if (i8sak->ep_addr.mode == IEEE802154_ADDRMODE_EXTENDED)
     {
      i8sak->ep_in6addr.sin6_addr.in6_u.u6_addr16[4] =
-        HTONS(((uint16_t)i8sak->ep_addr.eaddr[0] << 8) |
-              (uint16_t)i8sak->ep_addr.eaddr[1]);
+        HTONS(((uint16_t)i8sak->ep_addr.eaddr[0] << 8 | (uint16_t)i8sak->ep_addr.eaddr[1]));
       i8sak->ep_in6addr.sin6_addr.in6_u.u6_addr16[5] =
-        HTONS(((uint16_t)i8sak->ep_addr.eaddr[2] << 8) |
-              (uint16_t)i8sak->ep_addr.eaddr[3]);
+        HTONS(((uint16_t)i8sak->ep_addr.eaddr[2] << 8 | (uint16_t)i8sak->ep_addr.eaddr[3]));
       i8sak->ep_in6addr.sin6_addr.in6_u.u6_addr16[6] =
-        HTONS(((uint16_t)i8sak->ep_addr.eaddr[4] << 8) |
-              (uint16_t)i8sak->ep_addr.eaddr[5]);
+        HTONS(((uint16_t)i8sak->ep_addr.eaddr[4] << 8 | (uint16_t)i8sak->ep_addr.eaddr[5]));
       i8sak->ep_in6addr.sin6_addr.in6_u.u6_addr16[7] =
-        HTONS(((uint16_t)i8sak->ep_addr.eaddr[6] << 8) |
-              (uint16_t)i8sak->ep_addr.eaddr[7]);
+        HTONS(((uint16_t)i8sak->ep_addr.eaddr[6] << 8 | (uint16_t)i8sak->ep_addr.eaddr[7]));
 
       i8sak->ep_in6addr.sin6_addr.in6_u.u6_addr16[4] ^= HTONS(0x0200);
     }
@@ -287,10 +286,9 @@ static inline void i8sak_update_ep_ip(FAR struct i8sak_s *i8sak)
       i8sak->ep_in6addr.sin6_addr.in6_u.u6_addr16[5] = HTONS(0x00ff);
       i8sak->ep_in6addr.sin6_addr.in6_u.u6_addr16[6] = HTONS(0xfe00);
       i8sak->ep_in6addr.sin6_addr.in6_u.u6_addr16[7] =
-        ((uint16_t)i8sak->ep_addr.saddr[0] << 8 |
-         (uint16_t)i8sak->ep_addr.saddr[1]);
+        ((uint16_t)i8sak->ep_addr.saddr[0] << 8 | (uint16_t)i8sak->ep_addr.saddr[1]);
     }
 }
 #endif
 
-#endif /* __APPS_WIRELESS_IEEE802154_I8SAK_I8SAK_H */
+#endif /* __APPS_EXAMPLES_WIRELESS_IEEE802154_I8SAK_I8SAK_H */

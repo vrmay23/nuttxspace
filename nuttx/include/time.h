@@ -1,31 +1,44 @@
-/****************************************************************************
+/********************************************************************************
  * include/time.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2011, 2013-2015, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ********************************************************************************/
 
 #ifndef __INCLUDE_TIME_H
 #define __INCLUDE_TIME_H
 
-/****************************************************************************
+/********************************************************************************
  * Included Files
- ****************************************************************************/
+ ********************************************************************************/
 
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
@@ -33,14 +46,14 @@
 #include <sys/types.h>
 #include <stdint.h>
 
-/****************************************************************************
+/********************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ********************************************************************************/
 
 /* Clock tick of the system (frequency Hz).
  *
- * NOTE: This symbolic name CLK_TCK has been removed from the standard.
- *       It is replaced with CLOCKS_PER_SEC.  Both are defined here.
+ * NOTE: This symbolic name CLK_TCK has been removed from the standard.  It is
+ * replaced with CLOCKS_PER_SEC.  Both are defined here.
  *
  * The default value is 100Hz, but this default setting can be overridden by
  * defining the clock interval in microseconds as CONFIG_USEC_PER_TICK in the
@@ -48,11 +61,11 @@
  */
 
 #ifdef CONFIG_USEC_PER_TICK
-#  define CLK_TCK                 (1000000/CONFIG_USEC_PER_TICK)
-#  define CLOCKS_PER_SEC          (1000000/CONFIG_USEC_PER_TICK)
+# define CLK_TCK           (1000000/CONFIG_USEC_PER_TICK)
+# define CLOCKS_PER_SEC    (1000000/CONFIG_USEC_PER_TICK)
 #else
-#  define CLK_TCK                 (100)
-#  define CLOCKS_PER_SEC          (100)
+# define CLK_TCK           (100)
+# define CLOCKS_PER_SEC    (100)
 #endif
 
 /* CLOCK_REALTIME refers to the standard time source.  For most
@@ -66,47 +79,39 @@
  * forward and backward as the system time-of-day clock is changed.
  */
 
-#define CLOCK_REALTIME            0
+#define CLOCK_REALTIME     0
 
 /* Clock that cannot be set and represents monotonic time since some
  * unspecified starting point. It is not affected by changes in the
  * system time-of-day clock.
  */
 
-#define CLOCK_MONOTONIC           1
-
-/* Clock that measures CPU time consumed by this process (i.e., CPU
- * time consumed by all threads in the process).
- */
-
-#define CLOCK_PROCESS_CPUTIME_ID  2
-
-/* Clock that measures CPU time consumed by this thread */
-
-#define CLOCK_THREAD_CPUTIME_ID   3
-
-/* Monotonic system-wide clock that includes time spent in suspension. */
-
-#define CLOCK_BOOTTIME            4
+#ifdef CONFIG_CLOCK_MONOTONIC
+#  define CLOCK_MONOTONIC  1
+#endif
 
 /* This is a flag that may be passed to the timer_settime() and
  * clock_nanosleep() functions.
  */
 
-#define TIMER_ABSTIME             1
+#define TIMER_ABSTIME      1
 
-/* Time base values for timespec_get.  */
+#ifndef CONFIG_LIBC_LOCALTIME
+/* Local time is the same as gmtime in this implementation */
 
-#define TIME_UTC                  1
+#  define localtime(c)     gmtime(c)
+#  define localtime_r(c,r) gmtime_r(c,r)
+#endif
 
-/* Redirect the timelocal and strftime_l */
-
-#define timelocal                 mktime
-#define strftime_l(s, m, f, t, l) strftime(s, m, f, t)
-
-/****************************************************************************
+/********************************************************************************
  * Public Types
- ****************************************************************************/
+ ********************************************************************************/
+
+/* Scalar types */
+
+typedef uint32_t  time_t;         /* Holds time in seconds */
+typedef uint8_t   clockid_t;      /* Identifies one time base source */
+typedef FAR void *timer_t;        /* Represents one POSIX timer */
 
 /* struct timespec is the standard representation of time as seconds and
  * nanoseconds.
@@ -129,34 +134,32 @@ struct timespec
 
 struct tm
 {
-  int  tm_sec;         /* Seconds (0-61, allows for leap seconds) */
-  int  tm_min;         /* Minutes (0-59) */
-  int  tm_hour;        /* Hours (0-23) */
-  int  tm_mday;        /* Day of the month (1-31) */
-  int  tm_mon;         /* Month (0-11) */
-  int  tm_year;        /* Years since 1900 */
-  int  tm_wday;        /* Day of the week (0-6) */
-  int  tm_yday;        /* Day of the year (0-365) */
-  int  tm_isdst;       /* Non-0 if daylight savings time is in effect */
-  long tm_gmtoff;      /* Offset from UTC in seconds */
-  const char *tm_zone; /* Timezone abbreviation. */
+  int tm_sec;     /* Seconds (0-61, allows for leap seconds) */
+  int tm_min;     /* Minutes (0-59) */
+  int tm_hour;    /* Hours (0-23) */
+  int tm_mday;    /* Day of the month (1-31) */
+  int tm_mon;     /* Month (0-11) */
+  int tm_year;    /* Years since 1900 */
+  int tm_wday;    /* Day of the week (0-6) */
+  int tm_yday;    /* Day of the year (0-365) */
+  int tm_isdst;   /* Non-0 if daylight savings time is in effect */
 };
 
 /* Struct itimerspec is used to define settings for an interval timer */
 
 struct itimerspec
 {
-  struct timespec it_interval; /* Thereafter */
   struct timespec it_value;    /* First time */
+  struct timespec it_interval; /* and thereafter */
 };
 
 /* forward reference (defined in signal.h) */
 
 struct sigevent;
 
-/****************************************************************************
+/********************************************************************************
  * Public Data
- ****************************************************************************/
+ ********************************************************************************/
 
 #undef EXTERN
 #if defined(__cplusplus)
@@ -184,31 +187,27 @@ extern "C"
 EXTERN FAR char *tzname[2];
 #endif
 
-/****************************************************************************
+/********************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ********************************************************************************/
 
 clock_t clock(void);
 
 int clock_settime(clockid_t clockid, FAR const struct timespec *tp);
 int clock_gettime(clockid_t clockid, FAR struct timespec *tp);
 int clock_getres(clockid_t clockid, FAR struct timespec *res);
-int clock_getcpuclockid(pid_t pid, FAR clockid_t *clockid);
-int timespec_get(FAR struct timespec *t, int b);
 
-time_t timegm(FAR struct tm *tp);
 time_t mktime(FAR struct tm *tp);
-
 FAR struct tm *gmtime(FAR const time_t *timep);
 FAR struct tm *gmtime_r(FAR const time_t *timep, FAR struct tm *result);
 
+#ifdef CONFIG_LIBC_LOCALTIME
 FAR struct tm *localtime(FAR const time_t *timep);
 FAR struct tm *localtime_r(FAR const time_t *timep, FAR struct tm *result);
+#endif
 
 size_t strftime(FAR char *s, size_t max, FAR const char *format,
-                FAR const struct tm *tm) strftime_like(3);
-FAR char *strptime(FAR const char *s, FAR const char *format,
-                   FAR struct tm *tm);
+                FAR const struct tm *tm);
 
 FAR char *asctime(FAR const struct tm *tp);
 FAR char *asctime_r(FAR const struct tm *tp, FAR char *buf);
@@ -219,7 +218,7 @@ time_t time(FAR time_t *timep);
 
 #ifdef CONFIG_HAVE_DOUBLE
 double difftime(time_t time1, time_t time0);
-#elif defined(CONFIG_HAVE_FLOAT)
+#else
 float difftime(time_t time1, time_t time0);
 #endif
 

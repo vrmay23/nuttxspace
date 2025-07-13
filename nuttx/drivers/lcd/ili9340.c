@@ -1,29 +1,43 @@
 /****************************************************************************
  * drivers/lcd/ili9340.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ * LCD driver for the ILI9340 LCD Single Chip Driver
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright (C) 2014 Marco Krahl. All rights reserved.
+ *   Author: Marco Krahl <ocram.lhark@gmail.com>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/* References: ILI9340_DS_V1.10.pdf (Rev: 1.10), "a-Si TFT LCD Single Chip
+ * References: ILI9340_DS_V1.10.pdf (Rev: 1.10), "a-Si TFT LCD Single Chip
  *             Driver 240RGBx320 Resolution and 262K color",
  *             ILI TECHNOLOGY CORP., www.ilitek.com.
- */
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -35,7 +49,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -349,7 +362,7 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Private Type Definition
  ****************************************************************************/
 
 /* Each single connected ili9340 LCD driver needs an own driver instance
@@ -368,6 +381,16 @@ struct ili9340_dev_s
 
   FAR struct ili9340_lcd_s *lcd;
 
+  /* Driver specific putrun function */
+
+  int (*putrun)(fb_coord_t row, fb_coord_t col,
+                FAR const uint8_t * buffer, size_t npixels);
+#ifndef CONFIG_LCD_NOGETRUN
+  /* Driver specific getrun function */
+
+  int (*getrun)(fb_coord_t row, fb_coord_t col,
+                FAR uint8_t * buffer, size_t npixels);
+#endif
   /* Run buffer for the device */
 
   uint16_t *runbuffer;
@@ -400,13 +423,35 @@ static inline uint16_t ili9340_getyres(FAR struct ili9340_dev_s *dev);
 
 /* lcd data transfer methods */
 
-static int ili9340_putrun(FAR struct lcd_dev_s *dev, fb_coord_t row,
-                          fb_coord_t col, FAR const uint8_t *buffer,
-                          size_t npixels);
+static int ili9340_putrun(int devno, fb_coord_t row, fb_coord_t col,
+                         FAR const uint8_t * buffer, size_t npixels);
 #ifndef CONFIG_LCD_NOGETRUN
-static int ili9340_getrun(FAR struct lcd_dev_s *dev, fb_coord_t row,
-                          fb_coord_t col, FAR uint8_t *buffer,
-                          size_t npixels);
+static int ili9340_getrun(int devno, fb_coord_t row, fb_coord_t col,
+                         FAR uint8_t * buffer, size_t npixels);
+#endif
+
+/* Definition of the public visible getrun / putrun methods
+ * each for a single LCD driver
+ */
+
+#ifdef CONFIG_LCD_ILI9340_IFACE0
+static int ili9340_putrun0(fb_coord_t row, fb_coord_t col,
+                           FAR const uint8_t *buffer, size_t npixsels);
+#endif
+#ifdef CONFIG_LCD_ILI9340_IFACE1
+static int ili9340_putrun1(fb_coord_t row, fb_coord_t col,
+                            FAR const uint8_t * buffer, size_t npixsels);
+#endif
+
+#ifndef CONFIG_LCD_NOGETRUN
+# ifdef CONFIG_LCD_ILI9340_IFACE0
+static int ili9340_getrun0(fb_coord_t row, fb_coord_t col,
+                            FAR uint8_t * buffer, size_t npixsels);
+# endif
+# ifdef CONFIG_LCD_ILI9340_IFACE1
+static int ili9340_getrun1(fb_coord_t row, fb_coord_t col,
+                            FAR uint8_t * buffer, size_t npixsels);
+# endif
 #endif
 
 /* lcd configuration */
@@ -442,6 +487,10 @@ static struct ili9340_dev_s g_lcddev[CONFIG_LCD_ILI9340_NINTERFACES] =
 #ifdef CONFIG_LCD_ILI9340_IFACE0
   {
     .lcd              = 0,
+    .putrun           = ili9340_putrun0,
+# ifndef CONFIG_LCD_NOGETRUN
+    .getrun           = ili9340_getrun0,
+# endif
     .runbuffer        = g_runbuffer0,
     .orient           = ILI9340_IFACE0_ORIENT,
     .pxfmt            = ILI9340_IFACE0_PXFMT,
@@ -452,6 +501,10 @@ static struct ili9340_dev_s g_lcddev[CONFIG_LCD_ILI9340_NINTERFACES] =
 #ifdef CONFIG_LCD_ILI9340_IFACE1
   {
     .lcd              = 0,
+    .putrun           = ili9340_putrun1,
+# ifndef CONFIG_LCD_NOGETRUN
+    .getrun           = ili9340_getrun1,
+# endif
     .runbuffer        = g_runbuffer1,
     .orient           = ILI9340_IFACE1_ORIENT,
     .pxfmt            = ILI9340_IFACE1_PXFMT,
@@ -562,7 +615,7 @@ static void ili9340_selectarea(FAR struct ili9340_lcd_s *lcd,
  *   Write a partial raster line to the LCD.
  *
  * Parameters:
- *   lcd_dev - The lcd device
+ *   devno   - Number of lcd device
  *   row     - Starting row to write to (range: 0 <= row < yres)
  *   col     - Starting column to write to (range: 0 <= col <= xres-npixels)
  *   buffer  - The buffer containing the run to be written to the LCD
@@ -576,11 +629,10 @@ static void ili9340_selectarea(FAR struct ili9340_lcd_s *lcd,
  *
  ****************************************************************************/
 
-static int ili9340_putrun(FAR struct lcd_dev_s *lcd_dev, fb_coord_t row,
-                          fb_coord_t col, FAR const uint8_t *buffer,
-                          size_t npixels)
+static int ili9340_putrun(int devno, fb_coord_t row, fb_coord_t col,
+                            FAR const uint8_t * buffer, size_t npixels)
 {
-  FAR struct ili9340_dev_s *dev = (FAR struct ili9340_dev_s *)lcd_dev;
+  FAR struct ili9340_dev_s *dev = &g_lcddev[devno];
   FAR struct ili9340_lcd_s *lcd = dev->lcd;
   FAR const uint16_t *src = (FAR const uint16_t *)buffer;
 
@@ -623,7 +675,7 @@ static int ili9340_putrun(FAR struct lcd_dev_s *lcd_dev, fb_coord_t row,
  *   Read a partial raster line from the LCD.
  *
  * Parameter:
- *   lcd_dev - The lcd device
+ *   devno   - Number of the lcd device
  *   row     - Starting row to read from (range: 0 <= row < yres)
  *   col     - Starting column to read read (range: 0 <= col <= xres-npixels)
  *   buffer  - The buffer in which to return the run read from the LCD
@@ -638,11 +690,10 @@ static int ili9340_putrun(FAR struct lcd_dev_s *lcd_dev, fb_coord_t row,
  ****************************************************************************/
 
 # ifndef CONFIG_LCD_NOGETRUN
-static int ili9340_getrun(FAR struct lcd_dev_s *lcd_dev, fb_coord_t row,
-                          fb_coord_t col, FAR uint8_t *buffer,
-                          size_t npixels)
+static int ili9340_getrun(int devno, fb_coord_t row, fb_coord_t col,
+                            FAR uint8_t * buffer, size_t npixels)
 {
-  FAR struct ili9340_dev_s *dev = (FAR struct ili9340_dev_s *)lcd_dev;
+  FAR struct ili9340_dev_s *dev = &g_lcddev[devno];
   FAR struct ili9340_lcd_s *lcd = dev->lcd;
   FAR uint16_t *dest = (FAR uint16_t *)buffer;
 
@@ -778,6 +829,80 @@ static int ili9340_hwinitialize(FAR struct ili9340_dev_s *dev)
  ****************************************************************************/
 
 /****************************************************************************
+ * Name:  ili9340_putrunx
+ *
+ * Description:
+ *   Write a partial raster line to the LCD.
+ *
+ * Parameter:
+ *   row     - Starting row to write to (range: 0 <= row < yres)
+ *   col     - Starting column to write to (range: 0 <= col <= xres-npixels)
+ *   buffer  - The buffer containing the run to be written to the LCD
+ *   npixels - The number of pixels to write to the
+ *             (range: 0 < npixels <= xres-col)
+ *
+ * Returned Value:
+ *
+ *   On success - OK
+ *   On error   - -EINVAL
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_LCD_ILI9340_IFACE0
+static int ili9340_putrun0(fb_coord_t row, fb_coord_t col,
+                            FAR const uint8_t * buffer, size_t npixels)
+{
+  return ili9340_putrun(0, row, col, buffer, npixels);
+}
+#endif
+
+#ifdef CONFIG_LCD_ILI9340_IFACE1
+static int ili9340_putrun1(fb_coord_t row, fb_coord_t col,
+                            FAR const uint8_t * buffer, size_t npixels)
+{
+  return ili9340_putrun(1, row, col, buffer, npixels);
+}
+#endif
+
+/****************************************************************************
+ * Name:  ili9340_getrunx
+ *
+ * Description:
+ *   Read a partial raster line from the LCD.
+ *
+ * Parameter:
+ *   row     - Starting row to read from (range: 0 <= row < yres)
+ *   col     - Starting column to read from (range: 0 <= col <= xres-npixels)
+ *   buffer  - The buffer containing the run to be written to the LCD
+ *   npixels - The number of pixels to read from the
+ *             (range: 0 < npixels <= xres-col)
+ *
+ * Returned Value:
+ *
+ *   On success - OK
+ *   On error   - -EINVAL
+ *
+ ****************************************************************************/
+
+#ifndef CONFIG_LCD_NOGETRUN
+# ifdef CONFIG_LCD_ILI9340_IFACE0
+static int ili9340_getrun0(fb_coord_t row, fb_coord_t col,
+                            FAR uint8_t * buffer, size_t npixels)
+{
+  return ili9340_getrun(0, row, col, buffer, npixels);
+}
+# endif
+
+# ifdef CONFIG_LCD_ILI9340_IFACE1
+static int ili9340_getrun1(fb_coord_t row, fb_coord_t col,
+                            FAR uint8_t * buffer, size_t npixels)
+{
+  return ili9340_getrun(1, row, col, buffer, npixels);
+}
+# endif
+#endif
+
+/****************************************************************************
  * Name:  ili9340_getvideoinfo
  *
  * Description:
@@ -841,13 +966,12 @@ static int ili9340_getplaneinfo(FAR struct lcd_dev_s *dev,
     {
       FAR struct ili9340_dev_s *priv = (FAR struct ili9340_dev_s *)dev;
 
-      pinfo->putrun = ili9340_putrun;
+      pinfo->putrun = priv->putrun;
 #ifndef CONFIG_LCD_NOGETRUN
-      pinfo->getrun = ili9340_getrun;
+      pinfo->getrun = priv->getrun;
 #endif
       pinfo->bpp    = priv->bpp;
       pinfo->buffer = (FAR uint8_t *)priv->runbuffer;  /* Run scratch buffer */
-      pinfo->dev    = dev;
 
       lcdinfo("planeno: %d bpp: %d\n", planeno, pinfo->bpp);
 
@@ -1009,8 +1133,8 @@ static int ili9340_setcontrast(struct lcd_dev_s *dev, unsigned int contrast)
  *
  * Returned Value:
  *
- *  On success, this function returns a reference to the LCD driver object
- *  for the specified LCD driver. NULL is returned on any failure.
+ *  On success, this function returns a reference to the LCD driver object for
+ *  the specified LCD driver. NULL is returned on any failure.
  *
  ****************************************************************************/
 
@@ -1046,6 +1170,8 @@ FAR struct lcd_dev_s *ili9340_initialize(
             {
               return &priv->dev;
             }
+
+          errno = EINVAL;
         }
     }
 
@@ -1057,9 +1183,9 @@ FAR struct lcd_dev_s *ili9340_initialize(
  *
  * Description:
  *  This is a non-standard LCD interface.  Because of the various rotations,
- *  clearing the display in the normal way by writing a sequences of runs
- *  that covers the entire display can be very slow. Here the display is
- *  cleared by simply setting all GRAM memory to the specified color.
+ *  clearing the display in the normal way by writing a sequences of runs that
+ *  covers the entire display can be very slow. Here the display is cleared by
+ *  simply setting all GRAM memory to the specified color.
  *
  * Parameter:
  *  dev   - A reference to the lcd driver structure

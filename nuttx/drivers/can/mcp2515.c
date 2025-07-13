@@ -1,22 +1,37 @@
 /****************************************************************************
  * drivers/can/mcp2515.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017, 2019 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2017 Alan Carvalho de Assis. All rights reserved.
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ *   Modified: Ben <disruptivesolutionsnl@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX, Atmel, nor the names of its contributors may
+ *    be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,13 +41,11 @@
 
 #include <nuttx/config.h>
 
-#include <inttypes.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <strings.h>
@@ -40,16 +53,11 @@
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/signal.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/can/can.h>
 #include <nuttx/can/mcp2515.h>
-
-#ifdef CONFIG_CAN_TIMESTAMP
-#include <time.h>
-#endif
 
 #include "mcp2515.h"
 
@@ -202,27 +210,26 @@ enum can_state_s
 
 struct mcp2515_can_s
 {
-  FAR struct mcp2515_config_s *config; /* The constant configuration */
-
-  uint8_t state;               /* See enum can_state_s */
-  uint8_t nalloc;              /* Number of allocated filters */
-  mutex_t lock;                /* Enforces mutually exclusive access */
-  sem_t txfsem;                /* Used to wait for TX FIFO availability */
-  uint32_t btp;                /* Current bit timing */
-  uint8_t rxints;              /* Configured RX interrupts */
-  uint8_t txints;              /* Configured TX interrupts */
+  struct mcp2515_config_s *config; /* The constant configuration */
+  uint8_t state;                   /* See enum can_state_s */
+  uint8_t nalloc;                  /* Number of allocated filters */
+  sem_t locksem;                   /* Enforces mutually exclusive access */
+  sem_t txfsem;                    /* Used to wait for TX FIFO availability */
+  uint32_t btp;                    /* Current bit timing */
+  uint8_t rxints;                  /* Configured RX interrupts */
+  uint8_t txints;                  /* Configured TX interrupts */
 #ifdef CONFIG_CAN_ERRORS
-  uint32_t olderrors;          /* Used to detect the changes in error states */
+  uint32_t olderrors;              /* Used to detect the changes in error states */
 #endif
-  uint8_t filters;             /* Standard/Extende filter bit allocator. */
-  uint8_t txbuffers;           /* TX Buffers bit allocator. */
+  uint8_t filters;                 /* Standard/Extende filter bit allocator. */
+  uint8_t txbuffers;               /* TX Buffers bit allocator. */
 
   FAR uint8_t *spi_txbuf;
   FAR uint8_t *spi_rxbuf;
 #ifdef CONFIG_MCP2515_REGDEBUG
-  uintptr_t regaddr;           /* Last register address read */
-  uint32_t regval;             /* Last value read from the register */
-  unsigned int count;          /* Number of times that the value was read */
+  uintptr_t regaddr;               /* Last register address read */
+  uint32_t regval;                 /* Last value read from the register */
+  unsigned int count;              /* Number of times that the value was read */
 #endif
 };
 
@@ -231,8 +238,6 @@ struct mcp2515_can_s
  ****************************************************************************/
 
 /* MCP2515 Register access */
-
-static void mcp2515_config_spi(FAR struct mcp2515_can_s *priv);
 
 static void mcp2515_readregs(FAR struct mcp2515_can_s *priv, uint8_t regaddr,
               FAR uint8_t *buffer, uint8_t len);
@@ -247,6 +252,11 @@ static void mcp2515_dumpregs(FAR struct mcp2515_can_s *priv,
 #else
 #  define mcp2515_dumpregs(priv,msg)
 #endif
+
+/* Semaphore helpers */
+
+static int mcp2515_dev_lock(FAR struct mcp2515_can_s *priv);
+#define mcp2515_dev_unlock(priv) nxsem_post(&priv->locksem)
 
 /* MCP2515 helpers */
 
@@ -303,22 +313,12 @@ static const struct can_ops_s g_mcp2515ops =
   mcp2515_remoterequest, /* co_remoterequest */
   mcp2515_send,          /* co_send */
   mcp2515_txready,       /* co_txready */
-  mcp2515_txempty        /* co_txempty */
+  mcp2515_txempty,       /* co_txempty */
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-static void mcp2515_config_spi(FAR struct mcp2515_can_s *priv)
-{
-  /* Setup SPI frequency and mode */
-
-  SPI_SETFREQUENCY(priv->config->spi, CONFIG_MCP2515_SPI_SCK_FREQUENCY);
-  SPI_SETMODE(priv->config->spi, MCP2515_SPI_MODE);
-  SPI_SETBITS(priv->config->spi, 8);
-  SPI_HWFEATURES(priv->config->spi, 0);
-}
 
 static void mcp2515_read_2regs(FAR struct mcp2515_can_s *priv, uint8_t reg,
                                FAR uint8_t *v1, FAR uint8_t *v2)
@@ -327,10 +327,9 @@ static void mcp2515_read_2regs(FAR struct mcp2515_can_s *priv, uint8_t reg,
   priv->spi_txbuf[1] = reg;
 
   SPI_LOCK(priv->config->spi, true);
-  mcp2515_config_spi(priv);
-  SPI_SELECT(priv->config->spi, SPIDEV_CANBUS(priv->config->devid), true);
+  SPI_SELECT(priv->config->spi, SPIDEV_CANBUS(0), true);
   SPI_EXCHANGE(priv->config->spi, priv->spi_txbuf, priv->spi_rxbuf, 4);
-  SPI_SELECT(priv->config->spi, SPIDEV_CANBUS(priv->config->devid), false);
+  SPI_SELECT(priv->config->spi, SPIDEV_CANBUS(0), false);
   SPI_LOCK(priv->config->spi, false);
 
   *v1 = priv->spi_rxbuf[2];
@@ -361,11 +360,9 @@ static void mcp2515_readregs(FAR struct mcp2515_can_s *priv, uint8_t regaddr,
 
   SPI_LOCK(config->spi, true);
 
-  mcp2515_config_spi(priv);
-
   /* Select the MCP2515 */
 
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), true);
+  SPI_SELECT(config->spi, SPIDEV_CANBUS(0), true);
 
   /* Send the READ command */
 
@@ -378,7 +375,7 @@ static void mcp2515_readregs(FAR struct mcp2515_can_s *priv, uint8_t regaddr,
 
   /* Deselect the MCP2515 */
 
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), false);
+  SPI_SELECT(config->spi, SPIDEV_CANBUS(0), false);
 
   /* Unlock bus */
 
@@ -398,11 +395,9 @@ static void mcp2515_transfer(FAR struct mcp2515_can_s *priv, uint8_t len)
 
   SPI_LOCK(config->spi, true);
 
-  mcp2515_config_spi(priv);
-
   /* Select the MCP2515 */
 
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), true);
+  SPI_SELECT(config->spi, SPIDEV_CANBUS(0), true);
 
   /* Send the READ command */
 
@@ -410,7 +405,7 @@ static void mcp2515_transfer(FAR struct mcp2515_can_s *priv, uint8_t len)
 
   /* Deselect the MCP2515 */
 
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), false);
+  SPI_SELECT(config->spi, SPIDEV_CANBUS(0), false);
 
   /* Unlock bus */
 
@@ -449,11 +444,9 @@ static void mcp2515_writeregs(FAR struct mcp2515_can_s *priv,
 
   SPI_LOCK(config->spi, true);
 
-  mcp2515_config_spi(priv);
-
   /* Select the MCP2515 */
 
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), true);
+  SPI_SELECT(config->spi, SPIDEV_CANBUS(0), true);
 
   /* Send the READ command */
 
@@ -466,7 +459,7 @@ static void mcp2515_writeregs(FAR struct mcp2515_can_s *priv,
 
   /* Deselect the MCP2515 */
 
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), false);
+  SPI_SELECT(config->spi, SPIDEV_CANBUS(0), false);
 
   /* Unlock bus */
 
@@ -500,17 +493,15 @@ static void mcp2515_modifyreg(FAR struct mcp2515_can_s *priv,
 
   SPI_LOCK(config->spi, true);
 
-  mcp2515_config_spi(priv);
-
   /* Select the MCP2515 */
 
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), true);
+  SPI_SELECT(config->spi, SPIDEV_CANBUS(0), true);
 
   SPI_SNDBLOCK(config->spi, wr, 4);
 
   /* Deselect the MCP2515 */
 
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), false);
+  SPI_SELECT(config->spi, SPIDEV_CANBUS(0), false);
 
   /* Unlock bus */
 
@@ -538,6 +529,26 @@ static void mcp2515_dumpregs(FAR struct mcp2515_can_s *priv,
   FAR struct mcp2515_config_s *config = priv->config;
 }
 #endif
+
+/****************************************************************************
+ * Name: mcp2515_dev_lock
+ *
+ * Description:
+ *   Take the semaphore that enforces mutually exclusive access to device
+ *   structures, handling any exceptional conditions
+ *
+ * Input Parameters:
+ *   priv - A reference to the MCP2515 peripheral state
+ *
+ * Returned Value:
+ *  None
+ *
+ ****************************************************************************/
+
+static int mcp2515_dev_lock(FAR struct mcp2515_can_s *priv)
+{
+  return nxsem_wait(&priv->locksem);
+}
 
 /****************************************************************************
  * Name: mcp2515_add_extfilter
@@ -571,7 +582,7 @@ static int mcp2515_add_extfilter(FAR struct mcp2515_can_s *priv,
 
   /* Get exclusive excess to the MCP2515 hardware */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = mcp2515_dev_lock(priv);
   if (ret < 0)
     {
       return ret;
@@ -722,9 +733,7 @@ static int mcp2515_add_extfilter(FAR struct mcp2515_can_s *priv,
             }
           else
             {
-              /* The IDs will be filtered only by the Filter register
-               * (Mask == Filter)
-               */
+              /* The IDs will be filtered only by the Filter register (Mask == Filter) */
 
               /* Setup the Filter */
 
@@ -768,12 +777,12 @@ static int mcp2515_add_extfilter(FAR struct mcp2515_can_s *priv,
           regval = (regval & ~CANCTRL_REQOP_MASK) | (CANCTRL_REQOP_NORMAL);
           mcp2515_writeregs(priv, MCP2515_CANCTRL, &regval, 1);
 
-          nxmutex_unlock(&priv->lock);
+          mcp2515_dev_unlock(priv);
           return ndx;
         }
     }
 
-  nxmutex_unlock(&priv->lock);
+  mcp2515_dev_unlock(priv);
   return -EAGAIN;
 }
 #endif
@@ -819,7 +828,7 @@ static int mcp2515_del_extfilter(FAR struct mcp2515_can_s *priv, int ndx)
 
   /* Get exclusive excess to the MCP2515 hardware */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = mcp2515_dev_lock(priv);
   if (ret < 0)
     {
       return ret;
@@ -831,7 +840,7 @@ static int mcp2515_del_extfilter(FAR struct mcp2515_can_s *priv, int ndx)
     {
       /* No, error out */
 
-      nxmutex_unlock(&priv->lock);
+      mcp2515_dev_unlock(priv);
       return -ENOENT;
     }
 
@@ -878,7 +887,7 @@ static int mcp2515_del_extfilter(FAR struct mcp2515_can_s *priv, int ndx)
   regval = (regval & ~CANCTRL_REQOP_MASK) | (CANCTRL_REQOP_NORMAL);
   mcp2515_writeregs(priv, MCP2515_CANCTRL, &regval, 1);
 
-  nxmutex_unlock(&priv->lock);
+  mcp2515_dev_unlock(priv);
   return OK;
 }
 #endif
@@ -914,7 +923,7 @@ static int mcp2515_add_stdfilter(FAR struct mcp2515_can_s *priv,
 
   /* Get exclusive excess to the MCP2515 hardware */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = mcp2515_dev_lock(priv);
   if (ret < 0)
     {
       return ret;
@@ -1022,9 +1031,7 @@ static int mcp2515_add_stdfilter(FAR struct mcp2515_can_s *priv,
             }
           else
             {
-              /* The IDs will be filtered only by the Filter register
-               * (Mask == Filter)
-               */
+              /* The IDs will be filtered only by the Filter register (Mask == Filter) */
 
               /* Setup the Filter */
 
@@ -1055,12 +1062,12 @@ static int mcp2515_add_stdfilter(FAR struct mcp2515_can_s *priv,
           regval = (regval & ~CANCTRL_REQOP_MASK) | (CANCTRL_REQOP_NORMAL);
           mcp2515_writeregs(priv, MCP2515_CANCTRL, &regval, 1);
 
-          nxmutex_unlock(&priv->lock);
+          mcp2515_dev_unlock(priv);
           return ndx;
         }
     }
 
-  nxmutex_unlock(&priv->lock);
+  mcp2515_dev_unlock(priv);
   return -EAGAIN;
 }
 
@@ -1104,7 +1111,7 @@ static int mcp2515_del_stdfilter(FAR struct mcp2515_can_s *priv, int ndx)
 
   /* Get exclusive excess to the MCP2515 hardware */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = mcp2515_dev_lock(priv);
   if (ret < 0)
     {
       return ret;
@@ -1116,7 +1123,7 @@ static int mcp2515_del_stdfilter(FAR struct mcp2515_can_s *priv, int ndx)
     {
       /* No, error out */
 
-      nxmutex_unlock(&priv->lock);
+      mcp2515_dev_unlock(priv);
       return -ENOENT;
     }
 
@@ -1161,7 +1168,7 @@ static int mcp2515_del_stdfilter(FAR struct mcp2515_can_s *priv, int ndx)
   regval = (regval & ~CANCTRL_REQOP_MASK) | (CANCTRL_REQOP_NORMAL);
   mcp2515_writeregs(priv, MCP2515_CANCTRL, &regval, 1);
 
-  nxmutex_unlock(&priv->lock);
+  mcp2515_dev_unlock(priv);
   return OK;
 }
 
@@ -1193,7 +1200,7 @@ static void mcp2515_reset_lowlevel(FAR struct mcp2515_can_s *priv)
 
   /* Get exclusive access to the MCP2515 peripheral */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = mcp2515_dev_lock(priv);
   if (ret < 0)
     {
       return;
@@ -1202,25 +1209,28 @@ static void mcp2515_reset_lowlevel(FAR struct mcp2515_can_s *priv)
   /* Send SPI reset command to MCP2515 */
 
   SPI_LOCK(config->spi, true);
-  mcp2515_config_spi(priv);
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), true);
+  SPI_SELECT(config->spi, SPIDEV_CANBUS(0), true);
   SPI_SEND(config->spi, MCP2515_RESET);
-  SPI_SELECT(config->spi, SPIDEV_CANBUS(config->devid), false);
   SPI_LOCK(config->spi, false);
 
   /* Wait 1ms to let MCP2515 restart */
 
   nxsig_usleep(1000);
 
-  /* Make sure that all buffers are released. */
+  /* Make sure that all buffers are released.
+   *
+   * REVISIT: What if a thread is waiting for a buffer?  The following
+   * will not wake up any waiting threads.
+   */
 
-  nxsem_reset(&priv->txfsem, MCP2515_NUM_TX_BUFFERS);
-  priv->txbuffers = (1 << MCP2515_NUM_TX_BUFFERS) - 1;
+  nxsem_destroy(&priv->txfsem);
+  nxsem_init(&priv->txfsem, 0, MCP2515_NUM_TX_BUFFERS);
+  priv->txbuffers = 0b111;
 
   /* Define the current state and unlock */
 
   priv->state = MCP2515_STATE_RESET;
-  nxmutex_unlock(&priv->lock);
+  mcp2515_dev_unlock(priv);
 }
 
 /****************************************************************************
@@ -1282,7 +1292,7 @@ static int mcp2515_setup(FAR struct can_dev_s *dev)
 
   /* Get exclusive access to the MCP2515 peripheral */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = mcp2515_dev_lock(priv);
   if (ret < 0)
     {
       return ret;
@@ -1313,7 +1323,7 @@ static int mcp2515_setup(FAR struct can_dev_s *dev)
   priv->state = MCP2515_STATE_SETUP;
   mcp2515_rxint(dev, true);
 
-  nxmutex_unlock(&priv->lock);
+  mcp2515_dev_unlock(priv);
   return OK;
 }
 
@@ -1544,8 +1554,7 @@ static int mcp2515_ioctl(FAR struct can_dev_s *dev, int cmd,
            * PHSEG1 == PHSEG2 (PHSEG2 = TSEG2)
            *
            * See more at:
-           *  http://www.analog.com/en/analog-dialogue/articles/
-           *          configure-can-bit-timing.html
+           *  http://www.analog.com/en/analog-dialogue/articles/configure-can-bit-timing.html
            *
            */
 
@@ -1747,13 +1756,13 @@ static int mcp2515_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
   config = priv->config;
 
   caninfo("CAN%d\n", config->devid);
-  caninfo("CAN%d ID: %" PRId32 " DLC: %d\n",
-          config->devid, (uint32_t)msg->cm_hdr.ch_id, msg->cm_hdr.ch_dlc);
+  caninfo("CAN%d ID: %d DLC: %d\n",
+          config->devid, msg->cm_hdr.ch_id, msg->cm_hdr.ch_dlc);
   UNUSED(config);
 
   /* Get exclusive access to the MCP2515 peripheral */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = mcp2515_dev_lock(priv);
   if (ret < 0)
     {
       return ret;
@@ -1764,7 +1773,7 @@ static int mcp2515_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
   ret = nxsem_wait(&priv->txfsem);
   if (ret < 0)
     {
-      nxmutex_unlock(&priv->lock);
+      mcp2515_dev_unlock(priv);
       return ret;
     }
 
@@ -1799,7 +1808,7 @@ static int mcp2515_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
 
       /* STD2 - STD0 */
 
-      regval |= (msg->cm_hdr.ch_id & 0x1c0000) >> 13;
+      regval |= (msg->cm_hdr.ch_id & 0x1c0000) >> 18;
       TXREGVAL(MCP2515_TXB0SIDL) = regval;
 
       /* STD10 - STD3 */
@@ -1851,7 +1860,7 @@ static int mcp2515_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
   priv->spi_txbuf[0] = MCP2515_RTS(txbuf);
   mcp2515_transfer(priv, 1);
 
-  nxmutex_unlock(&priv->lock);
+  mcp2515_dev_unlock(priv);
 
   /* Report that the TX transfer is complete to the upper half logic.  Of
    * course, the transfer is not complete, but this early notification
@@ -2037,7 +2046,7 @@ static void mcp2515_error(FAR struct can_dev_s *dev, uint8_t status,
 #ifdef CONFIG_CAN_EXTID
       hdr.ch_extid  = 0;
 #endif
-      hdr.ch_tcf    = 0;
+      hdr.ch_unused = 0;
 
       /* And provide the error report to the upper half logic */
 
@@ -2069,19 +2078,10 @@ static void mcp2515_error(FAR struct can_dev_s *dev, uint8_t status,
 
 static void mcp2515_receive(FAR struct can_dev_s *dev, uint8_t offset)
 {
-#ifdef CONFIG_CAN_TIMESTAMP
-  clock_t clkval;
-  struct timespec ts;
-#endif
   FAR struct mcp2515_can_s *priv;
   struct can_hdr_s hdr;
   int ret;
   uint8_t regval;
-
-#ifdef CONFIG_CAN_TIMESTAMP
-  clkval = up_perf_gettime();
-  up_perf_convert(clkval, &ts);
-#endif
 
   DEBUGASSERT(dev);
   priv = dev->cd_priv;
@@ -2156,7 +2156,7 @@ static void mcp2515_receive(FAR struct can_dev_s *dev, uint8_t offset)
 #ifdef CONFIG_CAN_ERRORS
   hdr.ch_error  = 0; /* Error reporting not supported */
 #endif
-  hdr.ch_tcf    = 0;
+  hdr.ch_unused = 0;
 
   /* Extract the RTR bit */
 
@@ -2168,14 +2168,9 @@ static void mcp2515_receive(FAR struct can_dev_s *dev, uint8_t offset)
   regval = RXREGVAL(MCP2515_RXB0DLC);
   hdr.ch_dlc = (regval & RXBDLC_DLC_MASK) >> RXBDLC_DLC_SHIFT;
 
-#ifdef CONFIG_CAN_TIMESTAMP
-    hdr.ch_ts.tv_sec = ts.tv_sec;
-    hdr.ch_ts.tv_usec = ts.tv_nsec / 1000u;
-#endif
-
   /* Save the message data */
 
-  ret = can_receive(dev, &hdr, (FAR uint8_t *)&RXREGVAL(MCP2515_RXB0D0));
+  ret = can_receive(dev, &hdr, (FAR uint8_t *) & RXREGVAL(MCP2515_RXB0D0));
 
   if (ret < 0)
     {
@@ -2541,6 +2536,13 @@ FAR struct mcp2515_can_s *
       return NULL;
     }
 
+  /* Setup SPI frequency and mode */
+
+  SPI_SETFREQUENCY(config->spi, CONFIG_MCP2515_SPI_SCK_FREQUENCY);
+  SPI_SETMODE(config->spi, MCP2515_SPI_MODE);
+  SPI_SETBITS(config->spi, 8);
+  SPI_HWFEATURES(config->spi, 0);
+
   /* Perform one time data initialization */
 
   memset(priv, 0, sizeof(struct mcp2515_can_s));
@@ -2553,14 +2555,14 @@ FAR struct mcp2515_can_s *
    * due to IOCTL command processing.
    */
 
-  /* Initialize mutex & semaphores */
+  /* Initialize semaphores */
 
-  nxmutex_init(&priv->lock);
+  nxsem_init(&priv->locksem, 0, 1);
   nxsem_init(&priv->txfsem, 0, MCP2515_NUM_TX_BUFFERS);
 
   /* Initialize bitmask */
 
-  priv->txbuffers = (1 << MCP2515_NUM_TX_BUFFERS) - 1;
+  priv->txbuffers = (1 << MCP2515_NUM_TX_BUFFERS)-1;
 
   /* And put the hardware in the initial state */
 
@@ -2573,8 +2575,6 @@ FAR struct mcp2515_can_s *
   if (canctrl != DEFAULT_CANCTRL_CONFMODE)
     {
       canerr("ERROR: CANCTRL = 0x%02X ! It should be 0x87\n", canctrl);
-      nxmutex_destroy(&priv->lock);
-      kmm_free(priv);
       return NULL;
     }
 
@@ -2606,7 +2606,7 @@ FAR struct can_dev_s *mcp2515_initialize(
 
   /* Allocate a CAN Device structure */
 
-  dev = kmm_zalloc(sizeof(struct can_dev_s));
+  dev = (FAR struct can_dev_s *)kmm_zalloc(sizeof(struct can_dev_s));
   if (dev == NULL)
     {
       canerr("ERROR: Failed to allocate instance of can_dev_s!\n");

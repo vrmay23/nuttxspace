@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/stm32/nucleo-f429zi/src/stm32_appinitialize.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * boards/arm/stm32f4/nucleo-f429zi/src/stm32_appinitialize.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -27,58 +25,14 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
+#include <sys/mount.h>
 #include <debug.h>
 #include <syslog.h>
 
 #include "nucleo-144.h"
-#include <nuttx/fs/fs.h>
 #include <nuttx/leds/userled.h>
 #ifdef CONFIG_STM32_ROMFS
 #include "stm32_romfs.h"
-#endif
-
-#ifdef CONFIG_SENSORS_AMG88XX
-#include "stm32_amg88xx.h"
-#endif
-
-#if defined(CONFIG_I2C) && defined(CONFIG_SYSTEM_I2CTOOL)
-#  include "stm32_i2c.h"
-#endif
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: stm32_i2c_register
- *
- * Description:
- *   Register one I2C drivers for the I2C tool.
- *
- ****************************************************************************/
-
-#if defined(CONFIG_I2C) && defined(CONFIG_SYSTEM_I2CTOOL)
-static void stm32_i2c_register(int bus)
-{
-  struct i2c_master_s *i2c;
-  int ret;
-
-  i2c = stm32_i2cbus_initialize(bus);
-  if (i2c == NULL)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to get I2C%d interface\n", bus);
-    }
-  else
-    {
-      ret = i2c_register(i2c, bus);
-      if (ret < 0)
-        {
-          syslog(LOG_ERR, "ERROR: Failed to register I2C%d driver: %d\n",
-                 bus, ret);
-          stm32_i2cbus_uninitialize(i2c);
-        }
-    }
-}
 #endif
 
 /****************************************************************************
@@ -98,7 +52,7 @@ static void stm32_i2c_register(int bus)
  *         implementation without modification.  The argument has no
  *         meaning to NuttX; the meaning of the argument is a contract
  *         between the board-specific initialization logic and the
- *         matching application logic.  The value could be such things as a
+ *         matching application logic.  The value cold be such things as a
  *         mode enumeration value, a set of DIP switch switch settings, a
  *         pointer to configuration data read from a file or serial FLASH,
  *         or whatever you would like to do with it.  Every implementation
@@ -117,7 +71,7 @@ int board_app_initialize(uintptr_t arg)
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
 
-  ret = nx_mount(NULL, STM32_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
+  ret = mount(NULL, STM32_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to mount procfs at %s: %d\n",
@@ -167,7 +121,7 @@ int board_app_initialize(uintptr_t arg)
     }
 #endif
 
-#ifdef CONFIG_STM32_BBSRAM
+#ifdef CONFIG_STM32F4_BBSRAM
   /* Initialize battery-backed RAM */
 
   stm32_bbsram_int();
@@ -211,14 +165,6 @@ int board_app_initialize(uintptr_t arg)
     {
       syslog(LOG_ERR, "ERROR: stm32_pwm_setup() failed: %d\n", ret);
     }
-#endif
-
-#if defined(CONFIG_I2C) && defined(CONFIG_SYSTEM_I2CTOOL)
-  stm32_i2c_register(1);
-#endif
-
-#ifdef CONFIG_SENSORS_AMG88XX
-  board_amg88xx_initialize(1);
 #endif
 
   UNUSED(ret);

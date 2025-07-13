@@ -1,10 +1,9 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_pmstop.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2012, 2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2015 Motorola Mobility LLC. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2012, 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2015 Motorola Mobility, LLC. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,7 +42,7 @@
 
 #include <stdbool.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "nvic.h"
 #include "stm32l4_pwr.h"
 #include "stm32l4_pm.h"
@@ -110,9 +109,7 @@ int stm32l4_pmstop(bool lpds)
 {
   uint32_t regval;
 
-  /* Clear Low-Power Mode Selection (LPMS) bits in power control
-   * register 1.
-   */
+  /* Clear Low-Power Mode Selection (LPMS) bits in power control register 1. */
 
   regval  = getreg32(STM32L4_PWR_CR1);
   regval &= ~PWR_CR1_LPMS_MASK;

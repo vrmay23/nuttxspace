@@ -21,14 +21,14 @@ config EXAMPLES_ONESHOT_DEVNAME
 
 config EXAMPLES_ONESHOT_DELAY
 	int "Sample delay (microseconds)"
-	default 2000000
+	default 100000
 	---help---
 		This is the default delay samples in microseconds if one is not
 		specified on the command line
 
 config EXAMPLES_ONESHOT_SIGNO
 	int "Signal number"
-	default 32
+	default 13
 	---help---
 		This is the number of the signal that will be used in the oneshot
 		notification.

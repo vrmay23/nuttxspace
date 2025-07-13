@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/arm/src/samd5e5/sam_spi.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -39,10 +37,12 @@
 #include <nuttx/arch.h>
 #include <nuttx/wdog.h>
 #include <nuttx/clock.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "hardware/sam_pinmap.h"
 #include "sam_gclk.h"
 #include "sam_port.h"
@@ -96,7 +96,7 @@ struct sam_spidev_s
 
   /* Dynamic configuration */
 
-  mutex_t spilock;             /* Used to managed exclusive access to the bus */
+  sem_t spilock;               /* Used to managed exclusive access to the bus */
   uint32_t frequency;          /* Requested clock frequency */
   uint32_t actual;             /* Actual clock frequency */
   uint8_t mode;                /* Mode 0,1,2,3 */
@@ -132,7 +132,7 @@ struct sam_spidev_s
 static bool     spi_checkreg(struct sam_spidev_s *priv, bool wr,
                   uint32_t regval, uint32_t regaddr);
 #else
-#  define       spi_checkreg(priv,wr,regval,regaddr) (false)
+# define        spi_checkreg(priv,wr,regval,regaddr) (false)
 #endif
 
 static uint8_t  spi_getreg8(struct sam_spidev_s *priv,
@@ -155,13 +155,13 @@ static void spi_dma_setup(struct sam_spidev_s *priv);
 #ifdef CONFIG_DEBUG_SPI_INFO
 static void     spi_dumpregs(struct sam_spidev_s *priv, const char *msg);
 #else
-#  define       spi_dumpregs(priv,msg)
+# define        spi_dumpregs(priv,msg)
 #endif
 
 /* Interrupt handling */
 
 #if 0 /* Not used */
-static int      spi_interrupt(int irq, void *context, void *arg);
+static int      spi_interrupt(int irq, void *context, FAR void *arg);
 #endif
 
 /* SPI methods */
@@ -234,11 +234,10 @@ static struct sam_spidev_s g_spi0dev =
   .muxconfig   = BOARD_SERCOM0_MUXCONFIG,
   .srcfreq     = BOARD_SERCOM0_FREQUENCY,
   .base        = SAM_SERCOM0_BASE,
-  .spilock     = NXMUTEX_INITIALIZER,
+  .spilock     = SEM_INITIALIZER(1),
 #ifdef CONFIG_SAMD5E5SPI_DMA
   .dma_tx_trig = DMAC_TRIGSRC_SERCOM0_TX,
   .dma_rx_trig = DMAC_TRIGSRC_SERCOM0_RX,
-  .dmasem      = SEM_INITIALIZER(0),
 #endif
 };
 #endif
@@ -285,11 +284,10 @@ static struct sam_spidev_s g_spi1dev =
   .muxconfig   = BOARD_SERCOM1_MUXCONFIG,
   .srcfreq     = BOARD_SERCOM1_FREQUENCY,
   .base        = SAM_SERCOM1_BASE,
-  .spilock     = NXMUTEX_INITIALIZER,
+  .spilock     = SEM_INITIALIZER(1),
 #ifdef CONFIG_SAMD5E5SPI_DMA
   .dma_tx_trig = DMAC_TRIGSRC_SERCOM1_TX,
   .dma_rx_trig = DMAC_TRIGSRC_SERCOM1_RX,
-  .dmasem      = SEM_INITIALIZER(0),
 #endif
 };
 #endif
@@ -336,11 +334,10 @@ static struct sam_spidev_s g_spi2dev =
   .muxconfig   = BOARD_SERCOM2_MUXCONFIG,
   .srcfreq     = BOARD_SERCOM2_FREQUENCY,
   .base        = SAM_SERCOM2_BASE,
-  .spilock     = NXMUTEX_INITIALIZER,
+  .spilock     = SEM_INITIALIZER(1),
 #ifdef CONFIG_SAMD5E5SPI_DMA
   .dma_tx_trig = DMAC_TRIGSRC_SERCOM2_TX,
   .dma_rx_trig = DMAC_TRIGSRC_SERCOM2_RX,
-  .dmasem      = SEM_INITIALIZER(0),
 #endif
 };
 #endif
@@ -387,11 +384,10 @@ static struct sam_spidev_s g_spi3dev =
   .muxconfig   = BOARD_SERCOM3_MUXCONFIG,
   .srcfreq     = BOARD_SERCOM3_FREQUENCY,
   .base        = SAM_SERCOM3_BASE,
-  .spilock     = NXMUTEX_INITIALIZER,
+  .spilock     = SEM_INITIALIZER(1),
 #ifdef CONFIG_SAMD5E5SPI_DMA
   .dma_tx_trig = DMAC_TRIGSRC_SERCOM3_TX,
   .dma_rx_trig = DMAC_TRIGSRC_SERCOM3_RX,
-  .dmasem      = SEM_INITIALIZER(0),
 #endif
 };
 #endif
@@ -438,11 +434,10 @@ static struct sam_spidev_s g_spi4dev =
   .muxconfig   = BOARD_SERCOM4_MUXCONFIG,
   .srcfreq     = BOARD_SERCOM4_FREQUENCY,
   .base        = SAM_SERCOM4_BASE,
-  .spilock     = NXMUTEX_INITIALIZER,
+  .spilock     = SEM_INITIALIZER(1),
 #ifdef CONFIG_SAMD5E5SPI_DMA
   .dma_tx_trig = DMAC_TRIGSRC_SERCOM4_TX,
   .dma_rx_trig = DMAC_TRIGSRC_SERCOM4_RX,
-  .dmasem      = SEM_INITIALIZER(0),
 #endif
 };
 #endif
@@ -489,11 +484,10 @@ static struct sam_spidev_s g_spi5dev =
   .muxconfig   = BOARD_SERCOM5_MUXCONFIG,
   .srcfreq     = BOARD_SERCOM5_FREQUENCY,
   .base        = SAM_SERCOM5_BASE,
-  .spilock     = NXMUTEX_INITIALIZER,
+  .spilock     = SEM_INITIALIZER(1),
 #ifdef CONFIG_SAMD5E5SPI_DMA
   .dma_tx_trig = DMAC_TRIGSRC_SERCOM5_TX,
   .dma_rx_trig = DMAC_TRIGSRC_SERCOM5_RX,
-  .dmasem      = SEM_INITIALIZER(0),
 #endif
 };
 #endif
@@ -540,11 +534,10 @@ static struct sam_spidev_s g_spi6dev =
   .muxconfig   = BOARD_SERCOM6_MUXCONFIG,
   .srcfreq     = BOARD_SERCOM6_FREQUENCY,
   .base        = SAM_SERCOM6_BASE,
-  .spilock     = NXMUTEX_INITIALIZER,
+  .spilock     = SEM_INITIALIZER(1),
 #ifdef CONFIG_SAMD5E5SPI_DMA
   .dma_tx_trig = DMAC_TRIGSRC_SERCOM6_TX,
   .dma_rx_trig = DMAC_TRIGSRC_SERCOM6_RX,
-  .dmasem      = SEM_INITIALIZER(0),
 #endif
 };
 #endif
@@ -591,11 +584,10 @@ static struct sam_spidev_s g_spi7dev =
   .muxconfig   = BOARD_SERCOM7_MUXCONFIG,
   .srcfreq     = BOARD_SERCOM7_FREQUENCY,
   .base        = SAM_SERCOM7_BASE,
-  .spilock     = NXMUTEX_INITIALIZER,
+  .spilock     = SEM_INITIALIZER(1),
 #ifdef CONFIG_SAMD5E5SPI_DMA
   .dma_tx_trig = DMAC_TRIGSRC_SERCOM7_TX,
   .dma_rx_trig = DMAC_TRIGSRC_SERCOM7_RX,
-  .dmasem      = SEM_INITIALIZER(0),
 #endif
 };
 #endif
@@ -616,7 +608,7 @@ static struct sam_spidev_s g_spi7dev =
  *
  * Returned Value:
  *   true:  This is the first register access of this type.
- *   false: This is the same as the preceding register access.
+ *   flase: This is the same as the preceding register access.
  *
  ****************************************************************************/
 
@@ -841,7 +833,7 @@ static void spi_dumpregs(struct sam_spidev_s *priv, const char *msg)
  ****************************************************************************/
 
 #if 0 /* Not used */
-static int spi_interrupt(int irq, void *context, void *arg)
+static int spi_interrupt(int irq, void *context, FAR void *arg)
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)arg
   uint8_t pending;
@@ -915,11 +907,11 @@ static int spi_lock(struct spi_dev_s *dev, bool lock)
   spiinfo("lock=%d\n", lock);
   if (lock)
     {
-      ret = nxmutex_lock(&priv->spilock);
+      ret = nxsem_wait_uninterruptible(&priv->spilock);
     }
   else
     {
-      ret = nxmutex_unlock(&priv->spilock);
+      ret = nxsem_post(&priv->spilock);
     }
 
   return ret;
@@ -961,9 +953,7 @@ static uint32_t spi_setfrequency(struct spi_dev_s *dev, uint32_t frequency)
       frequency = maxfreq;
     }
 
-  /* Check if the requested frequency is the same as the frequency
-   * selection.
-   */
+  /* Check if the requested frequency is the same as the frequency selection */
 
   if (priv->frequency == frequency)
     {
@@ -972,7 +962,7 @@ static uint32_t spi_setfrequency(struct spi_dev_s *dev, uint32_t frequency)
       return priv->actual;
     }
 
-  /* For synchronous mode, the BAUD rate (Fbaud) is generated from the
+  /* For synchronous mode, the BAUAD rate (Fbaud) is generated from the
    * source clock frequency (Fref) as follows:
    *
    *   Fbaud = Fref / (2 * (BAUD + 1))
@@ -1109,7 +1099,7 @@ static void spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
  *
  * Input Parameters:
  *   dev -  Device-specific state data
- *   nbits - The number of bits requested
+ *   nbits - The number of bits requests
  *
  * Returned Value:
  *   none
@@ -1121,9 +1111,8 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
   struct sam_spidev_s *priv = (struct sam_spidev_s *)dev;
   uint32_t regval;
 
-  DEBUGASSERT(priv != NULL);
   spiinfo("sercom=%d nbits=%d\n", priv->sercom, nbits);
-  DEBUGASSERT(nbits > 7 && nbits < 10);
+  DEBUGASSERT(priv && nbits > 7 && nbits < 10);
 
   /* Has the number of bits changed? */
 
@@ -1141,9 +1130,7 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
 
       spi_putreg32(priv, regval, SAM_SPI_CTRLB_OFFSET);
 
-      /* Save the selection so that subsequent re-configurations will be
-       * faster.
-       */
+      /* Save the selection so the subsequence re-configurations will be faster */
 
       priv->nbits = nbits;
     }
@@ -1272,8 +1259,8 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
 
   /* Start RX and TX DMA channels */
 
-  sam_dmastart(priv->dma_tx, spi_dma_callback, priv);
-  sam_dmastart(priv->dma_rx, spi_dma_callback, priv);
+  sam_dmastart(priv->dma_tx, spi_dma_callback, (void *)priv);
+  sam_dmastart(priv->dma_rx, spi_dma_callback, (void *)priv);
 
   /* Enable SPI to trigger the TX DMA channel */
 
@@ -1529,6 +1516,11 @@ static void spi_dma_setup(struct sam_spidev_s *priv)
   priv->dma_tx = sam_dmachannel(DMACH_FLAG_BEATSIZE_BYTE |
                                 DMACH_FLAG_MEM_INCREMENT |
                                 DMACH_FLAG_PERIPH_TXTRIG(priv->dma_tx_trig));
+
+  /* Initialize the semaphore used to notify when DMA is complete */
+
+  nxsem_init(&priv->dmasem, 0, 0);
+  nxsem_setprotocol(&priv->dmasem, SEM_PRIO_NONE);
 }
 #endif
 
@@ -1558,7 +1550,7 @@ struct spi_dev_s *sam_spibus_initialize(int port)
 
   /* Get the port state structure */
 
-  spiinfo("port: %d\n", port);
+  spiinfo("port: %d \n", port);
 
 #ifdef SAMD5E5_HAVE_SPI0
   if (port == 0)

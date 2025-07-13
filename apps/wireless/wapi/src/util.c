@@ -1,10 +1,13 @@
 /****************************************************************************
  * apps/wireless/wapi/src/util.c
  *
- * SPDX-License-Identifier: BSD-2-Clause
- * SPDX-FileCopyrightText: 2011, 2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2010 Volkan YAZICI <volkan.yazici@gmail.com>
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2011, 2017Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Adapted for Nuttx from WAPI:
+ *
+ *   Copyright (c) 2010, Volkan YAZICI <volkan.yazici@gmail.com>
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,13 +43,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <ctype.h>
-#include <netinet/ether.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
-
-#include <nuttx/net/netconfig.h>
 
 #include "wireless/wapi.h"
 #include "util.h"
@@ -86,13 +86,12 @@ static FAR void *wapi_json_load(FAR const char *confname)
       return NULL;
     }
 
-  buf = malloc(sb.st_size + 1);
+  buf = malloc(sb.st_size);
   if (!buf)
     {
       goto errout;
     }
 
-  buf[sb.st_size] = '\0';
   fd = open(confname, O_RDONLY);
   if (fd < 0)
     {
@@ -112,7 +111,7 @@ errout:
       free(buf);
     }
 
-  if (fd >= 0)
+  if (fd > 0)
     {
       close(fd);
     }
@@ -146,7 +145,7 @@ static bool wapi_json_update(FAR cJSON *root,
           int len = strlen(obj->valuestring);
           if (len > 0)
             {
-              if (!strcmp(value, obj->valuestring))
+              if (!strncmp(value, obj->valuestring, len))
                 {
                   return false;
                 }
@@ -188,8 +187,7 @@ static bool wapi_json_update(FAR cJSON *root,
 
 int wapi_make_socket(void)
 {
-  int fd = socket(NET_SOCK_FAMILY, NET_SOCK_TYPE, NET_SOCK_PROTOCOL);
-  return fd < 0 ? -errno : fd;
+  return socket(PF_INETX, SOCK_WAPI, 0);
 }
 
 /****************************************************************************
@@ -240,9 +238,6 @@ FAR const char *wapi_ioctl_command_name(int cmd)
     case SIOCGIWTXPOW:
       return "SIOCGIWTXPOW";
 
-    case SIOCGIWPTAPRIO:
-      return "SIOCGIWPTAPRIO";
-
     case SIOCSIFADDR:
       return "SIOCSIFADDR";
 
@@ -258,9 +253,6 @@ FAR const char *wapi_ioctl_command_name(int cmd)
     case SIOCSIWMODE:
       return "SIOCSIWMODE";
 
-    case SIOCGIWSENS:
-      return "SIOCGIWSENS";
-
     case SIOCSIWRATE:
       return "SIOCSIWRATE";
 
@@ -269,15 +261,6 @@ FAR const char *wapi_ioctl_command_name(int cmd)
 
     case SIOCSIWTXPOW:
       return "SIOCSIWTXPOW";
-
-    case SIOCSIWPTAPRIO:
-      return "SIOCSIWPTAPRIO";
-
-    case SIOCSIWPMKSA:
-      return "SIOCSIWPMKSA";
-
-    case SIOCGIWPMKSA:
-      return "SIOCGIWPMKSA";
 
     default:
       snprintf(g_ioctl_command_namebuf, WAPI_IOCTL_COMMAND_NAMEBUFSIZ,
@@ -324,7 +307,6 @@ FAR void *wapi_load_config(FAR const char *ifname,
                            FAR const char *confname,
                            FAR struct wpa_wconfig_s *conf)
 {
-  FAR struct ether_addr *ap;
   FAR cJSON *ifobj;
   FAR cJSON *root;
   FAR cJSON *obj;
@@ -353,8 +335,6 @@ FAR void *wapi_load_config(FAR const char *ifname,
     {
       goto errout;
     }
-
-  memset(conf, 0, sizeof(*conf));
 
   obj = cJSON_GetObjectItem(ifobj, "mode");
   if (!obj)
@@ -396,18 +376,6 @@ FAR void *wapi_load_config(FAR const char *ifname,
 
   conf->ssid = (FAR const char *)obj->valuestring;
 
-  obj = cJSON_GetObjectItem(ifobj, "bssid");
-  if (!obj || !obj->valuestring)
-    {
-      goto errout;
-    }
-
-  ap = ether_aton(obj->valuestring);
-  if (ap != NULL)
-    {
-      conf->bssid = (FAR const char *)ap->ether_addr_octet;
-    }
-
   obj = cJSON_GetObjectItem(ifobj, "psk");
   if (!obj || !obj->valuestring)
     {
@@ -446,13 +414,13 @@ int wapi_save_config(FAR const char *ifname,
   FAR char *buf = NULL;
   FAR cJSON *ifobj;
   FAR cJSON *root;
-  int ret = -ENOMEM;
+  int ret = -1;
   int fd = -1;
   bool update;
 
   if (ifname == NULL || conf == NULL)
     {
-      return -EINVAL;
+      return ret;
     }
 
   if (confname == NULL)
@@ -492,8 +460,6 @@ int wapi_save_config(FAR const char *ifname,
                              (FAR void *)(intptr_t)conf->alg, true);
   update |= wapi_json_update(ifobj, "ssid",
                              (FAR void *)conf->ssid, false);
-  update |= wapi_json_update(ifobj, "bssid",
-                             (FAR void *)conf->bssid, false);
   update |= wapi_json_update(ifobj, "psk",
                              (FAR void *)conf->passphrase, false);
 
@@ -509,18 +475,13 @@ int wapi_save_config(FAR const char *ifname,
       goto errout;
     }
 
-  fd = open(confname, O_RDWR | O_CREAT | O_TRUNC, 0644);
+  fd = open(confname, O_RDWR | O_CREAT | O_TRUNC);
   if (fd < 0)
     {
-      ret = -errno;
       goto errout;
     }
 
   ret = write(fd, buf, strlen(buf));
-  if (ret < 0)
-    {
-      ret = -errno;
-    }
 
 errout:
   if (buf)
@@ -528,7 +489,7 @@ errout:
       free(buf);
     }
 
-  if (fd >= 0)
+  if (fd > 0)
     {
       close(fd);
     }

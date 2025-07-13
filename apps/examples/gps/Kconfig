@@ -6,7 +6,7 @@
 config EXAMPLES_GPS
 	tristate "GPS example"
 	default n
-	depends on GNSSUTILS_MINMEA_LIB
+	select GPSUTILS_MINMEA_LIB
 	---help---
 		Enable the gps test example
 

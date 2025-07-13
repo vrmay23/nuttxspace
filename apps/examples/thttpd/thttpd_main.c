@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/thttpd/thttpd_main.c
+ * examples/thttpd/thttpd_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009-2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+  * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name Gregory Nutt nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -40,17 +53,24 @@
 #include <netinet/in.h>
 #include <netinet/ether.h>
 
+#include <nuttx/net/arp.h>
 #include "netutils/netlib.h"
 #include "netutils/thttpd.h"
 
 #include <nuttx/drivers/ramdisk.h>
 
-#ifdef CONFIG_THTTPD_NXFLAT
-#  include <sys/boardctl.h>
+#ifdef CONFIG_THTTPD_BINFS
+#  include <nuttx/fs/unionfs.h>
 #endif
 
 #ifdef CONFIG_NET_SLIP
 #  include <nuttx/net/net.h>
+#endif
+
+#include "content/romfs.h"
+
+#ifdef CONFIG_THTTPD_NXFLAT
+#  include "content/symtab.h"
 #endif
 
 /****************************************************************************
@@ -77,10 +97,6 @@
 #  ifdef CONFIG_DISABLE_MOUNTPOINT
 #    error "You must not disable mountpoints via CONFIG_DISABLE_MOUNTPOINT in your configuration file"
 #  endif
-
-#ifndef CONFIG_BOARDCTL_ROMDISK
-#  error "CONFIG_BOARDCTL_ROMDISK should be enabled in the configuration file"
-#endif
 #endif
 
 #ifdef CONFIG_THTTPD_BINFS
@@ -100,13 +116,13 @@
 /* Ethernet specific configuration */
 
 #ifdef CONFIG_NET_ETHERNET
-/* Use the standard Ethernet device name */
+   /* Use the standard Ethernet device name */
 
 #  define NET_DEVNAME "eth0"
 
 #else
 
-/* No Ethernet -> No MAC address operations */
+   /* No Ethernet -> No MAC address operations */
 
 #  undef CONFIG_EXAMPLES_THTTPD_NOMAC
 #endif
@@ -115,7 +131,7 @@
 
 #ifdef CONFIG_NET_SLIP
 
-/* TTY device to use */
+   /* TTY device to use */
 
 #  ifndef CONFIG_NET_SLIPTTY
 #    define CONFIG_NET_SLIPTTY "/dev/ttyS1"
@@ -136,7 +152,7 @@
 
 #ifdef CONFIG_THTTPD_BINFS
 #  define ROMFS_MOUNTPT      "/mnt/tmp1"
-#  define ROMFS_PREFIX       ""
+#  define ROMFS_PREFIX       NULL
 #  define BINFS_MOUNTPT      "/mnt/tmp2"
 #  define BINFS_PREFIX       "cgi-bin"
 #  define UNIONFS_MOUNTPT    CONFIG_THTTPD_PATH
@@ -163,19 +179,7 @@
  */
 
 FAR const struct symtab_s *g_thttpdsymtab;
-int                        g_thttpdnsymbols;
-#endif
-
-/****************************************************************************
- * Symbols from Auto-Generated Code
- ****************************************************************************/
-
-extern const unsigned char romfs_img[];
-extern const unsigned int romfs_img_len;
-
-#ifdef CONFIG_THTTPD_NXFLAT
-extern const struct symtab_s g_thttpd_exports[];
-extern const int g_thttpd_nexports;
+int                         g_thttpdnsymbols;
 #endif
 
 /****************************************************************************
@@ -194,9 +198,6 @@ int main(int argc, FAR char *argv[])
 #endif
   char *thttpd_argv = "thttpd";
   int ret;
-#ifdef CONFIG_THTTPD_NXFLAT
-  struct boardioc_romdisk_s desc;
-#endif
 
   /* Configure SLIP */
 
@@ -209,7 +210,7 @@ int main(int argc, FAR char *argv[])
     }
 #endif
 
-  /* Many embedded network interfaces must have a software assigned MAC */
+/* Many embedded network interfaces must have a software assigned MAC */
 
 #ifdef CONFIG_EXAMPLES_THTTPD_NOMAC
   printf("Assigning MAC\n");
@@ -245,18 +246,11 @@ int main(int argc, FAR char *argv[])
 
   netlib_ifup("eth0");
 
-#ifdef CONFIG_THTTPD_NXFLAT
   /* Create a ROM disk for the ROMFS filesystem */
 
   printf("Registering romdisk\n");
 
-  desc.minor    = 0;                                    /* Minor device number of the ROM disk. */
-  desc.nsectors = NSECTORS(romfs_img_len);              /* The number of sectors in the ROM disk */
-  desc.sectsize = SECTORSIZE;                           /* The size of one sector in bytes */
-  desc.image    = (FAR uint8_t *)romfs_img;             /* File system image */
-
-  ret = boardctl(BOARDIOC_ROMDISK, (uintptr_t)&desc);
-
+  ret = romdisk_register(0, (uint8_t*)romfs_img, NSECTORS(romfs_img_len), SECTORSIZE);
   if (ret < 0)
     {
       printf("ERROR: romdisk_register failed: %d\n", ret);
@@ -274,7 +268,6 @@ int main(int argc, FAR char *argv[])
       printf("ERROR: mount(%s,%s,romfs) failed: %d\n",
              ROMFSDEV, ROMFS_MOUNTPT, errno);
     }
-#endif
 
 #ifdef CONFIG_THTTPD_BINFS
   /* Mount the BINFS file system */
@@ -284,31 +277,26 @@ int main(int argc, FAR char *argv[])
   ret = mount(NULL, BINFS_MOUNTPT, "binfs", MS_RDONLY, NULL);
   if (ret < 0)
     {
-      printf("ERROR: mount(NULL,%s,binfs) failed: %d\n",
-             BINFS_MOUNTPT, errno);
+      printf("ERROR: mount(NULL,%s,binfs) failed: %d\n", BINFS_MOUNTPT, errno);
     }
 
   /* Now create and mount the union file system */
 
   printf("Creating UNIONFS filesystem at %s\n", UNIONFS_MOUNTPT);
 
-  ret = mount(NULL, UNIONFS_MOUNTPT, "unionfs", 0,
-              "fspath1=" ROMFS_MOUNTPT ",prefix1=" ROMFS_PREFIX
-              ",fspath2=" BINFS_MOUNTPT ",prefix2=" BINFS_PREFIX);
+  ret = unionfs_mount(ROMFS_MOUNTPT, ROMFS_PREFIX, BINFS_MOUNTPT, BINFS_PREFIX,
+                      UNIONFS_MOUNTPT);
   if (ret < 0)
     {
-      printf("ERROR: Failed to create the union file system at %s: %d\n",
-             UNIONFS_MOUNTPT, ret);
+      printf("ERROR: Failed to create the union file system at %s: %d\n", UNIONFS_MOUNTPT, ret);
     }
 #endif
 
-  /* Start THTTPD.  At present, symbol table info is passed via
-   * global variables.
-   */
+  /* Start THTTPD.  At present, symbol table info is passed via global variables */
 
 #ifdef CONFIG_THTTPD_NXFLAT
   g_thttpdsymtab   = g_thttpd_exports;
-  g_thttpdnsymbols = g_thttpd_nexports;
+  g_thttpdnsymbols = NEXPORTS;
 #endif
 
   printf("Starting THTTPD\n");

@@ -1,10 +1,9 @@
-/****************************************************************************
+/************************************************************************************************
  * arch/arm/src/imxrt/hardware/imxrt_lcd.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2016-2018 NXP. All rights reserved.
- * SPDX-FileContributor: Johannes Schock (Port)
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2016-2018 NXP. All rights reserved.
+ *   Author: Johannes Schock (Port)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,23 +32,23 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_IMXRT_HARDWARE_IMXRT_LCD_H
 #define __ARCH_ARM_SRC_IMXRT_HARDWARE_IMXRT_LCD_H
 
-/****************************************************************************
+/************************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/imxrt_memorymap.h"
 
-/****************************************************************************
+/************************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************************/
 
-/* Register offsets *********************************************************/
+/* Register offsets *****************************************************************************/
 
 #define IMXRT_LCDIF_CTRL_OFFSET               0x0000  /* General Control Register */
 #define IMXRT_LCDIF_CTRL_SET_OFFSET           0x0004  /* General Control Register */
@@ -106,7 +105,7 @@
 #define IMXRT_LCDIF_LUT1_ADDR_OFFSET          0x0b30  /* Lookup Table Control Register */
 #define IMXRT_LCDIF_LUT1_DATA_OFFSET          0x0b40  /* Lookup Table Data Register */
 
-/* Register Addresses *******************************************************/
+/* Register Addresses ***************************************************************************/
 
 #define IMXRT_LCDIF_CTRL                  (IMXRT_LCDIF_BASE + IMXRT_LCDIF_CTRL_OFFSET)
 #define IMXRT_LCDIF_CTRL_SET              (IMXRT_LCDIF_BASE + IMXRT_LCDIF_CTRL_SET_OFFSET)
@@ -160,7 +159,7 @@
 #define IMXRT_LCDIF_LUT1_DATA             (IMXRT_LCDIF_BASE + IMXRT_LCDIF_LUT1_DATA_OFFSET)
 #define IMXRT_LCDIF_LUT_ENTRY_NUM         (256)
 
-/* Register Bitfield Definitions ********************************************/
+/* Register Bitfield Definitions ****************************************************************/
 
 /* CTRL - LCDIF General Control Register */
 
@@ -169,25 +168,16 @@
 #define LCDIF_CTRL_RUN(x)                        (((uint32_t)(((uint32_t)(x)) << LCDIF_CTRL_RUN_SHIFT)) & LCDIF_CTRL_RUN_MASK)
 #define LCDIF_CTRL_DATA_FORMAT_24_BIT_MASK       (0x2U)
 #define LCDIF_CTRL_DATA_FORMAT_24_BIT_SHIFT      (1U)
-
 /* DATA_FORMAT_24_BIT
- *  0b0..Data input to the block is in 24 bpp format, such that all RGB 888
- *            data is contained in 24 bits.
- *  0b1..Data input to the block is actually RGB 18 bpp, but there is 1 color
- *            per byte, hence the upper 2 bits in each byte do not contain
- *            any useful data, and should be dropped.
+ *  0b0..Data input to the block is in 24 bpp format, such that all RGB 888 data is contained in 24 bits.
+ *  0b1..Data input to the block is actually RGB 18 bpp, but there is 1 color per byte, hence the upper 2 bits in each byte do not contain any useful data, and should be dropped.
  */
 #define LCDIF_CTRL_DATA_FORMAT_24_BIT(x)         (((uint32_t)(((uint32_t)(x)) << LCDIF_CTRL_DATA_FORMAT_24_BIT_SHIFT)) & LCDIF_CTRL_DATA_FORMAT_24_BIT_MASK)
 #define LCDIF_CTRL_DATA_FORMAT_18_BIT_MASK       (0x4U)
 #define LCDIF_CTRL_DATA_FORMAT_18_BIT_SHIFT      (2U)
-
 /* DATA_FORMAT_18_BIT
- *  0b0..Data input to the block is in 18 bpp format, such that lower 18
- *            bits contain RGB 666 and upper 14 bits do not contain any
- *            useful data.
- *  0b1..Data input to the block is in 18 bpp format, such that upper 18
- *            bits contain RGB 666 and lower 14 bits do not contain any
- *            useful data.
+ *  0b0..Data input to the block is in 18 bpp format, such that lower 18 bits contain RGB 666 and upper 14 bits do not contain any useful data.
+ *  0b1..Data input to the block is in 18 bpp format, such that upper 18 bits contain RGB 666 and lower 14 bits do not contain any useful data.
  */
 #define LCDIF_CTRL_DATA_FORMAT_18_BIT(x)         (((uint32_t)(((uint32_t)(x)) << LCDIF_CTRL_DATA_FORMAT_18_BIT_SHIFT)) & LCDIF_CTRL_DATA_FORMAT_18_BIT_MASK)
 #define LCDIF_CTRL_DATA_FORMAT_16_BIT_MASK       (0x8U)
@@ -282,11 +272,8 @@
 #define LCDIF_CTRL_SET_DATA_FORMAT_24_BIT_SHIFT  (1U)
 
 /* DATA_FORMAT_24_BIT
- *  0b0..Data input to the block is in 24 bpp format, such that all RGB 888
- *            data is contained in 24 bits.
- *  0b1..Data input to the block is actually RGB 18 bpp, but there is 1 color
- *            per byte, hence the upper 2 bits in each byte do not contain
- *            any useful data, and should be dropped.
+ *  0b0..Data input to the block is in 24 bpp format, such that all RGB 888 data is contained in 24 bits.
+ *  0b1..Data input to the block is actually RGB 18 bpp, but there is 1 color per byte, hence the upper 2 bits in each byte do not contain any useful data, and should be dropped.
  */
 
 #define LCDIF_CTRL_SET_DATA_FORMAT_24_BIT(x)     (((uint32_t)(((uint32_t)(x)) << LCDIF_CTRL_SET_DATA_FORMAT_24_BIT_SHIFT)) & LCDIF_CTRL_SET_DATA_FORMAT_24_BIT_MASK)
@@ -294,12 +281,8 @@
 #define LCDIF_CTRL_SET_DATA_FORMAT_18_BIT_SHIFT  (2U)
 
 /* DATA_FORMAT_18_BIT
- *  0b0..Data input to the block is in 18 bpp format, such that lower 18
- *            bits contain RGB 666 and upper 14 bits do not contain any
- *            useful data.
- *  0b1..Data input to the block is in 18 bpp format, such that upper 18
- *            bits contain RGB 666 and lower 14 bits do not contain any
- *            useful data.
+ *  0b0..Data input to the block is in 18 bpp format, such that lower 18 bits contain RGB 666 and upper 14 bits do not contain any useful data.
+ *  0b1..Data input to the block is in 18 bpp format, such that upper 18 bits contain RGB 666 and lower 14 bits do not contain any useful data.
  */
 
 #define LCDIF_CTRL_SET_DATA_FORMAT_18_BIT(x)     (((uint32_t)(((uint32_t)(x)) << LCDIF_CTRL_SET_DATA_FORMAT_18_BIT_SHIFT)) & LCDIF_CTRL_SET_DATA_FORMAT_18_BIT_MASK)
@@ -397,11 +380,8 @@
 #define LCDIF_CTRL_CLR_DATA_FORMAT_24_BIT_SHIFT  (1U)
 
 /* DATA_FORMAT_24_BIT
- *  0b0..Data input to the block is in 24 bpp format, such that all RGB 888
- *            data is contained in 24 bits.
- *  0b1..Data input to the block is actually RGB 18 bpp, but there is 1
- *            color per byte, hence the upper 2 bits in each byte do not
- *            contain any useful data, and should be dropped.
+ *  0b0..Data input to the block is in 24 bpp format, such that all RGB 888 data is contained in 24 bits.
+ *  0b1..Data input to the block is actually RGB 18 bpp, but there is 1 color per byte, hence the upper 2 bits in each byte do not contain any useful data, and should be dropped.
  */
 
 #define LCDIF_CTRL_CLR_DATA_FORMAT_24_BIT(x)     (((uint32_t)(((uint32_t)(x)) << LCDIF_CTRL_CLR_DATA_FORMAT_24_BIT_SHIFT)) & LCDIF_CTRL_CLR_DATA_FORMAT_24_BIT_MASK)
@@ -409,12 +389,8 @@
 #define LCDIF_CTRL_CLR_DATA_FORMAT_18_BIT_SHIFT  (2U)
 
 /* DATA_FORMAT_18_BIT
- *  0b0..Data input to the block is in 18 bpp format, such that lower 18
- *            bits contain RGB 666 and upper 14 bits do not contain any
- *            useful data.
- *  0b1..Data input to the block is in 18 bpp format, such that upper 18
- *            bits contain RGB 666 and lower 14 bits do not contain any
- *            useful data.
+ *  0b0..Data input to the block is in 18 bpp format, such that lower 18 bits contain RGB 666 and upper 14 bits do not contain any useful data.
+ *  0b1..Data input to the block is in 18 bpp format, such that upper 18 bits contain RGB 666 and lower 14 bits do not contain any useful data.
  */
 
 #define LCDIF_CTRL_CLR_DATA_FORMAT_18_BIT(x)     (((uint32_t)(((uint32_t)(x)) << LCDIF_CTRL_CLR_DATA_FORMAT_18_BIT_SHIFT)) & LCDIF_CTRL_CLR_DATA_FORMAT_18_BIT_MASK)
@@ -512,11 +488,8 @@
 #define LCDIF_CTRL_TOG_DATA_FORMAT_24_BIT_SHIFT  (1U)
 
 /* DATA_FORMAT_24_BIT
- *  0b0..Data input to the block is in 24 bpp format, such that all RGB 888
- *            data is contained in 24 bits.
- *  0b1..Data input to the block is actually RGB 18 bpp, but there is 1
- *            color per byte, hence the upper 2 bits in each byte do not
- *            contain any useful data, and should be dropped.
+ *  0b0..Data input to the block is in 24 bpp format, such that all RGB 888 data is contained in 24 bits.
+ *  0b1..Data input to the block is actually RGB 18 bpp, but there is 1 color per byte, hence the upper 2 bits in each byte do not contain any useful data, and should be dropped.
  */
 
 #define LCDIF_CTRL_TOG_DATA_FORMAT_24_BIT(x)     (((uint32_t)(((uint32_t)(x)) << LCDIF_CTRL_TOG_DATA_FORMAT_24_BIT_SHIFT)) & LCDIF_CTRL_TOG_DATA_FORMAT_24_BIT_MASK)
@@ -524,12 +497,8 @@
 #define LCDIF_CTRL_TOG_DATA_FORMAT_18_BIT_SHIFT  (2U)
 
 /* DATA_FORMAT_18_BIT
- *  0b0..Data input to the block is in 18 bpp format, such that lower 18
- *            bits contain RGB 666 and upper 14 bits do not contain any
- *            useful data.
- *  0b1..Data input to the block is in 18 bpp format, such that upper 18
- *            bits contain RGB 666 and lower 14 bits do not contain any
- *            useful data.
+ *  0b0..Data input to the block is in 18 bpp format, such that lower 18 bits contain RGB 666 and upper 14 bits do not contain any useful data.
+ *  0b1..Data input to the block is in 18 bpp format, such that upper 18 bits contain RGB 666 and lower 14 bits do not contain any useful data.
  */
 
 #define LCDIF_CTRL_TOG_DATA_FORMAT_18_BIT(x)     (((uint32_t)(((uint32_t)(x)) << LCDIF_CTRL_TOG_DATA_FORMAT_18_BIT_SHIFT)) & LCDIF_CTRL_TOG_DATA_FORMAT_18_BIT_MASK)

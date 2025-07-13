@@ -1,22 +1,35 @@
 /****************************************************************************
- * net/local/local_recvutils.c
+ * net/local/local_recvpacket.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -38,6 +51,8 @@
 
 #include "local/local.h"
 
+#if defined(CONFIG_NET) && defined(CONFIG_NET_LOCAL)
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -53,18 +68,16 @@
  *   buf   - Local to store the received data
  *   len   - Length of data to receive [in]
  *           Length of data actually received [out]
- *           Zero means *len[in] is zero,
- *           or the sending side has closed the FIFO
- *   once  - Flag to indicate the buf may only be read once
  *
  * Returned Value:
  *   Zero is returned on success; a negated errno value is returned on any
- *   failure.
+ *   failure.  If -ECONNRESET is received, then the sending side has closed
+ *   the FIFO. In this case, the returned data may still be valid (if the
+ *   returned len > 0).
  *
  ****************************************************************************/
 
-int local_fifo_read(FAR struct file *filep, FAR uint8_t *buf,
-                    size_t *len, bool once)
+int local_fifo_read(FAR struct file *filep, FAR uint8_t *buf, size_t *len)
 {
   ssize_t remaining;
   ssize_t nread;
@@ -78,22 +91,14 @@ int local_fifo_read(FAR struct file *filep, FAR uint8_t *buf,
       nread = file_read(filep, buf, remaining);
       if (nread < 0)
         {
-          ret = (int)nread;
+          if (nread != -EINTR)
+            {
+              ret = (int)nread;
+              nerr("ERROR: nx_read() failed: %d\n", ret);
+              goto errout;
+            }
 
-          if (ret == -EINTR)
-            {
-              ninfo("Ignoring signal\n");
-              continue;
-            }
-          else if (ret == -EAGAIN)
-            {
-              goto errout;
-            }
-          else
-            {
-              nerr("ERROR: file_read() failed: %d\n", ret);
-              goto errout;
-            }
+          ninfo("Ignoring signal\n");
         }
       else if (nread == 0)
         {
@@ -101,18 +106,14 @@ int local_fifo_read(FAR struct file *filep, FAR uint8_t *buf,
            * has closed the FIFO.
            */
 
-            break;
+          ret = -ECONNRESET;
+          goto errout;
         }
       else
         {
           DEBUGASSERT(nread <= remaining);
           remaining -= nread;
           buf       += nread;
-
-          if (once)
-            {
-              break;
-            }
         }
     }
 
@@ -121,6 +122,71 @@ int local_fifo_read(FAR struct file *filep, FAR uint8_t *buf,
 errout:
   *len -= remaining;
   return ret;
+}
+
+/****************************************************************************
+ * Name: local_sync
+ *
+ * Description:
+ *   Read a sync bytes until the start of the packet is found.
+ *
+ * Input Parameters:
+ *   filep - File structure of write-only FIFO.
+ *
+ * Returned Value:
+ *   The non-zero size of the following packet is returned on success; a
+ *   negated errno value is returned on any failure.
+ *
+ ****************************************************************************/
+
+int local_sync(FAR struct file *filep)
+{
+  size_t readlen;
+  uint16_t pktlen;
+  uint8_t sync;
+  int ret;
+
+  /* Loop until a valid pre-amble is encountered:  SYNC bytes followed
+   * by one END byte.
+   */
+
+  do
+    {
+      /* Read until we encounter a sync byte */
+
+      do
+        {
+          readlen = sizeof(uint8_t);
+          ret     = local_fifo_read(filep, &sync, &readlen);
+          if (ret < 0)
+            {
+              nerr("ERROR: Failed to read sync bytes: %d\n", ret);
+              return ret;
+            }
+        }
+      while (sync != LOCAL_SYNC_BYTE);
+
+      /* Then read to the end of the SYNC sequence */
+
+      do
+        {
+          readlen = sizeof(uint8_t);
+          ret     = local_fifo_read(filep, &sync, &readlen);
+          if (ret < 0)
+            {
+              nerr("ERROR: Failed to read sync bytes: %d\n", ret);
+              return ret;
+            }
+        }
+      while (sync == LOCAL_SYNC_BYTE);
+    }
+  while (sync != LOCAL_END_BYTE);
+
+  /* Then read the packet length */
+
+  readlen = sizeof(uint16_t);
+  ret     = local_fifo_read(filep, (FAR uint8_t *)&pktlen, &readlen);
+  return ret < 0 ? ret : pktlen;
 }
 
 /****************************************************************************
@@ -147,7 +213,7 @@ int local_getaddr(FAR struct local_conn_s *conn, FAR struct sockaddr *addr,
   int totlen;
   int pathlen;
 
-  DEBUGASSERT(conn && addr && addrlen);
+  DEBUGASSERT(conn && addr && addrlen && *addrlen >= sizeof(sa_family_t));
 
   /* Get the length of the path (minus the NUL terminator) and the length
    * of the whole Unix domain address.
@@ -162,8 +228,8 @@ int local_getaddr(FAR struct local_conn_s *conn, FAR struct sockaddr *addr,
 
   if (totlen > *addrlen)
     {
-      pathlen -= (totlen - *addrlen);
-      totlen   = *addrlen;
+      pathlen    -= (totlen - *addrlen);
+      totlen      = *addrlen;
     }
 
   /* Copy the Unix domain address */
@@ -178,3 +244,5 @@ int local_getaddr(FAR struct local_conn_s *conn, FAR struct sockaddr *addr,
   *addrlen = totlen;
   return OK;
 }
+
+#endif /* CONFIG_NET && CONFIG_NET_LOCAL */

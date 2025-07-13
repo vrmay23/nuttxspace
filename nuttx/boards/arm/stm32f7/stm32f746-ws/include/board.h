@@ -1,22 +1,36 @@
 /****************************************************************************
  * boards/arm/stm32f7/stm32f746-ws/include/board.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *           Mark Olsson <post@markolsson.se>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +44,7 @@
 #include <nuttx/config.h>
 
 #ifndef __ASSEMBLY__
-#  include <stdint.h>
+# include <stdint.h>
 #endif
 
 /* Do not include STM32 F7 header files here */
@@ -43,10 +57,8 @@
 
 /* The STM32F7 Discovery board provides the following clock sources:
  *
- *   X1:  24 MHz oscillator for USB OTG HS PHY and camera module
- *        (daughter board)
- *   X2:  25 MHz oscillator for STM32F746NGH6 microcontroller and
- *         Ethernet PHY.
+ *   X1:  24 MHz oscillator for USB OTG HS PHY and camera module (daughter board)
+ *   X2:  25 MHz oscillator for STM32F746NGH6 microcontroller and Ethernet PHY.
  *   X3:  32.768 KHz crystal for STM32F746NGH6 embedded RTC
  *
  * So we have these clock source available within the STM32
@@ -163,6 +175,7 @@
 
 #define STM32_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK  /* HCLK  = SYSCLK / 1 */
 #define STM32_HCLK_FREQUENCY    STM32_SYSCLK_FREQUENCY
+#define STM32_BOARD_HCLK        STM32_HCLK_FREQUENCY  /* same as above, to satisfy compiler */
 
 /* APB1 clock (PCLK1) is HCLK/4 (54 MHz) */
 
@@ -208,6 +221,44 @@
 
 #define BOARD_FLASH_WAITSTATES 7
 
+/* Alternate function pin selections ****************************************/
+
+/* USART6:
+ *
+ * These configurations assume that you are using a standard Arduio RS-232
+ * shield with the serial interface with RX on pin D0 and TX on pin D1:
+ *
+ *   -------- ---------------
+ *               STM32F7
+ *   ARDUIONO FUNCTION  GPIO
+ *   -- ----- --------- -----
+ *   DO RX    USART6_RX PC7
+ *   D1 TX    USART6_TX PC6
+ *   -- ----- --------- -----
+ */
+
+#define GPIO_USART6_RX GPIO_USART6_RX_1
+#define GPIO_USART6_TX GPIO_USART6_TX_1
+
+#define GPIO_SPI1_SCK  GPIO_SPI1_SCK_1
+#define GPIO_SPI1_MISO GPIO_SPI1_MISO_1
+#define GPIO_SPI1_MOSI GPIO_SPI1_MOSI_1
+
+#define GPIO_I2C1_SCL  GPIO_I2C1_SCL_1
+#define GPIO_I2C1_SDA  GPIO_I2C1_SDA_1
+
+/* SDMMC */
+
+/* Stream selections are arbitrary for now but might become important in the future
+ * if we set aside more DMA channels/streams.
+ *
+ * SDIO DMA
+ *   DMAMAP_SDMMC1_1 = Channel 4, Stream 3
+ *   DMAMAP_SDMMC1_2 = Channel 4, Stream 6
+ */
+
+#define DMAMAP_SDMMC1  DMAMAP_SDMMC1_1
+
 /* SDIO dividers.  Note that slower clocking is required when DMA is disabled
  * in order to avoid RX overrun/TX underrun errors due to delayed responses
  * to service FIFOs in interrupt driven mode.  These values have not been
@@ -237,83 +288,5 @@
 #else
 #  define STM32_SDMMC_SDXFR_CLKDIV   (2 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 #endif
-
-/* DMA channels *************************************************************/
-
-/* SDMMC */
-
-/* Stream selections are arbitrary for now but might become important in the
- * future if we set aside more DMA channels/streams.
- *
- * SDIO DMA
- *   DMAMAP_SDMMC1_1 = Channel 4, Stream 3
- *   DMAMAP_SDMMC1_2 = Channel 4, Stream 6
- */
-
-#define DMAMAP_SDMMC1  DMAMAP_SDMMC1_1
-
-/* Alternate function pin selections ****************************************/
-
-/* ADC1 */
-
-#define GPIO_ADC1_IN0   GPIO_ADC1_IN0_0   /* PA0 */
-#define GPIO_ADC1_IN1   GPIO_ADC1_IN1_0   /* PA1 */
-#define GPIO_ADC1_IN2   GPIO_ADC1_IN2_0   /* PA2 */
-#define GPIO_ADC1_IN3   GPIO_ADC1_IN3_0   /* PA3 */
-#define GPIO_ADC1_IN4   GPIO_ADC1_IN4_0   /* PA4 */
-#define GPIO_ADC1_IN5   GPIO_ADC1_IN5_0   /* PA5 */
-#define GPIO_ADC1_IN6   GPIO_ADC1_IN6_0   /* PA6 */
-#define GPIO_ADC1_IN7   GPIO_ADC1_IN7_0   /* PA7 */
-#define GPIO_ADC1_IN8   GPIO_ADC1_IN8_0   /* PB0 */
-#define GPIO_ADC1_IN9   GPIO_ADC1_IN9_0   /* PB1 */
-#define GPIO_ADC1_IN10  GPIO_ADC1_IN10_0  /* PC0 */
-#define GPIO_ADC1_IN11  GPIO_ADC1_IN11_0  /* PC1 */
-#define GPIO_ADC1_IN12  GPIO_ADC1_IN12_0  /* PC2 */
-#define GPIO_ADC1_IN13  GPIO_ADC1_IN13_0  /* PC3 */
-#define GPIO_ADC1_IN14  GPIO_ADC1_IN14_0  /* PC4 */
-#define GPIO_ADC1_IN15  GPIO_ADC1_IN15_0  /* PC5 */
-
-/* USART6:
- *
- * These configurations assume that you are using a standard Arduio RS-232
- * shield with the serial interface with RX on pin D0 and TX on pin D1:
- *
- *   -------- ---------------
- *               STM32F7
- *   ARDUIONO FUNCTION  GPIO
- *   -- ----- --------- -----
- *   DO RX    USART6_RX PC7
- *   D1 TX    USART6_TX PC6
- *   -- ----- --------- -----
- */
-
-#define GPIO_USART6_RX (GPIO_USART6_RX_1|GPIO_SPEED_100MHz)
-#define GPIO_USART6_TX (GPIO_USART6_TX_1|GPIO_SPEED_100MHz)
-
-#define GPIO_SPI1_SCK  (GPIO_SPI1_SCK_1|GPIO_SPEED_50MHz)
-#define GPIO_SPI1_MISO (GPIO_SPI1_MISO_1|GPIO_SPEED_50MHz)
-#define GPIO_SPI1_MOSI (GPIO_SPI1_MOSI_1|GPIO_SPEED_50MHz)
-
-#define GPIO_I2C1_SCL  (GPIO_I2C1_SCL_1|GPIO_SPEED_50MHz)
-#define GPIO_I2C1_SDA  (GPIO_I2C1_SDA_1|GPIO_SPEED_50MHz)
-
-/* SDMMC1 */
-
-#define GPIO_SDMMC1_CK  (GPIO_SDMMC1_CK_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC1_CMD (GPIO_SDMMC1_CMD_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC1_D0  (GPIO_SDMMC1_D0_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC1_D1  (GPIO_SDMMC1_D1_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC1_D2  (GPIO_SDMMC1_D2_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC1_D3  (GPIO_SDMMC1_D3_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC1_D4  (GPIO_SDMMC1_D4_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC1_D5  (GPIO_SDMMC1_D5_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC1_D6  (GPIO_SDMMC1_D6_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC1_D7  (GPIO_SDMMC1_D7_0|GPIO_SPEED_50MHz)
-
-/* OTGFS */
-
-#define GPIO_OTGFS_DM  (GPIO_OTGFS_DM_0|GPIO_SPEED_100MHz)
-#define GPIO_OTGFS_DP  (GPIO_OTGFS_DP_0|GPIO_SPEED_100MHz)
-#define GPIO_OTGFS_ID  (GPIO_OTGFS_ID_0|GPIO_SPEED_100MHz)
 
 #endif /* __BOARDS_ARM_STM32F7_STM32F746_WS_INCLUDE_BOARD_H */

@@ -1,8 +1,8 @@
 /****************************************************************************
  * FreeModbus Library: A portable Modbus implementation for Modbus ASCII/RTU.
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2013 Armink <armink.ztl@gmail.com>
+ *   Copyright (C) 2013 Armink <armink.ztl@gmail.com>
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -428,13 +428,6 @@ eMBErrorCode eMBMasterPoll(void)
             }
 
           vMBMasterRunResRelease();
-          break;
-
-          case EV_MASTER_PROCESS_SUCCESS:
-          case EV_MASTER_ERROR_RESPOND_TIMEOUT:
-          case EV_MASTER_ERROR_RECEIVE_DATA:
-          case EV_MASTER_ERROR_EXECUTE_FUNCTION:
-          default:
           break;
         }
     }

@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/syslog/vsyslog.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2011-2014, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,39 +43,11 @@
 #include <syslog.h>
 #include <errno.h>
 
-#include <nuttx/arch.h>
 #include <nuttx/init.h>
+#include <nuttx/arch.h>
 #include <nuttx/clock.h>
 #include <nuttx/streams.h>
 #include <nuttx/syslog/syslog.h>
-
-#include "syslog.h"
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
-
-#if defined(CONFIG_SYSLOG_COLOR_OUTPUT)
-static FAR const char * const g_priority_color[] =
-  {
-    "\e[31;1;5m", /* LOG_EMERG, Red, Bold, Blinking */
-    "\e[31;1m",   /* LOG_ALERT, Red, Bold */
-    "\e[31;1m",   /* LOG_CRIT, Red, Bold */
-    "\e[31m",     /* LOG_ERR, Red */
-    "\e[33m",     /* LOG_WARNING, Yellow */
-    "\e[1m",      /* LOG_NOTICE, Bold */
-    "",           /* LOG_INFO, Normal */
-    "\e[2m",      /* LOG_DEBUG, Dim */
-  };
-#endif
-
-#if defined(CONFIG_SYSLOG_PRIORITY)
-static FAR const char * const g_priority_str[] =
-  {
-    "EMERG", "ALERT", "CRIT", "ERROR",
-    "WARN", "NOTICE", "INFO", "DEBUG"
-  };
-#endif
 
 /****************************************************************************
  * Public Functions
@@ -83,194 +68,93 @@ static FAR const char * const g_priority_str[] =
 
 int nx_vsyslog(int priority, FAR const IPTR char *fmt, FAR va_list *ap)
 {
-  struct lib_syslograwstream_s stream;
-  int ret = 0;
-#ifdef CONFIG_SYSLOG_PROCESS_NAME
-  FAR struct tcb_s *tcb = nxsched_self();
-#endif
+  struct lib_syslogstream_s stream;
+  int ret;
+
 #ifdef CONFIG_SYSLOG_TIMESTAMP
   struct timespec ts;
-#  if defined(CONFIG_SYSLOG_TIMESTAMP_FORMATTED)
-  struct tm tm;
-  char date_buf[CONFIG_SYSLOG_TIMESTAMP_BUFFER];
-#  endif
-#endif
-
-  /* Wrap the low-level output in a stream object and let lib_vsprintf
-   * do the work.
-   */
-
-  lib_syslograwstream_open(&stream);
-
-#ifdef CONFIG_SYSLOG_TIMESTAMP
-  ts.tv_sec = 0;
-  ts.tv_nsec = 0;
-
-#  if defined(CONFIG_SYSLOG_TIMESTAMP_FORMATTED)
-  memset(&tm, 0, sizeof(tm));
-#  endif
 
   /* Get the current time.  Since debug output may be generated very early
    * in the start-up sequence, hardware timer support may not yet be
    * available.
    */
 
+  ret = -EAGAIN;
   if (OSINIT_HW_READY())
     {
-#  if defined(CONFIG_SYSLOG_TIMESTAMP_REALTIME)
+#if defined(CONFIG_SYSLOG_TIMESTAMP_REALTIME)
       /* Use CLOCK_REALTIME if so configured */
 
-      clock_gettime(CLOCK_REALTIME, &ts);
-#  else
+      ret = clock_gettime(CLOCK_REALTIME, &ts);
+
+#elif defined(CONFIG_CLOCK_MONOTONIC)
       /* Prefer monotonic when enabled, as it can be synchronized to
        * RTC with clock_resynchronize.
        */
 
-      clock_gettime(CLOCK_MONOTONIC, &ts);
-#  endif
+      ret = clock_gettime(CLOCK_MONOTONIC, &ts);
 
-      /* Prepend the message with the current time, if available */
+#else
+      /* Otherwise, fall back to the system timer */
 
-#  if defined(CONFIG_SYSLOG_TIMESTAMP_FORMATTED)
-#    if defined(CONFIG_SYSLOG_TIMESTAMP_LOCALTIME)
-      localtime_r(&ts.tv_sec, &tm);
-#    else
-      gmtime_r(&ts.tv_sec, &tm);
-#    endif
-#  endif
+      ret = clock_systimespec(&ts);
+#endif
     }
 
-#  if defined(CONFIG_SYSLOG_TIMESTAMP_FORMATTED)
-  date_buf[0] = '\0';
-  strftime(date_buf, CONFIG_SYSLOG_TIMESTAMP_BUFFER,
-           CONFIG_SYSLOG_TIMESTAMP_FORMAT, &tm);
-#  endif
+  if (ret < 0)
+    {
+      /* Timer hardware is not available, or clock function failed */
+
+      ts.tv_sec  = 0;
+      ts.tv_nsec = 0;
+    }
 #endif
 
-#if defined(CONFIG_SYSLOG_COLOR_OUTPUT) || defined(CONFIG_SYSLOG_TIMESTAMP) || \
-    defined(CONFIG_SMP) || defined(CONFIG_SYSLOG_PROCESSID) || \
-    defined(CONFIG_SYSLOG_PRIORITY) || defined(CONFIG_SYSLOG_PREFIX) || \
-    defined(CONFIG_SYSLOG_PROCESS_NAME)
+  /* Wrap the low-level output in a stream object and let lib_vsprintf
+   * do the work.  NOTE that emergency priority output is handled
+   * differently.. it will use the SYSLOG emergency stream.
+   */
 
-  ret = lib_sprintf_internal(&stream.common,
-#if defined(CONFIG_SYSLOG_COLOR_OUTPUT)
-  /* Reset the terminal style. */
+  if (priority == LOG_EMERG)
+    {
+      /* Use the SYSLOG emergency stream */
 
-                             "\e[0m"
-#endif
+      emergstream(&stream.public);
+    }
+  else
+    {
+      /* Use the normal SYSLOG stream */
 
-#ifdef CONFIG_SYSLOG_TIMESTAMP
-#  if defined(CONFIG_SYSLOG_TIMESTAMP_FORMATTED)
-#    if defined(CONFIG_SYSLOG_TIMESTAMP_FORMAT_MICROSECOND)
-                             "[%s.%06ld] "
-#    else
-                             "[%s] "
-#    endif
-#  else
-                             "[%5ju.%06ld] "
-#  endif
-#endif
+      syslogstream_create(&stream);
+    }
 
-#if defined(CONFIG_SMP)
-                             "[CPU%d] "
-#endif
+#if defined(CONFIG_SYSLOG_TIMESTAMP)
+  /* Pre-pend the message with the current time, if available */
 
-#if defined(CONFIG_SYSLOG_PROCESSID)
-  /* Prepend the Thread ID */
-
-                             "[%2d] "
-#endif
-
-#if defined(CONFIG_SYSLOG_COLOR_OUTPUT)
-  /* Set the terminal style according to message priority. */
-
-                             "%s"
-#endif
-
-#if defined(CONFIG_SYSLOG_PRIORITY)
-  /* Prepend the message priority. */
-
-                             "[%6s] "
+  ret = lib_sprintf(&stream.public, "[%5d.%06d] ",
+                    ts.tv_sec, ts.tv_nsec/1000);
+#else
+  ret = 0;
 #endif
 
 #if defined(CONFIG_SYSLOG_PREFIX)
-  /* Prepend the prefix, if available */
+  /* Pre-pend the prefix, if available */
 
-                             "[%s] "
+  ret += lib_sprintf(&stream.public, "%s", CONFIG_SYSLOG_PREFIX_STRING);
 #endif
-#ifdef CONFIG_SYSLOG_PROCESS_NAME
-  /* Prepend the thread name */
-
-                             "%s: "
-#endif
-#ifdef CONFIG_SYSLOG_TIMESTAMP
-#  if defined(CONFIG_SYSLOG_TIMESTAMP_FORMATTED)
-#    if defined(CONFIG_SYSLOG_TIMESTAMP_FORMAT_MICROSECOND)
-                             , date_buf, ts.tv_nsec / NSEC_PER_USEC
-#    else
-                             , date_buf
-#    endif
-#  else
-                             , (uintmax_t)ts.tv_sec
-                             , ts.tv_nsec / NSEC_PER_USEC
-#  endif
-#endif
-
-#if defined(CONFIG_SMP)
-                             , this_cpu()
-#endif
-
-#if defined(CONFIG_SYSLOG_PROCESSID)
-  /* Prepend the Thread ID */
-
-                             , nxsched_gettid()
-#endif
-
-#if defined(CONFIG_SYSLOG_COLOR_OUTPUT)
-  /* Set the terminal style according to message priority. */
-
-                             , g_priority_color[LOG_PRI(priority)]
-#endif
-
-#if defined(CONFIG_SYSLOG_PRIORITY)
-  /* Prepend the message priority. */
-
-                             , g_priority_str[LOG_PRI(priority)]
-#endif
-
-#if defined(CONFIG_SYSLOG_PREFIX)
-  /* Prepend the prefix, if available */
-
-                             , CONFIG_SYSLOG_PREFIX_STRING
-#endif
-
-#ifdef CONFIG_SYSLOG_PROCESS_NAME
-  /* Prepend the thread name */
-
-                             , get_task_name(tcb)
-#endif
-                    );
-
-#endif /* CONFIG_SYSLOG_COLOR_OUTPUT || CONFIG_SYSLOG_TIMESTAMP || ... */
 
   /* Generate the output */
 
-  ret += lib_vsprintf_internal(&stream.common, fmt, *ap);
+  ret += lib_vsprintf(&stream.public, fmt, *ap);
 
-  if (stream.last_ch != '\n')
-    {
-      lib_stream_putc(&stream.common, '\n');
-      ret++;
-    }
-
-#if defined(CONFIG_SYSLOG_COLOR_OUTPUT)
-  /* Reset the terminal style back to normal. */
-
-  ret += lib_stream_puts(&stream.common, "\e[0m", sizeof("\e[0m"));
-#endif
-
+#ifdef CONFIG_SYSLOG_BUFFER
   /* Flush and destroy the syslog stream buffer */
 
-  lib_syslograwstream_close(&stream);
+  if (priority != LOG_EMERG)
+    {
+      syslogstream_destroy(&stream);
+    }
+#endif
+
   return ret;
 }

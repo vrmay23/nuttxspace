@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/route/net_fileroute.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017, 2020 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,7 +46,7 @@
 #include <assert.h>
 #include <debug.h>
 
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/fs/fs.h>
 
 #include "route/fileroute.h"
@@ -49,22 +62,26 @@
  * of the lock.
  */
 
-#define NO_HOLDER (INVALID_PROCESS_ID)
+#define NO_HOLDER ((pid_t)-1)
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
 #ifdef CONFIG_ROUTE_IPv4_FILEROUTE
-/* Used to lock a routing table for exclusive write-only access */
+/* Semaphore used to lock a routing table for exclusive write-only access */
 
-static rmutex_t g_ipv4_lock = NXRMUTEX_INITIALIZER;
+static sem_t g_ipv4_exclsem;
+static pid_t g_ipv4_holder = NO_HOLDER;
+static int g_ipv4_count;
 #endif
 
 #ifdef CONFIG_ROUTE_IPv6_FILEROUTE
-/* Used to lock a routing table for exclusive write-only access */
+/* Semaphore used to lock a routing table for exclusive write-only access */
 
-static rmutex_t g_ipv6_lock = NXRMUTEX_INITIALIZER;
+static sem_t g_ipv6_exclsem;
+static pid_t g_ipv6_holder = NO_HOLDER;
+static int g_ipv6_count;
 #endif
 
 /****************************************************************************
@@ -129,23 +146,26 @@ int net_routesize(FAR const char *path, size_t entrysize)
 
   /* Get information about the file */
 
-  ret = nx_stat(path, &buf, 1);
+  ret = stat(path, &buf);
   if (ret < 0)
     {
-      /* nx_stat() failed, but is that because the routing table has not been
+      int errcode;
+
+      /* stat() failed, but is that because the routing table has not been
        * created yet?
        */
 
-      if (ret == -ENOENT)
+      errcode = get_errno();
+      if (errcode == ENOENT)
         {
-          /* The routing table file has not been created.  Return zero. */
+          /* The routing table file has not been created.  Return size zero. */
 
           return 0;
         }
 
       /* Some other error */
 
-      return ret;
+      return -errcode;
     }
 
   /* The directory entry at this path must be a regular file */
@@ -177,6 +197,36 @@ int net_routesize(FAR const char *path, size_t entrysize)
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: net_init_fileroute
+ *
+ * Description:
+ *   Initialize the in-memory, RAM routing table
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ * Assumptions:
+ *   Called early in initialization so that no special protection is needed.
+ *
+ ****************************************************************************/
+
+void net_init_fileroute(void)
+{
+  /* Initialize semaphores */
+
+#ifdef CONFIG_ROUTE_IPv4_FILEROUTE
+  nxsem_init(&g_ipv4_exclsem, 0, 1);
+#endif
+
+#ifdef CONFIG_ROUTE_IPv6_FILEROUTE
+  nxsem_init(&g_ipv6_exclsem, 0, 1);
+#endif
+}
 
 /****************************************************************************
  * Name: net_openroute_ipv4/net_openroute_ipv6
@@ -261,11 +311,11 @@ int net_openroute_ipv6(int oflags, FAR struct file *filep)
  *   Read one route entry from the IPv4/IPv6 routing table.
  *
  * Input Parameters:
- *   filep - File instance obtained by net_openroute_ipv{4|6}[_rdonly]
+ *   filep - Detached file instance obtained by net_openroute_ipv{4|6}[_rdonly]
  *   route - Location to return the next route read from the file
  *
  * Returned Value:
- *   The number of bytes read on success.  The special return value of zero
+ *   The number of bytes read on success.  The special return valud of zero
  *   indicates that the endof of file was encountered (and nothing was read).
  *   A negated errno value is returned on any failure.
  *
@@ -374,7 +424,7 @@ ssize_t net_readroute_ipv6(FAR struct file *filep,
  *   Write one route entry to the IPv4/IPv6 routing table.
  *
  * Input Parameters:
- *   filep - File instance obtained by net_openroute_ipv{4|6}[_rdonly]
+ *   filep - Detached file instance obtained by net_openroute_ipv{4|6}[_rdonly]
  *   route - Location to return the next route read from the file
  *
  * Returned Value:
@@ -486,7 +536,7 @@ ssize_t net_writeroute_ipv6(FAR struct file *filep,
  *   Seek to a specific entry entry to the IPv4/IPv6 routing table.
  *
  * Input Parameters:
- *   filep - File instance obtained by net_openroute_ipv{4|6}[_rdonly]
+ *   filep - Detached file instance obtained by net_openroute_ipv{4|6}[_rdonly]
  *   index - The index of the routing table entry to seek to.
  *
  * Returned Value:
@@ -595,10 +645,36 @@ int net_routesize_ipv6(void)
 #ifdef CONFIG_ROUTE_IPv4_FILEROUTE
 int net_lockroute_ipv4(void)
 {
-  int ret = nxrmutex_lock(&g_ipv4_lock);
-  if (ret < 0)
+  pid_t me = getpid();
+  int ret;
+
+  /* Are we already the holder of the lock? */
+
+  if (g_ipv4_holder == me)
     {
-      nerr("ERROR: nxrmutex_lock() failed: %d\n", ret);
+      /* Yes.. just increment the count of locks held */
+
+      g_ipv4_count++;
+      ret = OK;
+    }
+  else
+    {
+      /* No.. wait to get the lock */
+
+      ret = nxsem_wait(&g_ipv4_exclsem);
+      if (ret < 0)
+        {
+          nerr("ERROR: nxsem_wait() failed: %d\n", ret);
+        }
+      else
+        {
+          DEBUGASSERT(g_ipv4_holder == NO_HOLDER && g_ipv4_count == 0);
+
+          /* We are now the holder with one count */
+
+          g_ipv4_holder = me;
+          g_ipv4_count  = 1;
+        }
     }
 
   return ret;
@@ -608,10 +684,36 @@ int net_lockroute_ipv4(void)
 #ifdef CONFIG_ROUTE_IPv6_FILEROUTE
 int net_lockroute_ipv6(void)
 {
-  int ret = nxrmutex_lock(&g_ipv6_lock);
-  if (ret < 0)
+  pid_t me = getpid();
+  int ret;
+
+  /* Are we already the holder of the lock? */
+
+  if (g_ipv6_holder == me)
     {
-      nerr("ERROR: nxrmutex_lock() failed: %d\n", ret);
+      /* Yes.. just increment the count of locks held */
+
+      g_ipv6_count++;
+      ret = OK;
+    }
+  else
+    {
+      /* No.. wait to get the lock */
+
+      ret = nxsem_wait(&g_ipv6_exclsem);
+      if (ret < 0)
+        {
+          nerr("ERROR: nxsem_wait() failed: %d\n", ret);
+        }
+      else
+        {
+          DEBUGASSERT(g_ipv6_holder == NO_HOLDER && g_ipv6_count == 0);
+
+          /* We are now the holder with one count */
+
+          g_ipv6_holder = me;
+          g_ipv6_count  = 1;
+        }
     }
 
   return ret;
@@ -636,10 +738,38 @@ int net_lockroute_ipv6(void)
 #ifdef CONFIG_ROUTE_IPv4_FILEROUTE
 int net_unlockroute_ipv4(void)
 {
-  int ret = nxrmutex_unlock(&g_ipv4_lock);
-  if (ret < 0)
+  pid_t me = getpid();
+  int ret;
+
+  /* If would be an error if we are called with on a thread that does not
+   * hold the lock.
+   */
+
+  DEBUGASSERT(me == g_ipv4_holder && g_ipv4_count > 0);
+
+  /* Release the count on the lock.  If this is the last count, then release
+   * the lock.
+   */
+
+  if (g_ipv4_count > 1)
     {
-      nerr("ERROR: nxrmutex_unlock() failed: %d\n", ret);
+      /* Not the last count... just decrement the count and return success */
+
+      g_ipv4_count--;
+      ret = OK;
+    }
+  else
+    {
+      /* This is the last count.  Release the lock */
+
+      g_ipv4_holder = NO_HOLDER;
+      g_ipv4_count  = 0;
+
+      ret = nxsem_post(&g_ipv4_exclsem);
+      if (ret < 0)
+        {
+          nerr("ERROR: nxsem_post() failed: %d\n", ret);
+        }
     }
 
   return ret;
@@ -649,10 +779,38 @@ int net_unlockroute_ipv4(void)
 #ifdef CONFIG_ROUTE_IPv6_FILEROUTE
 int net_unlockroute_ipv6(void)
 {
-  int ret = nxrmutex_unlock(&g_ipv6_lock);
-  if (ret < 0)
+  pid_t me = getpid();
+  int ret;
+
+  /* If would be an error if we are called with on a thread that does not
+   * hold the lock.
+   */
+
+  DEBUGASSERT(me == g_ipv6_holder && g_ipv6_count > 0);
+
+  /* Release the count on the lock.  If this is the last count, then release
+   * the lock.
+   */
+
+  if (g_ipv6_count > 1)
     {
-      nerr("ERROR: nxrmutex_unlock() failed: %d\n", ret);
+      /* Not the last count... just decrement the count and return success */
+
+      g_ipv6_count--;
+      ret = OK;
+    }
+  else
+    {
+      /* This is the last count.  Release the lock */
+
+      g_ipv6_holder = NO_HOLDER;
+      g_ipv6_count  = 0;
+
+      ret = nxsem_post(&g_ipv6_exclsem);
+      if (ret < 0)
+        {
+          nerr("ERROR: nxsem_post() failed: %d\n", ret);
+        }
     }
 
   return ret;
@@ -666,7 +824,7 @@ int net_unlockroute_ipv6(void)
  *   Close the IPv4/IPv6 routing table.
  *
  * Input Parameters:
- *   filep - File instance obtained by net_openroute_ipv{4|6}[_rdonly]
+ *   filep - Detached file instance obtained by net_openroute_ipv{4|6}[_rdonly]
  *
  * Returned Value:
  *   Zero (OK) is returned on success.  A negated errno value is returned on

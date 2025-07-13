@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/arm/src/kinetis/kinetis_rtc_lowerhalf.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *           Updates for kinetis by Neil Hancock
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -32,7 +46,6 @@
 #include <stdbool.h>
 #include <time.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/arch.h>
@@ -51,8 +64,8 @@
 #ifdef CONFIG_RTC_ALARM
 struct kinetis_cbinfo_s
 {
-  volatile rtc_alarm_callback_t cb; /* Callback when the alarm expires */
-  volatile void *priv;              /* Private argurment to accompany callback */
+  volatile rtc_alarm_callback_t cb;  /* Callback when the alarm expires */
+  volatile FAR void *priv;           /* Private argurment to accompany callback */
 };
 #endif
 
@@ -66,7 +79,7 @@ struct kinetis_lowerhalf_s
    * operations vtable (which may lie in FLASH or ROM)
    */
 
-  const struct rtc_ops_s *ops;
+  FAR const struct rtc_ops_s *ops;
 
   /* Data following is private to this driver and not visible outside of
    * this file.
@@ -85,20 +98,20 @@ struct kinetis_lowerhalf_s
 
 /* Prototypes for static methods in struct rtc_ops_s */
 
-static int kinetis_rdtime(struct rtc_lowerhalf_s *lower,
-                          struct rtc_time *rtctime);
-static int kinetis_settime(struct rtc_lowerhalf_s *lower,
-                           const struct rtc_time *rtctime);
+static int kinetis_rdtime(FAR struct rtc_lowerhalf_s *lower,
+                          FAR struct rtc_time *rtctime);
+static int kinetis_settime(FAR struct rtc_lowerhalf_s *lower,
+                           FAR const struct rtc_time *rtctime);
 
 #ifdef CONFIG_RTC_ALARM
-static int kinetis_setalarm(struct rtc_lowerhalf_s *lower,
-                            const struct lower_setalarm_s *alarminfo);
-static int kinetis_setrelative(struct rtc_lowerhalf_s *lower,
-                            const struct lower_setrelative_s *alarminfo);
-static int kinetis_cancelalarm(struct rtc_lowerhalf_s *lower,
+static int kinetis_setalarm(FAR struct rtc_lowerhalf_s *lower,
+                            FAR const struct lower_setalarm_s *alarminfo);
+static int kinetis_setrelative(FAR struct rtc_lowerhalf_s *lower,
+                               FAR const struct lower_setrelative_s *alarminfo);
+static int kinetis_cancelalarm(FAR struct rtc_lowerhalf_s *lower,
                                int alarmid);
-static int kinetis_rdalarm(struct rtc_lowerhalf_s *lower,
-                           struct lower_rdalarm_s *alarminfo);
+static int kinetis_rdalarm(FAR struct rtc_lowerhalf_s *lower,
+                           FAR struct lower_rdalarm_s *alarminfo);
 #endif
 
 /****************************************************************************
@@ -111,11 +124,18 @@ static const struct rtc_ops_s g_rtc_ops =
 {
   .rdtime      = kinetis_rdtime,
   .settime     = kinetis_settime,
+  .havesettime = NULL,
 #ifdef CONFIG_RTC_ALARM
   .setalarm    = kinetis_setalarm,
   .setrelative = kinetis_setrelative,
   .cancelalarm = kinetis_cancelalarm,
   .rdalarm     = kinetis_rdalarm,
+#endif
+#ifdef CONFIG_RTC_IOCTL
+  .ioctl       = NULL,
+#endif
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  .destroy     = NULL,
 #endif
 };
 
@@ -148,14 +168,14 @@ static struct kinetis_lowerhalf_s g_rtc_lowerhalf =
 #ifdef CONFIG_RTC_ALARM
 static void kinetis_alarm_callback(void)
 {
-  struct kinetis_cbinfo_s *cbinfo = &g_rtc_lowerhalf.cbinfo;
+  FAR struct kinetis_cbinfo_s *cbinfo = &g_rtc_lowerhalf.cbinfo;/*[0];*/
 
   /* Sample and clear the callback information to minimize the window in
    * time in which race conditions can occur.
    */
 
   rtc_alarm_callback_t cb = (rtc_alarm_callback_t)cbinfo->cb;
-  void *arg               = (void *)cbinfo->priv;
+  FAR void *arg           = (FAR void *)cbinfo->priv;
 
   cbinfo->cb              = NULL;
   cbinfo->priv            = NULL;
@@ -185,18 +205,18 @@ static void kinetis_alarm_callback(void)
  *
  ****************************************************************************/
 
-static int kinetis_rdtime(struct rtc_lowerhalf_s *lower,
-                          struct rtc_time *rtctime)
+static int kinetis_rdtime(FAR struct rtc_lowerhalf_s *lower,
+                          FAR struct rtc_time *rtctime)
 {
 #if defined(CONFIG_RTC_DATETIME)
   /* This operation depends on the fact that struct rtc_time is cast
    * compatible with struct tm.
    */
 
-  return up_rtc_getdatetime((struct tm *)rtctime);
+  return up_rtc_getdatetime((FAR struct tm *)rtctime);
 
 #elif defined(CONFIG_RTC_HIRES)
-  struct timespec ts;
+  FAR struct timespec ts;
   int ret;
 
   /* Get the higher resolution time */
@@ -204,7 +224,7 @@ static int kinetis_rdtime(struct rtc_lowerhalf_s *lower,
   ret = up_rtc_gettime(&ts);
   if (ret < 0)
     {
-      goto errout;
+      goto errout_with_errno;
     }
 
   /* Convert the one second epoch time to a struct tm.  This operation
@@ -212,17 +232,17 @@ static int kinetis_rdtime(struct rtc_lowerhalf_s *lower,
    * compatible.
    */
 
-  if (!gmtime_r(&ts.tv_sec, (struct tm *)rtctime))
+  if (!gmtime_r(&ts.tv_sec, (FAR struct tm *)rtctime))
     {
-      ret = -get_errno();
-      goto errout;
+      goto errout_with_errno;
     }
 
   return OK;
 
-errout:
-  DEBUGASSERT(ret < 0);
-  return ret;
+errout_with_errno:
+  ret = get_errno();
+  DEBUGASSERT(ret > 0);
+  return -ret;
 
 #else
   time_t timer;
@@ -233,7 +253,7 @@ errout:
 
   /* Convert the one second epoch time to a struct tm */
 
-  if (!gmtime_r(&timer, (struct tm *)rtctime))
+  if (!gmtime_r(&timer, (FAR struct tm *)rtctime))
     {
       int errcode = get_errno();
       DEBUGASSERT(errcode > 0);
@@ -260,8 +280,8 @@ errout:
  *
  ****************************************************************************/
 
-static int kinetis_settime(struct rtc_lowerhalf_s *lower,
-                           const struct rtc_time *rtctime)
+static int kinetis_settime(FAR struct rtc_lowerhalf_s *lower,
+                           FAR const struct rtc_time *rtctime)
 {
   struct timespec ts;
 
@@ -269,7 +289,7 @@ static int kinetis_settime(struct rtc_lowerhalf_s *lower,
    * rtc_time is cast compatible with struct tm.
    */
 
-  ts.tv_sec  = timegm((struct tm *)rtctime);
+  ts.tv_sec  = mktime((FAR struct tm *)rtctime);
   ts.tv_nsec = 0;
 
   /* Set the time (to one second accuracy) */
@@ -295,11 +315,11 @@ static int kinetis_settime(struct rtc_lowerhalf_s *lower,
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int kinetis_setalarm(struct rtc_lowerhalf_s *lower,
-                            const struct lower_setalarm_s *alarminfo)
+static int kinetis_setalarm(FAR struct rtc_lowerhalf_s *lower,
+                            FAR const struct lower_setalarm_s *alarminfo)
 {
-  struct kinetis_lowerhalf_s *priv;
-  struct kinetis_cbinfo_s *cbinfo;
+  FAR struct kinetis_lowerhalf_s *priv;
+  FAR struct kinetis_cbinfo_s *cbinfo;
 
   struct timespec tp;
 
@@ -308,9 +328,9 @@ static int kinetis_setalarm(struct rtc_lowerhalf_s *lower,
   /* ID0-> Alarm A supported */
 
   DEBUGASSERT(lower != NULL && alarminfo != NULL);
-  priv = (struct kinetis_lowerhalf_s *)lower;
+  priv = (FAR struct kinetis_lowerhalf_s *)lower;
 
-  if (alarminfo->id == RTC_ALARMA)
+  if (alarminfo->id == RTC_ALARMA )
     {
       /* Remember the callback information */
 
@@ -320,7 +340,7 @@ static int kinetis_setalarm(struct rtc_lowerhalf_s *lower,
 
       /* Convert from Julian calendar time to epoch time */
 
-      tp.tv_sec = timegm((struct tm *)&alarminfo->time) ;
+      tp.tv_sec = mktime((FAR struct tm *)&alarminfo->time) ;
 
       /* And set the alarm */
 
@@ -354,9 +374,8 @@ static int kinetis_setalarm(struct rtc_lowerhalf_s *lower,
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int
-kinetis_setrelative(struct rtc_lowerhalf_s *lower,
-                    const struct lower_setrelative_s *alarminfo)
+static int kinetis_setrelative(FAR struct rtc_lowerhalf_s *lower,
+                               FAR const struct lower_setrelative_s *alarminfo)
 {
   struct lower_setalarm_s setalarm;
 #if defined(CONFIG_RTC_DATETIME)
@@ -365,19 +384,18 @@ kinetis_setrelative(struct rtc_lowerhalf_s *lower,
   time_t seconds;
   struct timespec ts;
   int ret = -EINVAL;
-  irqstate_t flags;
 
   DEBUGASSERT(lower != NULL && alarminfo != NULL);
   DEBUGASSERT(alarminfo->id == RTC_ALARMA);
 
-  if (alarminfo->id == RTC_ALARMA &&
+  if ((alarminfo->id == RTC_ALARMA ) &&
       alarminfo->reltime > 0)
     {
       /* Disable pre-emption while we do this so that we don't have to worry
        * about being suspended and working on an old time.
        */
 
-      flags = enter_critical_section();
+      sched_lock();
 
 #if defined(CONFIG_RTC_DATETIME)
       /* Get the broken out time and convert to seconds */
@@ -385,11 +403,11 @@ kinetis_setrelative(struct rtc_lowerhalf_s *lower,
       ret = up_rtc_getdatetime(&time);
       if (ret < 0)
         {
-          leave_critical_section(flags);
+          sched_unlock();
           return ret;
         }
 
-      ts.tv_sec  = timegm(&time);
+      ts.tv_sec  = mktime(&time);
       ts.tv_nsec = 0;
 #else
       /* Get the current time in broken out format */
@@ -397,11 +415,10 @@ kinetis_setrelative(struct rtc_lowerhalf_s *lower,
       ret = up_rtc_gettime(&ts);
       if (ret < 0)
         {
-          leave_critical_section(flags);
+          sched_unlock();
           return ret;
         }
 #endif
-
       /* Convert to seconds since the epoch */
 
       seconds = ts.tv_sec;
@@ -414,7 +431,7 @@ kinetis_setrelative(struct rtc_lowerhalf_s *lower,
 
       /* And convert the time back to Julian/broken out format */
 
-      gmtime_r(&seconds, (struct tm *)&setalarm.time);
+      gmtime_r(&seconds, (FAR struct tm *)&setalarm.time);
 
       /* The set the alarm using this absolute time */
 
@@ -424,7 +441,7 @@ kinetis_setrelative(struct rtc_lowerhalf_s *lower,
 
       ret = kinetis_setalarm(lower, &setalarm);
 
-      leave_critical_section(flags);
+      sched_unlock();
     }
 
   return ret;
@@ -449,16 +466,15 @@ kinetis_setrelative(struct rtc_lowerhalf_s *lower,
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int
-kinetis_cancelalarm(struct rtc_lowerhalf_s *lower, int alarmid)
+static int kinetis_cancelalarm(FAR struct rtc_lowerhalf_s *lower, int alarmid)
 {
-  struct kinetis_lowerhalf_s *priv;
-  struct kinetis_cbinfo_s *cbinfo;
+  FAR struct kinetis_lowerhalf_s *priv;
+  FAR struct kinetis_cbinfo_s *cbinfo;
   int ret = -EINVAL;
 
   DEBUGASSERT(lower != NULL);
   DEBUGASSERT(alarmid == RTC_ALARMA);
-  priv = (struct kinetis_lowerhalf_s *)lower;
+  priv = (FAR struct kinetis_lowerhalf_s *)lower;
 
   /* ID0-> Alarm A */
 
@@ -473,6 +489,7 @@ kinetis_cancelalarm(struct rtc_lowerhalf_s *lower, int alarmid)
       /* Then cancel the alarm */
 
       ret = kinetis_rtc_cancelalarm();
+
     }
 
   return ret;
@@ -496,12 +513,11 @@ kinetis_cancelalarm(struct rtc_lowerhalf_s *lower, int alarmid)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int kinetis_rdalarm(struct rtc_lowerhalf_s *lower,
-                           struct lower_rdalarm_s *alarminfo)
+static int kinetis_rdalarm(FAR struct rtc_lowerhalf_s *lower,
+                           FAR struct lower_rdalarm_s *alarminfo)
 {
   struct timespec ts;
   int ret = -EINVAL;
-  irqstate_t flags;
 
   DEBUGASSERT(lower != NULL && alarminfo != NULL && alarminfo->time != NULL);
   DEBUGASSERT(alarminfo->id == RTC_ALARMA);
@@ -512,12 +528,17 @@ static int kinetis_rdalarm(struct rtc_lowerhalf_s *lower,
        * about being suspended and working on an old time.
        */
 
-      flags = enter_critical_section();
+      sched_lock();
       ret = kinetis_rtc_rdalarm(&ts);
 
-      localtime_r((const time_t *)&ts.tv_sec,
-                  (struct tm *)alarminfo->time);
-      leave_critical_section(flags);
+#ifdef CONFIG_LIBC_LOCALTIME
+      localtime_r((FAR const time_t *)&ts.tv_sec,
+                  (FAR struct tm *)alarminfo->time);
+#else
+      gmtime_r((FAR const time_t *)&ts.tv_sec,
+               (FAR struct tm *)alarminfo->time);
+#endif
+      sched_unlock();
     }
 
   return ret;
@@ -550,9 +571,9 @@ static int kinetis_rdalarm(struct rtc_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-struct rtc_lowerhalf_s *kinetis_rtc_lowerhalf(void)
+FAR struct rtc_lowerhalf_s *kinetis_rtc_lowerhalf(void)
 {
-  return (struct rtc_lowerhalf_s *)&g_rtc_lowerhalf;
+  return (FAR struct rtc_lowerhalf_s *)&g_rtc_lowerhalf;
 }
 
 #endif /* CONFIG_RTC_DRIVER */

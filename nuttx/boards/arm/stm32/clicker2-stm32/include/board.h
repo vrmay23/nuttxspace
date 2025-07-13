@@ -1,22 +1,40 @@
 /****************************************************************************
  * boards/arm/stm32/clicker2-stm32/include/board.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
+ *   Author: Anthony Merlino <anthony@vergeaero.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Modified from:
+ *     boards/stm32f4discovery/include/board.h
+ *     Copyright (C) 2012, 2014-2016 Gregory Nutt. All rights reserved.
+ *     Author: Gregory Nutt <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,35 +52,38 @@
 #  include <stdbool.h>
 #endif
 
+#ifdef __KERNEL__
+#  include "stm32_rcc.h"
+#  include "stm32_sdio.h"
+#  include "stm32.h"
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
 /* Clocking *****************************************************************/
 
-/* The Clicker 2 for STM32 board features a 25Hz crystal and 32.768kHz RTC
- * crystal.
+/* The Clicker 2 for STM32 board features a 25Hz crystal and 32.768kHz RTC crystal.
  *
  * This is the canonical configuration:
- *   System Clock source     : PLL (HSE)
- *   SYSCLK(Hz)              : 168000000    Determined by PLL configuration
- *   HCLK(Hz)                : 168000000    (STM32_RCC_CFGR_HPRE)
- *   AHB Prescaler           : 1            (STM32_RCC_CFGR_HPRE)
- *   APB1 Prescaler          : 4            (STM32_RCC_CFGR_PPRE1)
- *   APB2 Prescaler          : 2            (STM32_RCC_CFGR_PPRE2)
- *   HSE Frequency(Hz)       : 25000000     (STM32_BOARD_XTAL)
- *   PLLM                    : 25           (STM32_PLLCFG_PLLM)
- *   PLLN                    : 336          (STM32_PLLCFG_PLLN)
- *   PLLP                    : 2            (STM32_PLLCFG_PLLP)
- *   PLLQ                    : 7            (STM32_PLLCFG_PLLQ)
- *   Main regulator
- *           output voltage  : Scale1 mode  Needed for high speed SYSCLK
- *   Flash Latency(WS)       : 5
- *   Prefetch Buffer         : OFF
- *   Instruction cache       : ON
- *   Data cache              : ON
- *   Require 48MHz for
- *   USB OTG FS,             : Enabled
+ *   System Clock source           : PLL (HSE)
+ *   SYSCLK(Hz)                    : 168000000    Determined by PLL configuration
+ *   HCLK(Hz)                      : 168000000    (STM32_RCC_CFGR_HPRE)
+ *   AHB Prescaler                 : 1            (STM32_RCC_CFGR_HPRE)
+ *   APB1 Prescaler                : 4            (STM32_RCC_CFGR_PPRE1)
+ *   APB2 Prescaler                : 2            (STM32_RCC_CFGR_PPRE2)
+ *   HSE Frequency(Hz)             : 25000000     (STM32_BOARD_XTAL)
+ *   PLLM                          : 25           (STM32_PLLCFG_PLLM)
+ *   PLLN                          : 336          (STM32_PLLCFG_PLLN)
+ *   PLLP                          : 2            (STM32_PLLCFG_PLLP)
+ *   PLLQ                          : 7            (STM32_PLLCFG_PLLQ)
+ *   Main regulator output voltage : Scale1 mode  Needed for high speed SYSCLK
+ *   Flash Latency(WS)             : 5
+ *   Prefetch Buffer               : OFF
+ *   Instruction cache             : ON
+ *   Data cache                    : ON
+ *   Require 48MHz for USB OTG FS, : Enabled
  *   SDIO and RNG clock
  */
 
@@ -103,6 +124,7 @@
 
 #define STM32_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK  /* HCLK  = SYSCLK / 1 */
 #define STM32_HCLK_FREQUENCY    STM32_SYSCLK_FREQUENCY
+#define STM32_BOARD_HCLK        STM32_HCLK_FREQUENCY  /* same as above, to satisfy compiler */
 
 /* APB1 clock (PCLK1) is HCLK/4 (42MHz) */
 
@@ -178,15 +200,14 @@
 #  define SDIO_SDXFR_CLKDIV     (2 << SDIO_CLKCR_CLKDIV_SHIFT)
 #endif
 
-/* LED definitions **********************************************************/
-
+/* LED definitions ******************************************************************/
 /* The Mikroe Clicker2 STM32 has two user controllable LEDs:
  *
  *   LD1 - PE12, Active high output illuminates
  *   LD2 - PE15, Active high output illuminates
  *
- * If CONFIG_ARCH_LEDS is not defined, then the user can control the LEDs in
- * any way.  The following definitions are used to access individual LEDs.
+ * If CONFIG_ARCH_LEDS is not defined, then the user can control the LEDs in any
+ * way.  The following definitions are used to access individual LEDs.
  */
 
 /* LED index values for use with board_userled() */
@@ -200,9 +221,8 @@
 #define BOARD_LED1_BIT    (1 << BOARD_LED1)
 #define BOARD_LED2_BIT    (1 << BOARD_LED2)
 
-/* If CONFIG_ARCH_LEDs is defined, then NuttX will control the 2 LEDs on
- * board the Clicker2 for STM32.
- * The following definitions describe how NuttX controls the LEDs:
+/* If CONFIG_ARCH_LEDs is defined, then NuttX will control the 2 LEDs on board the
+ * Clicker2 for STM32.  The following definitions describe how NuttX controls the LEDs:
  *
  *   SYMBOL               Meaning                      LED state
  *                                                   LED1     LED2
@@ -256,7 +276,7 @@
 #define GPIO_USART2_TX   GPIO_USART2_TX_2  /* PD5 */
 
 #define GPIO_USART3_RX   GPIO_USART3_RX_3  /* PD9 */
-#define GPIO_USART3_TX   GPIO_USART3_TX_3  /* PD8 */
+#define GPIO_USART3_TX   GPIO_USART3_TX_3  /* PD8 /
 
 /* SPI
  *
@@ -299,10 +319,10 @@
 #define GPIO_TIM1_CH1OUT GPIO_TIM1_CH1OUT_2 /* PE9 */
 #define GPIO_TIM4_CH1OUT GPIO_TIM4_CH1OUT_2 /* PD12 */
 
-/* DMA Channel/Stream Selections ********************************************/
+/* DMA Channel/Stream Selections *********************************************/
 
-/* Stream selections are arbitrary for now but might become important in the
- * future if we set aside more DMA channels/streams.
+/* Stream selections are arbitrary for now but might become important in the future
+ * if we set aside more DMA channels/streams.
  *
  * SDIO DMA
  *   DMAMAP_SDIO_1 = Channel 4, Stream 3

@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/lpc54xx/lpc54_dma.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,14 +42,14 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "hardware/lpc54_inputmux.h"
 #include "hardware/lpc54_dma.h"
 #include "lpc54_enableclk.h"
@@ -62,7 +75,7 @@ struct lpc54_dmach_s
 
 struct lpc54_dma_s
 {
-  mutex_t lock;           /* For exclusive access to the DMA channel list */
+  sem_t exclsem;           /* For exclusive access to the DMA channel list */
 
   /* This is the state of each DMA channel */
 
@@ -75,10 +88,7 @@ struct lpc54_dma_s
 
 /* The state of the LPC54 DMA block */
 
-static struct lpc54_dma_s g_dma =
-{
-  .lock = NXMUTEX_INITIALIZER,
-};
+static struct lpc54_dma_s g_dma;
 
 /* The SRAMBASE register must be configured with an address (preferably in
  * on-chip SRAM) where DMA descriptors will be stored.  Each DMA channel has
@@ -134,7 +144,7 @@ static void lpc54_dma_dispatch(int ch, int result)
  *
  ****************************************************************************/
 
-static int lpc54_dma_interrupt(int irq, void *context, void *arg)
+static int lpc54_dma_interrupt(int irq, FAR void *context, FAR void *arg)
 {
   uint32_t pending;
   uint32_t bitmask;
@@ -207,18 +217,18 @@ static int lpc54_dma_interrupt(int irq, void *context, void *arg)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_dma_initialize
+ * Name: up_dma_initialize
  *
  * Description:
  *   Initialize the DMA subsystem.  Called from up_initialize() early in the
- *   boot-up sequence.  Prototyped in arm_internal.h.
+ *   boot-up sequence.  Prototyped in up_internal.h.
  *
  * Returned Value:
  *   None
  *
  ****************************************************************************/
 
-void weak_function arm_dma_initialize(void)
+void weak_function up_dma_initialize(void)
 {
   int ret;
 
@@ -236,6 +246,10 @@ void weak_function arm_dma_initialize(void)
   putreg32(DMA_ALL_CHANNELS, LPC54_DMA_ERRINT0);
   putreg32(DMA_ALL_CHANNELS, LPC54_DMA_INTA0);
   putreg32(DMA_ALL_CHANNELS, LPC54_DMA_INTB0);
+
+  /* Initialize the DMA state structure */
+
+  nxsem_init(&g_dma.exclsem, 0, 1);
 
   /* Set the SRAMBASE to the beginning a array of DMA descriptors, one for
    * each DMA channel.
@@ -297,7 +311,7 @@ int lpc54_dma_setup(int ch, uint32_t cfg, uint32_t xfrcfg, uint8_t trigsrc,
 
   /* Get exclusive access to the DMA data structures and interface */
 
-  ret = nxmutex_lock(&g_dma.lock);
+  ret = nxsem_wait(&g_dma.exclsem);
   if (ret < 0)
     {
       return ret;
@@ -309,7 +323,7 @@ int lpc54_dma_setup(int ch, uint32_t cfg, uint32_t xfrcfg, uint8_t trigsrc,
   if (dmach->inuse)
     {
       ret = -EBUSY;
-      goto errout_with_lock;
+      goto errout_with_exclsem;
     }
 
   dmach->inuse = true;
@@ -431,16 +445,15 @@ int lpc54_dma_setup(int ch, uint32_t cfg, uint32_t xfrcfg, uint8_t trigsrc,
    *   XFERCOUNT - Derived from with and nbytes
    */
 
-  xfrcfg &= ~(DMA_XFERCFG_RELOAD | DMA_XFERCFG_SWTRIG |
-              DMA_XFERCFG_SETINTB | DMA_XFERCFG_XFERCOUNT_MASK);
-  xfrcfg |= (DMA_XFERCFG_CFGVALID | DMA_XFERCFG_CLRTRIG |
-              DMA_XFERCFG_SETINTA);
+  xfrcfg &= ~(DMA_XFERCFG_RELOAD | DMA_XFERCFG_SWTRIG | DMA_XFERCFG_SETINTB |
+              DMA_XFERCFG_XFERCOUNT_MASK);
+  xfrcfg |= (DMA_XFERCFG_CFGVALID | DMA_XFERCFG_CLRTRIG | DMA_XFERCFG_SETINTA);
   xfrcfg |= DMA_XFERCFG_XFERCOUNT(nxfrs);
   putreg32(xfrcfg, base + LPC54_DMA_XFERCFG_OFFSET);
   ret = OK;
 
-errout_with_lock:
-  nxmutex_unlock(&g_dma.lock);
+errout_with_exclsem:
+  nxsem_post(&g_dma.exclsem);
   return ret;
 }
 
@@ -579,8 +592,7 @@ void lpc54_dmadump(int ch, const struct lpc54_dmaregs_s *regs,
 {
   uintptr_t base;
 
-  DEBUGASSERT((unsigned)ch <  LPC54_DMA_NCHANNELS &&
-               regs != NULL && msg != NULL);
+  DEBUGASSERT((unsigned)ch <  LPC54_DMA_NCHANNELS && regs != NULL && msg != NULL);
 
   /* Dump the sampled global DMA registers */
 

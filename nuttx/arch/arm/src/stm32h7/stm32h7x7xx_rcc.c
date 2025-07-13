@@ -1,22 +1,37 @@
 /****************************************************************************
- * arch/arm/src/stm32h7/stm32h7x7xx_rcc.c
+ * arch/arm/src/stm32h7/stm32h7x3xx_rcc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018, 2019 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            David Sidrane <david.sidrane@nscdg.com>
+ *            Mateusz Szafoni <raiden00@railab.me>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -98,54 +113,6 @@
 #if STM32_PLLCFG_PLL3CFG & (RCC_PLLCFGR_DIVP3EN | RCC_PLLCFGR_DIVQ3EN | \
                             RCC_PLLCFGR_DIVR3EN)
 #  define USE_PLL3
-#endif
-
-/* Over-drive is supported only for Voltage output scale 1 mode.
- * It is required when SYSCLK frequency is over 400 MHz or it can be forced
- * to a given state by adding define to the board.h configuration file:
- *
- *   #define STM32_VOS_OVERDRIVE 1 - force over-drive enabled,
- *   #define STM32_VOS_OVERDRIVE 0 - force over-drive disabled,
- *   #undef STM32_VOS_OVERDRIVE    - autoselect over-drive by logic below
- *
- * Boosting the core voltage can be a workaround solution to problems with
- * poor board signal integration for high-speed digital interfaces like ULPI.
- * Higher voltage means faster clock signal edges which may be sufficient to
- * synchronise the high-speed clock and data.
- */
-
-#ifndef STM32_VOS_OVERDRIVE
-#  if (STM32_PWR_VOS_SCALE == PWR_D3CR_VOS_SCALE_1) &&  \
-      (STM32_SYSCLK_FREQUENCY > 400000000)
-#    define STM32_VOS_OVERDRIVE 1
-#  else
-#    define STM32_VOS_OVERDRIVE 0
-#  endif
-#else
-#  if (STM32_VOS_OVERDRIVE == 1) &&                   \
-      (STM32_PWR_VOS_SCALE != PWR_D3CR_VOS_SCALE_1)
-#    error Over-drive can be selected only when VOS1 is configured
-#  endif
-#endif
-
-/* When the SoC supports SMPS we currently support 2 configurations:
- * Direct SMP Supply OR LDO only supply.
- *
- * When the Soc does not supports SMPS we support only the LDO supply.
- */
-
-#ifdef CONFIG_STM32H7_HAVE_SMPS
-#  define STM32_PWR_CR3_MASK  ~(STM32_PWR_CR3_BYPASS      | \
-                              STM32_PWR_CR3_LDOEN         | \
-                              STM32_PWR_CR3_SDEN          | \
-                              STM32_PWR_CR3_SMPSEXTHP     | \
-                              STM32_PWR_CR3_SMPSLEVEL_MASK)
-
-#  define STM32_PWR_CR3_SELECTION STM32_PWR_CR3_SDEN
-#else
-#  define STM32_PWR_CR3_MASK  0xffffffff
-#  define STM32_PWR_CR3_SELECTION (STM32_PWR_CR3_LDOEN | STM32_PWR_CR3_SCUEN)
-
 #endif
 
 /****************************************************************************
@@ -257,7 +224,7 @@ static inline void rcc_enableahb1(void)
 #endif
 
 #ifdef CONFIG_STM32H7_OTGHS
-#  if defined(CONFIG_STM32H7_OTGHS_EXTERNAL_ULPI)
+#ifdef BOARD_ENABLE_USBOTG_HSULPI
   /* Enable clocking for USB OTG HS and external PHY */
 
   regval |= (RCC_AHB1ENR_OTGHSEN | RCC_AHB1ENR_OTGHSULPIEN);
@@ -296,17 +263,7 @@ static inline void rcc_enableahb2(void)
 
   regval = getreg32(STM32_RCC_AHB2ENR);
 
-#ifdef CONFIG_STM32H7_SDMMC2
-  /* SDMMC2 clock enable */
-
-  regval |= RCC_AHB2ENR_SDMMC2EN;
-#endif
-
-#ifdef CONFIG_STM32H7_RNG
-  /* Random number generator clock enable */
-
-  regval |= RCC_AHB2ENR_RNGEN;
-#endif
+  /* TODO: ... */
 
   putreg32(regval, STM32_RCC_AHB2ENR);   /* Enable peripherals */
 }
@@ -392,10 +349,10 @@ static inline void rcc_enableahb4(void)
 #if STM32H7_NGPIO > 4
              | RCC_AHB4ENR_GPIOEEN
 #endif
-#if (STM32H7_NGPIO > 5) && (defined(CONFIG_STM32H7_HAVE_GPIOF))
+#if STM32H7_NGPIO > 5
              | RCC_AHB4ENR_GPIOFEN
 #endif
-#if (STM32H7_NGPIO > 6) && (defined(CONFIG_STM32H7_HAVE_GPIOG))
+#if STM32H7_NGPIO > 6
              | RCC_AHB4ENR_GPIOGEN
 #endif
 #if STM32H7_NGPIO > 7
@@ -529,16 +486,10 @@ static inline void rcc_enableapb2(void)
   regval |= RCC_APB2ENR_SPI5EN;
 #endif
 
-#ifdef CONFIG_STM32H7_USART1
-  /* USART1 clock enable */
+#ifdef CONFIG_STM32H7_SDMMC2
+  /* SDMMC2 clock enable */
 
-  regval |= RCC_APB2ENR_USART1EN;
-#endif
-
-#ifdef CONFIG_STM32H7_USART6
-  /* USART6 clock enable */
-
-  regval |= RCC_APB2ENR_USART6EN;
+  regval |= RCC_APB2ENR_SDMMC2EN;
 #endif
 
   putreg32(regval, STM32_RCC_APB2ENR);   /* Enable peripherals */
@@ -609,26 +560,6 @@ static inline void rcc_enableapb4(void)
 }
 
 /****************************************************************************
- * Name: rcc_enableperiphals
- ****************************************************************************/
-
-static inline void rcc_enableperipherals(void)
-{
-  rcc_enableahb1();
-  rcc_enableahb2();
-  rcc_enableahb3();
-  rcc_enableahb4();
-  rcc_enableapb1();
-  rcc_enableapb2();
-  rcc_enableapb3();
-  rcc_enableapb4();
-}
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-/****************************************************************************
  * Name: stm32_stdclockconfig
  *
  * Description:
@@ -638,7 +569,8 @@ static inline void rcc_enableperipherals(void)
  *   power clocking modes!
  ****************************************************************************/
 
-void stm32_stdclockconfig(void)
+#ifndef CONFIG_STM32H7_CUSTOM_CLOCKCONFIG
+static void stm32_stdclockconfig(void)
 {
   uint32_t regval;
   volatile int32_t timeout;
@@ -691,6 +623,7 @@ void stm32_stdclockconfig(void)
     }
 #endif
 
+#define CONFIG_STM32H7_HSI48
 #ifdef CONFIG_STM32H7_HSI48
   /* Enable HSI48 */
 
@@ -701,20 +634,6 @@ void stm32_stdclockconfig(void)
   /* Wait until the HSI48 is ready */
 
   while ((getreg32(STM32_RCC_CR) & RCC_CR_HSI48RDY) == 0)
-    {
-    }
-#endif
-
-#ifdef CONFIG_STM32H7_CSI
-  /* Enable CSI */
-
-  regval  = getreg32(STM32_RCC_CR);
-  regval |= RCC_CR_CSION;
-  putreg32(regval, STM32_RCC_CR);
-
-  /* Wait until the CSI is ready */
-
-  while ((getreg32(STM32_RCC_CR) & RCC_CR_CSIRDY) == 0)
     {
     }
 #endif
@@ -770,7 +689,7 @@ void stm32_stdclockconfig(void)
       putreg32(regval, STM32_RCC_CFGR);
 #endif
 
-      /* Configure PLL123 clock source and multipliers */
+      /* Configure PLL123 clock source and multipiers */
 
 #ifdef STM32_BOARD_USEHSI
       regval = (RCC_PLLCKSELR_PLLSRC_HSI |
@@ -877,9 +796,10 @@ void stm32_stdclockconfig(void)
        */
 
       regval = getreg32(STM32_PWR_CR3);
-      regval &= STM32_PWR_CR3_MASK;
-      regval |= STM32_PWR_CR3_SELECTION;
+      regval |= STM32_PWR_CR3_LDOEN | STM32_PWR_CR3_LDOESCUEN;
       putreg32(regval, STM32_PWR_CR3);
+
+#if 0
 
       /* Set the voltage output scale */
 
@@ -892,31 +812,29 @@ void stm32_stdclockconfig(void)
         {
         }
 
-#ifndef CONFIG_STM32H7_PWR_IGNORE_ACTVOSRDY
-      /* See Reference manual Section 5.4.1, System supply startup */
+      /* Over-drive is needed if
+       *  - Voltage output scale 1 mode is selected and SYSCLK frequency is
+       *    over 400 MHz.
+       */
 
-      while ((getreg32(STM32_PWR_CSR1) & PWR_CSR1_ACTVOSRDY) == 0)
+      if ((STM32_PWR_VOS_SCALE == PWR_D3CR_VOS_SCALE_1) &&
+           STM32_SYSCLK_FREQUENCY > 400000000)
         {
-        }
-#endif
+          /* Enable System configuration controller clock to Enable ODEN */
 
-#if STM32_VOS_OVERDRIVE && (STM32_PWR_VOS_SCALE == PWR_D3CR_VOS_SCALE_1)
-      /* Over-drive support for VOS1 */
+          regval = getreg32(STM32_RCC_APB4ENR);
+          regval |= RCC_APB4ENR_SYSCFGEN;
+          putreg32(regval, STM32_RCC_APB4ENR);
 
-      /* Enable System configuration controller clock to Enable ODEN */
+          /* Enable Overdrive to extend the clock frequency up to 480 MHz. */
 
-      regval = getreg32(STM32_RCC_APB4ENR);
-      regval |= RCC_APB4ENR_SYSCFGEN;
-      putreg32(regval, STM32_RCC_APB4ENR);
+          regval = getreg32(STM32_SYSCFG_PWRCR);
+          regval |= SYSCFG_PWRCR_ODEN;
+          putreg32(regval, STM32_SYSCFG_PWRCR);
 
-      /* Enable Overdrive */
-
-      regval = getreg32(STM32_SYSCFG_PWRCR);
-      regval |= SYSCFG_PWRCR_ODEN;
-      putreg32(regval, STM32_SYSCFG_PWRCR);
-
-      while ((getreg32(STM32_PWR_D3CR) & STM32_PWR_D3CR_VOSRDY) == 0)
-        {
+          while ((getreg32(STM32_PWR_D3CR) & STM32_PWR_D3CR_VOSRDY) == 0)
+            {
+            }
         }
 #endif
 
@@ -940,15 +858,6 @@ void stm32_stdclockconfig(void)
              RCC_CFGR_SWS_PLL1)
         {
         }
-
-      /* Configure SDMMC source clock */
-
-#if defined(STM32_RCC_D1CCIPR_SDMMCSEL)
-      regval = getreg32(STM32_RCC_D1CCIPR);
-      regval &= ~RCC_D1CCIPR_SDMMC_MASK;
-      regval |= STM32_RCC_D1CCIPR_SDMMCSEL;
-      putreg32(regval, STM32_RCC_D1CCIPR);
-#endif
 
       /* Configure I2C source clock */
 
@@ -997,40 +906,14 @@ void stm32_stdclockconfig(void)
       regval |= STM32_RCC_D2CCIP2R_USBSRC;
       putreg32(regval, STM32_RCC_D2CCIP2R);
 #endif
-      /* Configure USART2, 3, 4, 5, 7, and 8 kernel clock source selection */
-
-#if defined(STM32_RCC_D2CCIP2R_USART234578_SEL)
-      regval = getreg32(STM32_RCC_D2CCIP2R);
-      regval &= ~RCC_D2CCIP2R_USART234578SEL_MASK;
-      regval |= STM32_RCC_D2CCIP2R_USART234578_SEL;
-      putreg32(regval, STM32_RCC_D2CCIP2R);
-#endif
-
-      /* Configure USART1 and 6 kernel clock source selection */
-
-#if defined(STM32_RCC_D2CCIP2R_USART16_SEL)
-      regval = getreg32(STM32_RCC_D2CCIP2R);
-      regval &= ~RCC_D2CCIP2R_USART16SEL_MASK;
-      regval |= STM32_RCC_D2CCIP2R_USART16_SEL;
-      putreg32(regval, STM32_RCC_D2CCIP2R);
-#endif
 
       /* Configure ADC source clock */
 
-#if defined(STM32_RCC_D3CCIPR_ADCSRC)
+#if defined(STM32_RCC_D3CCIPR_ADCSEL)
       regval = getreg32(STM32_RCC_D3CCIPR);
       regval &= ~RCC_D3CCIPR_ADCSEL_MASK;
-      regval |= STM32_RCC_D3CCIPR_ADCSRC;
+      regval |= STM32_RCC_D3CCIPR_ADCSEL;
       putreg32(regval, STM32_RCC_D3CCIPR);
-#endif
-
-      /* Configure FDCAN source clock */
-
-#if defined(STM32_RCC_D2CCIP1R_FDCANSEL)
-      regval = getreg32(STM32_RCC_D2CCIP1R);
-      regval &= ~RCC_D2CCIP1R_FDCANSEL_MASK;
-      regval |= STM32_RCC_D2CCIP1R_FDCANSEL;
-      putreg32(regval, STM32_RCC_D2CCIP1R);
 #endif
 
 #if defined(CONFIG_STM32H7_IWDG) || defined(CONFIG_STM32H7_RTC_LSICLOCK)
@@ -1050,3 +933,24 @@ void stm32_stdclockconfig(void)
 #endif
     }
 }
+#endif
+
+/****************************************************************************
+ * Name: rcc_enableperiphals
+ ****************************************************************************/
+
+static inline void rcc_enableperipherals(void)
+{
+  rcc_enableahb1();
+  rcc_enableahb2();
+  rcc_enableahb3();
+  rcc_enableahb4();
+  rcc_enableapb1();
+  rcc_enableapb2();
+  rcc_enableapb3();
+  rcc_enableapb4();
+}
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/

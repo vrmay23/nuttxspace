@@ -1,36 +1,49 @@
-/****************************************************************************
+/********************************************************************************************
  * drivers/input/max11802.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011-2012, 2014 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Petteri Aimonen <jpa@nx.mail.kapsi.fi>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/* References:
+ * References:
  *   "Low-Power, Ultra-Small Resistive Touch-Screen Controllers
  *    with I2C/SPI Interface" Maxim IC, Rev 3, 10/2010
- */
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ********************************************************************************************/
 
 #ifndef __DRIVERS_INPUT_MAX11802_H
 #define __DRIVERS_INPUT_MAX11802_H
 
-/****************************************************************************
+/********************************************************************************************
  * Included Files
- ****************************************************************************/
+ ********************************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -40,16 +53,15 @@
 
 #include <nuttx/wdog.h>
 #include <nuttx/clock.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/input/max11802.h>
 
-/****************************************************************************
+/********************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ********************************************************************************************/
 
-/* MAX11802 Interfaces ******************************************************/
+/* MAX11802 Interfaces *********************************************************************/
 
 /* LSB of register addresses specifies read (1) or write (0). */
 
@@ -73,8 +85,7 @@
 #define MAX11802_DELAY   0x55
 #define MAX11802_PULL    0x33
 
-/* Driver support ***********************************************************/
-
+/* Driver support **************************************************************************/
 /* This format is used to construct the /dev/input[n] device driver path.  It
  * defined here so that it will be used consistently in all places.
  */
@@ -86,9 +97,9 @@
 
 #define MAX11802_WDOG_DELAY     MSEC2TICK(50)
 
-/****************************************************************************
+/********************************************************************************************
  * Public Types
- ****************************************************************************/
+ ********************************************************************************************/
 
 /* This describes the state of one contact */
 
@@ -123,31 +134,30 @@ struct max11802_dev_s
   volatile bool penchange;              /* An unreported event is buffered */
   uint16_t threshx;                     /* Thresholding X value */
   uint16_t threshy;                     /* Thresholding Y value */
-  mutex_t devlock;                      /* Manages exclusive access to this structure */
+  sem_t devsem;                         /* Manages exclusive access to this structure */
   sem_t waitsem;                        /* Used to wait for the availability of data */
 
   FAR struct max11802_config_s *config; /* Board configuration data */
   FAR struct spi_dev_s *spi;            /* Saved SPI driver instance */
   struct work_s work;                   /* Supports the interrupt handling "bottom half" */
   struct max11802_sample_s sample;      /* Last sampled touch point data */
-  struct wdog_s wdog;                   /* Poll the position while the pen is down */
+  WDOG_ID wdog;                         /* Poll the position while the pen is down */
 
   /* The following is a list if poll structures of threads waiting for
    * driver events. The 'struct pollfd' reference for each open is also
    * retained in the f_priv field of the 'struct file'.
    */
 
-  FAR struct pollfd *fds[CONFIG_MAX11802_NPOLLWAITERS];
+  struct pollfd *fds[CONFIG_MAX11802_NPOLLWAITERS];
 };
 
-/****************************************************************************
+/********************************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ********************************************************************************************/
 
 #ifdef __cplusplus
 #define EXTERN extern "C"
-extern "C"
-{
+extern "C" {
 #else
 #define EXTERN extern
 #endif

@@ -1,22 +1,39 @@
 /****************************************************************************
  * apps/wireless/ieee802154/i8sak/i8sak_scan.c
+ * IEEE 802.15.4 Swiss Army Knife
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2015, 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Author: Anthony Merlino <anthony@vergeaero.com>
+ *   Author: Gregory Nuttx <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +47,6 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/ioctl.h>
 #include <nuttx/fs/ioctl.h>
 
@@ -43,8 +59,7 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-static void scan_eventcb(FAR struct ieee802154_primitive_s *primitive,
-                         FAR void *arg);
+static void scan_eventcb(FAR struct ieee802154_primitive_s *primitive, FAR void *arg);
 
 /****************************************************************************
  * Public Functions
@@ -104,7 +119,6 @@ void i8sak_scan_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
 
           case ':':
             fprintf(stderr, "ERROR: missing argument\n");
-
             /* Must manually reset optind if we are going to exit early */
 
             optind = -1;
@@ -112,7 +126,6 @@ void i8sak_scan_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
 
           case '?':
             fprintf(stderr, "ERROR: unknown argument\n");
-
             /* Must manually reset optind if we are going to exit early */
 
             optind = -1;
@@ -192,8 +205,7 @@ void i8sak_scan_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
  * Private Functions
  ****************************************************************************/
 
-static void scan_eventcb(FAR struct ieee802154_primitive_s *primitive,
-                         FAR void *arg)
+static void scan_eventcb(FAR struct ieee802154_primitive_s *primitive, FAR void *arg)
 {
   FAR struct i8sak_s *i8sak = (FAR struct i8sak_s *)arg;
   FAR struct ieee802154_scan_conf_s *scan = &primitive->u.scanconf;
@@ -220,10 +232,9 @@ static void scan_eventcb(FAR struct ieee802154_primitive_s *primitive,
         break;
     }
 
-  printf("Scan results:\n");
+  printf("Scan results: \n");
 
-  if (scan->type == IEEE802154_SCANTYPE_ACTIVE ||
-      scan->type == IEEE802154_SCANTYPE_PASSIVE)
+  if (scan->type == IEEE802154_SCANTYPE_ACTIVE || scan->type == IEEE802154_SCANTYPE_PASSIVE)
     {
       /* Copy the results from the notification */
 
@@ -257,13 +268,12 @@ static void scan_eventcb(FAR struct ieee802154_primitive_s *primitive,
     {
       /* Print the results out */
 
-      for (i = 0; i < scan->numresults; i++)
+      for (i=0; i < scan->numresults; i++)
         {
           printf("Result %d\n", i);
-          printf("    Channel: %u Energy: %d\n",
-                 scan->chlist[i], scan->edlist[i]);
+          printf("    Channel: %u Energy: %d\n", scan->chlist[i], scan->edlist[i]);
         }
     }
 
-  i8sak_releasedaemon(i8sak);
+  i8sak_requestdaemon(i8sak);
 }

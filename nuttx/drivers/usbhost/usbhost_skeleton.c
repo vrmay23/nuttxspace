@@ -1,8 +1,6 @@
 /****************************************************************************
  * drivers/usbhost/usbhost_skeleton.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -37,7 +35,7 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/wqueue.h>
 
 #include <nuttx/usb/usb.h>
@@ -55,8 +53,8 @@
 
 /* Driver support ***********************************************************/
 
-/* The format used to construct device file path, defined for consistent use
- * from all places.
+/* This format is used to construct the /dev/skel[n] device driver path.  It
+ * defined here so that it will be used consistently in all places.
  */
 
 #define DEV_FORMAT          "/dev/skel%c"
@@ -75,7 +73,9 @@
  * Private Types
  ****************************************************************************/
 
-/* This is the internal, private state of the USB host class driver. */
+/* This structure contains the internal, private state of the USB host class
+ * driver.
+ */
 
 struct usbhost_state_s
 {
@@ -85,21 +85,27 @@ struct usbhost_state_s
 
   /* The remainder of the fields are provide to the class driver */
 
-  char            devchar;      /* char in /dev/skel[n] format name */
-  volatile bool   disconnected; /* TRUE: Device has been disconnected */
-  uint8_t         ifno;         /* Interface number */
-  int16_t         crefs;        /* Reference count on the driver instance */
-  mutex_t         lock;         /* Used for mutual exclusive access */
-  struct work_s   work;         /* For interacting with the worker thread */
-  FAR uint8_t    *tbuffer;      /* The allocated transfer buffer */
-  size_t          tbuflen;      /* Size of the allocated transfer buffer */
-  usbhost_ep_t    epin;         /* IN endpoint */
-  usbhost_ep_t    epout;        /* OUT endpoint */
+  char                    devchar;      /* Character identifying the /dev/skel[n] device */
+  volatile bool           disconnected; /* TRUE: Device has been disconnected */
+  uint8_t                 ifno;         /* Interface number */
+  int16_t                 crefs;        /* Reference count on the driver instance */
+  sem_t                   exclsem;      /* Used to maintain mutual exclusive access */
+  struct work_s           work;         /* For interacting with the worker thread */
+  FAR uint8_t            *tbuffer;      /* The allocated transfer buffer */
+  size_t                  tbuflen;      /* Size of the allocated transfer buffer */
+  usbhost_ep_t            epin;         /* IN endpoint */
+  usbhost_ep_t            epout;        /* OUT endpoint */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
+
+/* Semaphores */
+
+static int usbhost_takesem(FAR sem_t *sem);
+static void usbhost_forcetake(FAR sem_t *sem);
+#define usbhost_givesem(s) nxsem_post(s);
 
 /* Memory allocation services */
 
@@ -148,16 +154,14 @@ static int usbhost_connect(FAR struct usbhost_class_s *usbclass,
                            FAR const uint8_t *configdesc, int desclen);
 static int usbhost_disconnected(FAR struct usbhost_class_s *usbclass);
 
-/* Driver methods --
- * depend upon the type of NuttX driver interface exported
- */
+/* Driver methods -- depend upon the type of NuttX driver interface exported */
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-/* This structure provides the registry entry ID information that will be
- * used to associate the USB host class driver to a connected USB device.
+/* This structure provides the registry entry ID information that will  be
+ * used to associate the USB class driver to a connected USB device.
  */
 
 static const struct usbhost_id_s g_id =
@@ -169,7 +173,7 @@ static const struct usbhost_id_s g_id =
   0   /* pid      */
 };
 
-/* This is the USB host class' registry entry */
+/* This is the USB host storage class's registry entry */
 
 static struct usbhost_registry_s g_skeleton =
 {
@@ -179,13 +183,55 @@ static struct usbhost_registry_s g_skeleton =
   &g_id                   /* id[]     */
 };
 
-/* The bitmap depicting allocated device names in "/dev/skel[a-z]". */
+/* This is a bitmap that is used to allocate device names /dev/skela-z. */
 
 static uint32_t g_devinuse;
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: usbhost_takesem
+ *
+ * Description:
+ *   This is just a wrapper to handle the annoying behavior of semaphore
+ *   waits that return due to the receipt of a signal.
+ *
+ ****************************************************************************/
+
+static int usbhost_takesem(FAR sem_t *sem)
+{
+  return nxsem_wait_uninterruptible(sem);
+}
+
+/****************************************************************************
+ * Name: usbhost_forcetake
+ *
+ * Description:
+ *   This is just another wrapper but this one continues even if the thread
+ *   is canceled.  This must be done in certain conditions where were must
+ *   continue in order to clean-up resources.
+ *
+ ****************************************************************************/
+
+static void usbhost_forcetake(FAR sem_t *sem)
+{
+  int ret;
+
+  do
+    {
+      ret = nxsem_wait_uninterruptible(sem);
+
+      /* The only expected error would -ECANCELED meaning that the
+       * parent thread has been canceled.  We have to continue and
+       * terminate the poll in this case.
+       */
+
+      DEBUGASSERT(ret == OK || ret == -ECANCELED);
+    }
+  while (ret < 0);
+}
 
 /****************************************************************************
  * Name: usbhost_allocclass
@@ -412,7 +458,7 @@ static inline int usbhost_cfgdesc(FAR struct usbhost_state_s *priv,
   configdesc += cfgdesc->len;
   remaining  -= cfgdesc->len;
 
-  /* Loop where there are more descriptors to examine */
+  /* Loop where there are more dscriptors to examine */
 
   while (remaining >= sizeof(struct usb_desc_s))
     {
@@ -632,10 +678,10 @@ static inline int usbhost_devinit(FAR struct usbhost_state_s *priv)
 
   if (ret >= 0)
     {
-      ret = nxmutex_lock(&priv->lock);
+      ret = usbhost_takesem(&priv->exclsem);
       if (ret < 0)
         {
-          return ret;
+          return ert;
         }
 
       DEBUGASSERT(priv->crefs >= 2);
@@ -660,9 +706,8 @@ static inline int usbhost_devinit(FAR struct usbhost_state_s *priv)
 
           uinfo("Successfully initialized\n");
           priv->crefs--;
+          usbhost_givesem(&priv->exclsem);
         }
-
-      nxmutex_unlock(&priv->lock);
     }
 
   return ret;
@@ -868,17 +913,13 @@ static FAR struct usbhost_class_s *
           priv->usbclass.connect      = usbhost_connect;
           priv->usbclass.disconnected = usbhost_disconnected;
 
-          /* The initial reference count is 1...
-           * One reference is held by the driver
-           */
+          /* The initial reference count is 1... One reference is held by the driver */
 
           priv->crefs = 1;
 
-          /* Initialize mutex
-           * (this works okay in the interrupt context)
-           */
+          /* Initialize semaphores (this works okay in the interrupt context) */
 
-          nxmutex_init(&priv->lock);
+          nxsem_init(&priv->exclsem, 0, 1);
 
           /* Return the instance of the USB class driver */
 

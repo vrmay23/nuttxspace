@@ -1,22 +1,39 @@
 /****************************************************************************
  * drivers/lcd/lpm013m091a.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Driver for LPM013M091A LCD based on ili9341.c.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright (C) 2014 Marco Krahl. All rights reserved.
+ *   Author: Marco Krahl <ocram.lhark@gmail.com>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +47,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -84,12 +100,10 @@ static int lpm013m091a_hwinitialize(FAR struct lpm013m091a_dev_s *dev);
 
 /* lcd data transfer methods */
 
-static int lpm013m091a_putrun(FAR struct lcd_dev_s *dev,
-                              fb_coord_t row, fb_coord_t col,
+static int lpm013m091a_putrun(fb_coord_t row, fb_coord_t col,
                               FAR const uint8_t *buffer, size_t npixels);
 #ifndef CONFIG_LCD_NOGETRUN
-static int lpm013m091a_getrun(FAR struct lcd_dev_s *dev,
-                              fb_coord_t row, fb_coord_t col,
+static int lpm013m091a_getrun(fb_coord_t row, fb_coord_t col,
                               FAR uint8_t *buffer,
                               size_t npixels);
 #endif
@@ -134,7 +148,7 @@ static const struct lcd_planeinfo_s g_planeinfo =
 #ifndef CONFIG_LCD_NOGETRUN
   .getrun = lpm013m091a_getrun,           /* Get a run from lcd memory */
 #endif
-  .buffer = (FAR uint8_t *)g_runbuffer,   /* Run scratch buffer */
+  .buffer = (uint8_t *) g_runbuffer,      /* Run scratch buffer */
   .bpp = LPM013M091A_BPP,                 /* Bits-per-pixel */
 };
 
@@ -280,7 +294,7 @@ static int lpm013m091a_hwinitialize(FAR struct lpm013m091a_dev_s *dev)
  *   Write a partial raster line to the LCD.
  *
  * Parameters:
- *   dev     - The lcd device
+ *   devno   - Number of lcd device
  *   row     - Starting row to write to (range: 0 <= row < yres)
  *   col     - Starting column to write to (range: 0 <= col <= xres-npixels)
  *   buffer  - The buffer containing the run to be written to the LCD
@@ -294,12 +308,11 @@ static int lpm013m091a_hwinitialize(FAR struct lpm013m091a_dev_s *dev)
  *
  ****************************************************************************/
 
-static int lpm013m091a_putrun(FAR struct lcd_dev_s *lcd_dev,
-                              fb_coord_t row, fb_coord_t col,
+static int lpm013m091a_putrun(fb_coord_t row, fb_coord_t col,
                               FAR const uint8_t *buffer, size_t npixels)
 {
   FAR struct lpm013m091a_dev_s *dev = (FAR struct lpm013m091a_dev_s *)
-                                      lcd_dev;
+                                       &g_lpm013m091a_dev;
   FAR struct lpm013m091a_lcd_s *lcd = dev->lcd;
   FAR const uint16_t *src = (FAR const uint16_t *)buffer;
 
@@ -342,7 +355,7 @@ static int lpm013m091a_putrun(FAR struct lcd_dev_s *lcd_dev,
  *   Read a partial raster line from the LCD.
  *
  * Parameter:
- *   dev     - The lcd device
+ *   devno   - Number of the lcd device
  *   row     - Starting row to read from (range: 0 <= row < yres)
  *   col     - Starting column to read read (range: 0 <= col <= xres-npixels)
  *   buffer  - The buffer in which to return the run read from the LCD
@@ -357,10 +370,8 @@ static int lpm013m091a_putrun(FAR struct lcd_dev_s *lcd_dev,
  ****************************************************************************/
 
 #ifndef CONFIG_LCD_NOGETRUN
-static int lpm013m091a_getrun(FAR struct lcd_dev_s *dev,
-                              fb_coord_t row, fb_coord_t col,
-                              FAR uint8_t *buffer,
-                              size_t npixels)
+int lpm013m091a_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t * buffer,
+                       size_t npixels)
 {
   lcderr("getrun is not supported for now.\n");
   return -ENOSYS;
@@ -425,7 +436,6 @@ static int lpm013m091a_getplaneinfo(FAR struct lcd_dev_s *dev,
   if (dev && pinfo && planeno == 0)
     {
       memcpy(pinfo, &g_planeinfo, sizeof(struct lcd_planeinfo_s));
-      pinfo->dev = dev;
 
       lcdinfo("planeno: %d bpp: %d\n", planeno, pinfo->bpp);
 
@@ -596,6 +606,8 @@ FAR struct lcd_dev_s *
             {
               return &priv->dev;
             }
+
+          errno = EINVAL;
         }
     }
 

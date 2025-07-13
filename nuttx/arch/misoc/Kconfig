@@ -21,12 +21,6 @@ config ARCH_CHIP_MINERVA
 	---help---
 		LambdaConcept MINERVAL Chip Selected
 
-config ARCH_CHIP_MISOC_CUSTOM
-	bool "Custom MISOC chip"
-	select ARCH_CHIP_CUSTOM
-	---help---
-		Select this option if there is no directory for the chip under arch/misoc/src/.
-
 endchoice # Misoc Chip Selection
 
 config ARCH_CHIP
@@ -77,10 +71,10 @@ config MISOC_UART_TX_BUF_SIZE
 		Size of TX buffers for MISOC UARTs
 
 if ARCH_CHIP_LM32
-source "arch/misoc/src/lm32/Kconfig"
+source arch/misoc/src/lm32/Kconfig
 endif
 if ARCH_CHIP_MINERVA
-source "arch/misoc/src/minerva/Kconfig"
+source arch/misoc/src/minerva/Kconfig
 endif
 
 endif # ARCH_MISOC

@@ -1,8 +1,6 @@
 /****************************************************************************
  * drivers/wireless/spirit/drivers/spirit_netdev.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -35,7 +33,7 @@
  * input of all frames into the network, (2) queuing of all output frames,
  * and all network housekeeping such as periodic polling.
  *
- * Interrupt handling is very brief since it only schedules the interrupt
+ * Interrupt handling is verify brief since it only schedules the interrupt
  * work to occur on the HP work queue.  Several things are done for the
  * interrupt handling, but the primary things are:  (1) receipt of incoming
  * packets, and (2) handling of the completion of TX transfers.
@@ -83,9 +81,9 @@
  *                                      size
  *
  * Another consideration is the nature of the GPIO interrupts.  For STM32,
- * for example, disabling the Spirit interrupt tears down the entire
+ * for example, disabling the Spirit interrupt tears down the the entire
  * interrupt setup so, for example, any interrupts that are received while
- * interrupts are disabled, aka torn down, will be lost.  Hence, it may be
+ * interrupts are disable, aka torn down, will be lost.  Hence, it may be
  * necessary to process pending interrupts whenever interrupts are re-
  * enabled.
  */
@@ -108,7 +106,7 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/mm/iob.h>
@@ -217,6 +215,10 @@
 #define SPIRIT_RXFIFO_ALMOSTFULL  (3 * SPIRIT_MAX_FIFO_LEN / 4)
 #define SPIRIT_TXFIFO_ALMOSTEMPTY (1 * SPIRIT_MAX_FIFO_LEN / 4)
 
+/* TX poll delay = 1 seconds. CLK_TCK is the number of clock ticks per second */
+
+#define SPIRIT_WDDELAY      (1*CLK_TCK)
+
 /* Maximum number of retries (10) */
 
 #define SPIRIT_MAX_RETX     PKT_N_RETX_10
@@ -264,10 +266,12 @@ struct spirit_driver_s
   struct work_s                    txwork;    /* TX work queue support (HP) */
   struct work_s                    rxwork;    /* RX work queue support (LP) */
   struct work_s                    pollwork;  /* TX network poll work (LP) */
-  struct wdog_s                    txtimeout; /* TX timeout timer */
-  mutex_t                          rxlock;    /* Exclusive access to the RX queue */
-  mutex_t                          txlock;    /* Exclusive access to the TX queue */
+  WDOG_ID                          txpoll;    /* TX poll timer */
+  WDOG_ID                          txtimeout; /* TX timeout timer */
+  sem_t                            rxsem;     /* Exclusive access to the RX queue */
+  sem_t                            txsem;     /* Exclusive access to the TX queue */
   bool                             ifup;      /* Spirit is on and interface is up */
+  bool                             needpoll;  /* Timer poll needed */
   uint8_t                          state;     /* See  enum spirit_driver_state_e */
   uint8_t                          counter;   /* Count used with TX timeout */
   uint8_t                          prescaler; /* Prescaler used with TX timeout */
@@ -278,6 +282,11 @@ struct spirit_driver_s
  ****************************************************************************/
 
 /* Helpers */
+
+static void spirit_rxlock(FAR struct spirit_driver_s *priv);
+static inline void spirit_rxunlock(FAR struct spirit_driver_s *priv);
+static void spirit_txlock(FAR struct spirit_driver_s *priv);
+static inline void spirit_txunlock(FAR struct spirit_driver_s *priv);
 
 static void spirit_set_ipaddress(FAR struct net_driver_s *dev);
 static int  spirit_set_readystate(FAR struct spirit_driver_s *priv);
@@ -302,9 +311,10 @@ static int  spirit_interrupt(int irq, FAR void *context, FAR void *arg);
 /* Watchdog timer expirations */
 
 static void spirit_txtimeout_work(FAR void *arg);
-static void spirit_txtimeout_expiry(wdparm_t arg);
+static void spirit_txtimeout_expiry(int argc, wdparm_t arg, ...);
 
 static void spirit_txpoll_work(FAR void *arg);
+static void spirit_txpoll_expiry(int argc, wdparm_t arg, ...);
 
 /* NuttX callback functions */
 
@@ -447,6 +457,110 @@ static struct spirit_pktstack_address_s g_addrinit =
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: spirit_rxlock
+ *
+ * Description:
+ *   Get exclusive access to the incoming RX packet queue.
+ *
+ * Input Parameters:
+ *   priv - Reference to a driver state structure instance
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void spirit_rxlock(FAR struct spirit_driver_s *priv)
+{
+  int ret;
+
+  /* The only error that can be reported by nxsem_wait_uninterruptible() is
+   * ECANCELED if the the thread is canceled.  All of the work runs on the
+   * LP work thread, however.  It is very unlikely that the LP worker thread
+   * will be canceled and, if so, it should finish the work in progress
+   * before dying anyway.
+   */
+
+  do
+    {
+      ret = nxsem_wait_uninterruptible(&priv->rxsem);
+      DEBUGASSERT(ret == 0 || ret == -ECANCELED);
+    }
+  while (ret < 0);
+}
+
+/****************************************************************************
+ * Name: spirit_rxunlock
+ *
+ * Description:
+ *   Relinquish exclusive access to the incoming RX packet queue.
+ *
+ * Input Parameters:
+ *   priv - Reference to a driver state structure instance
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static inline void spirit_rxunlock(FAR struct spirit_driver_s *priv)
+{
+  nxsem_post(&priv->rxsem);
+}
+
+/****************************************************************************
+ * Name: spirit_txlock
+ *
+ * Description:
+ *   Get exclusive access to the outgoing TX packet queue.
+ *
+ * Input Parameters:
+ *   priv - Reference to a driver state structure instance
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void spirit_txlock(FAR struct spirit_driver_s *priv)
+{
+  int ret;
+
+  /* The only error that can be reported by nxsem_wait_uninterruptible() is
+   * ECANCELED if the the thread is canceled.  All of the work runs on the
+   * LP work thread, however.  It is very unlikely that the LP worker thread
+   * will be canceled and, if so, it should finish the work in progress
+   * before dying anyway.
+   */
+
+  do
+    {
+      ret = nxsem_wait_uninterruptible(&priv->txsem);
+      DEBUGASSERT(ret == 0 || ret == -ECANCELED);
+    }
+  while (ret < 0);
+}
+
+/****************************************************************************
+ * Name: spirit_txunlock
+ *
+ * Description:
+ *   Relinquish exclusive access to the outgoing TX packet queue.
+ *
+ * Input Parameters:
+ *   priv - Reference to a driver state structure instance
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static inline void spirit_txunlock(FAR struct spirit_driver_s *priv)
+{
+  nxsem_post(&priv->txsem);
+}
+
+/****************************************************************************
  * Name: spirit_set_ipaddress
  *
  * Description:
@@ -466,7 +580,7 @@ static void spirit_set_ipaddress(FAR struct net_driver_s *dev)
 {
   FAR struct netdev_varaddr_s *addr;
 
-  /* Get a convenient pointer to the variable length address struct */
+  /* Get a convenient pointer to the PktRadio variable length address struct */
 
   addr = (FAR struct netdev_varaddr_s *)&dev->d_mac.radio;
 
@@ -587,7 +701,7 @@ static void spirit_free_txhead(FAR struct spirit_driver_s *priv)
 
   /* Free the IOB contained in the metadata container */
 
-  iob_free(pktmeta->pm_iob);
+  iob_free(pktmeta->pm_iob, IOBUSER_WIRELESS_PACKETRADIO);
 
   /* Then free the meta data container itself */
 
@@ -633,7 +747,7 @@ static void spirit_transmit_work(FAR void *arg)
    * cannot run until this completes.
    */
 
-  nxmutex_lock(&priv->txlock);
+  spirit_txlock(priv);
 
   while (priv->txhead != NULL && priv->state == DRIVER_STATE_IDLE)
     {
@@ -810,11 +924,11 @@ static void spirit_transmit_work(FAR void *arg)
 
       /* Setup the TX timeout watchdog (perhaps restarting the timer) */
 
-      wd_start(&priv->txtimeout, SPIRIT_TXTIMEOUT,
-               spirit_txtimeout_expiry, (wdparm_t)priv);
+      wd_start(priv->txtimeout, SPIRIT_TXTIMEOUT,
+               spirit_txtimeout_expiry, 1, (wdparm_t)priv);
     }
 
-  nxmutex_unlock(&priv->txlock);
+  spirit_txunlock(priv);
   return;
 
 errout_with_rxtimeout:
@@ -824,8 +938,9 @@ errout_with_csma:
   spirit_csma_enable(spirit, S_DISABLE);
 
 errout_with_lock:
-  nxmutex_unlock(&priv->txlock);
+  spirit_txunlock(priv);
   NETDEV_TXERRORS(&priv->radio.r_dev);
+  return;
 }
 
 /****************************************************************************
@@ -923,7 +1038,7 @@ static void spirit_receive_work(FAR void *arg)
 
   while (priv->rxhead != NULL)
     {
-      nxmutex_lock(&priv->rxlock);
+      spirit_rxlock(priv);
 
       /* Remove the contained IOB from the RX queue */
 
@@ -938,7 +1053,7 @@ static void spirit_receive_work(FAR void *arg)
           priv->rxtail = NULL;
         }
 
-      nxmutex_unlock(&priv->rxlock);
+      spirit_rxunlock(priv);
 
       /* Remove the IOB from the container */
 
@@ -1044,7 +1159,7 @@ static void spirit_interrupt_work(FAR void *arg)
 
       if (priv->rxbuffer != NULL)
         {
-          iob_free(priv->rxbuffer);
+          iob_free(priv->rxbuffer, IOBUSER_WIRELESS_PACKETRADIO);
           priv->rxbuffer = NULL;
         }
 #endif
@@ -1104,7 +1219,7 @@ static void spirit_interrupt_work(FAR void *arg)
         {
           /* Yes.. Cancel the TX timeout */
 
-          wd_cancel(&priv->txtimeout);
+          wd_cancel(priv->txtimeout);
 
           /* Revert the sending state */
 
@@ -1134,7 +1249,7 @@ static void spirit_interrupt_work(FAR void *arg)
 
       /* Cancel the TX timeout */
 
-      wd_cancel(&priv->txtimeout);
+      wd_cancel(priv->txtimeout);
 
       /* Put the Spirit back in the receiving state */
 
@@ -1198,7 +1313,15 @@ static void spirit_interrupt_work(FAR void *arg)
 
       if (priv->rxbuffer == NULL)
         {
-          priv->rxbuffer = iob_alloc(false);
+          priv->rxbuffer = iob_alloc(false, IOBUSER_WIRELESS_PACKETRADIO);
+        }
+
+      if (priv->rxbuffer != NULL)
+        {
+          priv->rxbuffer->io_len    = 0;
+          priv->rxbuffer->io_offset = 0;
+          priv->rxbuffer->io_pktlen = 0;
+          priv->rxbuffer->io_flink  = NULL;
         }
 #endif
     }
@@ -1265,7 +1388,7 @@ static void spirit_interrupt_work(FAR void *arg)
             {
               /* Allocate an I/O buffer to hold the received packet. */
 
-              iob = iob_alloc(false);
+              iob = iob_alloc(false, IOBUSER_WIRELESS_PACKETRADIO);
             }
 
           if (iob == NULL)
@@ -1307,7 +1430,7 @@ static void spirit_interrupt_work(FAR void *arg)
                 {
                   wlerr("ERROR: Failed to allocate metadata... dropping\n");
                   NETDEV_RXDROPPED(&priv->radio.r_dev);
-                  iob_free(iob);
+                  iob_free(iob, IOBUSER_WIRELESS_PACKETRADIO);
                 }
               else
                 {
@@ -1335,7 +1458,7 @@ static void spirit_interrupt_work(FAR void *arg)
 
                   pktmeta->pm_flink          = NULL;
 
-                  nxmutex_lock(&priv->rxlock);
+                  spirit_rxlock(priv);
                   if (priv->rxtail == NULL)
                     {
                       priv->rxhead           = pktmeta;
@@ -1346,7 +1469,7 @@ static void spirit_interrupt_work(FAR void *arg)
                     }
 
                   priv->rxtail               = pktmeta;
-                  nxmutex_unlock(&priv->rxlock);
+                  spirit_rxunlock(priv);
 
                   /* Forward the packet to the network.  This must be done
                    * on the LP worker thread with the network locked.
@@ -1388,7 +1511,7 @@ static void spirit_interrupt_work(FAR void *arg)
         {
           /* If not, then allocate one now. */
 
-          priv->rxbuffer = iob_alloc(false);
+          priv->rxbuffer = iob_alloc(false, IOBUSER_WIRELESS_PACKETRADIO);
           iob            = priv->rxbuffer;
           offset         = 0;
         }
@@ -1416,7 +1539,7 @@ static void spirit_interrupt_work(FAR void *arg)
               /* Free the IOB */
 
               priv->rxbuffer = NULL;
-              iob_free(iob);
+              iob_free(iob, IOBUSER_WIRELESS_PACKETRADIO);
             }
           else
             {
@@ -1478,7 +1601,7 @@ static void spirit_interrupt_work(FAR void *arg)
 
       if (priv->rxbuffer != NULL)
         {
-          iob_free(priv->rxbuffer);
+          iob_free(priv->rxbuffer, IOBUSER_WIRELESS_PACKETRADIO);
           priv->rxbuffer = NULL;
         }
 #endif
@@ -1595,7 +1718,8 @@ static void spirit_txtimeout_work(FAR void *arg)
  *   The last TX never completed.  Reset the hardware and start again.
  *
  * Input Parameters:
- *   arg  - The argument
+ *   argc - The number of available arguments
+ *   arg  - The first argument
  *
  * Returned Value:
  *   None
@@ -1605,7 +1729,7 @@ static void spirit_txtimeout_work(FAR void *arg)
  *
  ****************************************************************************/
 
-static void spirit_txtimeout_expiry(wdparm_t arg)
+static void spirit_txtimeout_expiry(int argc, wdparm_t arg, ...)
 {
   FAR struct spirit_driver_s *priv = (FAR struct spirit_driver_s *)arg;
 
@@ -1663,7 +1787,27 @@ static void spirit_txpoll_work(FAR void *arg)
 
   /* Do nothing if the network is not yet UP */
 
-  if (priv->ifup)
+  if (!priv->ifup)
+    {
+      priv->needpoll = false;
+    }
+
+  /* Is a periodic poll needed? */
+
+  else if (priv->needpoll)
+    {
+      /* Perform the periodic poll */
+
+      priv->needpoll = false;
+      devif_timer(&priv->radio.r_dev, SPIRIT_WDDELAY,
+                  spirit_txpoll_callback);
+
+      /* Setup the watchdog poll timer again */
+
+      wd_start(priv->txpoll, SPIRIT_WDDELAY, spirit_txpoll_expiry, 1,
+               (wdparm_t)priv);
+    }
+  else
     {
       /* Perform a normal, asynchronous poll for new TX data */
 
@@ -1671,6 +1815,34 @@ static void spirit_txpoll_work(FAR void *arg)
     }
 
   net_unlock();
+}
+
+/****************************************************************************
+ * Name: spirit_txpoll_expiry
+ *
+ * Description:
+ *   Periodic timer handler.  Called from the timer interrupt handler.
+ *
+ * Input Parameters:
+ *   argc - The number of available arguments
+ *   arg  - The first argument
+ *
+ * Returned Value:
+ *   None
+ *
+ * Assumptions:
+ *   Global interrupts are disabled by the watchdog logic.
+ *
+ ****************************************************************************/
+
+static void spirit_txpoll_expiry(int argc, wdparm_t arg, ...)
+{
+  FAR struct spirit_driver_s *priv = (FAR struct spirit_driver_s *)arg;
+
+  /* Schedule to perform the poll work on the LP worker thread. */
+
+  priv->needpoll = true;
+  work_queue(LPWORK, &priv->pollwork, spirit_txpoll_work, priv, 0);
 }
 
 /****************************************************************************
@@ -1769,6 +1941,11 @@ static int spirit_ifup(FAR struct net_driver_s *dev)
           goto error_with_ifalmostup;
         }
 
+      /* Set and activate a timer process */
+
+      wd_start(priv->txpoll, SPIRIT_WDDELAY, spirit_txpoll_expiry, 1,
+               (wdparm_t)priv);
+
       /* Enables the interrupts from the SPIRIT1 */
 
       DEBUGASSERT(priv->lower->enable != NULL);
@@ -1828,9 +2005,10 @@ static int spirit_ifdown(FAR struct net_driver_s *dev)
       DEBUGASSERT(priv->lower->enable != NULL);
       priv->lower->enable(priv->lower, false);
 
-      /* Cancel the TX timeout timers */
+      /* Cancel the TX poll timer and TX timeout timers */
 
-      wd_cancel(&priv->txtimeout);
+      wd_cancel(priv->txpoll);
+      wd_cancel(priv->txtimeout);
       leave_critical_section(flags);
 
       /* First stop Rx/Tx
@@ -2173,7 +2351,7 @@ static int spirit_req_data(FAR struct radio_driver_s *netdev,
         {
           wlerr("ERROR: Failed to allocate metadata... dropping\n");
           NETDEV_RXDROPPED(&priv->radio.r_dev);
-          iob_free(iob);
+          iob_free(iob, IOBUSER_WIRELESS_PACKETRADIO);
           continue;
         }
 
@@ -2191,7 +2369,7 @@ static int spirit_req_data(FAR struct radio_driver_s *netdev,
 
       pktmeta->pm_flink          = NULL;
 
-      nxmutex_lock(&priv->txlock);
+      spirit_txlock(priv);
       if (priv->txtail == NULL)
         {
           priv->txhead           = pktmeta;
@@ -2202,7 +2380,7 @@ static int spirit_req_data(FAR struct radio_driver_s *netdev,
         }
 
       priv->txtail               = pktmeta;
-      nxmutex_unlock(&priv->txlock);
+      spirit_txunlock(priv);
 
       /* If are no transmissions or receptions in progress, then schedule
        * transmission of the frame in the IOB at the head of the IOB queue.
@@ -2628,8 +2806,16 @@ int spirit_netdev_initialize(FAR struct spi_dev_s *spi,
   /* Attach the interface, lower driver, and devops */
 
   priv->lower = lower;
-  nxmutex_init(&priv->rxlock);          /* Access to RX packet queue */
-  nxmutex_init(&priv->txlock);          /* Access to TX packet queue */
+
+  /* Create a watchdog for timing polling for and timing of transmissions */
+
+  priv->txpoll        = wd_create();       /* Create periodic poll timer */
+  priv->txtimeout     = wd_create();       /* Create TX timeout timer */
+
+  DEBUGASSERT(priv->txpoll != NULL && priv->txtimeout != NULL);
+
+  nxsem_init(&priv->rxsem, 0, 1);            /* Access to RX packet queue */
+  nxsem_init(&priv->txsem, 0, 1);            /* Access to TX packet queue */
 
   /* Initialize the IEEE 802.15.4 network device fields */
 
@@ -2651,7 +2837,7 @@ int spirit_netdev_initialize(FAR struct spi_dev_s *spi,
 #ifdef CONFIG_NETDEV_IOCTL
   dev->d_ioctl        = spirit_ioctl;      /* Handle network IOCTL commands */
 #endif
-  dev->d_private      = priv;              /* Used to recover private state from dev */
+  dev->d_private      = (FAR void *)priv;  /* Used to recover private state from dev */
 
   /* Make sure that the PktRadio common logic has been initialized */
 
@@ -2663,7 +2849,7 @@ int spirit_netdev_initialize(FAR struct spi_dev_s *spi,
   if (ret < 0)
     {
       wlerr("ERROR: spirit_hw_initialize failed: %d\n", ret);
-      goto errout_with_alloc;
+      goto errout_with_attach;
     }
 
 #ifdef CONFIG_NET_6LOWPAN
@@ -2675,6 +2861,15 @@ int spirit_netdev_initialize(FAR struct spi_dev_s *spi,
   priv->radio.r_dev.d_buf = g_iobuffer.rb_buf;
 #endif
 
+  /* Register the device with the OS so that socket IOCTLs can be performed. */
+
+  ret = netdev_register(dev, NET_LL_PKTRADIO);
+  if (ret < 0)
+    {
+      wlerr("ERROR: netdev_register failed: %d\n", ret);
+      goto errout_with_attach;
+    }
+
   /* Attach irq */
 
   ret = lower->attach(lower, spirit_interrupt, priv);
@@ -2682,15 +2877,6 @@ int spirit_netdev_initialize(FAR struct spi_dev_s *spi,
     {
       wlerr("ERROR: Failed to attach interrupt: %d\n", ret);
       goto errout_with_alloc;
-    }
-
-  /* Register the device with the OS so that IOCTLs can be performed. */
-
-  ret = netdev_register(dev, NET_LL_PKTRADIO);
-  if (ret < 0)
-    {
-      wlerr("ERROR: netdev_register failed: %d\n", ret);
-      goto errout_with_attach;
     }
 
   /* Enable Radio IRQ */
@@ -2702,8 +2888,6 @@ errout_with_attach:
   lower->attach(lower, NULL, NULL);
 
 errout_with_alloc:
-  nxmutex_destroy(&priv->rxlock);
-  nxmutex_destroy(&priv->txlock);
   kmm_free(priv);
   return ret;
 }

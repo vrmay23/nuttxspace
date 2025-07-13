@@ -1,22 +1,35 @@
 /****************************************************************************
- * boards/arm/stm32l4/nucleo-l432kc/src/stm32_spwm.c
+ * boards/arm/stm32/nucleo-l432kc/src/stm32_spwm.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Mateusz Szafoni <raiden00@railab.me>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <strings.h>
 #include <unistd.h>
 #include <math.h>
-#include <assert.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/signal.h>
@@ -40,7 +52,7 @@
 #include <arch/chip/chip.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
 #include "ram_vectors.h"
 
 #include "stm32l4_pwm.h"
@@ -138,20 +150,20 @@
 
 struct spwm_s
 {
-  struct stm32l4_pwm_dev_s *pwm;
+  FAR struct stm32l4_pwm_dev_s *pwm;
 #ifdef CONFIG_NUCLEOL432KC_SPWM_USE_TIM1
-  struct stm32l4_tim_dev_s *tim;
+  FAR struct stm32l4_tim_dev_s *tim;
 #endif
-  float waveform[SAMPLES_NUM];               /* Waveform samples */
-  float phase_step;                          /* Waveform phase step */
-  float waveform_freq;                       /* Waveform frequency */
-  uint16_t cmp[SAMPLES_NUM];                 /* PWM TIM compare table */
-  uint16_t per;                              /* PWM TIM period */
-  uint16_t samples;                          /* Modulation waveform samples num */
-  uint16_t phase_shift[PHASES_NUM];          /* Phase offset */
+  float waveform[SAMPLES_NUM];        /* Waveform samples */
+  float phase_step;                   /* Waveform phase step */
+  float waveform_freq;                /* Waveform frequency */
+  uint16_t cmp[SAMPLES_NUM];          /* PWM TIM compare table */
+  uint16_t per;                       /* PWM TIM period */
+  uint16_t samples;                   /* Modulation waveform samples num */
+  uint16_t phase_shift[PHASES_NUM];   /* Phase offset */
   volatile uint16_t sample_now[PHASES_NUM];  /* Current sample number for
                                               * phase */
-  uint8_t phases;                            /* Number of PWM phases */
+  uint8_t phases;                     /* Number of PWM phases */
 };
 
 /****************************************************************************
@@ -170,19 +182,19 @@ static struct spwm_s g_spwm =
  ****************************************************************************/
 
 static float waveform_func(float x);
-static int waveform_init(struct spwm_s *spwm, float (*f)(float));
-static int spwm_start(struct spwm_s *spwm);
-static int spwm_start(struct spwm_s *spwm);
-static int spwm_stop(struct spwm_s *spwm);
+static int waveform_init(FAR struct spwm_s *spwm, float (*f)(float));
+static int spwm_start(FAR struct spwm_s *spwm);
+static int spwm_start(FAR struct spwm_s *spwm);
+static int spwm_stop(FAR struct spwm_s *spwm);
 #ifdef CONFIG_NUCLEOL432KC_SPWM_USE_TIM1
-static int spwm_tim1_setup(struct spwm_s *spwm);
-static int spwm_tim6_setup(struct spwm_s *spwm);
-static int spwm_tim1_start(struct spwm_s *spwm);
-static int spwm_tim6_start(struct spwm_s *spwm);
-static int spwm_tim1_stop(struct spwm_s *spwm);
-static int spwm_tim6_stop(struct spwm_s *spwm);
+static int spwm_tim1_setup(FAR struct spwm_s *spwm);
+static int spwm_tim6_setup(FAR struct spwm_s *spwm);
+static int spwm_tim1_start(FAR struct spwm_s *spwm);
+static int spwm_tim6_start(FAR struct spwm_s *spwm);
+static int spwm_tim1_stop(FAR struct spwm_s *spwm);
+static int spwm_tim6_stop(FAR struct spwm_s *spwm);
 #endif /* CONFIG_NUCLEOL432KC_SPWM_USE_TIM1 */
-static int spwm_setup(struct spwm_s *spwm);
+static int spwm_setup(FAR struct spwm_s *spwm);
 
 /****************************************************************************
  * Private Functions
@@ -213,7 +225,7 @@ static float waveform_func(float x)
  *
  ****************************************************************************/
 
-static int waveform_init(struct spwm_s *spwm, float (*f)(float))
+static int waveform_init(FAR struct spwm_s *spwm, float (*f)(float))
 {
   uint16_t i = 0;
   int ret = 0;
@@ -271,7 +283,7 @@ static int waveform_init(struct spwm_s *spwm, float (*f)(float))
  *
  ****************************************************************************/
 
-static int spwm_start(struct spwm_s *spwm)
+static int spwm_start(FAR struct spwm_s *spwm)
 {
   /* Start TIM1 */
 
@@ -292,7 +304,7 @@ static int spwm_start(struct spwm_s *spwm)
  *
  ****************************************************************************/
 
-static int spwm_stop(struct spwm_s *spwm)
+static int spwm_stop(FAR struct spwm_s *spwm)
 {
   /* Stop TIM1 */
 
@@ -313,9 +325,9 @@ static int spwm_stop(struct spwm_s *spwm)
 
 static void tim6_handler(void)
 {
-  struct spwm_s *spwm = &g_spwm;
-  struct stm32l4_pwm_dev_s *pwm = spwm->pwm;
-  struct stm32l4_tim_dev_s *tim = spwm->tim;
+  FAR struct spwm_s *spwm = &g_spwm;
+  FAR struct stm32l4_pwm_dev_s *pwm = spwm->pwm;
+  FAR struct stm32l4_tim_dev_s *tim = spwm->tim;
   uint8_t i = 0;
 
   for (i = 0; i < spwm->phases; i += 1)
@@ -343,10 +355,11 @@ static void tim6_handler(void)
  * Name: spwm_tim6_setup
  ****************************************************************************/
 
-static int spwm_tim6_setup(struct spwm_s *spwm)
+static int spwm_tim6_setup(FAR struct spwm_s *spwm)
 {
-  struct stm32l4_tim_dev_s *tim = NULL;
+  FAR struct stm32l4_tim_dev_s *tim = NULL;
   uint64_t freq = 0;
+  uint32_t per = 0;
   int ret = OK;
 
   /* Get TIM6 interface */
@@ -367,16 +380,25 @@ static int spwm_tim6_setup(struct spwm_s *spwm)
    */
 
   freq = spwm->samples * spwm->waveform_freq;
+  per = BOARD_TIM6_FREQUENCY / freq;
+  if (per > 0xffff)
+    {
+      printf("ERROR: can not achieve TIM6 frequency\n");
+      ret = -1;
+      goto errout;
+    }
 
-  STM32L4_TIM_SETFREQ(tim, freq);
-  STM32L4_TIM_ENABLE(tim);
+  /* TODO: TIM_SETFREQ */
+
+  STM32L4_TIM_SETCLOCK(tim, BOARD_TIM6_FREQUENCY);
+  STM32L4_TIM_SETPERIOD(tim, per);
 
   /* Attach TIM6 ram vector */
 
-  ret = arm_ramvec_attach(STM32L4_IRQ_TIM6, tim6_handler);
+  ret = up_ramvec_attach(STM32L4_IRQ_TIM6, tim6_handler);
   if (ret < 0)
     {
-      printf("ERROR: arm_ramvec_attach failed: %d\n", ret);
+      printf("ERROR: up_ramvec_attach failed: %d\n", ret);
       ret = -1;
       goto errout;
     }
@@ -401,9 +423,9 @@ errout:
  * Name: spwm_tim6_start
  ****************************************************************************/
 
-static int spwm_tim6_start(struct spwm_s *spwm)
+static int spwm_tim6_start(FAR struct spwm_s *spwm)
 {
-  struct stm32l4_tim_dev_s *tim = spwm->tim;
+  FAR struct stm32l4_tim_dev_s *tim = spwm->tim;
 
   /* Enable the timer interrupt at the NVIC and at TIM6 */
 
@@ -417,9 +439,9 @@ static int spwm_tim6_start(struct spwm_s *spwm)
  * Name: spwm_tim6_stop
  ****************************************************************************/
 
-static int spwm_tim6_stop(struct spwm_s *spwm)
+static int spwm_tim6_stop(FAR struct spwm_s *spwm)
 {
-  struct stm32l4_tim_dev_s *tim = spwm->tim;
+  FAR struct stm32l4_tim_dev_s *tim = spwm->tim;
 
   /* Disable the timer interrupt at the NVIC and at TIM6 */
 
@@ -433,14 +455,14 @@ static int spwm_tim6_stop(struct spwm_s *spwm)
  * Name: spwm_tim1_setup
  ****************************************************************************/
 
-static int spwm_tim1_setup(struct spwm_s *spwm)
+static int spwm_tim1_setup(FAR struct spwm_s *spwm)
 {
-  struct stm32l4_pwm_dev_s *pwm = NULL;
+  FAR struct stm32l4_pwm_dev_s *pwm = NULL;
   int ret = OK;
 
   /* Get TIM1 PWM interface */
 
-  pwm = (struct stm32l4_pwm_dev_s *)stm32l4_pwminitialize(1);
+  pwm = (FAR struct stm32l4_pwm_dev_s *)stm32l4_pwminitialize(1);
   if (pwm == NULL)
     {
       printf("ERROR: Failed to get TIM1 PWM interface\n");
@@ -484,9 +506,9 @@ errout:
  * Name: spwm_tim1_start
  ****************************************************************************/
 
-static int spwm_tim1_start(struct spwm_s *spwm)
+static int spwm_tim1_start(FAR struct spwm_s *spwm)
 {
-  struct stm32l4_pwm_dev_s *pwm = spwm->pwm;
+  FAR struct stm32l4_pwm_dev_s *pwm = spwm->pwm;
   uint16_t outputs = 0;
   int i = 0;
 
@@ -512,9 +534,9 @@ static int spwm_tim1_start(struct spwm_s *spwm)
  * Name: spwm_tim1_stop
  ****************************************************************************/
 
-static int spwm_tim1_stop(struct spwm_s *spwm)
+static int spwm_tim1_stop(FAR struct spwm_s *spwm)
 {
-  struct stm32l4_pwm_dev_s *pwm = spwm->pwm;
+  FAR struct stm32l4_pwm_dev_s *pwm = spwm->pwm;
   uint16_t outputs = 0;
   int i = 0;
 
@@ -542,7 +564,7 @@ static int spwm_tim1_stop(struct spwm_s *spwm)
  * Name: spwm_setup
  ****************************************************************************/
 
-static int spwm_setup(struct spwm_s *spwm)
+static int spwm_setup(FAR struct spwm_s *spwm)
 {
   int ret = OK;
 
@@ -581,7 +603,7 @@ errout:
 
 int spwm_main(int argc, char *argv[])
 {
-  struct spwm_s *spwm = NULL;
+  FAR struct spwm_s *spwm = NULL;
   int ret = OK;
   int i = 0;
 

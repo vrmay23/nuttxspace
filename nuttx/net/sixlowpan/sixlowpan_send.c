@@ -1,8 +1,6 @@
 /****************************************************************************
  * net/sixlowpan/sixlowpan_send.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -87,9 +85,9 @@ struct sixlowpan_send_s
  *   send operation when polled by the lower, device interfacing layer.
  *
  * Input Parameters:
- *   dev    - The structure of the network driver that generated the event.
- *   pvpriv - An instance of struct sixlowpan_send_s cast to void*
- *   flags  - Set of events describing why the callback was invoked
+ *   dev   - The structure of the network driver that generated the event.
+ *   conn  - The connection structure associated with the socket
+ *   flags - Set of events describing why the callback was invoked
  *
  * Returned Value:
  *   None
@@ -100,11 +98,12 @@ struct sixlowpan_send_s
  ****************************************************************************/
 
 static uint16_t send_eventhandler(FAR struct net_driver_s *dev,
+                                  FAR void *pvconn,
                                   FAR void *pvpriv, uint16_t flags)
 {
-  FAR struct sixlowpan_send_s *sinfo = pvpriv;
+  FAR struct sixlowpan_send_s *sinfo = (FAR struct sixlowpan_send_s *)pvpriv;
 
-  ninfo("flags: %04x\n", flags);
+  ninfo("flags: %04x: %d\n", flags);
 
   /* Verify that this is a compatible network driver. */
 
@@ -204,7 +203,6 @@ end_wait:
 
 int sixlowpan_send(FAR struct net_driver_s *dev,
                    FAR struct devif_callback_s **list,
-                   FAR struct devif_callback_s **list_tail,
                    FAR const struct ipv6_hdr_s *ipv6hdr, FAR const void *buf,
                    size_t len, FAR const struct netdev_varaddr_s *destmac,
                    unsigned int timeout)
@@ -216,6 +214,7 @@ int sixlowpan_send(FAR struct net_driver_s *dev,
   /* Initialize the send state structure */
 
   nxsem_init(&sinfo.s_waitsem, 0, 0);
+  nxsem_setprotocol(&sinfo.s_waitsem, SEM_PRIO_NONE);
 
   sinfo.s_result  = -EBUSY;
   sinfo.s_ipv6hdr = ipv6hdr;
@@ -232,7 +231,7 @@ int sixlowpan_send(FAR struct net_driver_s *dev,
        * device related events, no connect-related events.
        */
 
-      sinfo.s_cb = devif_callback_alloc(dev, list, list_tail);
+      sinfo.s_cb = devif_callback_alloc(dev, list);
       if (sinfo.s_cb != NULL)
         {
           int ret;
@@ -248,17 +247,16 @@ int sixlowpan_send(FAR struct net_driver_s *dev,
           netdev_txnotify_dev(dev);
 
           /* Wait for the send to complete or an error to occur.
-           * net_sem_timedwait will also terminate if a signal is received.
+           * net_timedwait will also terminate if a signal is received.
            */
 
           ninfo("Wait for send complete\n");
 
-          ret = net_sem_timedwait(&sinfo.s_waitsem, timeout);
+          ret = net_timedwait(&sinfo.s_waitsem, timeout);
           if (ret < 0)
             {
               if (ret == -ETIMEDOUT)
                 {
-                  ret = -EAGAIN;
                   neighbor_notreachable(dev);
                 }
 
@@ -267,7 +265,7 @@ int sixlowpan_send(FAR struct net_driver_s *dev,
 
           /* Make sure that no further events are processed */
 
-          devif_conn_callback_free(dev, sinfo.s_cb, list, list_tail);
+          devif_conn_callback_free(dev, sinfo.s_cb, list);
         }
     }
 

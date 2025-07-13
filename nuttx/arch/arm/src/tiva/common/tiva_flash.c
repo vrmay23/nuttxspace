@@ -1,22 +1,40 @@
 /****************************************************************************
  * arch/arm/src/tiva/common/tiva_flash.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (c) 2013 Max Holtzberg. All rights reserved.
+ *   Copyright (C) 2013, 2018-2019 Gregory Nutt. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Authors: Max Holtzberg <mh@uvc.de>
+ *            Gregory Nutt <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * This code is derived from drivers/mtd/skeleton.c
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,7 +54,7 @@
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/mtd/mtd.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "chip.h"
 
 #include "tiva_flash.h"
@@ -71,19 +89,19 @@ struct tiva_dev_s
 
 /* MTD driver methods */
 
-static int tiva_erase(struct mtd_dev_s *dev, off_t startblock,
+static int tiva_erase(FAR struct mtd_dev_s *dev, off_t startblock,
                       size_t nblocks);
-static ssize_t tiva_bread(struct mtd_dev_s *dev, off_t startblock,
-                          size_t nblocks, uint8_t *buf);
-static ssize_t tiva_bwrite(struct mtd_dev_s *dev, off_t startblock,
-                           size_t nblocks, const uint8_t *buf);
-static ssize_t tiva_read(struct mtd_dev_s *dev, off_t offset,
-                         size_t nbytes, uint8_t *buf);
+static ssize_t tiva_bread(FAR struct mtd_dev_s *dev, off_t startblock,
+                          size_t nblocks, FAR uint8_t *buf);
+static ssize_t tiva_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
+                           size_t nblocks, FAR const uint8_t *buf);
+static ssize_t tiva_read(FAR struct mtd_dev_s *dev, off_t offset,
+                         size_t nbytes, FAR uint8_t *buf);
 #ifdef CONFIG_MTD_BYTE_WRITE
-static ssize_t tiva_write(struct mtd_dev_s *dev, off_t offset,
-                          size_t nbytes, const uint8_t *buf);
+static ssize_t tiva_write(FAR struct mtd_dev_s *dev, off_t offset,
+                          size_t nbytes, FAR const uint8_t *buf);
 #endif
-static int tiva_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg);
+static int tiva_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -119,7 +137,7 @@ static struct tiva_dev_s g_lmdev =
  *
  ****************************************************************************/
 
-static int tiva_erase(struct mtd_dev_s *dev, off_t startblock,
+static int tiva_erase(FAR struct mtd_dev_s *dev, off_t startblock,
                       size_t nblocks)
 {
   off_t endblock;
@@ -173,8 +191,8 @@ static int tiva_erase(struct mtd_dev_s *dev, off_t startblock,
  *
  ****************************************************************************/
 
-static ssize_t tiva_bread(struct mtd_dev_s *dev, off_t startblock,
-                          size_t nblocks, uint8_t *buf)
+static ssize_t tiva_bread(FAR struct mtd_dev_s *dev, off_t startblock,
+                          size_t nblocks, FAR uint8_t *buf)
 {
   DEBUGASSERT(startblock + nblocks <= TIVA_VIRTUAL_NPAGES);
 
@@ -192,11 +210,11 @@ static ssize_t tiva_bread(struct mtd_dev_s *dev, off_t startblock,
  *
  ****************************************************************************/
 
-static ssize_t tiva_bwrite(struct mtd_dev_s *dev, off_t startblock,
-                           size_t nblocks, const uint8_t *buf)
+static ssize_t tiva_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
+                           size_t nblocks, FAR const uint8_t *buf)
 {
-  uint32_t *src = (uint32_t *)buf;
-  uint32_t *dst = (uint32_t *)(TIVA_VIRTUAL_BASE +
+  FAR uint32_t *src = (uint32_t *)buf;
+  FAR uint32_t *dst = (uint32_t *)(TIVA_VIRTUAL_BASE +
                                    startblock * TIVA_FLASH_PAGESIZE);
   int i;
 
@@ -232,8 +250,8 @@ static ssize_t tiva_bwrite(struct mtd_dev_s *dev, off_t startblock,
  *
  ****************************************************************************/
 
-static ssize_t tiva_read(struct mtd_dev_s *dev, off_t offset,
-                         size_t nbytes, uint8_t *buf)
+static ssize_t tiva_read(FAR struct mtd_dev_s *dev, off_t offset,
+                         size_t nbytes, FAR uint8_t *buf)
 {
   DEBUGASSERT(offset + nbytes < TIVA_VIRTUAL_NPAGES * TIVA_FLASH_PAGESIZE);
 
@@ -260,8 +278,8 @@ static ssize_t tiva_read(struct mtd_dev_s *dev, off_t offset,
  ****************************************************************************/
 
 #ifdef CONFIG_MTD_BYTE_WRITE
-static ssize_t tiva_write(struct mtd_dev_s *dev, off_t offset,
-                          size_t nbytes, const uint8_t *buf)
+static ssize_t tiva_write(FAR struct mtd_dev_s *dev, off_t offset,
+                          size_t nbytes, FAR const uint8_t *buf)
 {
   /* WARNING and REVISIT:
    * Because this function exports a byte write interface and
@@ -270,7 +288,7 @@ static ssize_t tiva_write(struct mtd_dev_s *dev, off_t offset,
    * counts. But it doesn't. This needs to be fixed!
    */
 
-  const uint32_t *src = (uint32_t *)((uintptr_t)buf & ~3);
+  FAR const uint32_t *src = (uint32_t *)((uintptr_t)buf & ~3);
   ssize_t remaining;
   uint32_t regval;
 
@@ -368,7 +386,7 @@ static ssize_t tiva_write(struct mtd_dev_s *dev, off_t offset,
  * Name: tiva_ioctl
  ****************************************************************************/
 
-static int tiva_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg)
+static int tiva_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
 {
   int ret = -EINVAL; /* Assume good command with bad parameters */
 
@@ -376,11 +394,9 @@ static int tiva_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg)
     {
       case MTDIOC_GEOMETRY:
         {
-          struct mtd_geometry_s *geo = (struct mtd_geometry_s *)arg;
+          FAR struct mtd_geometry_s *geo = (FAR struct mtd_geometry_s *)arg;
           if (geo)
             {
-              memset(geo, 0, sizeof(*geo));
-
               /* Populate the geometry structure with information needed to
                * know the capacity and how to access the device.
                *
@@ -398,24 +414,9 @@ static int tiva_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg)
         }
         break;
 
-      case BIOC_PARTINFO:
+      case MTDIOC_XIPBASE:
         {
-          struct partition_info_s *info =
-            (struct partition_info_s *)arg;
-          if (info != NULL)
-            {
-              info->numsectors  = TIVA_VIRTUAL_NPAGES;
-              info->sectorsize  = TIVA_FLASH_PAGESIZE;
-              info->startsector = 0;
-              info->parent[0]   = '\0';
-              ret               = OK;
-            }
-        }
-        break;
-
-      case BIOC_XIPBASE:
-        {
-          void **ppv = (void**)arg;
+          FAR void **ppv = (FAR void**)arg;
 
           if (ppv)
             {
@@ -463,9 +464,9 @@ static int tiva_ioctl(struct mtd_dev_s *dev, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-struct mtd_dev_s *tiva_flash_initialize(void)
+FAR struct mtd_dev_s *tiva_flash_initialize(void)
 {
   /* Return the implementation-specific state structure as the MTD device */
 
-  return (struct mtd_dev_s *)&g_lmdev;
+  return (FAR struct mtd_dev_s *)&g_lmdev;
 }

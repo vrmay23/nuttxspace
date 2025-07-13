@@ -1,27 +1,40 @@
 /****************************************************************************
  * include/nuttx/mm/iob.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-#ifndef __INCLUDE_NUTTX_MM_IOB_H
-#define __INCLUDE_NUTTX_MM_IOB_H
+#ifndef _INCLUDE_NUTTX_MM_IOB_H
+#define _INCLUDE_NUTTX_MM_IOB_H
 
 /****************************************************************************
  * Included Files
@@ -41,7 +54,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Configuration ************************************************************/
 
 /* I/O buffer allocation logic supports a throttle value for read-ahead
@@ -72,12 +84,6 @@
 #  error CONFIG_IOB_NBUFFERS <= CONFIG_IOB_THROTTLE
 #endif
 
-/* Default config of alignment and head padding size */
-
-#if !defined(CONFIG_IOB_ALIGNMENT)
-#  define CONFIG_IOB_ALIGNMENT      1
-#endif
-
 /* IOB helpers */
 
 #define IOB_DATA(p)      (&(p)->io_data[(p)->io_offset])
@@ -90,17 +96,9 @@
 #  define IOB_QEMPTY(q)  ((q)->qh_head == NULL)
 #endif
 
-#ifdef CONFIG_IOB_ALLOC
-#  define IOB_BUFSIZE(p) ((p)->io_bufsize)
-#else
-#  define IOB_BUFSIZE(p) CONFIG_IOB_BUFSIZE
-#endif
-
 /****************************************************************************
  * Public Types
  ****************************************************************************/
-
-typedef CODE void (*iob_free_cb_t)(FAR void *data);
 
 /* Represents one I/O buffer.  A packet is contained by one or more I/O
  * buffers in a chain.  The io_pktlen is only valid for the I/O buffer at
@@ -115,24 +113,16 @@ struct iob_s
 
   /* Payload */
 
-#if CONFIG_IOB_BUFSIZE < 256 && !defined(CONFIG_IOB_ALLOC)
+#if CONFIG_IOB_BUFSIZE < 256
   uint8_t  io_len;      /* Length of the data in the entry */
   uint8_t  io_offset;   /* Data begins at this offset */
 #else
   uint16_t io_len;      /* Length of the data in the entry */
   uint16_t io_offset;   /* Data begins at this offset */
-#  ifdef CONFIG_IOB_ALLOC
-  uint16_t io_bufsize;  /* Total length of the data buffer */
-#  endif
 #endif
-  unsigned int io_pktlen; /* Total length of the packet */
+  uint16_t io_pktlen;   /* Total length of the packet */
 
-#ifdef CONFIG_IOB_ALLOC
-  iob_free_cb_t io_free;  /* Custom free callback */
-  FAR uint8_t  *io_data;
-#else
-  uint8_t       io_data[CONFIG_IOB_BUFSIZE];
-#endif
+  uint8_t  io_data[CONFIG_IOB_BUFSIZE];
 };
 
 #if CONFIG_IOB_NCHAINS > 0
@@ -162,12 +152,82 @@ struct iob_queue_s
 };
 #endif /* CONFIG_IOB_NCHAINS > 0 */
 
-struct iob_stats_s
+/* NOTE: When you change any logic here, you must change the logic in
+ * fs/procfs/fs_procfsiobinfo.c as it depends on having matching sequential
+ * logic.
+ */
+
+enum iob_user_e
 {
-  int ntotal;
-  int nfree;
-  int nwait;
-  int nthrottle;
+  IOBUSER_UNKNOWN = -1,
+#ifdef CONFIG_SYSLOG_BUFFER
+  IOBUSER_SYSLOG,
+#endif
+#ifdef CONFIG_IOB_UNITTEST
+  IOBUSER_UNITTEST,
+#endif
+#ifdef CONFIG_NET_6LOWPAN
+  IOBUSER_NET_6LOWPAN,
+#endif
+#ifdef CONFIG_NET_ICMP_SOCKET
+  IOBUSER_NET_SOCK_ICMP,
+#endif
+#ifdef CONFIG_NET_ICMPv6_SOCKET
+  IOBUSER_NET_SOCK_ICMPv6,
+#endif
+#ifdef CONFIG_NET_UDP
+  IOBUSER_NET_SOCK_UDP,
+#endif
+#ifdef CONFIG_NET_TCP
+  IOBUSER_NET_SOCK_TCP,
+#endif
+#ifdef CONFIG_NET_IEEE802154
+  IOBUSER_NET_SOCK_IEEE802154,
+#endif
+#ifdef CONFIG_NET_BLUETOOTH
+  IOBUSER_NET_SOCK_BLUETOOTH,
+#endif
+#if defined(CONFIG_NET_UDP) && !defined(NET_UDP_NO_STACK)
+  IOBUSER_NET_UDP_READAHEAD,
+#endif
+#ifdef CONFIG_NET_UDP_WRITE_BUFFERS
+  IOBUSER_NET_UDP_WRITEBUFFER,
+#endif
+#if defined(CONFIG_NET_TCP) && !defined(NET_TCP_NO_STACK)
+  IOBUSER_NET_TCP_READAHEAD,
+#endif
+#ifdef CONFIG_NET_TCP_WRITE_BUFFERS
+  IOBUSER_NET_TCP_WRITEBUFFER,
+#endif
+#ifdef CONFIG_NET_IPFORWARD
+  IOBUSER_NET_IPFORWARD,
+#endif
+#ifdef CONFIG_WIRELESS_IEEE802154
+  IOBUSER_WIRELESS_RAD802154,
+#endif
+#ifdef CONFIG_IEEE802154_MAC
+  IOBUSER_WIRELESS_MAC802154,
+#endif
+#ifdef CONFIG_IEEE802154_MACDEV
+  IOBUSER_WIRELESS_MAC802154_CHARDEV,
+#endif
+#ifdef CONFIG_IEEE802154_NETDEV
+  IOBUSER_WIRELESS_MAC802154_NETDEV,
+#endif
+ #ifdef CONFIG_WL_SPIRIT
+  IOBUSER_WIRELESS_PACKETRADIO,
+#endif
+#ifdef CONFIG_WIRELESS_BLUETOOTH
+  IOBUSER_WIRELESS_BLUETOOTH,
+#endif
+  IOBUSER_GLOBAL,
+  IOBUSER_NENTRIES /* MUST BE LAST ENTRY */
+};
+
+struct iob_userstats_s
+{
+  int totalconsumed;
+  int totalproduced;
 };
 
 /****************************************************************************
@@ -185,30 +245,14 @@ struct iob_stats_s
 void iob_initialize(void);
 
 /****************************************************************************
- * Name: iob_timedalloc
- *
- * Description:
- *  Allocate an I/O buffer by taking the buffer at the head of the free list.
- *  This wait will be terminated when the specified timeout expires.
- *
- * Input Parameters:
- *   throttled  - An indication of the IOB allocation is "throttled"
- *   timeout    - Timeout value in milliseconds.
- *
- ****************************************************************************/
-
-FAR struct iob_s *iob_timedalloc(bool throttled, unsigned int timeout);
-
-/****************************************************************************
  * Name: iob_alloc
  *
  * Description:
- *   Allocate an I/O buffer by taking the buffer at the head of the free
- *   list.
+ *   Allocate an I/O buffer by taking the buffer at the head of the free list.
  *
  ****************************************************************************/
 
-FAR struct iob_s *iob_alloc(bool throttled);
+FAR struct iob_s *iob_alloc(bool throttled, enum iob_user_e consumerid);
 
 /****************************************************************************
  * Name: iob_tryalloc
@@ -219,54 +263,7 @@ FAR struct iob_s *iob_alloc(bool throttled);
  *
  ****************************************************************************/
 
-FAR struct iob_s *iob_tryalloc(bool throttled);
-
-#ifdef CONFIG_IOB_ALLOC
-/****************************************************************************
- * Name: iob_alloc_dynamic
- *
- * Description:
- *   Allocate an I/O buffer and playload from heap
- *
- * Input Parameters:
- *   size    - The size of the io_data that is allocated.
- *
- *             +---------+
- *             |   IOB   |
- *             | io_data |--+
- *             | buffer  |<-+
- *             +---------+
- *
- ****************************************************************************/
-
-FAR struct iob_s *iob_alloc_dynamic(uint16_t size);
-
-/****************************************************************************
- * Name: iob_alloc_with_data
- *
- * Description:
- *   Allocate an I/O buffer from heap and attach the external payload
- *
- * Input Parameters:
- *   data    - Make io_data point to a specific address, the caller is
- *             responsible for the memory management. The caller should
- *             ensure that the memory is not freed before the iob is freed.
- *
- *             +---------+  +-->+--------+
- *             |   IOB   |  |   |  data  |
- *             | io_data |--+   +--------+
- *             +---------+
- *
- *   size    - The size of the data parameter
- *   free_cb - Notify the caller when the iob is freed. The caller can
- *             perform additional operations on the data before it is freed.
- *             The free_cb is called when the iob is freed.
- *
- ****************************************************************************/
-
-FAR struct iob_s *iob_alloc_with_data(FAR void *data, uint16_t size,
-                                      iob_free_cb_t free_cb);
-#endif
+FAR struct iob_s *iob_tryalloc(bool throttled, enum iob_user_e consumerid);
 
 /****************************************************************************
  * Name: iob_navail
@@ -279,6 +276,16 @@ FAR struct iob_s *iob_alloc_with_data(FAR void *data, uint16_t size,
 int iob_navail(bool throttled);
 
 /****************************************************************************
+ * Name: iob_qentry_navail
+ *
+ * Description:
+ *   Return the number of available IOB chains.
+ *
+ ****************************************************************************/
+
+int iob_qentry_navail(void);
+
+/****************************************************************************
  * Name: iob_free
  *
  * Description:
@@ -287,7 +294,8 @@ int iob_navail(bool throttled);
  *
  ****************************************************************************/
 
-FAR struct iob_s *iob_free(FAR struct iob_s *iob);
+FAR struct iob_s *iob_free(FAR struct iob_s *iob,
+                           enum iob_user_e producerid);
 
 /****************************************************************************
  * Name: iob_notifier_setup
@@ -334,12 +342,13 @@ int iob_notifier_setup(int qid, worker_t worker, FAR void *arg);
  *         iob_notifier_setup().
  *
  * Returned Value:
- *   None.
+ *   Zero (OK) is returned on success; a negated errno value is returned on
+ *   any failure.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_IOB_NOTIFIER
-void iob_notifier_teardown(int key);
+int iob_notifier_teardown(int key);
 #endif
 
 /****************************************************************************
@@ -351,7 +360,7 @@ void iob_notifier_teardown(int key);
  *
  ****************************************************************************/
 
-void iob_free_chain(FAR struct iob_s *iob);
+void iob_free_chain(FAR struct iob_s *iob, enum iob_user_e producerid);
 
 /****************************************************************************
  * Name: iob_add_queue
@@ -422,33 +431,8 @@ FAR struct iob_s *iob_peek_queue(FAR struct iob_queue_s *iobq);
  ****************************************************************************/
 
 #if CONFIG_IOB_NCHAINS > 0
-void iob_free_queue(FAR struct iob_queue_s *qhead);
-#endif /* CONFIG_IOB_NCHAINS > 0 */
-
-/****************************************************************************
- * Name: iob_free_queue_qentry
- *
- * Description:
- *   Free an iob entire queue of I/O buffer chains.
- *
- ****************************************************************************/
-
-#if CONFIG_IOB_NCHAINS > 0
-void iob_free_queue_qentry(FAR struct iob_s *iob,
-                           FAR struct iob_queue_s *iobq);
-#endif /* CONFIG_IOB_NCHAINS > 0 */
-
-/****************************************************************************
- * Name: iob_get_queue_size
- *
- * Description:
- *   Queue helper for get the iob queue buffer size.
- *
- ****************************************************************************/
-
-#if CONFIG_IOB_NCHAINS > 0
-unsigned int iob_get_queue_size(FAR struct iob_queue_s *queue);
-unsigned int iob_get_queue_entry_count(FAR struct iob_queue_s *queue);
+void iob_free_queue(FAR struct iob_queue_s *qhead,
+                    enum iob_user_e producerid);
 #endif /* CONFIG_IOB_NCHAINS > 0 */
 
 /****************************************************************************
@@ -461,7 +445,8 @@ unsigned int iob_get_queue_entry_count(FAR struct iob_queue_s *queue);
  ****************************************************************************/
 
 int iob_copyin(FAR struct iob_s *iob, FAR const uint8_t *src,
-               unsigned int len, int offset, bool throttled);
+               unsigned int len, unsigned int offset, bool throttled,
+               enum iob_user_e consumerid);
 
 /****************************************************************************
  * Name: iob_trycopyin
@@ -474,7 +459,8 @@ int iob_copyin(FAR struct iob_s *iob, FAR const uint8_t *src,
  ****************************************************************************/
 
 int iob_trycopyin(FAR struct iob_s *iob, FAR const uint8_t *src,
-                  unsigned int len, int offset, bool throttled);
+                  unsigned int len, unsigned int offset, bool throttled,
+                  enum iob_user_e consumerid);
 
 /****************************************************************************
  * Name: iob_copyout
@@ -486,18 +472,7 @@ int iob_trycopyin(FAR struct iob_s *iob, FAR const uint8_t *src,
  ****************************************************************************/
 
 int iob_copyout(FAR uint8_t *dest, FAR const struct iob_s *iob,
-                unsigned int len, int offset);
-
-/****************************************************************************
- * Name: iob_tailroom
- *
- * Description:
- *  Return the number of bytes at the tail of the I/O buffer chain which
- *  can be used to append data without additional allocations.
- *
- ****************************************************************************/
-
-unsigned int iob_tailroom(FAR struct iob_s *iob);
+                unsigned int len, unsigned int offset);
 
 /****************************************************************************
  * Name: iob_clone
@@ -507,33 +482,8 @@ unsigned int iob_tailroom(FAR struct iob_s *iob);
  *
  ****************************************************************************/
 
-int iob_clone(FAR struct iob_s *iob1, FAR struct iob_s *iob2,
-              bool throttled, bool block);
-
-/****************************************************************************
- * Name: iob_clone_partial
- *
- * Description:
- *   Duplicate the data from partial bytes of iob1 to iob2
- *
- * Input Parameters:
- *   iob1      - Pointer to source iob_s
- *   len       - Number of bytes to copy
- *   offset1   - Offset of source iobs_s
- *   iob2      - Pointer to destination iob_s
- *   offset2   - Offset of destination iobs_s
- *   throttled - An indication of the IOB allocation is "throttled"
- *   block     - Flag of Enable/Disable nonblocking operation
- *
- * Returned Value:
- *   == 0  - Partial clone successfully.
- *   < 0   - No available to clone to destination iob.
- *
- ****************************************************************************/
-
-int iob_clone_partial(FAR struct iob_s *iob1, unsigned int len,
-                      int offset1, FAR struct iob_s *iob2,
-                      int offset2, bool throttled, bool block);
+int iob_clone(FAR struct iob_s *iob1, FAR struct iob_s *iob2, bool throttled,
+              enum iob_user_e consumerid);
 
 /****************************************************************************
  * Name: iob_concat
@@ -554,7 +504,8 @@ void iob_concat(FAR struct iob_s *iob1, FAR struct iob_s *iob2);
  *
  ****************************************************************************/
 
-FAR struct iob_s *iob_trimhead(FAR struct iob_s *iob, unsigned int trimlen);
+FAR struct iob_s *iob_trimhead(FAR struct iob_s *iob, unsigned int trimlen,
+                               enum iob_user_e producerid);
 
 /****************************************************************************
  * Name: iob_trimhead_queue
@@ -574,7 +525,8 @@ FAR struct iob_s *iob_trimhead(FAR struct iob_s *iob, unsigned int trimlen);
 
 #if CONFIG_IOB_NCHAINS > 0
 FAR struct iob_s *iob_trimhead_queue(FAR struct iob_queue_s *qhead,
-                                     unsigned int trimlen);
+                                     unsigned int trimlen,
+                                     enum iob_user_e producerid);
 #endif
 
 /****************************************************************************
@@ -587,7 +539,8 @@ FAR struct iob_s *iob_trimhead_queue(FAR struct iob_queue_s *qhead,
  *
  ****************************************************************************/
 
-FAR struct iob_s *iob_trimtail(FAR struct iob_s *iob, unsigned int trimlen);
+FAR struct iob_s *iob_trimtail(FAR struct iob_s *iob, unsigned int trimlen,
+                               enum iob_user_e producerid);
 
 /****************************************************************************
  * Name: iob_pack
@@ -599,7 +552,8 @@ FAR struct iob_s *iob_trimtail(FAR struct iob_s *iob, unsigned int trimlen);
  *
  ****************************************************************************/
 
-FAR struct iob_s *iob_pack(FAR struct iob_s *iob);
+FAR struct iob_s *iob_pack(FAR struct iob_s *iob,
+                           enum iob_user_e producerid);
 
 /****************************************************************************
  * Name: iob_contig
@@ -610,43 +564,8 @@ FAR struct iob_s *iob_pack(FAR struct iob_s *iob);
  *
  ****************************************************************************/
 
-int iob_contig(FAR struct iob_s *iob, unsigned int len);
-
-/****************************************************************************
- * Name: iob_reserve
- *
- * Description:
- *   Adjust headroom offset of iobs by reducing the tail room.
- *
- ****************************************************************************/
-
-void iob_reserve(FAR struct iob_s *iob, unsigned int reserved);
-
-/****************************************************************************
- * Name: iob_update_pktlen
- *
- * Description:
- *   This function will update packet length of the iob, it will be
- *   trimmed if the current length of the iob chain is greater than the
- *   new length, and will be grown if less than new length.
- *
- * Returned Value:
- *   The new effective iob packet length, or a negated errno value on error.
- *
- ****************************************************************************/
-
-int iob_update_pktlen(FAR struct iob_s *iob, unsigned int pktlen,
-                      bool throttled);
-
-/****************************************************************************
- * Name: iob_count
- *
- * Description:
- *   Get iob entries count in chain.
- *
- ****************************************************************************/
-
-int iob_count(FAR struct iob_s *iob);
+int iob_contig(FAR struct iob_s *iob, unsigned int len,
+               enum iob_user_e producerid);
 
 /****************************************************************************
  * Name: iob_dump
@@ -667,8 +586,7 @@ void iob_dump(FAR const char *msg, FAR struct iob_s *iob, unsigned int len,
  * Name: iob_getuserstats
  *
  * Description:
- *   Return a reference to the IOB usage statistics for the IOB
- *   consumer/producer
+ *   Return a reference to the IOB usage statistics for the IOB consumer/producer
  *
  * Input Parameters:
  *   userid - id representing the IOB producer/consumer
@@ -680,8 +598,8 @@ void iob_dump(FAR const char *msg, FAR struct iob_s *iob, unsigned int len,
 
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && defined(CONFIG_FS_PROCFS) && \
     !defined(CONFIG_FS_PROCFS_EXCLUDE_IOBINFO)
-void iob_getstats(FAR struct iob_stats_s *stats);
+FAR struct iob_userstats_s * iob_getuserstats(enum iob_user_e userid);
 #endif
 
 #endif /* CONFIG_MM_IOB */
-#endif /* __INCLUDE_NUTTX_MM_IOB_H */
+#endif /* _INCLUDE_NUTTX_MM_IOB_H */

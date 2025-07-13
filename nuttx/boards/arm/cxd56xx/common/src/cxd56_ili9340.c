@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/cxd56xx/common/src/cxd56_ili9340.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +40,6 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -62,7 +74,7 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Private Type Definition
  ****************************************************************************/
 
 #ifndef ILI9340_SPI_MAXFREQUENCY
@@ -102,9 +114,9 @@ static struct lcd_dev_s *g_lcd = NULL;
  *
  ****************************************************************************/
 
-static void cxd56_ili93404ws_select(struct ili9340_lcd_s *lcd)
+static void cxd56_ili93404ws_select(FAR struct ili9340_lcd_s *lcd)
 {
-  struct ili93404ws_lcd_s *priv = (struct ili93404ws_lcd_s *)lcd;
+  FAR struct ili93404ws_lcd_s *priv = (FAR struct ili93404ws_lcd_s *)lcd;
 
   SPI_LOCK(priv->spi, true);
   SPI_SELECT(priv->spi, SPIDEV_DISPLAY(0), true);
@@ -123,9 +135,9 @@ static void cxd56_ili93404ws_select(struct ili9340_lcd_s *lcd)
  *
  ****************************************************************************/
 
-static void cxd56_ili93404ws_deselect(struct ili9340_lcd_s *lcd)
+static void cxd56_ili93404ws_deselect(FAR struct ili9340_lcd_s *lcd)
 {
-  struct ili93404ws_lcd_s *priv = (struct ili93404ws_lcd_s *)lcd;
+  FAR struct ili93404ws_lcd_s *priv = (FAR struct ili93404ws_lcd_s *)lcd;
 
   SPI_SELECT(priv->spi, SPIDEV_DISPLAY(0), false);
   SPI_LOCK(priv->spi, false);
@@ -146,7 +158,7 @@ static void cxd56_ili93404ws_deselect(struct ili9340_lcd_s *lcd)
  *
  ****************************************************************************/
 
-static int cxd56_ili93404ws_backlight(struct ili9340_lcd_s *lcd,
+static int cxd56_ili93404ws_backlight(FAR struct ili9340_lcd_s *lcd,
                                       int level)
 {
   if (level > 0)
@@ -178,10 +190,10 @@ static int cxd56_ili93404ws_backlight(struct ili9340_lcd_s *lcd,
  *
  ****************************************************************************/
 
-static int cxd56_ili93404ws_sendcmd(struct ili9340_lcd_s *lcd,
+static int cxd56_ili93404ws_sendcmd(FAR struct ili9340_lcd_s *lcd,
                                     const uint8_t cmd)
 {
-  struct ili93404ws_lcd_s *priv = (struct ili93404ws_lcd_s *)lcd;
+  FAR struct ili93404ws_lcd_s *priv = (FAR struct ili93404ws_lcd_s *)lcd;
 
   lcdinfo("%02x\n", cmd);
 
@@ -214,10 +226,10 @@ static int cxd56_ili93404ws_sendcmd(struct ili9340_lcd_s *lcd,
  *
  ****************************************************************************/
 
-static int cxd56_ili93404ws_sendparam(struct ili9340_lcd_s *lcd,
+static int cxd56_ili93404ws_sendparam(FAR struct ili9340_lcd_s *lcd,
                                       const uint8_t param)
 {
-  struct ili93404ws_lcd_s *priv = (struct ili93404ws_lcd_s *)lcd;
+  FAR struct ili93404ws_lcd_s *priv = (FAR struct ili93404ws_lcd_s *)lcd;
 
   cxd56_gpio_write(DISPLAY_DC, true);  /* Indicate DATA */
   SPI_SEND(priv->spi, param);
@@ -241,12 +253,12 @@ static int cxd56_ili93404ws_sendparam(struct ili9340_lcd_s *lcd,
  *
  ****************************************************************************/
 
-static int cxd56_ili93404ws_sendgram(struct ili9340_lcd_s *lcd,
+static int cxd56_ili93404ws_sendgram(FAR struct ili9340_lcd_s *lcd,
                                      const uint16_t *wd, uint32_t nwords)
 {
-  struct ili93404ws_lcd_s *priv = (struct ili93404ws_lcd_s *)lcd;
+  FAR struct ili93404ws_lcd_s *priv = (FAR struct ili93404ws_lcd_s *)lcd;
 
-  lcdinfo("lcd:%p, wd=%p, nwords=%" PRId32 "\n", lcd, wd, nwords);
+  lcdinfo("lcd:%p, wd=%p, nwords=%d\n", lcd, wd, nwords);
 
   SPI_SETBITS(priv->spi, 16);
   SPI_SNDBLOCK(priv->spi, wd, nwords);
@@ -269,13 +281,13 @@ static int cxd56_ili93404ws_sendgram(struct ili9340_lcd_s *lcd,
  *
  ****************************************************************************/
 
-static int cxd56_ili93404ws_recvparam(struct ili9340_lcd_s *lcd,
+static int cxd56_ili93404ws_recvparam(FAR struct ili9340_lcd_s *lcd,
                                         uint8_t *param)
 {
-  struct ili93404ws_lcd_s *priv = (struct ili93404ws_lcd_s *)lcd;
+  FAR struct ili93404ws_lcd_s *priv = (FAR struct ili93404ws_lcd_s *)lcd;
 
   cxd56_gpio_write(DISPLAY_DC, true);  /* Indicate DATA */
-  SPI_RECVBLOCK(priv->spi, param, 1);
+  *param = (uint8_t)(SPI_SEND(priv->spi, param) & 0xff);
 
   return OK;
 }
@@ -296,10 +308,10 @@ static int cxd56_ili93404ws_recvparam(struct ili9340_lcd_s *lcd,
  *
  ****************************************************************************/
 
-static int cxd56_ili93404ws_recvgram(struct ili9340_lcd_s *lcd,
+static int cxd56_ili93404ws_recvgram(FAR struct ili9340_lcd_s *lcd,
                                      uint16_t *wd, uint32_t nwords)
 {
-  lcdinfo("wd=%p, nwords=%" PRId32 "\n", wd, nwords);
+  lcdinfo("wd=%p, nwords=%d\n", wd, nwords);
 
   return OK;
 };
@@ -320,8 +332,8 @@ static int cxd56_ili93404ws_recvgram(struct ili9340_lcd_s *lcd,
 
 int board_lcd_initialize(void)
 {
-  struct ili93404ws_lcd_s *priv = &g_lcddev;
-  struct spi_dev_s *spi;
+  FAR struct ili93404ws_lcd_s *priv = &g_lcddev;
+  FAR struct spi_dev_s *spi;
 #if defined(CONFIG_CXD56_DMAC)
   DMA_HANDLE            hdl;
   dma_config_t          conf;
@@ -405,7 +417,7 @@ int board_lcd_initialize(void)
  *
  ****************************************************************************/
 
-struct lcd_dev_s *board_lcd_getdev(int lcddev)
+FAR struct lcd_dev_s *board_lcd_getdev(int lcddev)
 {
   if (lcddev == 0)
     {
@@ -413,8 +425,4 @@ struct lcd_dev_s *board_lcd_getdev(int lcddev)
     }
 
   return NULL;
-}
-
-void board_lcd_uninitialize(void)
-{
 }

@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/system/nxrecorder/nxrecorder.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Pinecone Inc. All rights reserved.
+ *   Author: Zhong An <zhongan@pinecone.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,24 +39,21 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
-#include <debug.h>
-#include <dirent.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sched.h>
-#include <stdbool.h>
+#include <sys/types.h>
+#include <sys/ioctl.h>
+
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/ioctl.h>
-#include <sys/types.h>
-#include <unistd.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <dirent.h>
+#include <debug.h>
 
 #include <nuttx/audio/audio.h>
-
 #include "system/nxrecorder.h"
 
 /****************************************************************************
@@ -54,6 +64,14 @@
 #define NXRECORDER_STATE_RECORDING 1
 #define NXRECORDER_STATE_PAUSED    2
 
+#ifndef CONFIG_AUDIO_NUM_BUFFERS
+#  define CONFIG_AUDIO_NUM_BUFFERS  2
+#endif
+
+#ifndef CONFIG_AUDIO_BUFFER_NUMBYTES
+#  define CONFIG_AUDIO_BUFFER_NUMBYTES  8192
+#endif
+
 #ifndef CONFIG_NXRECORDER_MSG_PRIO
 #  define CONFIG_NXRECORDER_MSG_PRIO  1
 #endif
@@ -61,92 +79,6 @@
 #ifndef CONFIG_NXRECORDER_RECORDTHREAD_STACKSIZE
 #  define CONFIG_NXRECORDER_RECORDTHREAD_STACKSIZE    1500
 #endif
-
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-#ifdef CONFIG_NXRECORDER_FMT_FROM_EXT
-struct nxrecorder_ext_fmt_s
-{
-  FAR const char *ext;
-  uint16_t       format;
-  CODE int       (*getsubformat)(int fd);
-};
-#endif
-
-/****************************************************************************
- * Private Function Prototypes
- ****************************************************************************/
-
-#ifdef CONFIG_AUDIO_FORMAT_MP3
-int nxrecorder_getmp3subformat(int fd);
-#endif
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
-
-#ifdef CONFIG_NXRECORDER_FMT_FROM_EXT
-static const struct nxrecorder_ext_fmt_s g_known_ext[] =
-{
-#ifdef CONFIG_AUDIO_FORMAT_AC3
-  { "ac3",      AUDIO_FMT_AC3, NULL },
-#endif
-#ifdef CONFIG_AUDIO_FORMAT_MP3
-  { "mp3",      AUDIO_FMT_MP3, nxrecorder_getmp3subformat },
-#endif
-#ifdef CONFIG_AUDIO_FORMAT_DTS
-  { "dts",      AUDIO_FMT_DTS, NULL },
-#endif
-#ifdef CONFIG_AUDIO_FORMAT_WMA
-  { "wma",      AUDIO_FMT_WMA, NULL },
-#endif
-#ifdef CONFIG_AUDIO_FORMAT_PCM
-  { "wav",      AUDIO_FMT_PCM, NULL },
-#endif
-#ifdef CONFIG_AUDIO_FORMAT_MIDI
-  { "mid",      AUDIO_FMT_MIDI, NULL },
-  { "midi",     AUDIO_FMT_MIDI, NULL },
-#endif
-#ifdef CONFIG_AUDIO_FORMAT_OGG_VORBIS
-  { "ogg",      AUDIO_FMT_OGG_VORBIS, NULL },
-#endif
-#ifdef CONFIG_AUDIO_FORMAT_AMR
-  { "amr",      AUDIO_FMT_AMR, NULL },
-#endif
-#ifdef CONFIG_AUDIO_FORMAT_OPUS
-  { "opus",     AUDIO_FMT_OPUS, NULL }
-#endif
-};
-
-static const int g_known_ext_count = sizeof(g_known_ext) /
-                    sizeof(struct nxrecorder_ext_fmt_s);
-#endif
-
-static const struct nxrecorder_enc_ops_s g_enc_ops[] =
-{
-  {
-    AUDIO_FMT_AMR,
-    nxrecorder_write_amr,
-    nxrecorder_write_common,
-  },
-  {
-    AUDIO_FMT_PCM,
-    NULL,
-    nxrecorder_write_common,
-  },
-  {
-    AUDIO_FMT_MP3,
-    NULL,
-    nxrecorder_write_common,
-  },
-  {
-    AUDIO_FMT_OPUS,
-    NULL,
-    nxrecorder_write_common,
-  }
-};
 
 /****************************************************************************
  * Private Functions
@@ -167,13 +99,8 @@ static const struct nxrecorder_enc_ops_s g_enc_ops[] =
  *
  ****************************************************************************/
 
-static int nxrecorder_opendevice(FAR struct nxrecorder_s *precorder,
-                                 int format, int subfmt)
+static int nxrecorder_opendevice(FAR struct nxrecorder_s *precorder)
 {
-  struct audio_caps_s cap;
-  bool supported = true;
-  int x;
-
   /* If we have a device, then open it */
 
   if (precorder->device[0] != '\0')
@@ -184,197 +111,26 @@ static int nxrecorder_opendevice(FAR struct nxrecorder_s *precorder,
 
       /* Device supports the format.  Open the device file. */
 
-      precorder->dev_fd = open(precorder->device, O_RDWR | O_CLOEXEC);
-      if (precorder->dev_fd == -1)
+      precorder->devFd = open(precorder->device, O_RDWR);
+      if (precorder->devFd == -1)
         {
           int errcode = errno;
           DEBUGASSERT(errcode > 0);
 
-          auderr("ERROR: Failed to open %s: %d\n",
-                 precorder->device, -errcode);
+          auderr("ERROR: Failed to open %s: %d\n", -errcode);
           UNUSED(errcode);
           return -ENOENT;
         }
 
-      cap.ac_len     = sizeof(cap);
-      cap.ac_type    = AUDIO_TYPE_QUERY;
-      cap.ac_subtype = AUDIO_TYPE_QUERY;
-
-      if (ioctl(precorder->dev_fd, AUDIOIOC_GETCAPS,
-                (uintptr_t)&cap) == cap.ac_len)
-        {
-          if (((cap.ac_format.hw & (1 << (format - 1))) ||
-               (cap.ac_format.hw & (1 << (AUDIO_FMT_OTHER - 1)))) &&
-              (cap.ac_controls.b[0] & AUDIO_TYPE_INPUT))
-            {
-              if (!(cap.ac_format.hw & (1 << (format - 1))))
-                {
-                  /* Get the format supported by the driver
-                   * through cap.ac_controls.w
-                   */
-
-                  cap.ac_len     = sizeof(cap);
-                  cap.ac_type    = AUDIO_TYPE_QUERY;
-                  cap.ac_subtype = AUDIO_FMT_OTHER;
-                  if (ioctl(precorder->dev_fd, AUDIOIOC_GETCAPS,
-                            (uintptr_t)&cap) == cap.ac_len)
-                    {
-                      if (!(cap.ac_controls.w & (1 << (format - 1))))
-                        {
-                          supported = false;
-                        }
-                    }
-                }
-
-              /* Test if subformat needed and detected */
-
-              if (subfmt != AUDIO_FMT_UNDEF && supported)
-                {
-                  /* Prepare to get sub-formats for
-                   * this main format
-                   */
-
-                  cap.ac_subtype = format;
-                  cap.ac_format.b[0] = 0;
-
-                  while (ioctl(precorder->dev_fd, AUDIOIOC_GETCAPS,
-                               (uintptr_t)&cap) == cap.ac_len)
-                    {
-                      /* Check the next set of 4 controls
-                       * to find the subformat
-                       */
-
-                      for (x = 0; x < sizeof(cap.ac_controls.b); x++)
-                        {
-                          if (cap.ac_controls.b[x] == subfmt)
-                            {
-                              /* Sub format supported! */
-
-                              break;
-                            }
-                          else if (cap.ac_controls.b[x] ==
-                                   AUDIO_SUBFMT_END)
-                            {
-                              /* Sub format not supported */
-
-                              supported = false;
-                              break;
-                            }
-                        }
-
-                      /* If we reached the end of the subformat list,
-                       * then break out of the loop.
-                       */
-
-                      if (x != sizeof(cap.ac_controls))
-                        {
-                          break;
-                        }
-
-                      /* Increment ac_format.b[0] to get next
-                       * set of subformats
-                       */
-
-                      cap.ac_format.b[0]++;
-                    }
-                }
-
-              if (supported)
-                {
-                  /* Yes, it supports this format.  Use this device */
-
-                  return OK;
-                }
-            }
-
-            close(precorder->dev_fd);
-        }
+      return OK;
     }
 
   /* Device not found */
 
   auderr("ERROR: Device not found\n");
-  precorder->dev_fd = -1;
+  precorder->devFd = -1;
   return -ENODEV;
 }
-
-/****************************************************************************
- * Name: nxrecorder_getmp3subformat
- *
- *   nxrecorder_getmp3subformat() just ruturn AUDIO_SUBFMT_PCM_MP3.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_AUDIO_FORMAT_MP3
-int nxrecorder_getmp3subformat(int fd)
-{
-  return AUDIO_SUBFMT_PCM_MP3;
-}
-#endif
-
-#ifdef CONFIG_NXRECORDER_FMT_FROM_EXT
-
-/****************************************************************************
- * Name: nxprecorder_fmtfromext
- *
- *   nxrecorder_fmtfromext() tries to determine the file format based
- *   on the extension of the supplied filename.
- *
- ****************************************************************************/
-
-static inline int nxrecorder_fmtfromext(FAR struct nxrecorder_s *precorder,
-                                        FAR const char *pfilename,
-                                        FAR int *subfmt)
-{
-  FAR const char *pext;
-  uint8_t         x;
-  uint8_t         c;
-
-  /* Find the file extension, if any */
-
-  x = strlen(pfilename) - 1;
-  while (x > 0)
-    {
-      /* Search backward for the first '.' */
-
-      if (pfilename[x] == '.')
-        {
-          /* First '.' found.  Now compare with known extensions */
-
-          pext = &pfilename[x + 1];
-          for (c = 0; c < g_known_ext_count; c++)
-            {
-              /* Test for extension match */
-
-              if (strcasecmp(pext, g_known_ext[c].ext) == 0)
-                {
-                  /* Test if we have a sub-format detection routine */
-
-                  if (subfmt && g_known_ext[c].getsubformat)
-                    {
-                      *subfmt = g_known_ext[c].getsubformat(precorder->fd);
-                    }
-
-                  /* Return the format for this extension */
-
-                  return g_known_ext[c].format;
-                }
-            }
-        }
-
-      /* Stop if we find a '/' */
-
-      if (pfilename[x] == '/')
-        {
-          break;
-        }
-
-      x--;
-    }
-
-  return AUDIO_FMT_UNDEF;
-}
-#endif
 
 /****************************************************************************
  * Name: nxrecorder_writebuffer
@@ -405,7 +161,7 @@ static int nxrecorder_writebuffer(FAR struct nxrecorder_s *precorder,
 
   /* Write data to the file. */
 
-  ret = precorder->ops->write_data(precorder->fd, apb);
+  ret = write(precorder->fd, apb->samp, apb->nbytes);
   if (ret < 0)
     {
       return ret;
@@ -430,10 +186,10 @@ static int nxrecorder_writebuffer(FAR struct nxrecorder_s *precorder,
  *   called with a buffer of data to be enqueued in the audio stream.
  *
  *   Be we may also receive an empty length buffer (with only the
- *   AUDIO_APB_FINAL set) in the event of certain write error occurs or in
- *   the event that the file was an exact multiple of the nmaxbytes size of
- *   the audio buffer.
- *   In that latter case, we have an end of file with no bytes written.
+ *   AUDIO_APB_FINAL set) in the event of certain write error occurs or in the
+ *   event that the file was an exact multiple of the nmaxbytes size of the
+ *   audio buffer.  In that latter case, we have an end of file with no bytes
+ *   written.
  *
  *   These infrequent zero length buffers have to be passed through because
  *   the include the AUDIO_APB_FINAL flag that is needed to terminate the
@@ -460,10 +216,10 @@ static int nxrecorder_enqueuebuffer(FAR struct nxrecorder_s *precorder,
   bufdesc.session   = precorder->session;
 #endif
   bufdesc.numbytes  = apb->nbytes;
-  bufdesc.u.buffer = apb;
+  bufdesc.u.pBuffer = apb;
 
-  ret = ioctl(precorder->dev_fd, AUDIOIOC_ENQUEUEBUFFER,
-              (uintptr_t)&bufdesc);
+  ret = ioctl(precorder->devFd, AUDIOIOC_ENQUEUEBUFFER,
+              (unsigned long)&bufdesc);
   if (ret < 0)
     {
       int errcode = errno;
@@ -481,36 +237,6 @@ static int nxrecorder_enqueuebuffer(FAR struct nxrecorder_s *precorder,
 }
 
 /****************************************************************************
- * Name: nxrecorder_jointhread
- ****************************************************************************/
-
-static void nxrecorder_jointhread(FAR struct nxrecorder_s *precorder)
-{
-  FAR void *value;
-  int id = 0;
-
-  if (gettid() == precorder->record_id)
-    {
-      return;
-    }
-
-  pthread_mutex_lock(&precorder->mutex);
-
-  if (precorder->record_id > 0)
-    {
-      id = precorder->record_id;
-      precorder->record_id = 0;
-    }
-
-  pthread_mutex_unlock(&precorder->mutex);
-
-  if (id > 0)
-    {
-      pthread_join(id, &value);
-    }
-}
-
-/****************************************************************************
  * Name: nxrecorder_thread_recordthread
  *
  *  This is the thread that write the audio file file and enqueues /
@@ -518,31 +244,37 @@ static void nxrecorder_jointhread(FAR struct nxrecorder_s *precorder)
  *
  ****************************************************************************/
 
-static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
+static void *nxrecorder_recordthread(pthread_addr_t pvarg)
 {
-  FAR struct nxrecorder_s *precorder = (FAR struct nxrecorder_s *)pvarg;
-  struct audio_msg_s      msg;
-  struct audio_buf_desc_s buf_desc;
-  ssize_t                 size;
-  bool                    running = true;
-  bool                    streaming = true;
-  bool                    failed = false;
-  struct ap_buffer_info_s buf_info;
-  unsigned int            prio;
-#ifdef CONFIG_DEBUG_FEATURES
-  int                     outstanding = 0;
+  struct nxrecorder_s         *precorder = (struct nxrecorder_s *) pvarg;
+  struct audio_msg_s          msg;
+  struct audio_buf_desc_s     buf_desc;
+  ssize_t                     size;
+  bool                        running = true;
+  bool                        streaming = true;
+  bool                        failed = false;
+#ifdef CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS
+  struct ap_buffer_info_s     buf_info;
+  FAR struct ap_buffer_s      **pbuffers;
+#else
+  FAR struct ap_buffer_s      *pbuffers[CONFIG_AUDIO_NUM_BUFFERS];
 #endif
-  int                     x;
-  int                     ret;
+  unsigned int                prio;
+#ifdef CONFIG_DEBUG_FEATURES
+  int                         outstanding = 0;
+#endif
+  int                         x;
+  int                         ret;
 
   audinfo("Entry\n");
 
-  /* Query the audio device for its preferred buffer size / qty */
+  /* Query the audio device for it's preferred buffer size / qty */
 
-  if ((ret = ioctl(precorder->dev_fd, AUDIOIOC_GETBUFFERINFO,
-                   (uintptr_t)&buf_info)) != OK)
+#ifdef CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS
+  if ((ret = ioctl(precorder->devFd, AUDIOIOC_GETBUFFERINFO,
+          (unsigned long) &buf_info)) != OK)
     {
-      /* Driver doesn't report its buffer size.  Use our default. */
+      /* Driver doesn't report it's buffer size.  Use our default. */
 
       buf_info.buffer_size = CONFIG_AUDIO_BUFFER_NUMBYTES;
       buf_info.nbuffers = CONFIG_AUDIO_NUM_BUFFERS;
@@ -550,25 +282,48 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
 
   /* Create array of pointers to buffers */
 
-  FAR struct ap_buffer_s *pbuffers[buf_info.nbuffers];
+  pbuffers = (FAR struct ap_buffer_s **) malloc(buf_info.nbuffers * sizeof(FAR void *));
+  if (pbuffers == NULL)
+    {
+      /* Error allocating memory for buffer storage! */
+
+      ret = -ENOMEM;
+      running = false;
+      goto err_out;
+    }
 
   /* Create our audio pipeline buffers to use for queueing up data */
 
-  memset(pbuffers, 0, sizeof(pbuffers));
+  for (x = 0; x < buf_info.nbuffers; x++)
+    {
+      pbuffers[x] = NULL;
+    }
 
   for (x = 0; x < buf_info.nbuffers; x++)
+#else /* CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFER */
+
+  for (x = 0; x < CONFIG_AUDIO_NUM_BUFFERS; x++)
+    {
+      pbuffers[x] = NULL;
+    }
+
+  for (x = 0; x < CONFIG_AUDIO_NUM_BUFFERS; x++)
+#endif /* CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFER */
     {
       /* Fill in the buffer descriptor struct to issue an alloc request */
 
 #ifdef CONFIG_AUDIO_MULTI_SESSION
       buf_desc.session = precorder->session;
 #endif
-
+#ifdef CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS
       buf_desc.numbytes = buf_info.buffer_size;
-      buf_desc.u.pbuffer = &pbuffers[x];
+#else
+      buf_desc.numbytes = CONFIG_AUDIO_BUFFER_NUMBYTES;
+#endif
+      buf_desc.u.ppBuffer = &pbuffers[x];
 
-      ret = ioctl(precorder->dev_fd, AUDIOIOC_ALLOCBUFFER,
-                  (uintptr_t)&buf_desc);
+      ret = ioctl(precorder->devFd, AUDIOIOC_ALLOCBUFFER,
+                  (unsigned long) &buf_desc);
       if (ret != sizeof(buf_desc))
         {
           /* Buffer alloc Operation not supported or error allocating! */
@@ -581,7 +336,11 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
 
   /* Fill up the pipeline with enqueued buffers */
 
+#ifdef CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS
   for (x = 0; x < buf_info.nbuffers; x++)
+#else
+  for (x = 0; x < CONFIG_AUDIO_NUM_BUFFERS; x++)
+#endif
     {
       /* Write the next buffer of data */
 
@@ -629,10 +388,10 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
   if (running && !failed)
     {
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-      ret = ioctl(precorder->dev_fd, AUDIOIOC_START,
-                  (uintptr_t)precorder->session);
+      ret = ioctl(precorder->devFd, AUDIOIOC_START,
+                  (unsigned long) precorder->session);
 #else
-      ret = ioctl(precorder->dev_fd, AUDIOIOC_START, 0);
+      ret = ioctl(precorder->devFd, AUDIOIOC_START, 0);
 #endif
 
       if (ret < 0)
@@ -651,6 +410,7 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
       /* Indicate we are recording a file */
 
       precorder->state = NXRECORDER_STATE_RECORDING;
+
     }
 
   /* Loop until we specifically break.  running == true means that we are
@@ -691,7 +451,7 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
 
       /* Perform operation based on message id */
 
-      switch (msg.msg_id)
+      switch (msg.msgId)
         {
           /* An audio buffer is being dequeued by the driver */
 
@@ -701,7 +461,7 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
              * least one buffer.
              */
 
-            DEBUGASSERT(msg.u.ptr && outstanding > 0);
+            DEBUGASSERT(msg.u.pPtr && outstanding > 0);
             outstanding--;
 #endif
 
@@ -714,7 +474,7 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
               {
                 /* Write the next buffer of data */
 
-                ret = nxrecorder_writebuffer(precorder, msg.u.ptr);
+                ret = nxrecorder_writebuffer(precorder, msg.u.pPtr);
                 if (ret != OK)
                   {
                     /* Out of data.  Stay in the loop until the device sends
@@ -729,7 +489,7 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
 
                 else
                   {
-                    ret = nxrecorder_enqueuebuffer(precorder, msg.u.ptr);
+                    ret = nxrecorder_enqueuebuffer(precorder, msg.u.pPtr);
                     if (ret != OK)
                       {
                         /* There is some issue from the audio driver.
@@ -765,18 +525,15 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
           /* Someone wants to stop the recordback. */
 
           case AUDIO_MSG_STOP:
-
             /* Send a stop message to the device */
 
-#ifdef CONFIG_DEBUG_FEATURES
             audinfo("Stopping! outstanding=%d\n", outstanding);
-#endif
 
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-            ioctl(precorder->dev_fd, AUDIOIOC_STOP,
-                  (uintptr_t)precorder->session);
+            ioctl(precorder->devFd, AUDIOIOC_STOP,
+                 (unsigned long) precorder->session);
 #else
-            ioctl(precorder->dev_fd, AUDIOIOC_STOP, 0);
+            ioctl(precorder->devFd, AUDIOIOC_STOP, 0);
 #endif
             /* Stay in the running loop (without sending more data).
              * we will need to recover our audio buffers.  We will
@@ -789,9 +546,7 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
           /* Message indicating the recordback is complete */
 
           case AUDIO_MSG_COMPLETE:
-#ifdef CONFIG_DEBUG_FEATURES
             audinfo("Record complete.  outstanding=%d\n", outstanding);
-#endif
             running = false;
             break;
 
@@ -807,40 +562,59 @@ static FAR void *nxrecorder_recordthread(pthread_addr_t pvarg)
 err_out:
   audinfo("Clean-up and exit\n");
 
-  audinfo("Freeing buffers\n");
-  for (x = 0; x < buf_info.nbuffers; x++)
+#ifdef CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS
+  if (pbuffers != NULL)
     {
-      /* Fill in the buffer descriptor struct to issue a free request */
-
-      if (pbuffers[x] != NULL)
+      audinfo("Freeing buffers\n");
+      for (x = 0; x < buf_info.nbuffers; x++)
         {
+          /* Fill in the buffer descriptor struct to issue a free request */
+
+          if (pbuffers[x] != NULL)
+            {
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-         buf_desc.session = precorder->session;
+              buf_desc.session = pPlayer->session;
 #endif
-          buf_desc.u.buffer = pbuffers[x];
-          ioctl(precorder->dev_fd, AUDIOIOC_FREEBUFFER,
-                (uintptr_t)&buf_desc);
+              buf_desc.u.pBuffer = pbuffers[x];
+              ioctl(precorder->devFd, AUDIOIOC_FREEBUFFER, (unsigned long) &buf_desc);
+            }
         }
+
+      /* Free the pointers to the buffers */
+
+      free(pbuffers);
     }
+#else
+    audinfo("Freeing buffers\n");
+    for (x = 0; x < CONFIG_AUDIO_NUM_BUFFERS; x++)
+      {
+        /* Fill in the buffer descriptor struct to issue a free request */
+
+        if (pbuffers[x] != NULL)
+          {
+#ifdef CONFIG_AUDIO_MULTI_SESSION
+            buf_desc.session = pPlayer->session;
+#endif
+            buf_desc.u.pBuffer = pbuffers[x];
+            ioctl(precorder->devFd, AUDIOIOC_FREEBUFFER, (unsigned long) &buf_desc);
+          }
+      }
+#endif
 
   /* Unregister the message queue and release the session */
 
-  ioctl(precorder->dev_fd,
-        AUDIOIOC_UNREGISTERMQ,
-        (uintptr_t)precorder->mq);
+  ioctl(precorder->devFd, AUDIOIOC_UNREGISTERMQ, (unsigned long) precorder->mq);
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-  ioctl(precorder->dev_fd,
-        AUDIOIOC_RELEASE,
-        (uintptr_t)precorder->session);
+  ioctl(precorder->devFd, AUDIOIOC_RELEASE, (unsigned long) precorder->session);
 #else
-  ioctl(precorder->dev_fd,
-        AUDIOIOC_RELEASE,
-        0);
+  ioctl(precorder->devFd, AUDIOIOC_RELEASE, 0);
 #endif
 
   /* Cleanup */
 
-  pthread_mutex_lock(&precorder->mutex);
+  while (sem_wait(&precorder->sem) < 0)
+    {
+    }
 
   /* Close the files */
 
@@ -850,13 +624,13 @@ err_out:
       precorder->fd = -1;                   /* Clear out the FD */
     }
 
-  close(precorder->dev_fd);                 /* Close the device */
-  precorder->dev_fd = -1;                   /* Mark device as closed */
+  close(precorder->devFd);                  /* Close the device */
+  precorder->devFd = -1;                    /* Mark device as closed */
   mq_close(precorder->mq);                  /* Close the message queue */
   mq_unlink(precorder->mqname);             /* Unlink the message queue */
   precorder->state = NXRECORDER_STATE_IDLE; /* Go to IDLE */
 
-  pthread_mutex_unlock(&precorder->mutex);
+  sem_post(&precorder->sem);                /* Release the semaphore */
 
   /* The record thread is done with the context.  Release it, which may
    * actually cause the context to be freed if the creator has already
@@ -889,10 +663,10 @@ int nxrecorder_pause(FAR struct nxrecorder_s *precorder)
   if (precorder->state == NXRECORDER_STATE_RECORDING)
     {
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-      ret = ioctl(precorder->dev_fd, AUDIOIOC_PAUSE,
-                  (uintptr_t)precorder->session);
+      ret = ioctl(precorder->devFd, AUDIOIOC_PAUSE,
+          (unsigned long) precorder->session);
 #else
-      ret = ioctl(precorder->dev_fd, AUDIOIOC_PAUSE, 0);
+      ret = ioctl(precorder->devFd, AUDIOIOC_PAUSE, 0);
 #endif
       if (ret == OK)
         {
@@ -919,10 +693,10 @@ int nxrecorder_resume(FAR struct nxrecorder_s *precorder)
   if (precorder->state == NXRECORDER_STATE_PAUSED)
     {
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-      ret = ioctl(precorder->dev_fd, AUDIOIOC_RESUME,
-                  (uintptr_t)precorder->session);
+      ret = ioctl(precorder->devFd, AUDIOIOC_RESUME,
+          (unsigned long) precorder->session);
 #else
-      ret = ioctl(precorder->dev_fd, AUDIOIOC_RESUME, 0);
+      ret = ioctl(precorder->devFd, AUDIOIOC_RESUME, 0);
 #endif
       if (ret == OK)
         {
@@ -943,28 +717,28 @@ int nxrecorder_resume(FAR struct nxrecorder_s *precorder)
  ****************************************************************************/
 
 int nxrecorder_setdevice(FAR struct nxrecorder_s *precorder,
-                         FAR const char *pdevice)
+                         FAR const char *pDevice)
 {
-  int temp_fd;
+  int tempFd;
 
   DEBUGASSERT(precorder != NULL);
-  DEBUGASSERT(pdevice != NULL);
+  DEBUGASSERT(pDevice != NULL);
 
   /* Try to open the device */
 
-  temp_fd = open(pdevice, O_RDWR);
-  if (temp_fd == -1)
+  tempFd = open(pDevice, O_RDWR);
+  if (tempFd == -1)
     {
       /* Error opening the device */
 
       return -ENOENT;
     }
 
-  close(temp_fd);
+  close(tempFd);
 
   /* Save the path and format capabilities of the device */
 
-  strlcpy(precorder->device, pdevice, sizeof(precorder->device));
+  strncpy(precorder->device, pDevice, sizeof(precorder->device));
 
   return OK;
 }
@@ -983,49 +757,50 @@ int nxrecorder_setdevice(FAR struct nxrecorder_s *precorder,
 #ifndef CONFIG_AUDIO_EXCLUDE_STOP
 int nxrecorder_stop(FAR struct nxrecorder_s *precorder)
 {
-  struct audio_msg_s term_msg;
+  struct audio_msg_s  term_msg;
+  FAR void            *value;
 
   DEBUGASSERT(precorder != NULL);
 
   /* Validate we are not in IDLE state */
 
-  pthread_mutex_lock(&precorder->mutex);
+  sem_wait(&precorder->sem);                      /* Get the semaphore */
   if (precorder->state == NXRECORDER_STATE_IDLE)
     {
-      pthread_mutex_unlock(&precorder->mutex);
+      sem_post(&precorder->sem);                  /* Release the semaphore */
       return OK;
     }
 
-  pthread_mutex_unlock(&precorder->mutex);
+  sem_post(&precorder->sem);
 
   /* Notify the recordback thread that it needs to cancel the recordback */
 
-  term_msg.msg_id = AUDIO_MSG_STOP;
+  term_msg.msgId = AUDIO_MSG_STOP;
   term_msg.u.data = 0;
   mq_send(precorder->mq, (FAR const char *)&term_msg, sizeof(term_msg),
           CONFIG_NXRECORDER_MSG_PRIO);
 
   /* Join the thread.  The thread will do all the cleanup. */
 
-  nxrecorder_jointhread(precorder);
+  pthread_join(precorder->recordId, &value);
+  precorder->recordId = 0;
 
   return OK;
 }
 #endif /* CONFIG_AUDIO_EXCLUDE_STOP */
 
 /****************************************************************************
- * Name: nxrecorder_recordinteral
+ * Name: nxrecorder_recordraw
  *
- *   nxrecorder_recordinternal() tries to record audio file using the Audio
- *   system. If a device is specified, it will try to use that
+ *   nxrecorder_recordraw() tries to record the raw data file using the Audio
+ *   system.  If a device is specified, it will try to use that
  *   device.
  * Input:
  *   precorder  Pointer to the initialized MRecorder context
- *   pfilename  Pointer to the filename to record
+ *   pFilename  Pointer to the filename to record
  *   nchannels  channel num
  *   bpsampe    bit width
  *   samprate   sample rate
- *   chmap      channel map
  *
  * Returns:
  *   OK         File is being recorded
@@ -1036,24 +811,19 @@ int nxrecorder_stop(FAR struct nxrecorder_s *precorder)
  *
  ****************************************************************************/
 
-int nxrecorder_recordinternal(FAR struct nxrecorder_s *precorder,
-                              FAR const char *pfilename, int filefmt,
-                              uint8_t nchannels, uint8_t bpsamp,
-                              uint32_t samprate, uint8_t chmap)
+int nxrecorder_recordraw(FAR struct nxrecorder_s *precorder,
+                         FAR const char *pFilename, uint8_t nchannels,
+                         uint8_t bpsamp, uint32_t samprate)
 {
   struct mq_attr           attr;
   struct sched_param       sparam;
   pthread_attr_t           tattr;
   struct audio_caps_desc_s cap_desc;
-  struct ap_buffer_info_s  buf_info;
-  struct audio_caps_s      caps;
-  int                      min_channels;
+  FAR void                 *value;
   int                      ret;
-  int                      subfmt = AUDIO_FMT_UNDEF;
-  int                      index;
 
   DEBUGASSERT(precorder != NULL);
-  DEBUGASSERT(pfilename != NULL);
+  DEBUGASSERT(pFilename != NULL);
 
   if (precorder->state != NXRECORDER_STATE_IDLE)
     {
@@ -1061,39 +831,22 @@ int nxrecorder_recordinternal(FAR struct nxrecorder_s *precorder,
     }
 
   audinfo("==============================\n");
-  audinfo("Recording file %s\n", pfilename);
+  audinfo("Recording file %s\n", pFilename);
   audinfo("==============================\n");
 
   /* Test that the specified file exists */
 
-  if ((precorder->fd = open(pfilename, O_WRONLY | O_CREAT | O_TRUNC,
-                            0666)) == -1)
+  if ((precorder->fd = open(pFilename, O_WRONLY | O_CREAT)) == -1)
     {
       /* File not found.  Test if its in the mediadir */
 
-      auderr("ERROR: Could not open %s\n", pfilename);
-      return -ENOENT;
-    }
-
-  if (filefmt == AUDIO_FMT_UNDEF)
-    {
-      filefmt = nxrecorder_fmtfromext(precorder, pfilename, &subfmt);
-    }
-
-  /* Test if we determined the file format */
-
-  if (filefmt == AUDIO_FMT_UNDEF)
-    {
-      /* Hmmm, it's some unknown / unsupported type */
-
-      auderr("ERROR: Unsupported format: %d\n", filefmt);
-      ret = -ENOSYS;
-      goto err_out_nodev;
+        auderr("ERROR: Could not open %s\n", pFilename);
+        return -ENOENT;
     }
 
   /* Try to open the device */
 
-  ret = nxrecorder_opendevice(precorder, filefmt, subfmt);
+  ret = nxrecorder_opendevice(precorder);
   if (ret < 0)
     {
       /* Error opening the device */
@@ -1102,38 +855,13 @@ int nxrecorder_recordinternal(FAR struct nxrecorder_s *precorder,
       goto err_out_nodev;
     }
 
-  for (index = 0; index < sizeof(g_enc_ops) / sizeof(g_enc_ops[0]); index++)
-    {
-      if (g_enc_ops[index].format == filefmt)
-        {
-          precorder->ops = &g_enc_ops[index];
-          break;
-        }
-    }
-
-  if (!precorder->ops)
-    {
-      ret = -ENOSYS;
-      goto err_out;
-    }
-
-  if (precorder->ops->pre_write)
-    {
-      ret = precorder->ops->pre_write(precorder->fd,
-                                      samprate, nchannels, bpsamp);
-      if (ret < 0)
-        {
-          goto err_out;
-        }
-    }
-
   /* Try to reserve the device */
 
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-  ret = ioctl(precorder->dev_fd, AUDIOIOC_RESERVE,
-              (uintptr_t)&precorder->session);
+  ret = ioctl(precorder->devFd, AUDIOIOC_RESERVE,
+              (unsigned long)&precorder->session);
 #else
-  ret = ioctl(precorder->dev_fd, AUDIOIOC_RESERVE, 0);
+  ret = ioctl(precorder->devFd, AUDIOIOC_RESERVE, 0);
 #endif
   if (ret < 0)
     {
@@ -1144,54 +872,26 @@ int nxrecorder_recordinternal(FAR struct nxrecorder_s *precorder,
       goto err_out;
     }
 
-  caps.ac_len = sizeof(caps);
-  caps.ac_type = AUDIO_TYPE_INPUT;
-  caps.ac_subtype = AUDIO_TYPE_QUERY;
-
-  if (ioctl(precorder->dev_fd, AUDIOIOC_GETCAPS,
-      (unsigned long)&caps) == caps.ac_len)
-    {
-      min_channels = caps.ac_channels >> 4;
-
-      if (min_channels != 0 && nchannels < min_channels)
-        {
-          ret = -EINVAL;
-          goto err_out;
-        }
-    }
-
 #ifdef CONFIG_AUDIO_MULTI_SESSION
   cap_desc.session = precorder->session;
 #endif
   cap_desc.caps.ac_len = sizeof(struct audio_caps_s);
   cap_desc.caps.ac_type = AUDIO_TYPE_INPUT;
   cap_desc.caps.ac_channels = nchannels ? nchannels : 2;
-  cap_desc.caps.ac_chmap    = chmap;
   cap_desc.caps.ac_controls.hw[0] = samprate ? samprate : 48000;
   cap_desc.caps.ac_controls.b[3] = samprate >> 16;
   cap_desc.caps.ac_controls.b[2]  = bpsamp ? bpsamp : 16;
-  cap_desc.caps.ac_subtype        = filefmt;
-  ret = ioctl(precorder->dev_fd, AUDIOIOC_CONFIGURE,
-              (uintptr_t)&cap_desc);
+  ret = ioctl(precorder->devFd, AUDIOIOC_CONFIGURE,
+              (unsigned long)&cap_desc);
   if (ret < 0)
     {
       ret = -errno;
       goto err_out;
     }
 
-  /* Query the audio device for its preferred buffer count */
-
-  if (ioctl(precorder->dev_fd, AUDIOIOC_GETBUFFERINFO,
-            (uintptr_t)&buf_info) != OK)
-    {
-      /* Driver doesn't report its buffer size.  Use our default. */
-
-      buf_info.nbuffers = CONFIG_AUDIO_NUM_BUFFERS;
-    }
-
   /* Create a message queue for the recordthread */
 
-  attr.mq_maxmsg  = buf_info.nbuffers + 8;
+  attr.mq_maxmsg  = 16;
   attr.mq_msgsize = sizeof(struct audio_msg_s);
   attr.mq_curmsgs = 0;
   attr.mq_flags   = 0;
@@ -1200,7 +900,7 @@ int nxrecorder_recordinternal(FAR struct nxrecorder_s *precorder,
            (unsigned long)((uintptr_t)precorder));
 
   precorder->mq = mq_open(precorder->mqname, O_RDWR | O_CREAT, 0644, &attr);
-  if (precorder->mq == (mqd_t) -1)
+  if (precorder->mq == NULL)
     {
       /* Unable to open message queue! */
 
@@ -1211,15 +911,16 @@ int nxrecorder_recordinternal(FAR struct nxrecorder_s *precorder,
 
   /* Register our message queue with the audio device */
 
-  ioctl(precorder->dev_fd,
-        AUDIOIOC_REGISTERMQ,
-        (uintptr_t)precorder->mq);
+  ioctl(precorder->devFd, AUDIOIOC_REGISTERMQ, (unsigned long)precorder->mq);
 
   /* Check if there was a previous thread and join it if there was
    * to perform clean-up.
    */
 
-  nxrecorder_jointhread(precorder);
+  if (precorder->recordId != 0)
+    {
+      pthread_join(precorder->recordId, &value);
+    }
 
   /* Start the recordfile thread to stream the media file to the
    * audio device.
@@ -1237,9 +938,7 @@ int nxrecorder_recordinternal(FAR struct nxrecorder_s *precorder,
    */
 
   nxrecorder_reference(precorder);
-  ret = pthread_create(&precorder->record_id,
-                       &tattr,
-                       nxrecorder_recordthread,
+  ret = pthread_create(&precorder->recordId, &tattr, nxrecorder_recordthread,
                        (pthread_addr_t) precorder);
   if (ret != OK)
     {
@@ -1249,12 +948,12 @@ int nxrecorder_recordinternal(FAR struct nxrecorder_s *precorder,
 
   /* Name the thread */
 
-  pthread_setname_np(precorder->record_id, "recordthread");
+  pthread_setname_np(precorder->recordId, "recordthread");
   return OK;
 
 err_out:
-  close(precorder->dev_fd);
-  precorder->dev_fd = -1;
+  close(precorder->devFd);
+  precorder->devFd = -1;
 
 err_out_nodev:
   if (0 < precorder->fd)
@@ -1270,8 +969,8 @@ err_out_nodev:
  * Name: nxrecorder_create
  *
  *   nxrecorder_create() allocates and initializes a nxrecorder context for
- *   use by further nxrecorder operations.  This routine must be called
- *   before to perform the create for proper reference counting.
+ *   use by further nxrecorder operations.  This routine must be called before
+ *   to perform the create for proper reference counting.
  *
  * Input Parameters:  None
  *
@@ -1286,7 +985,7 @@ FAR struct nxrecorder_s *nxrecorder_create(void)
 
   /* Allocate the memory */
 
-  precorder = (FAR struct nxrecorder_s *)malloc(sizeof(struct nxrecorder_s));
+  precorder = (FAR struct nxrecorder_s *) malloc(sizeof(struct nxrecorder_s));
   if (precorder == NULL)
     {
       return NULL;
@@ -1295,19 +994,18 @@ FAR struct nxrecorder_s *nxrecorder_create(void)
   /* Initialize the context data */
 
   precorder->state = NXRECORDER_STATE_IDLE;
-  precorder->dev_fd = -1;
+  precorder->devFd = -1;
   precorder->fd = -1;
   precorder->device[0] = '\0';
-  precorder->mq = 0;
-  precorder->record_id = 0;
+  precorder->mq = NULL;
+  precorder->recordId = 0;
   precorder->crefs = 1;
-  precorder->ops = NULL;
 
 #ifdef CONFIG_AUDIO_MULTI_SESSION
   precorder->session = NULL;
 #endif
 
-  pthread_mutex_init(&precorder->mutex, NULL);
+  sem_init(&precorder->sem, 0, 1);
 
   return precorder;
 }
@@ -1328,23 +1026,52 @@ FAR struct nxrecorder_s *nxrecorder_create(void)
 void nxrecorder_release(FAR struct nxrecorder_s *precorder)
 {
   int         refcount;
+  FAR void    *value;
+
+  /* Grab the semaphore */
+
+  while (sem_wait(&precorder->sem) < 0)
+    {
+      int errcode = errno;
+      DEBUGASSERT(errcode > 0);
+
+      if (errcode != EINTR)
+        {
+          auderr("ERROR: sem_wait failed: %d\n", errcode);
+          return;
+        }
+    }
 
   /* Check if there was a previous thread and join it if there was */
 
-  nxrecorder_jointhread(precorder);
+  if (precorder->recordId != 0)
+    {
+      sem_post(&precorder->sem);
+      pthread_join(precorder->recordId, &value);
+      precorder->recordId = 0;
 
-  pthread_mutex_lock(&precorder->mutex);
+      while (sem_wait(&precorder->sem) < 0)
+        {
+          int errcode = errno;
+          DEBUGASSERT(errcode > 0);
+
+          if (errcode != EINTR)
+            {
+              auderr("ERROR: sem_wait failed: %d\n", errcode);
+              return;
+            }
+        }
+    }
 
   /* Reduce the reference count */
 
   refcount = precorder->crefs--;
-  pthread_mutex_unlock(&precorder->mutex);
+  sem_post(&precorder->sem);
 
   /* If the ref count *was* one, then free the context */
 
   if (refcount == 1)
     {
-      pthread_mutex_destroy(&precorder->mutex);
       free(precorder);
     }
 }
@@ -1363,10 +1090,22 @@ void nxrecorder_release(FAR struct nxrecorder_s *precorder)
 
 void nxrecorder_reference(FAR struct nxrecorder_s *precorder)
 {
-  pthread_mutex_lock(&precorder->mutex);
+  /* Grab the semaphore */
+
+  while (sem_wait(&precorder->sem) < 0)
+    {
+      int errcode = errno;
+      DEBUGASSERT(errcode > 0);
+
+      if (errcode != EINTR)
+        {
+          auderr("ERROR: sem_wait failed: %d\n", errcode);
+          return;
+        }
+    }
 
   /* Increment the reference count */
 
   precorder->crefs++;
-  pthread_mutex_unlock(&precorder->mutex);
+  sem_post(&precorder->sem);
 }

@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/sam34/sam3u-ek/src/sam_touchscreen.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011-2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -93,11 +106,11 @@
  * pendown - Return the state of the pen down GPIO input
  */
 
-static int  tsc_attach(struct ads7843e_config_s *state, xcpt_t isr);
-static void tsc_enable(struct ads7843e_config_s *state, bool enable);
-static void tsc_clear(struct ads7843e_config_s *state);
-static bool tsc_busy(struct ads7843e_config_s *state);
-static bool tsc_pendown(struct ads7843e_config_s *state);
+static int  tsc_attach(FAR struct ads7843e_config_s *state, xcpt_t isr);
+static void tsc_enable(FAR struct ads7843e_config_s *state, bool enable);
+static void tsc_clear(FAR struct ads7843e_config_s *state);
+static bool tsc_busy(FAR struct ads7843e_config_s *state);
+static bool tsc_pendown(FAR struct ads7843e_config_s *state);
 
 /****************************************************************************
  * Private Data
@@ -140,7 +153,7 @@ static struct ads7843e_config_s g_tscinfo =
  * pendown - Return the state of the pen down GPIO input
  */
 
-static int tsc_attach(struct ads7843e_config_s *state, xcpt_t isr)
+static int tsc_attach(FAR struct ads7843e_config_s *state, xcpt_t isr)
 {
   /* Attach the ADS7843E interrupt */
 
@@ -148,7 +161,7 @@ static int tsc_attach(struct ads7843e_config_s *state, xcpt_t isr)
   return irq_attach(SAM_TCS_IRQ, isr, NULL);
 }
 
-static void tsc_enable(struct ads7843e_config_s *state, bool enable)
+static void tsc_enable(FAR struct ads7843e_config_s *state, bool enable)
 {
   /* Attach and enable, or detach and disable */
 
@@ -163,12 +176,12 @@ static void tsc_enable(struct ads7843e_config_s *state, bool enable)
     }
 }
 
-static void tsc_clear(struct ads7843e_config_s *state)
+static void tsc_clear(FAR struct ads7843e_config_s *state)
 {
   /* Does nothing */
 }
 
-static bool tsc_busy(struct ads7843e_config_s *state)
+static bool tsc_busy(FAR struct ads7843e_config_s *state)
 {
 #if defined(CONFIG_DEBUG_INPUT) && defined(CONFIG_DEBUG_INFO)
   static bool last = (bool)-1;
@@ -190,7 +203,7 @@ static bool tsc_busy(struct ads7843e_config_s *state)
   return busy;
 }
 
-static bool tsc_pendown(struct ads7843e_config_s *state)
+static bool tsc_pendown(FAR struct ads7843e_config_s *state)
 {
   /* The /PENIRQ value is active low */
 
@@ -222,7 +235,7 @@ static bool tsc_pendown(struct ads7843e_config_s *state)
 
 int sam_tsc_setup(int minor)
 {
-  struct spi_dev_s *dev;
+  FAR struct spi_dev_s *dev;
   int ret;
 
   iinfo("minor %d\n", minor);

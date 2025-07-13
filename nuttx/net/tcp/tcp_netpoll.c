@@ -1,22 +1,36 @@
 /****************************************************************************
  * net/tcp/tcp_netpoll.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2011-2016, 2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -32,7 +46,6 @@
 #include <debug.h>
 
 #include <nuttx/net/net.h>
-#include <nuttx/net/tcp.h>
 #include <nuttx/semaphore.h>
 
 #include "devif/devif.h"
@@ -54,7 +67,7 @@
  *
  * Input Parameters:
  *   dev      The structure of the network driver that caused the event
- *   pvpriv   An instance of struct tcp_poll_s cast to void*
+ *   conn     The connection structure associated with the socket
  *   flags    Set of events describing why the callback was invoked
  *
  * Returned Value:
@@ -66,13 +79,14 @@
  ****************************************************************************/
 
 static uint16_t tcp_poll_eventhandler(FAR struct net_driver_s *dev,
+                                      FAR void *conn,
                                       FAR void *pvpriv, uint16_t flags)
 {
-  FAR struct tcp_poll_s *info = pvpriv;
+  FAR struct tcp_poll_s *info = (FAR struct tcp_poll_s *)pvpriv;
 
   ninfo("flags: %04x\n", flags);
 
-  DEBUGASSERT(info == NULL || (info->conn != NULL && info->fds != NULL));
+  DEBUGASSERT(info == NULL || (info->psock != NULL && info->fds != NULL));
 
   /* 'priv' might be null in some race conditions (?) */
 
@@ -84,97 +98,114 @@ static uint16_t tcp_poll_eventhandler(FAR struct net_driver_s *dev,
 
       if ((flags & (TCP_NEWDATA | TCP_BACKLOG)) != 0)
         {
-          eventset |= POLLIN;
-        }
-
-      /* Non-blocking connection */
-
-      if ((flags & TCP_CONNECTED) != 0)
-        {
-          eventset |= POLLOUT;
+          eventset |= POLLIN & info->fds->events;
         }
 
       /* Check for a loss of connection events. */
 
       if ((flags & TCP_DISCONN_EVENTS) != 0)
         {
-#ifdef CONFIG_NET_SOCKOPTS
-          int reason;
-
-          /* TCP_TIMEDOUT: Connection aborted due to too many
-           *               retransmissions.
-           */
-
-          if ((flags & TCP_TIMEDOUT) != 0)
-            {
-              /* Indicate that the connection timedout?) */
-
-              reason = ETIMEDOUT;
-            }
-
-          else if ((flags & NETDEV_DOWN) != 0)
-            {
-              /* The network device went down.  Indicate that the remote host
-               * is unreachable.
-               */
-
-              reason = ENETUNREACH;
-            }
-
-          /* TCP_CLOSE: The remote host has closed the connection
-           * TCP_ABORT: The remote host has aborted the connection
-           */
-
-          else
-            {
-              /* Indicate that remote host refused the connection */
-
-              reason = ECONNREFUSED;
-            }
-
-          _SO_CONN_SETERRNO(info->conn, reason);
-#endif
-
           /* Mark that the connection has been lost */
 
-          tcp_lost_connection(info->conn, info->cb, flags);
+          tcp_lost_connection(info->psock, info->cb, flags);
           eventset |= (POLLERR | POLLHUP);
         }
 
       /* A poll is a sign that we are free to send data. */
 
-      /* Wake up poll() speculatively on TCP_ACKDATA.
-       * Note: our event handler is usually executed before
-       * psock_send_eventhandler, which might free IOBs/WRBs on TCP_ACKDATA.
-       * Revisit: consider some kind of priority for devif callback to allow
-       * this callback to be inserted after psock_send_eventhandler.
-       */
-
-      else if (psock_tcp_cansend(info->conn) >= 0
-#if defined(CONFIG_NET_TCP_WRITE_BUFFERS)
-               || (flags & TCP_ACKDATA) != 0
-#endif
-              )
+      else if ((flags & TCP_POLL) != 0 && psock_tcp_cansend(info->psock) >= 0)
         {
-          eventset |= POLLOUT;
+          eventset |= (POLLOUT & info->fds->events);
         }
 
       /* Awaken the caller of poll() if requested event occurred. */
 
-      poll_notify(&info->fds, 1, eventset);
-
-      if (info->fds->revents != 0)
+      if (eventset != 0)
         {
           /* Stop further callbacks */
 
-          info->cb->flags = 0;
-          info->cb->priv  = NULL;
-          info->cb->event = NULL;
+          info->cb->flags   = 0;
+          info->cb->priv    = NULL;
+          info->cb->event   = NULL;
+
+          info->fds->revents |= eventset;
+          nxsem_post(info->fds->sem);
         }
     }
 
   return flags;
 }
+
+/****************************************************************************
+ * Name: tcp_iob_work
+ *
+ * Description:
+ *   Work thread callback function execute when an IOB because available.
+ *
+ * Input Parameters:
+ *   psock - Socket state structure
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_NET_TCP_WRITE_BUFFERS) && defined(CONFIG_IOB_NOTIFIER)
+static inline void tcp_iob_work(FAR void *arg)
+{
+  FAR struct tcp_poll_s *pinfo;
+  FAR struct socket *psock;
+  FAR struct pollfd *fds;
+
+  pinfo = (FAR struct tcp_poll_s *)arg;
+  DEBUGASSERT(pinfo->psock != NULL && pinfo->fds != NULL);
+
+  psock = pinfo->psock;
+  fds   = pinfo->fds;
+
+  /* Verify that we still have a connection */
+
+  if (!_SS_ISCONNECTED(psock->s_flags) && !_SS_ISLISTENING(psock->s_flags))
+    {
+      /* Don't report more than once.  Might happen in a race condition */
+
+      if ((fds->revents & (POLLERR | POLLHUP)) == 0)
+        {
+          /* We were previously connected but lost the connection either due
+           * to a graceful shutdown by the remote peer or because of some
+           * exceptional event.
+           */
+
+          fds->revents |= (POLLERR | POLLHUP);
+          nxsem_post(fds->sem);
+        }
+    }
+
+  /* Handle a race condition.  Check if we have already posted the POLLOUT
+   * event.  If so, don't do it again and don't setup notification again.
+   */
+
+  else if ((fds->events & POLLWRNORM) != 0 &&
+           (fds->revents & POLLWRNORM) == 0)
+    {
+      /* Check if we are now able to send */
+
+      if (psock_tcp_cansend(psock) >= 0)
+        {
+          /* Yes.. then signal the poll logic */
+
+          fds->revents |= POLLWRNORM;
+          nxsem_post(fds->sem);
+        }
+      else
+        {
+          /* No.. ask for the IOB free notification again */
+
+          pinfo->key = iob_notifier_setup(LPWORK, tcp_iob_work, pinfo);
+        }
+    }
+}
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -198,41 +229,31 @@ static uint16_t tcp_poll_eventhandler(FAR struct net_driver_s *dev,
 
 int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 {
-  FAR struct tcp_conn_s *conn;
+  FAR struct tcp_conn_s *conn = psock->s_conn;
   FAR struct tcp_poll_s *info;
   FAR struct devif_callback_s *cb;
-  pollevent_t eventset = 0;
-  bool nonblock_conn;
   int ret = OK;
-
-  /* Some of the following must be atomic */
-
-  net_lock();
-
-  conn = psock->s_conn;
 
   /* Sanity check */
 
+#ifdef CONFIG_DEBUG_FEATURES
   if (!conn || !fds)
     {
-      ret = -EINVAL;
-      goto errout_with_lock;
+      return -EINVAL;
     }
+#endif
 
-  /* Non-blocking connection ? */
+  /* Some of the  following must be atomic */
 
-  nonblock_conn = ((conn->tcpstateflags == TCP_ALLOCATED ||
-                    conn->tcpstateflags == TCP_SYN_SENT) &&
-                   _SS_ISNONBLOCK(conn->sconn.s_flags));
+  net_lock();
 
   /* Find a container to hold the poll information */
 
   info = conn->pollinfo;
-  while (info->conn != NULL)
+  while (info->psock != NULL)
     {
       if (++info >= &conn->pollinfo[CONFIG_NET_TCP_NPOLLWAITERS])
         {
-          DEBUGPANIC();
           ret = -ENOMEM;
           goto errout_with_lock;
         }
@@ -249,32 +270,25 @@ int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 
   /* Initialize the poll info container */
 
-  info->conn = conn;
-  info->fds  = fds;
-  info->cb   = cb;
+  info->psock  = psock;
+  info->fds    = fds;
+  info->cb     = cb;
+#if defined(CONFIG_NET_TCP_WRITE_BUFFERS) && defined(CONFIG_IOB_NOTIFIER)
+  info->key    = 0;
+#endif
 
   /* Initialize the callback structure.  Save the reference to the info
    * structure as callback private data so that it will be available during
    * callback processing.
    */
 
-  cb->flags = TCP_DISCONN_EVENTS;
-  cb->priv  = info;
-  cb->event = tcp_poll_eventhandler;
+  cb->flags    = TCP_DISCONN_EVENTS;
+  cb->priv     = (FAR void *)info;
+  cb->event    = tcp_poll_eventhandler;
 
   if ((fds->events & POLLOUT) != 0)
     {
       cb->flags |= TCP_POLL;
-#if defined(CONFIG_NET_TCP_WRITE_BUFFERS)
-      cb->flags |= TCP_ACKDATA;
-#endif
-
-      /* Monitor the connected event */
-
-      if (nonblock_conn)
-        {
-          cb->flags |= TCP_CONNECTED;
-        }
     }
 
   if ((fds->events & POLLIN) != 0)
@@ -286,15 +300,15 @@ int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
    * for use during poll teardown as well.
    */
 
-  fds->priv = info;
+  fds->priv    = (FAR void *)info;
 
   /* Check for read data or backlogged connection availability now */
 
-  if (conn->readahead != NULL || tcp_backlogpending(conn))
+  if (!IOB_QEMPTY(&conn->readahead) || tcp_backlogavailable(conn))
     {
       /* Normal data may be read without blocking. */
 
-      eventset |= POLLRDNORM;
+      fds->revents |= (POLLRDNORM & fds->events);
     }
 
   /* Check for a loss of connection events.  We need to be careful here.
@@ -337,26 +351,42 @@ int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
    *    Action: Return with POLLHUP|POLLERR events
    */
 
-  if (!nonblock_conn && !_SS_ISCONNECTED(conn->sconn.s_flags) &&
-      !_SS_ISLISTENING(conn->sconn.s_flags))
+  if (!_SS_ISCONNECTED(psock->s_flags) && !_SS_ISLISTENING(psock->s_flags))
     {
       /* We were previously connected but lost the connection either due
        * to a graceful shutdown by the remote peer or because of some
        * exceptional event.
        */
 
-      _SO_CONN_SETERRNO(conn, ENOTCONN);
-      eventset |= POLLERR | POLLHUP;
+      fds->revents |= (POLLERR | POLLHUP);
     }
-  else if (_SS_ISCONNECTED(conn->sconn.s_flags) &&
-           psock_tcp_cansend(conn) >= 0)
+  else if (_SS_ISCONNECTED(psock->s_flags) && psock_tcp_cansend(psock) >= 0)
     {
-      eventset |= POLLWRNORM;
+      fds->revents |= (POLLWRNORM & fds->events);
     }
 
   /* Check if any requested events are already in effect */
 
-  poll_notify(&fds, 1, eventset);
+  if (fds->revents != 0)
+    {
+      /* Yes.. then signal the poll logic */
+
+      nxsem_post(fds->sem);
+    }
+
+#if defined(CONFIG_NET_TCP_WRITE_BUFFERS) && defined(CONFIG_IOB_NOTIFIER)
+  /* If (1) revents == 0, (2) write buffering is enabled, and (3) the
+   * POLLOUT event is needed, then setup to receive a notification when an
+   * IOB is freed.
+   */
+
+  else if ((fds->events & POLLOUT) != 0)
+    {
+      /* Ask for the IOB free notification */
+
+      info->key = iob_notifier_setup(LPWORK, tcp_iob_work, info);
+    }
+#endif
 
 errout_with_lock:
   net_unlock();
@@ -381,29 +411,35 @@ errout_with_lock:
 
 int tcp_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds)
 {
-  FAR struct tcp_conn_s *conn;
+  FAR struct tcp_conn_s *conn = psock->s_conn;
   FAR struct tcp_poll_s *info;
-
-  /* Some of the following must be atomic */
-
-  net_lock();
-
-  conn = psock->s_conn;
 
   /* Sanity check */
 
+#ifdef CONFIG_DEBUG_FEATURES
   if (!conn || !fds->priv)
     {
-      net_unlock();
       return -EINVAL;
     }
+#endif
 
   /* Recover the socket descriptor poll state info from the poll structure */
 
   info = (FAR struct tcp_poll_s *)fds->priv;
-  DEBUGASSERT(info->fds != NULL && info->cb != NULL);
+  DEBUGASSERT(info != NULL && info->fds != NULL && info->cb != NULL);
   if (info != NULL)
     {
+#if defined(CONFIG_NET_TCP_WRITE_BUFFERS) && defined(CONFIG_IOB_NOTIFIER)
+      /* Cancel any pending IOB free notification */
+
+      if (info->key > 0)
+        {
+          /* Ask for the IOB free notification */
+
+          iob_notifier_teardown(info->key);
+        }
+#endif
+
       /* Release the callback */
 
       tcp_callback_free(conn, info->cb);
@@ -414,10 +450,8 @@ int tcp_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds)
 
       /* Then free the poll info container */
 
-      info->conn = NULL;
+      info->psock = NULL;
     }
-
-  net_unlock();
 
   return OK;
 }

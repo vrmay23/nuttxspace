@@ -1,7 +1,12 @@
 /****************************************************************************
  * wireless/bluetooth/bt_conn.c
+ * Bluetooth connection handling.
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Ported from the Intel/Zephyr arduino101_firmware_source-v1.tar package
+ * where the code was released with a compatible 3-clause BSD license:
  *
  *   Copyright (c) 2016, Intel Corporation
  *   All rights reserved.
@@ -46,7 +51,6 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -88,6 +92,7 @@ static struct bt_conn_handoff_s g_conn_handoff =
  * Private Functions
  ****************************************************************************/
 
+#ifdef CONFIG_DEBUG_WIRELESS_INFO
 static const char *state2str(enum bt_conn_state_e state)
 {
   switch (state)
@@ -111,6 +116,7 @@ static const char *state2str(enum bt_conn_state_e state)
       return "(unknown)";
     }
 }
+#endif
 
 static void bt_conn_reset_rx_state(FAR struct bt_conn_s *conn)
 {
@@ -162,7 +168,7 @@ static int conn_tx_kthread(int argc, FAR char *argv[])
 
       /* Get next ACL packet for connection */
 
-      ret = bt_queue_receive(&conn->tx_queue, &buf);
+      ret = bt_queue_receive(conn->tx_queue, &buf);
       DEBUGASSERT(ret >= 0 && buf != NULL);
       UNUSED(ret);
 
@@ -174,7 +180,7 @@ static int conn_tx_kthread(int argc, FAR char *argv[])
         }
 
       wlinfo("passing buf %p len %u to driver\n", buf, buf->len);
-      bt_send(g_btdev.btdev, buf);
+      g_btdev.btdev->send(g_btdev.btdev, buf);
       bt_buf_release(buf);
     }
 
@@ -191,7 +197,7 @@ static int conn_tx_kthread(int argc, FAR char *argv[])
        * result in a successful termination of this thread.
        */
 
-      ret = file_mq_getattr(&conn->tx_queue, &attr);
+      ret = mq_getattr(conn->tx_queue, &attr);
       if (ret != OK)
         {
           break;
@@ -202,7 +208,7 @@ static int conn_tx_kthread(int argc, FAR char *argv[])
           break;
         }
 
-      ret = bt_queue_receive(&conn->tx_queue, &buf);
+      ret = bt_queue_receive(conn->tx_queue, &buf);
       if (ret >= 0)
         {
           DEBUGASSERT(buf != NULL);
@@ -292,11 +298,11 @@ void bt_conn_receive(FAR struct bt_conn_s *conn, FAR struct bt_buf_s *buf,
 
   switch (flags)
     {
-      case BT_HCI_ACL_NEW:
+      case 0x02:
 
         /* First packet */
 
-        hdr = (FAR void *)buf->data;
+        hdr = (void *)buf->data;
         len = BT_LE162HOST(hdr->len);
 
         wlinfo("First, len %u final %u\n", buf->len, len);
@@ -317,7 +323,7 @@ void bt_conn_receive(FAR struct bt_conn_s *conn, FAR struct bt_buf_s *buf,
 
         break;
 
-      case BT_HCI_ACL_CONTINUATION:
+      case 0x01:
 
         /* Continuation */
 
@@ -369,7 +375,7 @@ void bt_conn_receive(FAR struct bt_conn_s *conn, FAR struct bt_buf_s *buf,
         return;
     }
 
-  hdr = (FAR void *)buf->data;
+  hdr = (void *)buf->data;
   len = BT_LE162HOST(hdr->len);
 
   if (sizeof(*hdr) + len != buf->len)
@@ -411,7 +417,7 @@ void bt_conn_send(FAR struct bt_conn_s *conn, FAR struct bt_buf_s *buf)
 
   sq_init(&fraglist);
 
-  wlwarn("conn handle %u buf len %u\n", conn->handle, buf->len);
+  wlinfo("conn handle %u buf len %u\n", conn->handle, buf->len);
 
   if (conn->state != BT_CONN_CONNECTED)
     {
@@ -466,7 +472,7 @@ void bt_conn_send(FAR struct bt_conn_s *conn, FAR struct bt_buf_s *buf)
 
   while ((buf = (FAR struct bt_buf_s *)sq_remfirst(&fraglist)) != NULL)
     {
-      bt_queue_send(&conn->tx_queue, buf, BT_NORMAL_PRIO);
+      bt_queue_send(conn->tx_queue, buf, BT_NORMAL_PRIO);
     }
 }
 
@@ -559,12 +565,14 @@ void bt_conn_set_state(FAR struct bt_conn_s *conn,
     {
       case BT_CONN_CONNECTED:
         {
+          pid_t pid;
           int ret;
 
-          ret = bt_queue_open(BT_CONN_TX, O_RDWR | O_CREAT | O_CLOEXEC,
+          ret = bt_queue_open(BT_CONN_TX, O_RDWR | O_CREAT,
                               CONFIG_BLUETOOTH_TXCONN_NMSGS,
                               &conn->tx_queue);
-          DEBUGASSERT(ret >= 0);
+          DEBUGASSERT(ret >= 0 && g_btdev.tx_queue != 0);
+          UNUSED(ret);
 
           /* Get exclusive access to the handoff structure.  The count will
            * be zero when we complete this.
@@ -576,11 +584,12 @@ void bt_conn_set_state(FAR struct bt_conn_s *conn,
               /* Start the Tx connection kernel thread */
 
               g_conn_handoff.conn = bt_conn_addref(conn);
-              ret = kthread_create("BT Conn Tx",
+              pid = kthread_create("BT Conn Tx",
                                    CONFIG_BLUETOOTH_TXCONN_PRIORITY,
                                    CONFIG_BLUETOOTH_TXCONN_STACKSIZE,
                                    conn_tx_kthread, NULL);
-              DEBUGASSERT(ret > 0);
+              DEBUGASSERT(pid > 0);
+              UNUSED(pid);
 
               /* Take the semaphore again.  This will force us to wait with
                * the sem_count at -1.  It will be zero again when we
@@ -590,8 +599,6 @@ void bt_conn_set_state(FAR struct bt_conn_s *conn,
               ret = nxsem_wait_uninterruptible(&g_conn_handoff.sync_sem);
               nxsem_post(&g_conn_handoff.sync_sem);
           }
-
-          UNUSED(ret);
         }
         break;
 
@@ -604,13 +611,11 @@ void bt_conn_set_state(FAR struct bt_conn_s *conn,
         if (old_state == BT_CONN_CONNECTED ||
            old_state == BT_CONN_DISCONNECT)
           {
-            bt_queue_send(&conn->tx_queue, bt_buf_alloc(BT_DUMMY, NULL, 0),
+            bt_queue_send(conn->tx_queue, bt_buf_alloc(BT_DUMMY, NULL, 0),
                           BT_NORMAL_PRIO);
           }
 
-        /* Release the reference we took for the very first state
-         * transition.
-         */
+        /* Release the reference we took for the very first state transition. */
 
         bt_conn_release(conn);
         break;
@@ -762,8 +767,7 @@ FAR struct bt_conn_s *bt_conn_addref(FAR struct bt_conn_s *conn)
 {
   bt_atomic_incr(&conn->ref);
 
-  wlinfo("handle %u ref %" PRId32 "\n", conn->handle,
-         bt_atomic_get(&conn->ref));
+  wlinfo("handle %u ref %u\n", conn->handle, bt_atomic_get(&conn->ref));
 
   return conn;
 }
@@ -788,8 +792,7 @@ void bt_conn_release(FAR struct bt_conn_s *conn)
 
   old_ref = bt_atomic_decr(&conn->ref);
 
-  wlinfo("handle %u ref %" PRId32 "\n", conn->handle,
-          bt_atomic_get(&conn->ref));
+  wlinfo("handle %u ref %u\n", conn->handle, bt_atomic_get(&conn->ref));
 
   if (old_ref > 1)
     {
@@ -853,10 +856,6 @@ int bt_conn_security(FAR struct bt_conn_s *conn, enum bt_security_e sec)
       return -ENOTCONN;
     }
 
-  /* Store the requested security level */
-
-  conn->sec_level = sec;
-
   /* Nothing to do */
 
   if (sec == BT_SECURITY_LOW)
@@ -864,9 +863,9 @@ int bt_conn_security(FAR struct bt_conn_s *conn, enum bt_security_e sec)
       return 0;
     }
 
-  /* For now we only support Just Works and MITM with passkey (Legacy only) */
+  /* For now we only support JustWorks */
 
-  if (sec > BT_SECURITY_HIGH)
+  if (sec > BT_SECURITY_MEDIUM)
     {
       return -EINVAL;
     }
@@ -1085,23 +1084,4 @@ int bt_conn_le_conn_update(FAR struct bt_conn_s *conn, uint16_t min,
   conn_update->supervision_timeout = BT_HOST2LE16(timeout);
 
   return bt_hci_cmd_send(BT_HCI_OP_LE_CONN_UPDATE, buf);
-}
-
-/****************************************************************************
- * Name: bt_conn_initialize
- *
- * Description:
- *   Initialize this module's private data.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-void bt_conn_initialize(void)
-{
-  memset(g_conns, 0, sizeof(g_conns));
 }

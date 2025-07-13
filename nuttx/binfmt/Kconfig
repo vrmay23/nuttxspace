@@ -5,30 +5,37 @@
 
 config BINFMT_DISABLE
 	bool "Disable BINFMT support"
-	default DEFAULT_SMALL
+	default n
 	---help---
 		By default, support for loadable binary formats is built.  This logic
-		may be suppressed by defining this setting.
+		may be suppressed be defining this setting.
+
+config ELF_64BIT
+	bool "64bit ELF support"
+	default n
+	depends on (!BINFMT_DISABLE && ELF) || LIBC_MODLIB
+	---help---
+		This option is used to load 64bit ELF files
 
 if !BINFMT_DISABLE
 
 config PATH_INITIAL
 	string "Initial PATH Value"
 	default ""
-	depends on LIBC_ENVPATH
+	depends on LIB_ENVPATH
 	---help---
 		The initial value of the PATH variable.  This is the colon-separated
 		list of absolute paths.  E.g., "/bin:/usr/bin:/sbin"
 
 config BINFMT_LOADABLE
 	bool
-	select MODULES
+	select BUILD_LOADABLE
 	default n
 	---help---
 		Automatically selected if a loadable binary format is selected.
 
 config PIC
-	bool "Executable elf position-independent support"
+	bool
 	default n
 	---help---
 		Automatically selected if the binary format requires position
@@ -43,49 +50,35 @@ config NXFLAT
 		Enable support for the NXFLAT binary format.  Default: n
 
 if NXFLAT
-source "binfmt/libnxflat/Kconfig"
+source binfmt/libnxflat/Kconfig
 endif
 
 config ELF
 	bool "Enable the ELF Binary Format"
 	default n
 	select BINFMT_LOADABLE
-	select LIBC_ELF
+	select LIBC_ARCH_ELF
 	---help---
 		Enable support for the ELF binary format.  Default: n
 
 if ELF
-config ELF_STACKSIZE
-	int "ELF Stack Size"
-	default DEFAULT_TASK_STACKSIZE
-	---help---
-		This is the default stack size that will be used when starting ELF binaries.
+source binfmt/libelf/Kconfig
 endif
 endif
 
 config BINFMT_CONSTRUCTORS
 	bool "C++ Static Constructor Support"
 	default n
-	depends on HAVE_CXX && ELF
+	depends on HAVE_CXX && SCHED_STARTHOOK && ELF
 	---help---
-		Built-in support for C++ constructors in loaded modules.  Currently
+		Build in support for C++ constructors in loaded modules.  Currently
 		only support for ELF binary formats.
 
-choice
-	prompt "File output format"
-	default BINFMT_ELF_RELOCATABLE
+config SYMTAB_ORDEREDBYNAME
+	bool "Symbol Tables Ordered by Name"
+	default n
 	---help---
-		Defines the type of ELF file produced by the NuttX build system.
-
-config BINFMT_ELF_RELOCATABLE
-	bool "Relocatable ELF"
-	---help---
-		Produce a relocatable object as output. This is also known as partial linking.
-
-config BINFMT_ELF_EXECUTABLE
-	bool "Executable ELF"
-	depends on ARCH_HAVE_ELF_EXECUTABLE
-	---help---
-		Produce a full linked executable object as output.
-
-endchoice
+		Select if the symbol table is ordered by symbol name.  In this case,
+		the logic can perform faster lookups using a binary search.
+		Otherwise, the symbol table is assumed to be un-ordered an only
+		slow, linear searches are supported.

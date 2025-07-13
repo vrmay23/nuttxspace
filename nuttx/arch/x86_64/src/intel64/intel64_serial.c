@@ -1,7 +1,5 @@
 /****************************************************************************
- * arch/x86_64/src/intel64/intel64_serial.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  arch/x86_64/src/intel64/intel64_serial.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -28,14 +26,12 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/serial/uart_16550.h>
-#include <nuttx/serial/uart_pci_16550.h>
 
 #include <arch/io.h>
 
-#include "chip.h"
-#include "x86_64_internal.h"
+#include "up_internal.h"
 
-/* This is a "stub" file to support up_putc if no real serial driver is
+/* This is a "stub" file to suppport up_putc if no real serial driver is
  * configured.  Normally, drivers/serial/uart_16550.c provides the serial
  * driver for this platform.
  */
@@ -55,12 +51,12 @@
  *
  ****************************************************************************/
 
-uart_datawidth_t uart_getreg(struct u16550_s *priv, unsigned int offset)
+uart_datawidth_t uart_getreg(uart_addrwidth_t base, unsigned int offset)
 {
-  return inb(priv->uartbase + offset);
+  return inb(base + offset);
 }
 
-void uart_putreg(struct u16550_s *priv, unsigned int offset,
+void uart_putreg(uart_addrwidth_t base, unsigned int offset,
                  uart_datawidth_t value)
 {
   /* Intel x86 platform require OUT2 of MCR being set
@@ -72,10 +68,10 @@ void uart_putreg(struct u16550_s *priv, unsigned int offset,
       value |= UART_MCR_OUT2;
     }
 
-  outb(value, priv->uartbase + offset);
+  outb(value, base + offset);
 }
 
-#elif defined(CONFIG_MULTBOOT2_FB_TERM)
+#else /* USE_SERIALDRIVER */
 
 /****************************************************************************
  * Name: up_putc
@@ -85,41 +81,19 @@ void uart_putreg(struct u16550_s *priv, unsigned int offset,
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
-  fb_putc(ch);
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
+  return ch;
 }
-#endif
 
-void up_lowputc(int ch)
-{
-#ifdef CONFIG_MULTBOOT2_FB_TERM
-  fb_putc(ch);
-#endif
-}
-
-#ifdef USE_EARLYSERIALINIT
-void x86_64_earlyserialinit(void)
-{
-#ifndef CONFIG_16550_NO_SERIAL_CONSOLE
-  u16550_earlyserialinit();
-#endif
-}
-#endif
-
-#ifdef USE_SERIALDRIVER
-void x86_64_serialinit(void)
-{
-#ifdef CONFIG_16550_PCI_UART
-  /* Initialize PCI UART 16550 */
-
-  pci_u16550_init();
-#endif
-
-#ifdef CONFIG_16550_UART
-  /* Initialize UART 16550 */
-
-  u16550_serialinit();
-#endif
-}
-#endif
+#endif /* USE_SERIALDRIVER */

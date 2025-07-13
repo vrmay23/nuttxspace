@@ -1,10 +1,14 @@
 /****************************************************************************
- * libs/libc/wchar/lib_mbrlen.c
+ * libs/libc/wchar/lib_mbrtowc.c
  *
- * SPDX-License-Identifier: BSD-2-Clause
- * SPDX-FileCopyrightText: 2002-2004 Tim J. Robbins. All rights reserved.
- * SPDX-FileCopyrightText: 2011 The FreeBSD Foundation,All rights reserved.
- * SPDX-FileContributor: David Chisnall
+ *   Copyright (c) 2002-2004 Tim J. Robbins.
+ *   All rights reserved.
+ *
+ *   Copyright (c) 2011 The FreeBSD Foundation
+ *   All rights reserved.
+ *
+ * Portions of this software were developed by David Chisnall
+ * under sponsorship from the FreeBSD Foundation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +38,15 @@
  * Included Files
  ****************************************************************************/
 
+#include <nuttx/config.h>
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
 #include <wchar.h>
+
+#ifdef CONFIG_LIBC_WCHAR
 
 /****************************************************************************
  * Public Functions
@@ -48,7 +60,9 @@
  *
  ****************************************************************************/
 
-size_t mbrlen(FAR const char *s, size_t n, FAR mbstate_t *ps)
+size_t mbrlen(const char *s, size_t n, mbstate_t *ps)
 {
   return mbrtowc(NULL, s, n, ps);
 }
+
+#endif

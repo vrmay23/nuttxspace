@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/nshlib/nsh_usbconsole.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012-2014, 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,6 +41,7 @@
 
 #include <sys/boardctl.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -63,11 +77,30 @@
 
 static void nsh_configstdio(int fd)
 {
+  /* Make sure the stdin, stdout, and stderr are closed */
+
+  fclose(stdin);
+  fclose(stdout);
+  fclose(stderr);
+
   /* Dup the fd to create standard fd 0-2 */
 
   dup2(fd, 0);
   dup2(fd, 1);
   dup2(fd, 2);
+
+  /* fdopen to get the stdin, stdout and stderr streams. The following logic depends
+   * on the fact that the library layer will allocate FILEs in order.  And since
+   * we closed stdin, stdout, and stderr above, that is what we should get.
+   *
+   * fd = 0 is stdin  (read-only)
+   * fd = 1 is stdout (write-only, append)
+   * fd = 2 is stderr (write-only, append)
+   */
+
+  fdopen(0, "r");
+  fdopen(1, "a");
+  fdopen(2, "a");
 }
 
 /****************************************************************************
@@ -96,9 +129,9 @@ static int nsh_nullstdio(void)
        */
 
       if (fd > 2)
-        {
+       {
           close(fd);
-        }
+       }
 
       return OK;
     }
@@ -114,7 +147,7 @@ static int nsh_nullstdio(void)
  *
  ****************************************************************************/
 
-static int nsh_waitusbready(FAR struct console_stdio_s *pstate)
+static int nsh_waitusbready(void)
 {
   char inch;
   ssize_t nbytes;
@@ -138,8 +171,8 @@ restart:
       fd = open(CONFIG_NSH_USBCONDEV, O_RDWR);
       if (fd < 0)
         {
-          /* ENOTCONN means that the USB device is not yet connected.
-           * Anything else is bad.
+          /* ENOTCONN means that the USB device is not yet connected. Anything
+           * else is bad.
            */
 
           DEBUGASSERT(errno == ENOTCONN);
@@ -197,7 +230,7 @@ restart:
 
   nsh_configstdio(fd);
 
-  /* We can close the original file descriptor (unless it was one of 0-2) */
+  /* We can close the original file descriptor now (unless it was one of 0-2) */
 
   if (fd > 2)
     {
@@ -215,7 +248,7 @@ restart:
  * Name: nsh_consolemain (USB console version)
  *
  * Description:
- *   This interface may be called or started with task_start to start a
+ *   This interfaces maybe to called or started with task_start to start a
  *   single an NSH instance that operates on stdin and stdout.  This
  *   function does not return.
  *
@@ -224,7 +257,7 @@ restart:
  *   operations to handle the cases where the session is lost when the
  *   USB device is unplugged and restarted when the USB device is plugged
  *   in again.
- *
+  *
  * Input Parameters:
  *   Standard task start-up arguments.  These are not used.  argc may be
  *   zero and argv may be NULL.
@@ -235,34 +268,25 @@ restart:
  *
  ****************************************************************************/
 
-int nsh_consolemain(int argc, FAR char *argv[])
+int nsh_consolemain(int argc, char *argv[])
 {
-  FAR struct console_stdio_s *pstate = nsh_newconsole(true);
+  FAR struct console_stdio_s *pstate = nsh_newconsole();
   struct boardioc_usbdev_ctrl_s ctrl;
   FAR void *handle;
   int ret;
 
   DEBUGASSERT(pstate);
 
+  /* Initialize any USB tracing options that were requested */
+
+#ifdef CONFIG_NSH_USBDEV_TRACE
+  usbtrace_enable(TRACE_BITSET);
+#endif
+
   /* Initialize the USB serial driver */
 
 #if defined(CONFIG_PL2303) || defined(CONFIG_CDCACM)
-#if defined(CONFIG_USBDEV_COMPOSITE)
-
-  ctrl.usbdev   = BOARDIOC_USBDEV_COMPOSITE;
-  ctrl.action   = BOARDIOC_USBDEV_INITIALIZE;
-  ctrl.instance = 0;
-  ctrl.config   = 0;
-  ctrl.handle   = NULL;
-  ret = boardctl(BOARDIOC_USBDEV_CONTROL, (uintptr_t)&ctrl);
-
-  ctrl.usbdev   = BOARDIOC_USBDEV_COMPOSITE;
-  ctrl.action   = BOARDIOC_USBDEV_CONNECT;
-  ctrl.instance = 0;
-  ctrl.config   = 0;
-  ctrl.handle   = &handle;
-
-#elif defined(CONFIG_CDCACM)
+#ifdef CONFIG_CDCACM
 
   ctrl.usbdev   = BOARDIOC_USBDEV_CDCACM;
   ctrl.action   = BOARDIOC_USBDEV_CONNECT;
@@ -289,21 +313,39 @@ int nsh_consolemain(int argc, FAR char *argv[])
   nsh_nullstdio();
 #endif
 
+  /* Execute the one-time start-up script (output may go to /dev/null) */
+
+#ifdef CONFIG_NSH_ROMFSETC
+  nsh_initscript(&pstate->cn_vtbl);
+#endif
+
+#ifdef CONFIG_NSH_NETINIT
+  /* Bring up the network */
+
+  netinit_bringup();
+#endif
+
+#if defined(CONFIG_NSH_ARCHINIT) && defined(CONFIG_BOARDCTL_FINALINIT)
+  /* Perform architecture-specific final-initialization (if configured) */
+
+  boardctl(BOARDIOC_FINALINIT, 0);
+#endif
+
   /* Now loop, executing creating a session for each USB connection */
 
-  for (; ; )
+  for (;;)
     {
       /* Wait for the USB to be connected to the host and switch
        * standard I/O to the USB serial device.
        */
 
-      ret = nsh_waitusbready(pstate);
+      ret = nsh_waitusbready();
       UNUSED(ret); /* Eliminate warning if not used */
       DEBUGASSERT(ret == OK);
 
       /* Execute the session */
 
-      nsh_session(pstate, NSH_LOGIN_LOCAL, argc, argv);
+      nsh_session(pstate);
 
       /* Switch to /dev/null because we probably no longer have a
        * valid console device.

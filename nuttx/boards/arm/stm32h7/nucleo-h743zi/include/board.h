@@ -1,22 +1,37 @@
 /****************************************************************************
  * boards/arm/stm32h7/nucleo-h743zi/include/board.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018, 2019 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Simon Laube <simon@leitwert.ch>
+ *            Mateusz Szafoni <raiden00@railab.me>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +45,7 @@
 #include <nuttx/config.h>
 
 #ifndef __ASSEMBLY__
-#  include <stdint.h>
+# include <stdint.h>
 #endif
 
 /* Do not include STM32 H7 header files here */
@@ -71,8 +86,7 @@
  *  - SB148, SB8 and SB9 OFF
  *  - SB112 and SB149 ON
  *
- * When STM32_HSE_FREQUENCY / PLLM <= 2MHz VCOL must be selected.
- * VCOH otherwise.
+ * When STM32_HSE_FREQUENCY / PLLM <= 2MHz VCOL must be selected. VCOH otherwise.
  *
  * PLL_VCOx = (STM32_HSE_FREQUENCY / PLLM) * PLLN
  * Subject to:
@@ -166,8 +180,9 @@
  */
 
 #define STM32_RCC_D1CFGR_HPRE   RCC_D1CFGR_HPRE_SYSCLKd2        /* HCLK  = SYSCLK / 2 */
-#define STM32_ACLK_FREQUENCY    (STM32_SYSCLK_FREQUENCY / 2)    /* ACLK in D1, HCLK3 in D1 */
-#define STM32_HCLK_FREQUENCY    (STM32_SYSCLK_FREQUENCY / 2)    /* HCLK in D2, HCLK4 in D3 */
+#define STM32_ACLK_FREQUENCY    (STM32_CPUCLK_FREQUENCY / 2)    /* ACLK in D1, HCLK3 in D1 */
+#define STM32_HCLK_FREQUENCY    (STM32_CPUCLK_FREQUENCY / 2)    /* HCLK in D2, HCLK4 in D3 */
+#define STM32_BOARD_HCLK        STM32_HCLK_FREQUENCY            /* same as above, to satisfy compiler */
 
 /* APB1 clock (PCLK1) is HCLK/4 (54 MHz) */
 
@@ -242,7 +257,7 @@
 
 /* ADC 1 2 3 clock source - pll2_pclk */
 
-#define STM32_RCC_D3CCIPR_ADCSRC     RCC_D3CCIPR_ADCSEL_PLL2
+#define STM32_RCC_D3CCIPR_ADCSEL     RCC_D3CCIPR_ADCSEL_PLL2
 
 /* FLASH wait states
  *
@@ -272,9 +287,7 @@
 
 #define STM32_SDMMC_INIT_CLKDIV     (250 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 
-/* Just set these to 25 MHz for now,
- * PLL1Q/(2*4), for default speed 12.5MB/s
- */
+/* Just set these to 25 MHz for now, PLL1Q/(2*4), for default speed 12.5MB/s */
 
 #define STM32_SDMMC_MMCXFR_CLKDIV   (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 #define STM32_SDMMC_SDXFR_CLKDIV    (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
@@ -283,24 +296,17 @@
 
 /* Ethernet definitions *****************************************************/
 
-#define GPIO_ETH_RMII_TXD0    (GPIO_ETH_RMII_TXD0_2 | GPIO_SPEED_100MHz)    /* PG13 */
-#define GPIO_ETH_RMII_TXD1    (GPIO_ETH_RMII_TXD1_1 | GPIO_SPEED_100MHz)    /* PB13 */
-#define GPIO_ETH_RMII_TX_EN   (GPIO_ETH_RMII_TX_EN_2 | GPIO_SPEED_100MHz)   /* PG11 */
-#define GPIO_ETH_MDC          (GPIO_ETH_MDC_0 | GPIO_SPEED_100MHz)          /* PC1 */
-#define GPIO_ETH_MDIO         (GPIO_ETH_MDIO_0 | GPIO_SPEED_100MHz)         /* PA2 */
-#define GPIO_ETH_RMII_RXD0    (GPIO_ETH_RMII_RXD0_0 | GPIO_SPEED_100MHz)    /* PC4 */
-#define GPIO_ETH_RMII_RXD1    (GPIO_ETH_RMII_RXD1_0 | GPIO_SPEED_100MHz)    /* PC5 */
-#define GPIO_ETH_RMII_CRS_DV  (GPIO_ETH_RMII_CRS_DV_0 | GPIO_SPEED_100MHz)  /* PA7 */
-#define GPIO_ETH_RMII_REF_CLK (GPIO_ETH_RMII_REF_CLK_0 | GPIO_SPEED_100MHz) /* PA1 */
+#define GPIO_ETH_RMII_TXD0    GPIO_ETH_RMII_TXD0_2    /* PG13 */
+#define GPIO_ETH_RMII_TXD1    GPIO_ETH_RMII_TXD1_1    /* PB 13 */
+#define GPIO_ETH_RMII_TX_EN   GPIO_ETH_RMII_TX_EN_2
 
 /* LED definitions **********************************************************/
 
-/* The Nucleo-144 board has numerous LEDs but only three, LD1 a Green LED,
- * LD2 a Blue LED and LD3 a Red LED, that can be controlled by software.
- * The following definitions assume the default Solder Bridges are installed.
+/* The Nucleo-144 board has numerous LEDs but only three, LD1 a Green LED, LD2 a Blue
+ * LED and LD3 a Red LED, that can be controlled by software. The following
+ * definitions assume the default Solder Bridges are installed.
  *
- * If CONFIG_ARCH_LEDS is not defined, then the user can control the LEDs in
- * any way.
+ * If CONFIG_ARCH_LEDS is not defined, then the user can control the LEDs in any way.
  * The following definitions are used to access individual LEDs.
  */
 
@@ -322,14 +328,13 @@
 #define BOARD_LED3_BIT    (1 << BOARD_LED3)
 
 /* If CONFIG_ARCH_LEDS is defined, the usage by the board port is defined in
- * include/board.h and src/stm32_leds.c.
- * The LEDs are used to encode OS-related events as follows:
+ * include/board.h and src/stm32_leds.c. The LEDs are used to encode OS-related
+ * events as follows:
  *
  *
  *   SYMBOL                     Meaning                      LED state
  *                                                        Red   Green Blue
- *   ----------------------  --------------------------  ------ ------ ---
- */
+ *   ----------------------  --------------------------  ------ ------ ----*/
 
 #define LED_STARTED        0 /* NuttX has been started   OFF    OFF   OFF  */
 #define LED_HEAPALLOCATE   1 /* Heap has been allocated  OFF    OFF   ON   */
@@ -362,58 +367,46 @@
 
 /* USART3 (Nucleo Virtual Console) */
 
-#define GPIO_USART3_RX    (GPIO_USART3_RX_3 | GPIO_SPEED_100MHz) /* PD9 */
-#define GPIO_USART3_TX    (GPIO_USART3_TX_3 | GPIO_SPEED_100MHz) /* PD8 */
-
-#define DMAMAP_USART3_RX DMAMAP_DMA12_USART3RX_0
-#define DMAMAP_USART3_TX DMAMAP_DMA12_USART3TX_1
+#define GPIO_USART3_RX     GPIO_USART3_RX_3  /* PD9 */
+#define GPIO_USART3_TX     GPIO_USART3_TX_3  /* PD8 */
 
 /* USART6 (Arduino Serial Shield) */
 
-#define GPIO_USART6_RX    (GPIO_USART6_RX_2 | GPIO_SPEED_100MHz) /* PG9 */
-#define GPIO_USART6_TX    (GPIO_USART6_TX_2 | GPIO_SPEED_100MHz) /* PG14 */
+#define GPIO_USART6_RX     GPIO_USART6_RX_2  /* PG9 */
+#define GPIO_USART6_TX     GPIO_USART6_TX_2  /* PG14 */
 
 /* I2C1 Use Nucleo I2C1 pins */
 
-#define GPIO_I2C1_SCL     (GPIO_I2C1_SCL_2 | GPIO_SPEED_50MHz) /* PB8 - D15 */
-#define GPIO_I2C1_SDA     (GPIO_I2C1_SDA_2 | GPIO_SPEED_50MHz) /* PB9 - D14 */
+#define GPIO_I2C1_SCL GPIO_I2C1_SCL_2 /* PB8 - D15 */
+#define GPIO_I2C1_SDA GPIO_I2C1_SDA_2 /* PB9 - D14 */
 
 /* I2C2 Use Nucleo I2C2 pins */
 
-#define GPIO_I2C2_SCL     (GPIO_I2C2_SCL_2  | GPIO_SPEED_50MHz) /* PF1 - D69 */
-#define GPIO_I2C2_SDA     (GPIO_I2C2_SDA_2  | GPIO_SPEED_50MHz) /* PF0 - D68 */
-#define GPIO_I2C2_SMBA    (GPIO_I2C2_SMBA_2 | GPIO_SPEED_50MHz) /* PF2 - D70 */
+#define GPIO_I2C2_SCL  GPIO_I2C2_SCL_2  /* PF1 - D69 */
+#define GPIO_I2C2_SDA  GPIO_I2C2_SDA_2  /* PF0 - D68 */
+#define GPIO_I2C2_SMBA GPIO_I2C2_SMBA_2 /* PF2 - D70 */
 
 /* SPI3 */
 
-#define GPIO_SPI3_MISO    (GPIO_SPI3_MISO_1 | GPIO_SPEED_50MHz) /* PB4 */
-#define GPIO_SPI3_MOSI    (GPIO_SPI3_MOSI_4 | GPIO_SPEED_50MHz) /* PB5 */
-#define GPIO_SPI3_SCK     (GPIO_SPI3_SCK_1 | GPIO_SPEED_50MHz)  /* PB3 */
-#define GPIO_SPI3_NSS     (GPIO_SPI3_NSS_2 | GPIO_SPEED_50MHz)  /* PA4 */
+#define GPIO_SPI3_MISO GPIO_SPI3_MISO_1 /* PB4 */
+#define GPIO_SPI3_MOSI GPIO_SPI3_MOSI_4 /* PB5 */
+#define GPIO_SPI3_SCK  GPIO_SPI3_SCK_1  /* PB3 */
+#define GPIO_SPI3_NSS  GPIO_SPI3_NSS_2  /* PA4 */
 
 /* TIM1 */
 
-#define GPIO_TIM1_CH1OUT  (GPIO_TIM1_CH1OUT_2  | GPIO_SPEED_50MHz) /* PE9  - D6 */
-#define GPIO_TIM1_CH1NOUT (GPIO_TIM1_CH1NOUT_3 | GPIO_SPEED_50MHz) /* PE8  - D42 */
-#define GPIO_TIM1_CH2OUT  (GPIO_TIM1_CH2OUT_2  | GPIO_SPEED_50MHz) /* PE11 - D5 */
-#define GPIO_TIM1_CH2NOUT (GPIO_TIM1_CH2NOUT_3 | GPIO_SPEED_50MHz) /* PE10 - D40 */
-#define GPIO_TIM1_CH3OUT  (GPIO_TIM1_CH3OUT_2  | GPIO_SPEED_50MHz) /* PE13 - D3 */
-#define GPIO_TIM1_CH3NOUT (GPIO_TIM1_CH3NOUT_3 | GPIO_SPEED_50MHz) /* PE12 - D39 */
-#define GPIO_TIM1_CH4OUT  (GPIO_TIM1_CH4OUT_2  | GPIO_SPEED_50MHz) /* PE14 - D38 */
-
-/* OTGFS */
-
-#define GPIO_OTGFS_DM  (GPIO_OTGFS_DM_0  | GPIO_SPEED_100MHz)
-#define GPIO_OTGFS_DP  (GPIO_OTGFS_DP_0  | GPIO_SPEED_100MHz)
-#define GPIO_OTGFS_ID  (GPIO_OTGFS_ID_0  | GPIO_SPEED_100MHz)
+#define GPIO_TIM1_CH1OUT  GPIO_TIM1_CH1OUT_2  /* PE9  - D6 */
+#define GPIO_TIM1_CH1NOUT GPIO_TIM1_CH1NOUT_3 /* PE8  - D42 */
+#define GPIO_TIM1_CH2OUT  GPIO_TIM1_CH2OUT_2  /* PE11 - D5 */
+#define GPIO_TIM1_CH2NOUT GPIO_TIM1_CH2NOUT_3 /* PE10 - D40 */
+#define GPIO_TIM1_CH3OUT  GPIO_TIM1_CH3OUT_2  /* PE13 - D3 */
+#define GPIO_TIM1_CH3NOUT GPIO_TIM1_CH3NOUT_3 /* PE12 - D39 */
+#define GPIO_TIM1_CH4OUT  GPIO_TIM1_CH4OUT_2  /* PE14 - D38 */
 
 /* DMA **********************************************************************/
 
 #define DMAMAP_SPI3_RX DMAMAP_DMA12_SPI3RX_0 /* DMA1 */
 #define DMAMAP_SPI3_TX DMAMAP_DMA12_SPI3TX_0 /* DMA1 */
-
-#define DMAMAP_USART6_RX DMAMAP_DMA12_USART6RX_1
-#define DMAMAP_USART6_TX DMAMAP_DMA12_USART6TX_0
 
 /****************************************************************************
  * Public Data

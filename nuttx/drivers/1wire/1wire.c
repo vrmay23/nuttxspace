@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/1wire/1wire.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Haltian Ltd. All rights reserved.
+ *   Author: Juha Niskanen <juha.niskanen@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,16 +38,14 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/nuttx.h>
 
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <string.h>
 
 #include <nuttx/kmalloc.h>
-#include <nuttx/1wire/1wire_master.h>
-#include <nuttx/1wire/1wire.h>
+#include <nuttx/i2c/i2c_master.h>
+#include <nuttx/drivers/1wire.h>
 
 #include "1wire_internal.h"
 
@@ -49,7 +60,7 @@
 #  define onewire_leuint32(x) (x)
 #endif
 
-#define NO_HOLDER     (INVALID_PROCESS_ID)
+#define NO_HOLDER ((pid_t)-1)
 
 /****************************************************************************
  * Private Function Prototypes
@@ -107,6 +118,32 @@ static inline uint32_t onewire_leuint32(uint32_t x)
 #endif
 
 /****************************************************************************
+ * Name: onewire_sem_init
+ *
+ * Description:
+ *
+ ****************************************************************************/
+
+static inline void onewire_sem_init(FAR struct onewire_sem_s *sem)
+{
+  sem->holder = NO_HOLDER;
+  sem->count  = 0;
+  nxsem_init(&sem->sem, 0, 1);
+}
+
+/****************************************************************************
+ * Name: onewire_sem_destroy
+ *
+ * Description:
+ *
+ ****************************************************************************/
+
+static inline void onewire_sem_destroy(FAR struct onewire_sem_s *sem)
+{
+  nxsem_destroy(&sem->sem);
+}
+
+/****************************************************************************
  * Name: onewire_pm_prepare
  *
  * Description:
@@ -138,8 +175,10 @@ static inline uint32_t onewire_leuint32(uint32_t x)
 static int onewire_pm_prepare(FAR struct pm_callback_s *cb, int domain,
                               enum pm_state_e pmstate)
 {
-  struct onewire_master_s *master;
-  master = container_of(cb, struct onewire_master_s, pm_cb);
+  struct onewire_master_s *master =
+      (struct onewire_master_s *)((char *)cb -
+                                  offsetof(struct onewire_master_s, pm_cb));
+  int sval;
 
   /* Logic to prepare for a reduced power state goes here. */
 
@@ -154,11 +193,15 @@ static int onewire_pm_prepare(FAR struct pm_callback_s *cb, int domain,
 
       /* Check if exclusive lock for the bus master is held. */
 
-      if (nxrmutex_is_locked(&master->devlock))
+      if (nxsem_getvalue(&master->devsem.sem, &sval) < 0)
         {
-          /* Exclusive lock is held, do not allow entry to deeper PM
-           * states.
-           */
+          DEBUGASSERT(false);
+          return -EINVAL;
+        }
+
+      if (sval <= 0)
+        {
+          /* Exclusive lock is held, do not allow entry to deeper PM states. */
 
           return -EBUSY;
         }
@@ -179,6 +222,80 @@ static int onewire_pm_prepare(FAR struct pm_callback_s *cb, int domain,
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: onewire_sem_wait
+ *
+ * Description:
+ *   Take the exclusive access, waiting as necessary
+ *
+ ****************************************************************************/
+
+int onewire_sem_wait(FAR struct onewire_master_s *master)
+{
+  pid_t me;
+  int ret;
+
+  /* Do we already hold the semaphore? */
+
+  me = getpid();
+  if (me == master->devsem.holder)
+    {
+      /* Yes... just increment the count */
+
+      master->devsem.count++;
+      DEBUGASSERT(master->devsem.count > 0);
+    }
+
+  /* Take the semaphore (perhaps waiting) */
+
+  else
+    {
+      ret = nxsem_wait(&master->devsem.sem);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      /* Now we hold the semaphore */
+
+      master->devsem.holder = me;
+      master->devsem.count  = 1;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: onewire_sem_post
+ *
+ * Description:
+ *   Release the mutual exclusion semaphore
+ *
+ ****************************************************************************/
+
+void onewire_sem_post(FAR struct onewire_master_s *master)
+{
+  DEBUGASSERT(master->devsem.holder == getpid());
+
+  /* Is this our last count on the semaphore? */
+
+  if (master->devsem.count > 1)
+    {
+      /* No.. just decrement the count */
+
+      master->devsem.count--;
+    }
+
+  /* Yes.. then we can really release the semaphore */
+
+  else
+    {
+      master->devsem.holder = NO_HOLDER;
+      master->devsem.count  = 0;
+      nxsem_post(&master->devsem.sem);
+    }
+}
 
 /****************************************************************************
  * Name: onewire_reset_resume
@@ -211,9 +328,9 @@ int onewire_reset_resume(FAR struct onewire_master_s *master)
  *
  ****************************************************************************/
 
-int onewire_reset_select(FAR struct onewire_master_s *master,
-                         uint64_t romcode)
+int onewire_reset_select(FAR struct onewire_slave_s *slave)
 {
+  FAR struct onewire_master_s *master = slave->master;
   uint64_t tmp;
   uint8_t skip_rom[1] =
   {
@@ -235,13 +352,13 @@ int onewire_reset_select(FAR struct onewire_master_s *master,
 
   /* Issue skip-ROM if single slave, match-ROM otherwise. */
 
-  if (master->nslaves == 1 || master->maxslaves == 1)
+  if (master->nslaves == 1)
     {
       ret = ONEWIRE_WRITE(master->dev, skip_rom, sizeof(skip_rom));
     }
   else
     {
-      tmp = onewire_leuint64(romcode);
+      tmp = onewire_leuint64(slave->romcode);
       memcpy(&match_rom[1], &tmp, 8);
       ret = ONEWIRE_WRITE(master->dev, match_rom, sizeof(match_rom));
     }
@@ -422,14 +539,6 @@ int onewire_search(FAR struct onewire_master_s *master,
 
   DEBUGASSERT(master->insearch == false);
 
-  /* Make complete search on the bus mutal exclusive */
-
-  ret = nxrmutex_lock(&master->devlock);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
   /* Skip costly search if bus supports only a single slave. */
 
   if (master->maxslaves == 1)
@@ -443,7 +552,7 @@ int onewire_search(FAR struct onewire_master_s *master,
           nslaves_match++;
         }
 
-      goto unlock;
+      return (ret < 0) ? ret : nslaves_match;
     }
 
   /* Select search type. */
@@ -459,7 +568,7 @@ int onewire_search(FAR struct onewire_master_s *master,
       ret = ONEWIRE_RESET(dev);
       if (ret < 0)
         {
-          goto unlock;
+          return ret;
         }
 
       /* Send the Search-ROM command. */
@@ -467,7 +576,7 @@ int onewire_search(FAR struct onewire_master_s *master,
       ret = ONEWIRE_WRITE(dev, cmd, sizeof(cmd));
       if (ret < 0)
         {
-          goto unlock;
+          return ret;
         }
 
       last_rom = rom;
@@ -500,7 +609,7 @@ int onewire_search(FAR struct onewire_master_s *master,
             {
               /* Error or zero valid directions. */
 
-              goto unlock;
+              return ret;
             }
 
           if (ret == 2 && taken_bit == 0)
@@ -526,7 +635,7 @@ int onewire_search(FAR struct onewire_master_s *master,
 
       if (last_zero == last_bit || last_zero == -1)
         {
-          i2cinfo("search complete, rom=0x%" PRIx64 "\n", rom);
+          i2cinfo("search complete, rom=0x%llx\n", rom);
 
           /* Found last device, quit searching. */
 
@@ -557,9 +666,7 @@ int onewire_search(FAR struct onewire_master_s *master,
        */
     }
 
-unlock:
-  nxrmutex_unlock(&master->devlock);
-  return (ret < 0) ? ret : nslaves_match;
+  return nslaves_match;
 }
 
 /****************************************************************************
@@ -620,7 +727,7 @@ int onewire_removeslave(FAR struct onewire_master_s *master,
  ****************************************************************************/
 
 FAR struct onewire_master_s *
-onewire_initialize(FAR struct onewire_dev_s *dev, int maxslaves)
+  onewire_initialize(FAR struct onewire_dev_s *dev, int maxslaves)
 {
   FAR struct onewire_master_s *master;
 
@@ -638,7 +745,7 @@ onewire_initialize(FAR struct onewire_dev_s *dev, int maxslaves)
   /* Initialize the device structure */
 
   master->dev = dev;
-  nxrmutex_init(&master->devlock);
+  onewire_sem_init(&master->devsem);
   master->nslaves = 0;
   master->maxslaves = maxslaves;
   master->insearch = false;
@@ -675,7 +782,7 @@ int onewire_uninitialize(FAR struct onewire_master_s *master)
 
   /* Release resources. This does not touch the underlying onewire_dev_s */
 
-  nxrmutex_destroy(&master->devlock);
+  onewire_sem_destroy(&master->devsem);
   kmm_free(master);
   return OK;
 }

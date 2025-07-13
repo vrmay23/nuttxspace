@@ -1,22 +1,35 @@
 /****************************************************************************
  * libs/libc/wqueue/work_usrthread.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009-2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,21 +42,33 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <signal.h>
 #include <sched.h>
 #include <errno.h>
 #include <assert.h>
+#include <queue.h>
 
+#include <nuttx/semaphore.h>
 #include <nuttx/clock.h>
-#include <nuttx/list.h>
 #include <nuttx/wqueue.h>
 
 #include "wqueue/wqueue.h"
 
-#if defined(CONFIG_LIBC_USRWORK) && !defined(__KERNEL__)
+#if defined(CONFIG_LIB_USRWORK) && !defined(__KERNEL__)
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/* Use CLOCK_MONOTONIC if it is available.  CLOCK_REALTIME can cause bad
+ * delays if the time is changed.
+ */
+
+#ifdef CONFIG_CLOCK_MONOTONIC
+#  define WORK_CLOCK CLOCK_MONOTONIC
+#else
+#  define WORK_CLOCK CLOCK_REALTIME
+#endif
 
 #ifdef CONFIG_SYSTEM_TIME64
 #  define WORK_DELAY_MAX UINT64_MAX
@@ -51,8 +76,12 @@
 #  define WORK_DELAY_MAX UINT32_MAX
 #endif
 
+#ifndef MIN
+#  define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
 /****************************************************************************
- * Private Types
+ * Private Type Declarations
  ****************************************************************************/
 
 /****************************************************************************
@@ -61,12 +90,15 @@
 
 /* The state of the user mode work queue. */
 
-struct usr_wqueue_s g_usrwork =
-{
-  LIST_INITIAL_VALUE(g_usrwork.q),
-  NXMUTEX_INITIALIZER,
-  SEM_INITIALIZER(0),
-};
+struct usr_wqueue_s g_usrwork;
+
+/* This semaphore supports exclusive access to the user-mode work queue */
+
+#ifdef CONFIG_BUILD_PROTECTED
+sem_t g_usrsem;
+#else
+pthread_mutex_t g_usrmutex;
+#endif
 
 /****************************************************************************
  * Private Functions
@@ -89,12 +121,17 @@ struct usr_wqueue_s g_usrwork =
  *
  ****************************************************************************/
 
-static void work_process(FAR struct usr_wqueue_s *wqueue)
+void work_process(FAR struct usr_wqueue_s *wqueue)
 {
-  FAR struct work_s *work;
-  worker_t worker;
+  volatile FAR struct work_s *work;
+  sigset_t sigset;
+  sigset_t oldset;
+  worker_t  worker;
   FAR void *arg;
-  clock_t tick;
+  clock_t elapsed;
+  clock_t remaining;
+  clock_t stick;
+  clock_t ctick;
   clock_t next;
   int ret;
 
@@ -103,7 +140,7 @@ static void work_process(FAR struct usr_wqueue_s *wqueue)
    */
 
   next = WORK_DELAY_MAX;
-  ret = nxmutex_lock(&wqueue->lock);
+  ret = work_lock();
   if (ret < 0)
     {
       /* Break out earlier if we were awakened by a signal */
@@ -111,33 +148,39 @@ static void work_process(FAR struct usr_wqueue_s *wqueue)
       return;
     }
 
+  /* Set up the signal mask */
+
+  sigemptyset(&sigset);
+  sigaddset(&sigset, SIGWORK);
+
+  /* Get the time that we started this polling cycle in clock ticks. */
+
+  stick = clock();
+
   /* And check each entry in the work queue.  Since we have locked the
    * work queue we know:  (1) we will not be suspended unless we do
    * so ourselves, and (2) there will be no changes to the work queue
    */
 
-  while (!list_is_empty(&wqueue->q))
+  work = (FAR struct work_s *)wqueue->q.head;
+  while (work)
     {
-      work = list_first_entry(&wqueue->q, struct work_s, node);
-
-      /* Is this work ready? It is ready if there is no delay or if
-       * the delay has elapsed.  is the time that the work was added
-       * to the work queue. Therefore a delay of equal or less than
-       * zero will always execute immediately.
+      /* Is this work ready?  It is ready if there is no delay or if
+       * the delay has elapsed. qtime is the time that the work was added
+       * to the work queue.  It will always be greater than or equal to
+       * zero.  Therefore a delay of zero will always execute immediately.
        */
 
-      tick = clock();
-
-      /* Is this delay work ready? */
-
-      if (clock_compare(work->qtime, tick))
+      ctick   = clock();
+      elapsed = ctick - work->qtime;
+      if (elapsed >= work->delay)
         {
           /* Remove the ready-to-execute work from the list */
 
-          list_delete(&work->node);
+          dq_rem((struct dq_entry_s *)work, &wqueue->q);
 
           /* Extract the work description from the entry (in case the work
-           * instance by the reused after it has been de-queued).
+           * instance by the re-used after it has been de-queued).
            */
 
           worker = work->worker;
@@ -148,7 +191,7 @@ static void work_process(FAR struct usr_wqueue_s *wqueue)
 
           if (worker != NULL)
             {
-              /* Extract the work argument before unlocking the work queue */
+              /* Extract the work argument (before unlocking the work queue) */
 
               arg = work->arg;
 
@@ -160,57 +203,99 @@ static void work_process(FAR struct usr_wqueue_s *wqueue)
                * performed... we don't have any idea how long this will take!
                */
 
-              nxmutex_unlock(&wqueue->lock);
+              work_unlock();
               worker(arg);
 
-              /* Now, unfortunately, since we unlocked the work queue we
-               * don't know the state of the work list and we will have to
-               * start back at the head of the list.
+              /* Now, unfortunately, since we unlocked the work queue we don't
+               * know the state of the work list and we will have to start
+               * back at the head of the list.
                */
 
-              ret = nxmutex_lock(&wqueue->lock);
+              ret = work_lock();
               if (ret < 0)
                 {
                   /* Break out earlier if we were awakened by a signal */
 
                   return;
                 }
+
+              work = (FAR struct work_s *)wqueue->q.head;
+            }
+          else
+            {
+              /* Canceled.. Just move to the next work in the list with
+               * the work queue still locked.
+               */
+
+              work = (FAR struct work_s *)work->dq.flink;
             }
         }
-      else
+      else /* elapsed < work->delay */
         {
-          next = work->qtime - clock();
-          break;
+          /* This one is not ready.
+           *
+           * NOTE that elapsed is relative to the current time,
+           * not the time of beginning of this queue processing pass.
+           * So it may need an adjustment.
+           */
+
+          elapsed += (ctick - stick);
+          if (elapsed > work->delay)
+            {
+              /* The delay has expired while we are processing */
+
+              elapsed = work->delay;
+            }
+
+          /* Will it be ready before the next scheduled wakeup interval? */
+
+          remaining = work->delay - elapsed;
+          if (remaining < next)
+            {
+              /* Yes.. Then schedule to wake up when the work is ready */
+
+              next = remaining;
+            }
+
+          /* Then try the next in the list. */
+
+          work = (FAR struct work_s *)work->dq.flink;
         }
     }
 
-  /* Unlock the work queue before waiting. */
+  /* Unlock the work queue before waiting.  In order to assure that we do
+   * not lose the SIGWORK signal before waiting, we block the SIGWORK
+   * signals before unlocking the work queue.  That will cause in SIGWORK
+   * signals directed to the worker thread to pend.
+   */
 
-  nxmutex_unlock(&wqueue->lock);
+  sigprocmask(SIG_BLOCK, &sigset, &oldset);
+  work_unlock();
 
   if (next == WORK_DELAY_MAX)
     {
-      /* Wait indefinitely until work_queue has new items */
+      /* Wait indefinitely until signaled with SIGWORK */
 
-      nxsem_wait(&wqueue->wake);
+      sigwaitinfo(&sigset, NULL);
     }
   else
     {
-      struct timespec now;
-      struct timespec delay;
       struct timespec rqtp;
+      time_t sec;
 
       /* Wait awhile to check the work list.  We will wait here until
-       * either the time elapses or until we are awakened by a semaphore.
+       * either the time elapses or until we are awakened by a signal.
        * Interrupts will be re-enabled while we wait.
        */
 
-      clock_gettime(CLOCK_REALTIME, &now);
-      clock_ticks2time(&delay, next);
-      clock_timespec_add(&now, &delay, &rqtp);
+      sec          = next / 1000000;
+      rqtp.tv_sec  = sec;
+      rqtp.tv_nsec = (next - (sec * 1000000)) * 1000;
 
-      nxsem_timedwait(&wqueue->wake, &rqtp);
+      sigtimedwait(&sigset, NULL, &rqtp);
     }
+
+  sigprocmask(SIG_SETMASK, &oldset, NULL);
 }
 
 /****************************************************************************
@@ -277,57 +362,80 @@ static pthread_addr_t work_usrthread(pthread_addr_t arg)
 
 int work_usrstart(void)
 {
-  int ret;
-#ifndef CONFIG_BUILD_PROTECTED
-  pthread_t usrwork;
-  pthread_attr_t attr;
-  struct sched_param param;
-#endif
-
-  /* Initialize the work queue */
-
-  list_initialize(&g_usrwork.q);
+  /* Initialize work queue data structures */
 
 #ifdef CONFIG_BUILD_PROTECTED
+  {
+    /* Set up the work queue lock */
 
-  /* Start a user-mode worker thread for use by applications. */
+    nxsem_init(&g_usrsem, 0, 1);
 
-  ret = task_create("uwork",
-                    CONFIG_LIBC_USRWORKPRIORITY,
-                    CONFIG_LIBC_USRWORKSTACKSIZE,
-                    work_usrthread, NULL);
-  if (ret < 0)
-    {
-      int errcode = get_errno();
-      DEBUGASSERT(errcode > 0);
-      return -errcode;
-    }
+    /* Start a user-mode worker thread for use by applications. */
 
-  return ret;
+    g_usrwork.pid = task_create("uwork",
+                                CONFIG_LIB_USRWORKPRIORITY,
+                                CONFIG_LIB_USRWORKSTACKSIZE,
+                                (main_t)work_usrthread,
+                                (FAR char * const *)NULL);
+
+    DEBUGASSERT(g_usrwork.pid > 0);
+    if (g_usrwork.pid < 0)
+      {
+        int errcode = get_errno();
+        DEBUGASSERT(errcode > 0);
+        return -errcode;
+      }
+
+    return g_usrwork.pid;
+  }
 #else
-  /* Start a user-mode worker thread for use by applications. */
+  {
+    pthread_t usrwork;
+    pthread_attr_t attr;
+    struct sched_param param;
+    int ret;
 
-  pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, CONFIG_LIBC_USRWORKSTACKSIZE);
+    /* Set up the work queue lock */
 
-  pthread_attr_getschedparam(&attr, &param);
-  param.sched_priority = CONFIG_LIBC_USRWORKPRIORITY;
-  pthread_attr_setschedparam(&attr, &param);
+    pthread_mutex_init(&g_usrmutex, NULL);
 
-  ret = pthread_create(&usrwork, &attr, work_usrthread, NULL);
-  if (ret != 0)
-    {
-      return -ret;
-    }
+    /* Start a user-mode worker thread for use by applications. */
 
-  /* Detach because the return value and completion status will not be
-   * requested.
-   */
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, CONFIG_LIB_USRWORKSTACKSIZE);
 
-  pthread_detach(usrwork);
+#ifdef CONFIG_SCHED_SPORADIC
+    /* Get the current sporadic scheduling parameters.  Those will not be
+     * modified.
+     */
 
-  return (pid_t)usrwork;
+    ret = set_getparam(pid, &param);
+    if (ret < 0)
+      {
+        int erroode = get_errno();
+        return -errcode;
+      }
+#endif
+
+    param.sched_priority = CONFIG_LIB_USRWORKPRIORITY;
+    pthread_attr_setschedparam(&attr, &param);
+
+    ret = pthread_create(&usrwork, &attr, work_usrthread, NULL);
+    if (ret != 0)
+      {
+        return -ret;
+      }
+
+    /* Detach because the return value and completion status will not be
+     * requested.
+     */
+
+    pthread_detach(usrwork);
+
+    g_usrwork.pid = (pid_t)usrwork;
+    return g_usrwork.pid;
+  }
 #endif
 }
 
-#endif /* CONFIG_LIBC_USRWORK && !__KERNEL__*/
+#endif /* CONFIG_LIB_USRWORK && !__KERNEL__*/

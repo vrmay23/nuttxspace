@@ -1,22 +1,35 @@
 /****************************************************************************
  * tools/mksymtab.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -58,29 +71,16 @@ static int nhdrfiles;
 
 static void show_usage(const char *progname)
 {
-  fprintf(stderr,
-    "USAGE:\n");
-  fprintf(stderr,
-    "%s [-d] <cvs-file> <symtab-file> [<symtab-name> [<nsymbols-name>]]\n\n",
-    progname);
-  fprintf(stderr,
-    "Where:\n\n");
-  fprintf(stderr,
-    " <cvs-file>      : The path to the input CSV file (required)\n");
-  fprintf(stderr,
-    " <symtab-file>   : The path to the output symbol table file\n");
-  fprintf(stderr,
-    "(required)\n");
-  fprintf(stderr,
-    " <symtab-name>   : Optional name for the symbol table variable\n");
-  fprintf(stderr,
-    "                   Default: \"%s\"\n", SYMTAB_NAME);
-  fprintf(stderr,
-    " <nsymbols-name> : Optional name for the symbol table variable\n");
-  fprintf(stderr,
-    "                   Default: \"%s\"\n", NSYMBOLS_NAME);
-  fprintf(stderr,
-    "  -d              : Enable debug output\n");
+  fprintf(stderr, "USAGE: %s [-d] <cvs-file> <symtab-file> [<symtab-name> [<nsymbols-name>]]\n\n",
+          progname);
+  fprintf(stderr, "Where:\n\n");
+  fprintf(stderr, "  <cvs-file>      : The path to the input CSV file (required)\n");
+  fprintf(stderr, "  <symtab-file>   : The path to the output symbol table file (required)\n");
+  fprintf(stderr, "  <symtab-name>   : Optional name for the symbol table variable\n");
+  fprintf(stderr, "                    Default: \"%s\"\n", SYMTAB_NAME);
+  fprintf(stderr, "  <nsymbols-name> : Optional name for the symbol table variable\n");
+  fprintf(stderr, "                    Default: \"%s\"\n", NSYMBOLS_NAME);
+  fprintf(stderr, "  -d              : Enable debug output\n");
   exit(EXIT_FAILURE);
 }
 
@@ -107,8 +107,7 @@ static void add_hdrfile(const char *hdrfile)
         {
           if (nhdrfiles > MAX_HEADER_FILES)
             {
-              fprintf(stderr,
-                "ERROR:  Too man header files. Increase MAX_HEADER_FILES\n");
+              fprintf(stderr, "ERROR:  Too man header files.  Increase MAX_HEADER_FILES\n");
               exit(EXIT_FAILURE);
             }
 
@@ -132,7 +131,6 @@ int main(int argc, char **argv, char **envp)
   char *finalterm;
   char *ptr;
   bool cond;
-  bool parm1;
   FILE *instream;
   FILE *outstream;
   int ch;
@@ -244,8 +242,7 @@ int main(int argc, char **argv, char **envp)
 
   /* Output up-front file boilerplate */
 
-  fprintf(outstream,
-     "/* %s: Auto-generated symbol table.  Do not edit */\n\n", sympath);
+  fprintf(outstream, "/* %s: Auto-generated symbol table.  Do not edit */\n\n", sympath);
   fprintf(outstream, "#include <nuttx/config.h>\n");
   fprintf(outstream, "#include <nuttx/compiler.h>\n");
   fprintf(outstream, "#include <nuttx/symtab.h>\n\n");
@@ -271,12 +268,6 @@ int main(int argc, char **argv, char **envp)
     {
       /* Parse the line from the CVS file */
 
-      g_parm[NAME_INDEX][0] = 0;
-      g_parm[HEADER_INDEX][0] = 0;
-      g_parm[COND_INDEX][0] = 0;
-      g_parm[RETTYPE_INDEX][0] = 0;
-      g_parm[PARM1_INDEX][0] = 0;
-
       int nargs = parse_csvline(ptr);
       if (nargs < PARM1_INDEX)
         {
@@ -286,7 +277,7 @@ int main(int argc, char **argv, char **envp)
 
       /* Output any conditional compilation */
 
-      cond = strlen(g_parm[COND_INDEX]) > 0;
+      cond = (g_parm[COND_INDEX] && strlen(g_parm[COND_INDEX]) > 0);
       if (cond)
         {
           fprintf(outstream, "%s#if %s\n", nextterm, g_parm[COND_INDEX]);
@@ -295,17 +286,8 @@ int main(int argc, char **argv, char **envp)
 
       /* Output the symbol table entry */
 
-      parm1 = strlen(g_parm[PARM1_INDEX]) > 0;
-      if (parm1)
-        {
-          fprintf(outstream, "%s  { \"%s\", (FAR const void *)%s }",
-                  nextterm, g_parm[NAME_INDEX], g_parm[NAME_INDEX]);
-        }
-      else
-        {
-          fprintf(outstream, "%s  { \"%s\", (FAR const void *)&%s }",
-                  nextterm, g_parm[NAME_INDEX], g_parm[NAME_INDEX]);
-        }
+      fprintf(outstream, "%s  { \"%s\", (FAR const void *)%s }",
+              nextterm, g_parm[NAME_INDEX], g_parm[NAME_INDEX]);
 
       if (cond)
         {
@@ -320,8 +302,7 @@ int main(int argc, char **argv, char **envp)
     }
 
   fprintf(outstream, "%s};\n\n", finalterm);
-  fprintf(outstream,
-    "#define NSYMBOLS (sizeof(%s) / sizeof (struct symtab_s))\n", symtab);
+  fprintf(outstream, "#define NSYMBOLS (sizeof(%s) / sizeof (struct symtab_s))\n", symtab);
   fprintf(outstream, "int %s = NSYMBOLS;\n", nsymbols);
 
   /* Close the CSV and symbol table files and exit */

@@ -1,28 +1,40 @@
 /****************************************************************************
  * arch/arm/src/stm32/stm32_dma2d.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2015, 2018 Marco Krahl. All rights reserved.
+ *   Author: Marco Krahl <ocram.lhark@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References:
+ *   STM32F429 Technical Reference Manual
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
-/* References:
- *   STM32F429 Technical Reference Manual
- */
 
 /****************************************************************************
  * Included Files
@@ -30,21 +42,20 @@
 
 #include <nuttx/config.h>
 
-#include <inttypes.h>
 #include <stdint.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/video/fb.h>
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
 #include "stm32.h"
 #include "hardware/stm32_ltdc.h"
 #include "hardware/stm32_dma2d.h"
@@ -69,7 +80,7 @@
                                             STM32_DMA2D_CR_MODE_BLEND   | \
                                             STM32_DMA2D_CR_MODE_COLOR
 
-/* Only 8 bit per pixel overall supported */
+/* Only 8 bit per pixel overal supported */
 
 #define DMA2D_PF_BYPP(n)                    ((n) / 8)
 
@@ -112,7 +123,8 @@ struct stm32_dma2d_s
 #ifdef CONFIG_STM32_FB_CMAP
   uint32_t *clut;              /* Color lookup table */
 #endif
-  mutex_t  *lock;              /* Ensure mutually exclusive access */
+
+  sem_t   *lock;               /* Ensure mutually exclusive access */
 };
 
 /* Interrupt handling */
@@ -188,46 +200,43 @@ static const uintptr_t stm32_cmar_layer_t[DMA2D_NLAYERS - 1] =
 /* Private functions */
 
 static void stm32_dma2d_control(uint32_t setbits, uint32_t clrbits);
-static int stm32_dma2dirq(int irq, void *context, void *arg);
+static int stm32_dma2dirq(int irq, void *context, FAR void *arg);
 static int stm32_dma2d_waitforirq(void);
 static int stm32_dma2d_start(void);
 #ifdef CONFIG_STM32_FB_CMAP
 static int stm32_dma2d_loadclut(uintptr_t reg);
 #endif
-static uint32_t stm32_dma2d_memaddress(
-                                   struct stm32_dma2d_overlay_s *oinfo,
-                                   uint32_t xpos, uint32_t ypos);
-static uint32_t stm32_dma2d_lineoffset(
-                                   struct stm32_dma2d_overlay_s *oinfo,
-                                   const struct fb_area_s *area);
-static void stm32_dma2d_lfifo(struct stm32_dma2d_overlay_s *oinfo,
-                              int lid,
+static uint32_t stm32_dma2d_memaddress(FAR struct stm32_dma2d_overlay_s *oinfo,
+                                       uint32_t xpos, uint32_t ypos);
+static uint32_t stm32_dma2d_lineoffset(FAR struct stm32_dma2d_overlay_s *oinfo,
+                                       FAR const struct fb_area_s *area);
+static void stm32_dma2d_lfifo(FAR struct stm32_dma2d_overlay_s *oinfo, int lid,
                               uint32_t xpos, uint32_t ypos,
-                              const struct fb_area_s *area);
+                              FAR const struct fb_area_s *area);
 static void stm32_dma2d_lcolor(int lid, uint32_t argb);
-static void stm32_dma2d_llnr(const struct fb_area_s *area);
+static void stm32_dma2d_llnr(FAR const struct fb_area_s *area);
 static int stm32_dma2d_loutpfc(uint8_t fmt);
 static void stm32_dma2d_lpfc(int lid, uint32_t blendmode, uint8_t alpha,
                              uint8_t fmt);
 
-/* Public Functions */
+/* Public functions */
 
 #ifdef CONFIG_STM32_FB_CMAP
-static int stm32_dma2d_setclut(const struct fb_cmap_s *cmap);
+static int stm32_dma2d_setclut(FAR const struct fb_cmap_s *cmap);
 #endif
-static int stm32_dma2d_fillcolor(struct stm32_dma2d_overlay_s *oinfo,
-                                 const struct fb_area_s *area,
+static int stm32_dma2d_fillcolor(FAR struct stm32_dma2d_overlay_s *oinfo,
+                                 FAR const struct fb_area_s *area,
                                  uint32_t argb);
-static int stm32_dma2d_blit(struct stm32_dma2d_overlay_s *doverlay,
+static int stm32_dma2d_blit(FAR struct stm32_dma2d_overlay_s *doverlay,
                             uint32_t destxpos, uint32_t destypos,
-                            struct stm32_dma2d_overlay_s *soverlay,
-                            const struct fb_area_s *sarea);
-static int stm32_dma2d_blend(struct stm32_dma2d_overlay_s *doverlay,
+                            FAR struct stm32_dma2d_overlay_s *soverlay,
+                            FAR const struct fb_area_s *sarea);
+static int stm32_dma2d_blend(FAR struct stm32_dma2d_overlay_s *doverlay,
                              uint32_t destxpos, uint32_t destypos,
-                             struct stm32_dma2d_overlay_s *foverlay,
+                             FAR struct stm32_dma2d_overlay_s *foverlay,
                              uint32_t forexpos, uint32_t foreypos,
-                             struct stm32_dma2d_overlay_s *boverlay,
-                             const struct fb_area_s *barea);
+                             FAR struct stm32_dma2d_overlay_s *boverlay,
+                             FAR const struct fb_area_s *barea);
 
 /****************************************************************************
  * Private Data
@@ -246,16 +255,16 @@ static uint32_t g_clut[STM32_DMA2D_NCLUT *
 #  else
                       3
 #  endif
-                      / 4];
+                      / 4 ];
 #endif /* CONFIG_STM32_FB_CMAP */
 
-/* The DMA2D mutex that enforces mutually exclusive access */
+/* The DMA2D semaphore that enforces mutually exclusive access */
 
-static mutex_t g_lock = NXMUTEX_INITIALIZER;
+static sem_t g_lock;
 
 /* Semaphore for interrupt handling */
 
-static sem_t g_semirq = SEM_INITIALIZER(0);
+static sem_t g_semirq;
 
 /* This structure provides irq handling */
 
@@ -307,14 +316,13 @@ static void stm32_dma2d_control(uint32_t setbits, uint32_t clrbits)
 {
   uint32_t   cr;
 
-  lcdinfo("setbits=%08" PRIx32 ", clrbits=%08" PRIx32 "\n",
-          setbits, clrbits);
+  lcdinfo("setbits=%08x, clrbits=%08x\n", setbits, clrbits);
 
   cr = getreg32(STM32_DMA2D_CR);
   cr &= ~clrbits;
   cr |= setbits;
 
-  lcdinfo("cr=%08" PRIx32 "\n", cr);
+  lcdinfo("cr=%08x\n", cr);
   putreg32(cr, STM32_DMA2D_CR);
 }
 
@@ -326,11 +334,11 @@ static void stm32_dma2d_control(uint32_t setbits, uint32_t clrbits)
  *
  ****************************************************************************/
 
-static int stm32_dma2dirq(int irq, void *context, void *arg)
+static int stm32_dma2dirq(int irq, void *context, FAR void *arg)
 {
   int ret;
   uint32_t regval = getreg32(STM32_DMA2D_ISR);
-  struct stm32_interrupt_s *priv = &g_interrupt;
+  FAR struct stm32_interrupt_s *priv = &g_interrupt;
 
   reginfo("irq = %d, regval = %08x\n", irq, regval);
 
@@ -431,7 +439,7 @@ static int stm32_dma2dirq(int irq, void *context, void *arg)
 static int stm32_dma2d_waitforirq(void)
 {
   int ret;
-  struct stm32_interrupt_s *priv = &g_interrupt;
+  FAR struct stm32_interrupt_s *priv = &g_interrupt;
 
   ret = nxsem_wait(priv->sem);
 
@@ -464,13 +472,13 @@ static int stm32_dma2d_waitforirq(void)
 #ifdef CONFIG_STM32_DMA2D_L8
 static int stm32_dma2d_loadclut(uintptr_t pfcreg)
 {
-  int      ret;
-  uint32_t regval;
+  int        ret;
+  uint32_t   regval;
 
   /* Start clut loading */
 
   regval  = getreg32(pfcreg);
-  regval |= DMA2D_XGPFCCR_START;
+  regval |= DMA2D_xGPFCCR_START;
   reginfo("set regval=%08x\n", regval);
   putreg32(regval, pfcreg);
   reginfo("configured regval=%08x\n", getreg32(pfcreg));
@@ -498,7 +506,7 @@ static int stm32_dma2d_loadclut(uintptr_t pfcreg)
 
 static int stm32_dma2d_start(void)
 {
-  int ret;
+  int        ret;
 
   /* Start dma transfer */
 
@@ -527,17 +535,15 @@ static int stm32_dma2d_start(void)
  *
  ****************************************************************************/
 
-static uint32_t stm32_dma2d_memaddress(
-                                   struct stm32_dma2d_overlay_s *oinfo,
-                                   uint32_t xpos, uint32_t ypos)
+static uint32_t stm32_dma2d_memaddress(FAR struct stm32_dma2d_overlay_s *oinfo,
+                                       uint32_t xpos, uint32_t ypos)
 {
   uint32_t offset;
-  struct fb_overlayinfo_s *poverlay = oinfo->oinfo;
+  FAR struct fb_overlayinfo_s *poverlay = oinfo->oinfo;
 
   offset = xpos * DMA2D_PF_BYPP(poverlay->bpp) + poverlay->stride * ypos;
 
-  lcdinfo("%" PRIx32 ", offset=%" PRId32 "\n",
-          ((uint32_t) poverlay->fbmem) + offset, offset);
+  lcdinfo("%p, offset=%d\n", ((uint32_t) poverlay->fbmem) + offset, offset);
   return ((uint32_t) poverlay->fbmem) + offset;
 }
 
@@ -555,9 +561,8 @@ static uint32_t stm32_dma2d_memaddress(
  *
  ****************************************************************************/
 
-static uint32_t stm32_dma2d_lineoffset(
-                                   struct stm32_dma2d_overlay_s *oinfo,
-                                   const struct fb_area_s *area)
+static uint32_t stm32_dma2d_lineoffset(FAR struct stm32_dma2d_overlay_s *oinfo,
+                                       FAR const struct fb_area_s *area)
 {
   uint32_t loffset;
 
@@ -565,7 +570,7 @@ static uint32_t stm32_dma2d_lineoffset(
 
   loffset = oinfo->xres - area->w;
 
-  lcdinfo("%" PRId32 "\n", loffset);
+  lcdinfo("%d\n", loffset);
   return loffset;
 }
 
@@ -582,15 +587,14 @@ static uint32_t stm32_dma2d_lineoffset(
  *
  ****************************************************************************/
 
-static void stm32_dma2d_lfifo(struct stm32_dma2d_overlay_s *oinfo,
+static void stm32_dma2d_lfifo(FAR struct stm32_dma2d_overlay_s *oinfo,
                               int lid, uint32_t xpos, uint32_t ypos,
-                              const struct fb_area_s *area)
+                              FAR const struct fb_area_s *area)
 {
-  lcdinfo("oinfo=%p, lid=%d, xpos=%" PRId32 ", ypos=%" PRId32 ", area=%p\n",
+  lcdinfo("oinfo=%p, lid=%d, xpos=%d, ypos=%d, area=%p\n",
            oinfo, lid, xpos, ypos, area);
 
-  putreg32(stm32_dma2d_memaddress(oinfo, xpos, ypos),
-           stm32_mar_layer_t[lid]);
+  putreg32(stm32_dma2d_memaddress(oinfo, xpos, ypos), stm32_mar_layer_t[lid]);
   putreg32(stm32_dma2d_lineoffset(oinfo, area), stm32_or_layer_t[lid]);
 }
 
@@ -608,7 +612,7 @@ static void stm32_dma2d_lfifo(struct stm32_dma2d_overlay_s *oinfo,
 
 static void stm32_dma2d_lcolor(int lid, uint32_t argb)
 {
-  lcdinfo("lid=%d, argb=%08" PRIx32 "\n", lid, argb);
+  lcdinfo("lid=%d, argb=%08x\n", lid, argb);
   putreg32(argb, stm32_color_layer_t[lid]);
 }
 
@@ -623,7 +627,7 @@ static void stm32_dma2d_lcolor(int lid, uint32_t argb)
  *
  ****************************************************************************/
 
-static void stm32_dma2d_llnr(const struct fb_area_s *area)
+static void stm32_dma2d_llnr(FAR const struct fb_area_s *area)
 {
   uint32_t nlrreg;
 
@@ -674,31 +678,31 @@ static void stm32_dma2d_lpfc(int lid, uint32_t blendmode, uint8_t alpha,
 {
   uint32_t   pfccrreg;
 
-  lcdinfo("lid=%d, blendmode=%08" PRIx32 ", alpha=%02x, fmt=%d\n",
-          lid, blendmode, alpha, fmt);
+  lcdinfo("lid=%d, blendmode=%08x, alpha=%02x, fmt=%d\n", lid, blendmode, alpha,
+          fmt);
 
   /* Set color format */
 
-  pfccrreg = DMA2D_XGPFCCR_CM(fmt);
+  pfccrreg = DMA2D_xGPFCCR_CM(fmt);
 
 #ifdef CONFIG_STM32_FB_CMAP
   if (fmt == DMA2D_PF_L8)
     {
-      struct stm32_dma2d_s *layer = &g_dma2ddev;
+      FAR struct stm32_dma2d_s * layer = &g_dma2ddev;
 
       /* Load CLUT automatically */
 
-      pfccrreg |= DMA2D_XGPFCCR_START;
+      pfccrreg |= DMA2D_xGPFCCR_START;
 
       /* Set the CLUT color mode */
 
 #  ifndef CONFIG_STM32_FB_TRANSPARENCY
-      pfccrreg |= DMA2D_XGPFCCR_CCM;
+      pfccrreg |= DMA2D_xGPFCCR_CCM;
 #  endif
 
       /* Set CLUT size */
 
-      pfccrreg |= DMA2D_XGPFCCR_CS(DMA2D_CLUT_SIZE);
+      pfccrreg |= DMA2D_xGPFCCR_CS(DMA2D_CLUT_SIZE);
 
       /* Set the CLUT memory address */
 
@@ -712,14 +716,15 @@ static void stm32_dma2d_lpfc(int lid, uint32_t blendmode, uint8_t alpha,
 
   /* Set alpha blend mode */
 
-  pfccrreg |= DMA2D_XGPFCCR_AM(blendmode);
+  pfccrreg |= DMA2D_xGPFCCR_AM(blendmode);
 
   if (blendmode == STM32_DMA2D_PFCCR_AM_CONST ||
         blendmode == STM32_DMA2D_PFCCR_AM_PIXEL)
     {
       /* Set alpha value */
 
-      pfccrreg |= DMA2D_XGPFCCR_ALPHA(alpha);
+      pfccrreg |= DMA2D_xGPFCCR_ALPHA(alpha);
+
     }
 
   putreg32(pfccrreg, stm32_pfccr_layer_t[lid]);
@@ -745,14 +750,14 @@ static void stm32_dma2d_lpfc(int lid, uint32_t blendmode, uint8_t alpha,
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_FB_CMAP
-static int stm32_dma2d_setclut(const struct fb_cmap_s *cmap)
+static int stm32_dma2d_setclut(FAR const struct fb_cmap_s *cmap)
 {
   int n;
-  struct stm32_dma2d_s *priv = &g_dma2ddev;
+  FAR struct stm32_dma2d_s * priv = &g_dma2ddev;
 
   lcdinfo("cmap=%p\n", cmap);
 
-  nxmutex_lock(priv->lock);
+  nxsem_wait(priv->lock);
 
   for (n = cmap->first; n < cmap->len - 1 && n < STM32_DMA2D_NCLUT; n++)
     {
@@ -786,7 +791,8 @@ static int stm32_dma2d_setclut(const struct fb_cmap_s *cmap)
 #  endif
     }
 
-  nxmutex_unlock(priv->lock);
+  nxsem_post(priv->lock);
+
   return OK;
 }
 #endif /* CONFIG_STM32_FB_CMAP */
@@ -801,26 +807,25 @@ static int stm32_dma2d_setclut(const struct fb_cmap_s *cmap)
  * Input Parameters:
  *   oinfo - Overlay to fill
  *   area  - Reference to the valid area structure select the area
- *   argb  - Color to fill the selected area. Color must be argb8888
- *           formatted.
+ *   argb  - Color to fill the selected area. Color must be argb8888 formatted.
  *
  * Returned Value:
  *    OK        - On success
- *   -EINVAL    - If one of the parameter invalid or if the size of the
- *                selected area outside the visible area of the layer.
+ *   -EINVAL    - If one of the parameter invalid or if the size of the selected
+ *                area outside the visible area of the layer.
  *   -ECANCELED - Operation cancelled, something goes wrong.
  *
  ****************************************************************************/
 
-static int stm32_dma2d_fillcolor(struct stm32_dma2d_overlay_s *oinfo,
-                                 const struct fb_area_s *area,
+static int stm32_dma2d_fillcolor(FAR struct stm32_dma2d_overlay_s *oinfo,
+                                 FAR const struct fb_area_s *area,
                                  uint32_t argb)
 {
   int ret;
-  struct stm32_dma2d_s *priv = &g_dma2ddev;
+  FAR struct stm32_dma2d_s * priv = &g_dma2ddev;
   DEBUGASSERT(oinfo != NULL && oinfo->oinfo != NULL && area != NULL);
 
-  lcdinfo("oinfo=%p, argb=%08" PRIx32 "\n", oinfo, argb);
+  lcdinfo("oinfo=%p, argb=%08x\n", oinfo, argb);
 
 #ifdef CONFIG_STM32_FB_CMAP
   if (oinfo->fmt == DMA2D_PF_L8)
@@ -833,7 +838,7 @@ static int stm32_dma2d_fillcolor(struct stm32_dma2d_overlay_s *oinfo,
     }
 #endif
 
-  nxmutex_lock(priv->lock);
+  nxsem_wait(priv->lock);
 
   /* Set output pfc */
 
@@ -865,7 +870,7 @@ static int stm32_dma2d_fillcolor(struct stm32_dma2d_overlay_s *oinfo,
       lcderr("ERROR: Returning ECANCELED\n");
     }
 
-  nxmutex_unlock(priv->lock);
+  nxsem_post(priv->lock);
   return ret;
 }
 
@@ -885,28 +890,26 @@ static int stm32_dma2d_fillcolor(struct stm32_dma2d_overlay_s *oinfo,
  *
  * Returned Value:
  *    OK        - On success
- *   -EINVAL    - If one of the parameter invalid or if the size of the
- *                selected source area outside the visible area of the
- *                destination layer.
+ *   -EINVAL    - If one of the parameter invalid or if the size of the selected
+ *                source area outside the visible area of the destination layer.
  *                (The visible area usually represents the display size)
  *   -ECANCELED - Operation cancelled, something goes wrong.
  *
  ****************************************************************************/
 
-static int stm32_dma2d_blit(struct stm32_dma2d_overlay_s *doverlay,
+static int stm32_dma2d_blit(FAR struct stm32_dma2d_overlay_s *doverlay,
                             uint32_t destxpos, uint32_t destypos,
-                            struct stm32_dma2d_overlay_s *soverlay,
-                            const struct fb_area_s *sarea)
+                            FAR struct stm32_dma2d_overlay_s *soverlay,
+                            FAR const struct fb_area_s *sarea)
 {
-  int      ret;
-  uint32_t mode;
-  struct stm32_dma2d_s *priv = &g_dma2ddev;
+  int        ret;
+  uint32_t  mode;
+  FAR struct stm32_dma2d_s * priv = &g_dma2ddev;
 
-  lcdinfo("doverlay=%p, destxpos=%" PRId32 ", destypos=%" PRId32
-          ", soverlay=%p, sarea=%p\n",
+  lcdinfo("doverlay=%p, destxpos=%d, destypos=%d, soverlay=%p, sarea=%p\n",
           doverlay, destxpos, destypos, soverlay, sarea);
 
-  nxmutex_lock(priv->lock);
+  nxsem_wait(priv->lock);
 
   /* Set output pfc */
 
@@ -956,7 +959,7 @@ static int stm32_dma2d_blit(struct stm32_dma2d_overlay_s *doverlay,
       lcderr("ERROR: Returning ECANCELED\n");
     }
 
-  nxmutex_unlock(priv->lock);
+  nxsem_post(priv->lock);
   return ret;
 }
 
@@ -966,9 +969,9 @@ static int stm32_dma2d_blit(struct stm32_dma2d_overlay_s *doverlay,
  * Description:
  *   Blends the selected area from a background layer with selected position
  *   of the foreground layer. Copies the result to the selected position of
- *   the destination layer. Note! The content of the foreground and
- *   background layer keeps unchanged as long destination layer is unequal to
- *   the foreground and background layer.
+ *   the destination layer. Note! The content of the foreground and background
+ *   layer keeps unchanged as long destination layer is unequal to the
+ *   foreground and background layer.
  *
  * Input Parameters:
  *   doverlay - Destination overlay
@@ -978,31 +981,30 @@ static int stm32_dma2d_blit(struct stm32_dma2d_overlay_s *doverlay,
  *   forexpos - x-Offset foreground overlay
  *   foreypos - y-Offset foreground overlay
  *   boverlay - Background overlay
- *   barea    - x-Offset, y-Offset, x-resolution and y-resolution of
- *              background overlay
+ *   barea    - x-Offset, y-Offset, x-resolution and y-resolution of background
+ *              overlay
  *
  * Returned Value:
  *    OK        - On success
- *   -EINVAL    - If one of the parameter invalid or if the size of the
- *                selected source area outside the visible area of the
- *                destination layer.
+ *   -EINVAL    - If one of the parameter invalid or if the size of the selected
+ *                source area outside the visible area of the destination layer.
  *                (The visible area usually represents the display size)
  *   -ECANCELED - Operation cancelled, something goes wrong.
  *
  ****************************************************************************/
 
-static int stm32_dma2d_blend(struct stm32_dma2d_overlay_s *doverlay,
+static int stm32_dma2d_blend(FAR struct stm32_dma2d_overlay_s *doverlay,
                              uint32_t destxpos, uint32_t destypos,
-                             struct stm32_dma2d_overlay_s *foverlay,
+                             FAR struct stm32_dma2d_overlay_s *foverlay,
                              uint32_t forexpos, uint32_t foreypos,
-                             struct stm32_dma2d_overlay_s *boverlay,
-                             const struct fb_area_s *barea)
+                             FAR struct stm32_dma2d_overlay_s *boverlay,
+                             FAR const struct fb_area_s *barea)
 {
-  int ret;
-  struct stm32_dma2d_s *priv = &g_dma2ddev;
+  int          ret;
+  FAR struct stm32_dma2d_s * priv = &g_dma2ddev;
 
-  lcdinfo("doverlay=%p, destxpos=%" PRId32 ", destypos=%" PRId32 ", "
-          "foverlay=%p, forexpos=%" PRId32 ", foreypos=%" PRId32 ", "
+  lcdinfo("doverlay=%p, destxpos=%d, destypos=%d, "
+          "foverlay=%p, forexpos=%d, foreypos=%d, "
           "boverlay=%p, barea=%p, barea.x=%d, barea.y=%d, barea.w=%d, "
           "barea.h=%d\n", doverlay, destxpos, destypos, foverlay, forexpos,
           foreypos, boverlay, barea, barea->x, barea->y, barea->w, barea->h);
@@ -1018,7 +1020,7 @@ static int stm32_dma2d_blend(struct stm32_dma2d_overlay_s *doverlay,
     }
 #endif
 
-  nxmutex_lock(priv->lock);
+  nxsem_wait(priv->lock);
 
   /* Set output pfc */
 
@@ -1066,7 +1068,7 @@ static int stm32_dma2d_blend(struct stm32_dma2d_overlay_s *doverlay,
       lcderr("ERROR: Returning ECANCELED\n");
     }
 
-  nxmutex_unlock(priv->lock);
+  nxsem_post(priv->lock);
   return ret;
 }
 
@@ -1096,6 +1098,20 @@ int stm32_dma2dinitialize(void)
        * arch/arm/src/stm32/stm32f40xxx_rcc.c
        */
 
+      /* Initialize the DMA2D semaphore that enforces mutually exclusive access
+       * to the driver
+       */
+
+      nxsem_init(&g_lock, 0, 1);
+
+      /* Initialize the semaphore for interrupt handling.  This waitsem
+       * semaphore is used for signaling and, hence, should not have
+       * priority inheritance enabled.
+       */
+
+      nxsem_init(g_interrupt.sem, 0, 0);
+      nxsem_setprotocol(g_interrupt.sem, SEM_PRIO_NONE);
+
 #ifdef CONFIG_STM32_FB_CMAP
       /* Enable dma2d transfer and clut loading interrupts only */
 
@@ -1109,8 +1125,7 @@ int stm32_dma2dinitialize(void)
 #endif
 
       stm32_dma2d_control(DMA2D_CR_TCIE | DMA2D_CR_CTCIE | DMA2D_CR_TEIE |
-                          DMA2D_CR_CAEIE | DMA2D_CR_CTCIE | DMA2D_CR_CEIE,
-                          0);
+                          DMA2D_CR_CAEIE | DMA2D_CR_CTCIE | DMA2D_CR_CEIE, 0);
 
       /* Attach DMA2D interrupt vector */
 
@@ -1162,7 +1177,7 @@ void stm32_dma2duninitialize(void)
  *
  ****************************************************************************/
 
-struct dma2d_layer_s *stm32_dma2ddev(void)
+FAR struct dma2d_layer_s *stm32_dma2ddev(void)
 {
   return &g_dma2ddev.dma2d;
 }

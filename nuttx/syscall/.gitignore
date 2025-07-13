@@ -1,1 +1,11 @@
-/*.ldcmd
+/Make.dep
+/.depend
+/.context
+/*.asm
+/*.obj
+/*.rel
+/*.lst
+/*.sym
+/*.adb
+/*.lib
+/*.src

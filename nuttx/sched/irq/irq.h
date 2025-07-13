@@ -1,22 +1,36 @@
 /****************************************************************************
  * sched/irq/irq.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2008, 2013-2014, 2017-2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -46,15 +60,6 @@
 #  error CONFIG_ARCH_NUSER_INTERRUPTS is not defined
 #endif
 
-#if defined(CONFIG_ARCH_MINIMAL_VECTORTABLE_DYNAMIC)
-#  define IRQ_TO_NDX(irq) (g_irqmap[irq] ? g_irqmap[irq] : irq_to_ndx(irq))
-#elif defined(CONFIG_ARCH_MINIMAL_VECTORTABLE)
-#  define IRQ_TO_NDX(irq) \
-  (g_irqmap[(irq)] < CONFIG_ARCH_NUSER_INTERRUPTS ? g_irqmap[(irq)] : -EINVAL)
-#else
-#  define IRQ_TO_NDX(irq) (irq)
-#endif
-
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -71,8 +76,13 @@ struct irq_info_s
   FAR void *arg;     /* The argument provided to the interrupt handler. */
 #ifdef CONFIG_SCHED_IRQMONITOR
   clock_t start;     /* Time interrupt attached */
-  clock_t time;      /* Maximum execution time on this IRQ */
-  uint32_t count;    /* Number of interrupts on this IRQ */
+#ifdef CONFIG_HAVE_LONG_LONG
+  uint64_t count;    /* Number of interrupts on this IRQ */
+#else
+  uint32_t mscount;  /* Number of interrupts on this IRQ (MS) */
+  uint32_t lscount;  /* Number of interrupts on this IRQ (LS) */
+#endif
+  uint32_t time;     /* Maximum execution time on this IRQ */
 #endif
 };
 
@@ -98,6 +108,7 @@ extern struct irq_info_s g_irqvector[CONFIG_ARCH_NUSER_INTERRUPTS];
 extern struct irq_info_s g_irqvector[NR_IRQS];
 #endif
 
+#ifdef CONFIG_ARCH_MINIMAL_VECTORTABLE
 /* This is the interrupt vector mapping table.  This must be provided by
  * architecture specific logic if CONFIG_ARCH_MINIMAL_VECTORTABLE is define
  * in the configuration.
@@ -107,10 +118,6 @@ extern struct irq_info_s g_irqvector[NR_IRQS];
  * declaration is here for the time being.
  */
 
-#if defined(CONFIG_ARCH_MINIMAL_VECTORTABLE_DYNAMIC)
-extern irq_mapped_t g_irqmap[NR_IRQS];
-int irq_to_ndx(int irq);
-#elif defined(CONFIG_ARCH_MINIMAL_VECTORTABLE)
 extern const irq_mapped_t g_irqmap[NR_IRQS];
 #endif
 
@@ -119,11 +126,12 @@ extern const irq_mapped_t g_irqmap[NR_IRQS];
  * disabled.
  */
 
-extern volatile spinlock_t g_cpu_irqlock;
+extern volatile spinlock_t g_cpu_irqlock SP_SECTION;
 
 /* Used to keep track of which CPU(s) hold the IRQ lock. */
 
-extern volatile cpu_set_t g_cpu_irqset;
+extern volatile spinlock_t g_cpu_irqsetlock SP_SECTION;
+extern volatile cpu_set_t g_cpu_irqset SP_SECTION;
 
 /* Handles nested calls to enter_critical section from interrupt handlers */
 
@@ -150,7 +158,7 @@ extern "C"
  *
  ****************************************************************************/
 
-void irq_initialize(void);
+void weak_function irq_initialize(void);
 
 /****************************************************************************
  * Name: irq_unexpected_isr
@@ -162,6 +170,33 @@ void irq_initialize(void);
  ****************************************************************************/
 
 int irq_unexpected_isr(int irq, FAR void *context, FAR void *arg);
+
+/****************************************************************************
+ * Name:  irq_cpu_locked
+ *
+ * Description:
+ *   Test if the IRQ lock set OR if this CPU holds the IRQ lock
+ *   There is an interaction with pre-emption controls and IRQ locking:
+ *   Even if the pre-emption is enabled, tasks will be forced to pend if
+ *   the IRQ lock is also set UNLESS the CPU starting the task is the
+ *   holder of the IRQ lock.
+ *
+ * Input Parameters:
+ *   rtcb - Points to the blocked TCB that is ready-to-run
+ *
+ * Returned Value:
+ *   true  - IRQs are locked by a different CPU.
+ *   false - IRQs are unlocked OR if they are locked BUT this CPU
+ *           is the holder of the lock.
+ *
+ *   Warning: This values are volatile at only valid at the instance that
+ *   the CPU set was queried.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SMP
+bool irq_cpu_locked(int cpu);
+#endif
 
 /****************************************************************************
  * Name: irq_foreach

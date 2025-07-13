@@ -1,22 +1,40 @@
 /****************************************************************************
- * arch/arm/src/samd2l2/sam_usb.c
+ * arch/arm/src/samd2l2/sam_usb.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Filament - www.filament.com
+ *   Copyright (C) 2015 Offcode Ltd. All rights reserved.
+ *   Author: Janne Rosberg <janne.rosberg@offcode.fi>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * This driver is derived from the SAM34 UDP driver:
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,19 +51,19 @@
  *
  *   Device mode
  *   - Supports 8 IN endpoints and 8 OUT endpoints
- *   - No endpoint size limitations
- *   - Built-in DMA with multi-packet and dual bank for all endpoints
- *   - Supports feedback endpoint
- *   - Supports crystal less clock
+ *   – No endpoint size limitations
+ *   – Built-in DMA with multi-packet and dual bank for all endpoints
+ *   – Supports feedback endpoint
+ *   – Supports crystal less clock
  *
  *   Host mode
  *   - Supports 8 physical pipes
- *   - No pipe size limitations
- *   - Supports multiplexed virtual pipe on one physical pipe to allow an
+ *   – No pipe size limitations
+ *   – Supports multiplexed virtual pipe on one physical pipe to allow an
  *     unlimited USB tree
- *   - Built-in DMA with multi-packet support and dual bank for all pipes
- *   - Supports feedback endpoint
- *   - Supports the USB 2.0 Phase-locked SOFs feature
+ *   – Built-in DMA with multi-packet support and dual bank for all pipes
+ *   – Supports feedback endpoint
+ *   – Supports the USB 2.0 Phase-locked SOFs feature
  *
  ****************************************************************************/
 
@@ -68,13 +86,11 @@
 
 #include <nuttx/config.h>
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -87,7 +103,9 @@
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "sam_gclk.h"
 #include "chip.h"
 #include "sam_port.h"
@@ -214,6 +232,16 @@
 #define SAM_TRACEINTID_EP0WRSTATUS        0x002a
 #define SAM_TRACEINTID_EPTRCPT0_LEN       0x002b
 
+/* Ever-present MIN and MAX macros */
+
+#ifndef MIN
+#  define MIN(a,b) (a < b ? a : b)
+#endif
+
+#ifndef MAX
+#  define MAX(a,b) (a > b ? a : b)
+#endif
+
 /* Byte ordering in host-based values */
 
 #ifdef CONFIG_ENDIAN_BIG
@@ -225,7 +253,7 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
 /* State of an endpoint */
@@ -373,6 +401,7 @@ struct sam_usbdev_s
 #ifdef CONFIG_SAMD2L2_USB_REGDEBUG
 static void   sam_printreg(uintptr_t regaddr, uint32_t regval, bool iswrite);
 static void   sam_checkreg(uintptr_t regaddr, uint32_t regval, bool iswrite);
+static uint32_t sam_getreg32(uintptr_t regaddr);
 static void   sam_putreg32(uint32_t regval, uintptr_t regaddr);
 static uint32_t sam_getreg16(uintptr_t regaddr);
 static void   sam_putreg16(uint16_t regval, uintptr_t regaddr);
@@ -380,12 +409,13 @@ static uint32_t sam_getreg8(uintptr_t regaddr);
 static void   sam_putreg8(uint8_t regval, uintptr_t regaddr);
 static void   sam_dumpep(struct sam_usbdev_s *priv, uint8_t epno);
 #else
+static inline uint32_t sam_getreg32(uintptr_t regaddr);
 static inline void sam_putreg32(uint32_t regval, uintptr_t regaddr);
 static inline uint32_t sam_getreg16(uintptr_t regaddr);
 static inline void sam_putreg16(uint16_t regval, uintptr_t regaddr);
 static inline uint32_t sam_getreg8(uintptr_t regaddr);
 static inline void sam_putreg8(uint8_t regval, uintptr_t regaddr);
-#  define sam_dumpep(priv,epno)
+# define sam_dumpep(priv,epno)
 #endif
 
 /* Suspend/Resume Helpers ***************************************************/
@@ -432,6 +462,8 @@ static inline struct sam_ep_s *
 static inline void
               sam_ep_unreserve(struct sam_usbdev_s *priv,
                 struct sam_ep_s *privep);
+static inline bool
+              sam_ep_reserved(struct sam_usbdev_s *priv, int epno);
 static int    sam_ep_configure_internal(struct sam_ep_s *privep,
                 const struct usb_epdesc_s *desc);
 
@@ -522,7 +554,7 @@ static const struct usb_epdesc_s g_ep0desc =
   .interval      = 0
 };
 
-/* Device error strings that may be enabled for more descriptive USB trace
+/* Device error strings that may be enabled for more desciptive USB trace
  * output.
  */
 
@@ -562,7 +594,7 @@ const struct trace_msg_t g_usb_trace_strings_deverror[] =
 };
 #endif
 
-/* Interrupt event strings that may be enabled for more descriptive USB trace
+/* Interrupt event strings that may be enabled for more desciptive USB trace
  * output.
  */
 
@@ -705,6 +737,33 @@ static void sam_checkreg(uintptr_t regaddr, uint32_t regval, bool iswrite)
 #endif
 
 /****************************************************************************
+ * Name: sam_getreg32
+ *
+ * Description:
+ *   Get the contents of an 32-bit SAMD2L2 USB register
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SAMD2L2_USB_REGDEBUG
+static uint32_t sam_getreg32(uintptr_t regaddr)
+{
+  /* Read the value from the register */
+
+  uint32_t regval = getreg32(regaddr);
+
+  /* Check if we need to print this value */
+
+  sam_checkreg(regaddr, regval, false);
+  return regval;
+}
+#else
+static inline uint32_t sam_getreg32(uintptr_t regaddr)
+{
+  return getreg32(regaddr);
+}
+#endif
+
+/****************************************************************************
  * Name: sam_putreg32
  *
  * Description:
@@ -724,7 +783,7 @@ static void sam_putreg32(uint32_t regval, uintptr_t regaddr)
   putreg32(regval, regaddr);
 }
 #else
-static inline void sam_putreg32(uint32_t regval, uintptr_t regaddr)
+static inline void sam_putreg32(uint32_t regval, uint32_t regaddr)
 {
   putreg32(regval, regaddr);
 }
@@ -777,7 +836,7 @@ static void sam_putreg16(uint16_t regval, uintptr_t regaddr)
   putreg16(regval, regaddr);
 }
 #else
-static inline void sam_putreg16(uint16_t regval, uintptr_t regaddr)
+static inline void sam_putreg16(uint16_t regval, uint32_t regaddr)
 {
   putreg16(regval, regaddr);
 }
@@ -830,7 +889,7 @@ static void sam_putreg8(uint8_t regval, uintptr_t regaddr)
   putreg8(regval, regaddr);
 }
 #else
-static inline void sam_putreg8(uint8_t regval, uintptr_t regaddr)
+static inline void sam_putreg8(uint8_t regval, uint32_t regaddr)
 {
   putreg8(regval, regaddr);
 }
@@ -1088,7 +1147,7 @@ static int sam_req_write(struct sam_usbdev_s *priv, struct sam_ep_s *privep)
           return -ENOENT;
         }
 
-      uinfo("epno=%d req=%p: len=%zu xfrd=%zu inflight=%d\n",
+      uinfo("epno=%d req=%p: len=%d xfrd=%d inflight=%d\n",
             epno, privreq, privreq->req.len, privreq->req.xfrd,
             privreq->inflight);
 
@@ -1203,6 +1262,7 @@ static int sam_req_read(struct sam_usbdev_s *priv, struct sam_ep_s *privep,
                         uint16_t recvsize)
 {
   struct sam_req_s *privreq;
+  uint32_t packetsize;
   int epno;
 
   DEBUGASSERT(priv && privep && privep->epstate == USB_EPSTATE_IDLE);
@@ -1229,7 +1289,7 @@ static int sam_req_read(struct sam_usbdev_s *priv, struct sam_ep_s *privep,
           return -ENOENT;
         }
 
-      uinfo("EP%d: req.len=%zu xfrd=%zu recvsize=%d\n",
+      uinfo("EP%d: req.len=%d xfrd=%d recvsize=%d\n",
             epno, privreq->req.len, privreq->req.xfrd, recvsize);
 
       /* Ignore any attempt to receive a zero length packet */
@@ -1274,6 +1334,10 @@ static int sam_req_read(struct sam_usbdev_s *priv, struct sam_ep_s *privep,
   privreq->req.xfrd = 0;
   privreq->inflight = privreq->req.len;
   priv->eplist[epno].descb[0]->addr = (uint32_t) privreq->req.buf;
+  packetsize        = priv->eplist[epno].descb[0]->pktsize;
+  packetsize       &= ~USBDEV_PKTSIZE_BCNT_MASK;
+  packetsize       &= ~USBDEV_PKTSIZE_MPKTSIZE_MASK;
+  packetsize       |=  USBDEV_PKTSIZE_MPKTSIZE(privreq->inflight);
   sam_putreg8(USBDEV_EPSTATUS_BK0RDY, SAM_USBDEV_EPSTATUSCLR(epno));
 
   return OK;
@@ -1524,7 +1588,7 @@ sam_ep_reserve(struct sam_usbdev_s *priv, uint8_t epset)
  *
  * Description:
  *   The endpoint is no long in-used.  It will be unreserved and can be
- *   reused if needed.
+ *   re-used if needed.
  *
  ****************************************************************************/
 
@@ -1534,6 +1598,20 @@ sam_ep_unreserve(struct sam_usbdev_s *priv, struct sam_ep_s *privep)
   irqstate_t flags = enter_critical_section();
   priv->epavail   |= SAM_EP_BIT(USB_EPNO(privep->ep.eplog));
   leave_critical_section(flags);
+}
+
+/****************************************************************************
+ * Name: sam_ep_reserved
+ *
+ * Description:
+ *   Check if the endpoint has already been allocated.
+ *
+ ****************************************************************************/
+
+static inline bool
+sam_ep_reserved(struct sam_usbdev_s *priv, int epno)
+{
+  return ((priv->epavail & SAM_EP_BIT(epno)) == 0);
 }
 
 /****************************************************************************
@@ -1646,7 +1724,7 @@ static struct usbdev_req_s *sam_ep_allocreq(struct usbdev_ep_s *ep)
 
   usbtrace(TRACE_EPALLOCREQ, USB_EPNO(ep->eplog));
 
-  privreq = kmm_malloc(sizeof(struct sam_req_s));
+  privreq = (struct sam_req_s *)kmm_malloc(sizeof(struct sam_req_s));
   if (!privreq)
     {
       usbtrace(TRACE_DEVERROR(SAM_TRACEERR_ALLOCFAIL), 0);
@@ -2192,9 +2270,7 @@ static void sam_resume(struct sam_usbdev_s *priv)
 
       sam_enableclks();
 
-      /* Restore full power -- whatever that means for this particular
-       * board
-       */
+      /* Restore full power -- whatever that means for this particular board */
 
       sam_usb_suspend((struct usbdev_s *)priv, true);
 
@@ -3393,12 +3469,12 @@ static int sam_usb_interrupt(int irq, void *context, void *arg)
   return OK;
 }
 
-void arm_usbuninitialize(void)
+void up_usbuninitialize(void)
 {
-  uinfo("arm_usbuninitialize()\n");
+  uinfo("up_usbuninitialize()\n");
 }
 
-void arm_usbinitialize(void)
+void up_usbinitialize(void)
 {
   /* For now there is only one USB controller, but we will always refer to
    * it using a pointer to make any future ports to multiple USB controllers
@@ -3437,7 +3513,7 @@ void arm_usbinitialize(void)
   return;
 
 errout:
-  arm_usbuninitialize();
+  up_usbuninitialize();
 }
 
 /****************************************************************************
@@ -4044,7 +4120,7 @@ int usbdev_unregister(struct usbdevclass_driver_s *driver)
 
   /* Put the hardware in an inactive state.  Then bring the hardware back up
    * in the initial state.  This is essentially the same state as we were
-   * in when arm_usbinitialize() was first called.
+   * in when up_usbinitialize() was first called.
    */
 
   sam_hw_shutdown(priv);

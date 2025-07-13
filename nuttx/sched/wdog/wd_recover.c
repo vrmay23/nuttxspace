@@ -1,7 +1,5 @@
 /****************************************************************************
- * sched/wdog/wd_recover.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * sched/wdog/wdog_recover.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -58,12 +56,22 @@
 
 void wd_recover(FAR struct tcb_s *tcb)
 {
+  irqstate_t flags;
+
   /* The task is being deleted.  If it is waiting for any timed event, then
-   * cancel the watchdog now so that no events occur after the watchdog
-   * expires. Obviously there are lots of race conditions here so this will
-   * most certainly have to be revisited in the future.
-   *
+   * tcb->waitdog will be non-NULL.  Cancel the watchdog now so that no
+   * events occur after the watchdog expires.  Obviously there are lots of
+   * race conditions here so this will most certainly have to be revisited in
+   * the future.
    */
 
-  wd_cancel(&tcb->waitdog);
+  flags = enter_critical_section();
+  if (tcb->waitdog)
+    {
+      wd_cancel(tcb->waitdog);
+      wd_delete(tcb->waitdog);
+      tcb->waitdog = NULL;
+    }
+
+  leave_critical_section(flags);
 }

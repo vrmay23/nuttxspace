@@ -1,8 +1,7 @@
 /****************************************************************************
  * apps/interpreters/bas/bas_fs.h
  *
- * SPDX-License-Identifier: MIT
- * SPDX-FileCopyrightText: 1999-2014 Michael Haardt
+ *   Copyright (c) 1999-2014 Michael Haardt
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -14,13 +13,46 @@
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
  * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
+ *
+ * Adapted to NuttX and re-released under a 3-clause BSD license:
+ *
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
+ *   Authors: Alan Carvalho de Assis <Alan Carvalho de Assis>
+ *            Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -70,24 +102,20 @@
 
 struct FileStream
 {
-  int dev;
-  int tty;
+  int dev,tty;
   int recLength;
 
   int infd;
   char inBuf[1024];
-  size_t inSize;
-  size_t inCapacity;
+  size_t inSize,inCapacity;
 
   int outfd;
   int outPos;
   int outLineWidth;
   int outColWidth;
   char outBuf[1024];
-  size_t outSize;
-  size_t outCapacity;
-  int outforeground;
-  int outbackground;
+  size_t outSize,outCapacity;
+  int outforeground,outbackground;
 
   int randomfd;
   int recPos;
@@ -117,7 +145,13 @@ int FS_openbinaryChn(int chn, const char *name, int mode);
 int FS_freechn(void);
 int FS_flush(int dev);
 int FS_close(int dev);
+
+#ifdef CONFIG_SERIAL_TERMIOS
 int FS_istty(int chn);
+#else
+#  define FS_istty(chn) (1)
+#endif
+
 int FS_lock(int chn, off_t offset, off_t length, int mode, int w);
 int FS_truncate(int chn);
 void FS_shellmode(int chn);

@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/samv7/sam_lowputc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,15 +42,15 @@
 #include <stdint.h>
 
 #include <nuttx/irq.h>
-#include <nuttx/arch.h>
-#include <nuttx/spinlock.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "sam_config.h"
 #include "sam_gpio.h"
 #include "sam_periphclks.h"
-#include "sam_start.h"
+#include "sam_lowputc.h"
 
 #include "hardware/sam_uart.h"
 #include "hardware/sam_pinmap.h"
@@ -47,7 +60,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Configuration ************************************************************/
+/* Configuration **********************************************************/
 
 #ifdef HAVE_SERIAL_CONSOLE
 
@@ -160,41 +173,46 @@
 #endif /* HAVE_SERIAL_CONSOLE */
 
 /****************************************************************************
- * Private Data
- ****************************************************************************/
-
-#ifdef HAVE_SERIAL_CONSOLE
-static spinlock_t g_sam_lowputc_lock = SP_UNLOCKED;
-#endif
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_lowputc
+ * Name: up_lowputc
  *
  * Description:
  *   Output one byte on the serial console
  *
  ****************************************************************************/
 
-void arm_lowputc(char ch)
+void up_lowputc(char ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   irqstate_t flags;
 
-  /* Wait for the transmitter to be available */
+  for (; ; )
+    {
+      /* Wait for the transmitter to be available */
 
-  flags = spin_lock_irqsave(&g_sam_lowputc_lock);
-  while ((getreg32(SAM_CONSOLE_BASE + SAM_UART_SR_OFFSET) &
-    UART_INT_TXEMPTY) == 0);
+      while ((getreg32(SAM_CONSOLE_BASE + SAM_UART_SR_OFFSET) &
+        UART_INT_TXEMPTY) == 0);
 
-  /* Send the character */
+      /* Disable interrupts so that the test and the transmission are
+       * atomic.
+       */
 
-  putreg32((uint32_t)ch, SAM_CONSOLE_BASE + SAM_UART_THR_OFFSET);
+      flags = enter_critical_section();
+      if ((getreg32(SAM_CONSOLE_BASE + SAM_UART_SR_OFFSET) &
+        UART_INT_TXEMPTY) != 0)
+        {
+          /* Send the character */
 
-  spin_unlock_irqrestore(&g_sam_lowputc_lock, flags);
+          putreg32((uint32_t)ch, SAM_CONSOLE_BASE + SAM_UART_THR_OFFSET);
+          leave_critical_section(flags);
+          return;
+        }
+
+      leave_critical_section(flags);
+    }
 #endif
 }
 
@@ -206,11 +224,21 @@ void arm_lowputc(char ch)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
-  arm_lowputc(ch);
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
 #endif
+  return ch;
 }
 
 /****************************************************************************
@@ -229,64 +257,67 @@ void sam_lowsetup(void)
   uint64_t divb3;
   uint32_t intpart;
   uint32_t fracpart;
+#endif
+#if (defined(HAVE_SERIAL_CONSOLE) && !defined(CONFIG_SUPPRESS_UART_CONFIG)) || \
+    defined(CONFIG_SAMV7_USART1)
   uint32_t regval;
 #endif
 
   /* Enable clocking for all selected UART/USARTs */
 
-#ifdef CONFIG_UART0_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART0
   sam_uart0_enableclk();
 #endif
-#ifdef CONFIG_UART1_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART1
   sam_uart1_enableclk();
 #endif
-#ifdef CONFIG_UART2_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART2
   sam_uart2_enableclk();
 #endif
-#ifdef CONFIG_UART3_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART3
   sam_uart3_enableclk();
 #endif
-#ifdef CONFIG_UART4_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART4
   sam_uart4_enableclk();
 #endif
-#ifdef CONFIG_USART0_SERIALDRIVER
+#ifdef CONFIG_SAMV7_USART0
   sam_usart0_enableclk();
 #endif
-#ifdef CONFIG_USART1_SERIALDRIVER
+#ifdef CONFIG_SAMV7_USART1
   sam_usart1_enableclk();
 #endif
-#ifdef CONFIG_USART2_SERIALDRIVER
+#ifdef CONFIG_SAMV7_USART2
   sam_usart2_enableclk();
 #endif
 
   /* Configure UART pins for all selected UART/USARTs */
 
-#ifdef CONFIG_UART0_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART0
   sam_configgpio(GPIO_UART0_RXD);
   sam_configgpio(GPIO_UART0_TXD);
 #endif
 
-#ifdef CONFIG_UART1_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART1
   sam_configgpio(GPIO_UART1_RXD);
   sam_configgpio(GPIO_UART1_TXD);
 #endif
 
-#ifdef CONFIG_UART2_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART2
   sam_configgpio(GPIO_UART2_RXD);
   sam_configgpio(GPIO_UART2_TXD);
 #endif
 
-#ifdef CONFIG_UART3_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART3
   sam_configgpio(GPIO_UART3_RXD);
   sam_configgpio(GPIO_UART3_TXD);
 #endif
 
-#ifdef CONFIG_UART4_SERIALDRIVER
+#ifdef CONFIG_SAMV7_UART4
   sam_configgpio(GPIO_UART4_RXD);
   sam_configgpio(GPIO_UART4_TXD);
 #endif
 
-#ifdef CONFIG_USART0_SERIALDRIVER
+#ifdef CONFIG_SAMV7_USART0
   sam_configgpio(GPIO_USART0_RXD);
   sam_configgpio(GPIO_USART0_TXD);
 #ifdef CONFIG_USART0_OFLOWCONTROL
@@ -297,7 +328,7 @@ void sam_lowsetup(void)
 #endif
 #endif
 
-#ifdef CONFIG_USART1_SERIALDRIVER
+#ifdef CONFIG_SAMV7_USART1
   sam_configgpio(GPIO_USART1_RXD);
   sam_configgpio(GPIO_USART1_TXD);
 #  ifdef CONFIG_USART1_OFLOWCONTROL
@@ -307,9 +338,22 @@ void sam_lowsetup(void)
   sam_configgpio(GPIO_USART1_RTS);
 #  endif
 
+  /* To use the USART1 as an USART, the SYSIO Pin4 must be bound to PB4
+   * instead of TDI
+   */
+
+#  if defined(CONFIG_SAMV7_JTAG_FULL_ENABLE)
+#    warning CONFIG_SAMV7_JTAG_FULL_ENABLE is incompatible with CONFIG_SAMV7_USART1.
+#    warning The SYSIO Pin4 must be bound to PB4 to use USART1
+#  endif
+
+  regval  = getreg32(SAM_MATRIX_CCFG_SYSIO);
+  regval |= MATRIX_CCFG_SYSIO_SYSIO4;
+  putreg32(regval, SAM_MATRIX_CCFG_SYSIO);
+
 #endif
 
-#ifdef CONFIG_USART2_SERIALDRIVER
+#ifdef CONFIG_SAMV7_USART2
   sam_configgpio(GPIO_USART2_RXD);
   sam_configgpio(GPIO_USART2_TXD);
 #ifdef CONFIG_USART2_OFLOWCONTROL

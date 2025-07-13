@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/graphics/pdcurs34/nuttx/pdcscrn.c
+ * apps/graphics/nuttx/pdcscrn.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,7 +46,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <graphics/curses.h>
 #include "pdcnuttx.h"
@@ -64,8 +76,7 @@ bool graphic_screen = false;
 #ifdef CONFIG_SYSTEM_TERMCURSES
 static void PDC_scr_free_term(FAR SCREEN *sp)
 {
-  FAR struct pdc_termscreen_s *termscreen =
-    (FAR struct pdc_termscreen_s *)sp;
+  FAR struct pdc_termscreen_s *termscreen = (FAR struct pdc_termscreen_s *)sp;
   FAR struct pdc_termstate_s  *termstate = &termscreen->termstate;
 
   /* Deinitialize termcurses */
@@ -149,8 +160,7 @@ static int PDC_scr_open_term(int argc, char **argv)
   ret = termcurses_getwinsize(termstate->tcurs, &winsz);
   if (ret != OK)
     {
-      PDC_LOG(("ERROR: Terminal termcurses driver doesn't support size "
-               "reporting\n"));
+      PDC_LOG(("ERROR: Terminal termcurses driver doesn't support size reporting\n"));
       free(termscreen);
       return ERR;
     }
@@ -161,8 +171,8 @@ static int PDC_scr_open_term(int argc, char **argv)
   SP->cols                     = winsz.ws_col;
   termscreen->termstate.out_fd = 1;
   termscreen->termstate.in_fd  = 0;
-  termscreen->termstate.fg_red = 0xfffe;
-  termscreen->termstate.bg_red = 0xfffe;
+  termscreen->termstate.fg_red = 0xFFFE;
+  termscreen->termstate.bg_red = 0xFFFE;
   termstate                    = &termscreen->termstate;
 
   /* Setup initial RGB colors */
@@ -177,7 +187,7 @@ static int PDC_scr_open_term(int argc, char **argv)
       greylevel                       += (i & COLOR_BLUE)  ? 0x40 : 0;
 
       termstate->greylevel[i]          = greylevel;
-      termstate->greylevel[i + 8]      = greylevel | 0x3f;
+      termstate->greylevel[i+8]        = greylevel | 0x3f;
 #else
       termstate->rgbcolor[i].red       = (i & COLOR_RED)   ? 0xc0 : 0;
       termstate->rgbcolor[i].green     = (i & COLOR_GREEN) ? 0xc0 : 0;
@@ -197,9 +207,7 @@ static int PDC_scr_open_term(int argc, char **argv)
     {
       /* Free the memory ... can't open input */
 
-#ifdef CONFIG_PDCURSES_MULTITHREAD
       PDC_ctx_free();
-#endif
       free(termscreen);
     }
 #endif
@@ -212,20 +220,18 @@ static int PDC_scr_open_term(int argc, char **argv)
  * Name: PDC_init_pair_term
  *
  * Description:
- *   The core of init_pair().  This does all the work of that function,
- *   except checking for values out of range.  The values passed to this
- *   function should be returned by a call to PDC_pair_content() with the
- *   same pair number.  PDC_transform_line() should use the specified colors
- *   when rendering a chtype with the given pair number.
+ *   The core of init_pair().  This does all the work of that function, except
+ *   checking for values out of range.  The values passed to this function
+ *   should be returned by a call to PDC_pair_content() with the same pair
+ *   number.  PDC_transform_line() should use the specified colors when
+ *   rendering a chtype with the given pair number.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_SYSTEM_TERMCURSES
-static void PDC_init_pair_term(FAR SCREEN *sp, short pair,
-                               short fg, short bg)
+static void PDC_init_pair_term(FAR SCREEN *sp, short pair, short fg, short bg)
 {
-  FAR struct pdc_termscreen_s *termscreen =
-    (FAR struct pdc_termscreen_s *)sp;
+  FAR struct pdc_termscreen_s *termscreen = (FAR struct pdc_termscreen_s *)sp;
 
   termscreen->termstate.colorpair[pair].fg = fg;
   termscreen->termstate.colorpair[pair].bg = bg;
@@ -245,8 +251,7 @@ static void PDC_init_pair_term(FAR SCREEN *sp, short pair,
 int PDC_init_color_term(FAR SCREEN *sp, short color, short red, short green,
                         short blue)
 {
-  FAR struct pdc_termscreen_s *termscreen =
-    (FAR struct pdc_termscreen_s *)sp;
+  FAR struct pdc_termscreen_s *termscreen = (FAR struct pdc_termscreen_s *)sp;
   FAR struct pdc_termstate_s  *termstate;
 
   DEBUGASSERT(termscreen != NULL);
@@ -280,8 +285,7 @@ int PDC_init_color_term(FAR SCREEN *sp, short color, short red, short green,
 int PDC_color_content_term(FAR SCREEN *sp, short color,
                            FAR short *red, FAR short *green, FAR short *blue)
 {
-  FAR struct pdc_termscreen_s *termscreen =
-    (FAR struct pdc_termscreen_s *)sp;
+  FAR struct pdc_termscreen_s *termscreen = (FAR struct pdc_termscreen_s *)sp;
   FAR struct pdc_termstate_s  *termstate;
 
   DEBUGASSERT(termscreen != NULL);
@@ -312,11 +316,9 @@ int PDC_color_content_term(FAR SCREEN *sp, short color,
  ****************************************************************************/
 
 #ifdef CONFIG_SYSTEM_TERMCURSES
-static int PDC_pair_content_term(FAR SCREEN *sp, short pair,
-                                 FAR short *fg, FAR short *bg)
+static int PDC_pair_content_term(FAR SCREEN *sp, short pair, short *fg, short *bg)
 {
-  FAR struct pdc_termscreen_s *termscreen =
-    (FAR struct pdc_termscreen_s *)sp;
+  FAR struct pdc_termscreen_s *termscreen = (FAR struct pdc_termscreen_s *)sp;
 
   *fg = termscreen->termstate.colorpair[pair].fg;
   *bg = termscreen->termstate.colorpair[pair].bg;
@@ -453,8 +455,7 @@ int PDC_scr_open(int argc, char **argv)
 
   /* Allocate the global instance of SP */
 
-  fbscreen =
-    (FAR struct pdc_fbscreen_s *)zalloc(sizeof(struct pdc_fbscreen_s));
+  fbscreen = (FAR struct pdc_fbscreen_s *)zalloc(sizeof(struct pdc_fbscreen_s));
   if (fbscreen == NULL)
     {
       PDC_LOG(("ERROR: Failed to allocate SP\n"));
@@ -485,7 +486,7 @@ int PDC_scr_open(int argc, char **argv)
       greylevel                     += (i & COLOR_BLUE)  ? 0x40 : 0;
 
       fbstate->greylevel[i]          = greylevel;
-      fbstate->greylevel[i + 8]      = greylevel | 0x3f;
+      fbstate->greylevel[i+8]        = greylevel | 0x3f;
 #else
       fbstate->rgbcolor[i].red       = (i & COLOR_RED)   ? 0xc0 : 0;
       fbstate->rgbcolor[i].green     = (i & COLOR_GREEN) ? 0xc0 : 0;
@@ -576,8 +577,8 @@ int PDC_scr_open(int argc, char **argv)
    * address mapping to make the memory accessible to the application.
    */
 
-  fbstate->fbmem = mmap(NULL, pinfo.fblen, PROT_READ | PROT_WRITE,
-                        MAP_SHARED | MAP_FILE, fbstate->fbfd, 0);
+  fbstate->fbmem = mmap(NULL, pinfo.fblen, PROT_READ|PROT_WRITE,
+                        MAP_SHARED|MAP_FILE, fbstate->fbfd, 0);
   if (fbstate->fbmem == MAP_FAILED)
     {
       PDC_LOG(("ERROR: ioctl(FBIOGET_PLANEINFO) failed: %d\n", errno));
@@ -716,9 +717,9 @@ int PDC_resize_screen(int nlines, int ncols)
  *
  * Description:
  *   The non-portable functionality of reset_prog_mode() is handled here --
- *   whatever's not done in _restore_mode().  In current ports:  In OS/2,
- *   this sets the keyboard to binary mode; in Win32, it enables or disables
- *   the mouse pointer to match the saved mode; in others it does nothing.
+ *   whatever's not done in _restore_mode().  In current ports:  In OS/2, this
+ *   sets the keyboard to binary mode; in Win32, it enables or disables the
+ *   mouse pointer to match the saved mode; in others it does nothing.
  *
  ****************************************************************************/
 
@@ -775,11 +776,11 @@ void PDC_save_screen_mode(int i)
  * Name: PDC_init_pair
  *
  * Description:
- *   The core of init_pair().  This does all the work of that function,
- *   except checking for values out of range.  The values passed to this
- *   function should be returned by a call to PDC_pair_content() with the
- *   same pair number.  PDC_transform_line() should use the specified colors
- *   when rendering a chtype with the given pair number.
+ *   The core of init_pair().  This does all the work of that function, except
+ *   checking for values out of range.  The values passed to this function
+ *   should be returned by a call to PDC_pair_content() with the same pair
+ *   number.  PDC_transform_line() should use the specified colors when
+ *   rendering a chtype with the given pair number.
  *
  ****************************************************************************/
 

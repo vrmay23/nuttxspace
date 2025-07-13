@@ -1,22 +1,36 @@
 /****************************************************************************
  * drivers/syslog/syslog_rpmsg_server.c
+ * Syslog driver for rpmsg syslog server
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Pinecone Inc. All rights reserved.
+ *   Author: Guiding Li<liguiding@pinecone.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,13 +40,9 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
-
-#include <nuttx/fs/ioctl.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/list.h>
-#include <nuttx/mutex.h>
-#include <nuttx/rpmsg/rpmsg.h>
+#include <nuttx/rptun/openamp.h>
+#include <nuttx/syslog/syslog.h>
 #include <nuttx/syslog/syslog_rpmsg.h>
 
 #include "syslog.h"
@@ -50,9 +60,6 @@
 
 struct syslog_rpmsg_server_s
 {
-#ifdef CONFIG_SYSLOG_RPMSG_SERVER_CHARDEV
-  struct list_node      node;
-#endif
   struct rpmsg_endpoint ept;
   FAR char              *tmpbuf;
   unsigned int          nextpos;
@@ -63,77 +70,22 @@ struct syslog_rpmsg_server_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static void syslog_rpmsg_write_internal(FAR const char *buf1, size_t len1,
-                                        FAR const char *buf2, size_t len2);
-static bool syslog_rpmsg_ns_match(FAR struct rpmsg_device *rdev,
-                                  FAR void *priv_, FAR const char *name,
-                                  uint32_t dest);
+static void syslog_rpmsg_write(FAR const char *buf1, size_t len1,
+                               FAR const char *buf2, size_t len2);
 static void syslog_rpmsg_ns_bind(FAR struct rpmsg_device *rdev,
                                  FAR void *priv_, FAR const char *name,
                                  uint32_t dest);
+static void syslog_rpmsg_ns_unbind(FAR struct rpmsg_endpoint *ept);
 static int  syslog_rpmsg_ept_cb(FAR struct rpmsg_endpoint *ept,
                                 FAR void *data, size_t len, uint32_t src,
                                 FAR void *priv_);
-#ifdef CONFIG_SYSLOG_RPMSG_SERVER_CHARDEV
-static int syslog_rpmsg_file_ioctl(FAR struct file *filep, int cmd,
-                                   unsigned long arg);
-#endif
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
-
-#ifdef CONFIG_SYSLOG_RPMSG_SERVER_CHARDEV
-static struct list_node g_list = LIST_INITIAL_VALUE(g_list);
-static mutex_t g_lock = NXMUTEX_INITIALIZER;
-
-static const struct file_operations g_syslog_rpmsg_fops =
-{
-  NULL,                    /* open */
-  NULL,                    /* close */
-  NULL,                    /* read */
-  NULL,                    /* write */
-  NULL,                    /* seek */
-  syslog_rpmsg_file_ioctl, /* ioctl */
-};
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-static int syslog_rpmsg_file_ioctl(FAR struct file *filep, int cmd,
-                                   unsigned long arg)
-{
-  FAR struct syslog_rpmsg_server_s *priv;
-  struct syslog_rpmsg_sync_s msg;
-  sem_t sem;
-
-  if (cmd != FIOC_DUMP)
-    {
-      return -ENOTTY;
-    }
-
-  nxsem_init(&sem, 0, 0);
-  nxmutex_lock(&g_lock);
-  list_for_every_entry(&g_list, priv, struct syslog_rpmsg_server_s, node)
-    {
-      msg.cookie = (uint64_t)(uintptr_t)&sem;
-      msg.header.command = SYSLOG_RPMSG_SYNC;
-      if (rpmsg_send(&priv->ept, &msg, sizeof(msg)) >= 0)
-        {
-          rpmsg_wait(&priv->ept, &sem);
-        }
-    }
-
-  nxmutex_unlock(&g_lock);
-  nxsem_destroy(&sem);
-  return OK;
-}
-#endif
-
-static void
-syslog_rpmsg_write_internal(FAR const char *buf1, size_t len1,
-                            FAR const char *buf2, size_t len2)
+static void syslog_rpmsg_write(FAR const char *buf1, size_t len1,
+                               FAR const char *buf2, size_t len2)
 {
   FAR const char *nl;
   size_t len;
@@ -166,38 +118,17 @@ syslog_rpmsg_write_internal(FAR const char *buf1, size_t len1,
     }
 }
 
-static bool syslog_rpmsg_ns_match(FAR struct rpmsg_device *rdev,
-                                  FAR void *priv_, FAR const char *name,
-                                  uint32_t dest)
-{
-  return !strcmp(name, SYSLOG_RPMSG_EPT_NAME);
-}
-
-static void syslog_rpmsg_ept_release(FAR struct rpmsg_endpoint *ept)
-{
-  FAR struct syslog_rpmsg_server_s *priv = ept->priv;
-
-  if (priv->nextpos)
-    {
-      syslog_rpmsg_write_internal(priv->tmpbuf, priv->nextpos, "\n", 1);
-    }
-
-#ifdef CONFIG_SYSLOG_RPMSG_SERVER_CHARDEV
-  nxmutex_lock(&g_lock);
-  list_delete(&priv->node);
-  nxmutex_unlock(&g_lock);
-#endif
-
-  kmm_free(priv->tmpbuf);
-  kmm_free(priv);
-}
-
 static void syslog_rpmsg_ns_bind(FAR struct rpmsg_device *rdev,
                                  FAR void *priv_, FAR const char *name,
                                  uint32_t dest)
 {
   FAR struct syslog_rpmsg_server_s *priv;
   int ret;
+
+  if (strcmp(name, SYSLOG_RPMSG_EPT_NAME))
+    {
+      return;
+    }
 
   priv = kmm_zalloc(sizeof(struct syslog_rpmsg_server_s));
   if (!priv)
@@ -206,26 +137,33 @@ static void syslog_rpmsg_ns_bind(FAR struct rpmsg_device *rdev,
     }
 
   priv->ept.priv = priv;
-  priv->ept.release_cb = syslog_rpmsg_ept_release;
-
-#ifdef CONFIG_SYSLOG_RPMSG_SERVER_CHARDEV
-  nxmutex_lock(&g_lock);
-  list_add_tail(&g_list, &priv->node);
-  nxmutex_unlock(&g_lock);
-#endif
 
   ret = rpmsg_create_ept(&priv->ept, rdev, SYSLOG_RPMSG_EPT_NAME,
                          RPMSG_ADDR_ANY, dest,
-                         syslog_rpmsg_ept_cb, rpmsg_destroy_ept);
+                         syslog_rpmsg_ept_cb, syslog_rpmsg_ns_unbind);
   if (ret)
     {
       kmm_free(priv);
     }
 }
 
-static int syslog_rpmsg_ept_cb(FAR struct rpmsg_endpoint *ept,
-                               FAR void *data, size_t len,
-                               uint32_t src, FAR void *priv_)
+static void syslog_rpmsg_ns_unbind(FAR struct rpmsg_endpoint *ept)
+{
+  FAR struct syslog_rpmsg_server_s *priv = ept->priv;
+
+  if (priv->nextpos)
+    {
+      syslog_rpmsg_write(priv->tmpbuf, priv->nextpos, "\n", 1);
+    }
+
+  rpmsg_destroy_ept(ept);
+
+  kmm_free(priv->tmpbuf);
+  kmm_free(priv);
+}
+
+static int syslog_rpmsg_ept_cb(FAR struct rpmsg_endpoint *ept, FAR void *data,
+                               size_t len, uint32_t src, FAR void *priv_)
 {
   FAR struct syslog_rpmsg_server_s *priv = priv_;
   FAR struct syslog_rpmsg_header_s *header = data;
@@ -233,6 +171,7 @@ static int syslog_rpmsg_ept_cb(FAR struct rpmsg_endpoint *ept,
   if (header->command == SYSLOG_RPMSG_TRANSFER)
     {
       FAR struct syslog_rpmsg_transfer_s *msg = data;
+      struct syslog_rpmsg_header_s done;
       unsigned int copied = msg->count;
       unsigned int printed = 0;
       FAR const char *nl;
@@ -245,9 +184,7 @@ static int syslog_rpmsg_ept_cb(FAR struct rpmsg_endpoint *ept,
 
           if (priv->nextpos)
             {
-              syslog_rpmsg_write_internal(priv->tmpbuf,
-                                          priv->nextpos,
-                                          msg->data, printed);
+              syslog_rpmsg_write(priv->tmpbuf, priv->nextpos, msg->data, printed);
               priv->nextpos = 0;
             }
           else
@@ -261,7 +198,7 @@ static int syslog_rpmsg_ept_cb(FAR struct rpmsg_endpoint *ept,
           unsigned int newsize = priv->nextpos + copied;
           if (newsize > priv->alloced)
             {
-              FAR char *newbuf = kmm_realloc(priv->tmpbuf, newsize);
+              char *newbuf = kmm_realloc(priv->tmpbuf, newsize);
               if (newbuf != NULL)
                 {
                   priv->tmpbuf  = newbuf;
@@ -276,16 +213,11 @@ static int syslog_rpmsg_ept_cb(FAR struct rpmsg_endpoint *ept,
           memcpy(priv->tmpbuf + priv->nextpos, msg->data + printed, copied);
           priv->nextpos += copied;
         }
-    }
-#ifdef CONFIG_SYSLOG_RPMSG_SERVER_CHARDEV
-  else if (header->command == SYSLOG_RPMSG_SYNC)
-    {
-      FAR struct syslog_rpmsg_sync_s *msg = data;
-      FAR sem_t *sem = (FAR sem_t *)(uintptr_t)msg->cookie;
 
-      rpmsg_post(ept, sem);
+      done.command = SYSLOG_RPMSG_TRANSFER_DONE;
+      done.result  = printed + copied;
+      rpmsg_send(ept, &done, sizeof(done));
     }
-#endif
 
   return 0;
 }
@@ -296,19 +228,8 @@ static int syslog_rpmsg_ept_cb(FAR struct rpmsg_endpoint *ept,
 
 int syslog_rpmsg_server_init(void)
 {
-#ifdef CONFIG_SYSLOG_RPMSG_SERVER_CHARDEV
-  int ret;
-
-  ret = register_driver("/dev/logrpmsg", &g_syslog_rpmsg_fops, 0666, NULL);
-  if (ret < 0)
-    {
-      return ret;
-    }
-#endif
-
   return rpmsg_register_callback(NULL,
                                  NULL,
                                  NULL,
-                                 syslog_rpmsg_ns_match,
                                  syslog_rpmsg_ns_bind);
 }

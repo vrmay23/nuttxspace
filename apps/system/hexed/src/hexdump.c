@@ -1,8 +1,8 @@
 /****************************************************************************
  * apps/system/hexed/src/hexdump.c
+ * hexed dump command
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2010, B.ZaaR, All rights reserved.
+ *   Copyright (c) 2010, B.ZaaR, All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:

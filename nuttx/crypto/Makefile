@@ -1,26 +1,42 @@
 ############################################################################
 # crypto/Makefile
 #
-# SPDX-License-Identifier: Apache-2.0
+#   Copyright (C) 2007, 2008, 2011-2014, 2016 Gregory Nutt. All rights reserved.
+#   Author: Gregory Nutt <gnutt@nuttx.org>
 #
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.  The
-# ASF licenses this file to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance with the
-# License.  You may obtain a copy of the License at
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the
+#    distribution.
+# 3. Neither the name NuttX nor the names of its contributors may be
+#    used to endorse or promote products derived from this software
+#    without specific prior written permission.
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
-# License for the specific language governing permissions and limitations
-# under the License.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
 
-include $(TOPDIR)/Make.defs
+-include $(TOPDIR)/Make.defs
+
+CRYPTO_ASRCS =
+CRYPTO_CSRCS =
 
 ifeq ($(CONFIG_CRYPTO),y)
 
@@ -32,41 +48,19 @@ CRYPTO_CSRCS += crypto.c testmngr.c
 
 ifeq ($(CONFIG_CRYPTO_CRYPTODEV),y)
   CRYPTO_CSRCS += cryptodev.c
-ifeq ($(CONFIG_CRYPTO_CRYPTODEV_SOFTWARE),y)
-  CRYPTO_CSRCS += cryptosoft.c
-  CRYPTO_CSRCS += xform.c
-endif
 endif
 
-# Software crypto algorithm
+# Software AES library
 
 ifeq ($(CONFIG_CRYPTO_SW_AES),y)
   CRYPTO_CSRCS += aes.c
 endif
-CRYPTO_CSRCS += blake2s.c
-CRYPTO_CSRCS += blf.c
-CRYPTO_CSRCS += cast.c
-CRYPTO_CSRCS += chachapoly.c
-CRYPTO_CSRCS += ecb_enc.c
-CRYPTO_CSRCS += ecb3_enc.c
-CRYPTO_CSRCS += set_key.c
-CRYPTO_CSRCS += md5.c
-CRYPTO_CSRCS += poly1305.c
-CRYPTO_CSRCS += rijndael.c
-CRYPTO_CSRCS += rmd160.c
-CRYPTO_CSRCS += sha1.c
-CRYPTO_CSRCS += sha2.c
-CRYPTO_CSRCS += gmac.c
-CRYPTO_CSRCS += cmac.c
-CRYPTO_CSRCS += hmac.c
-ifeq ($(CONFIG_CRYPTO_RANDOM_POOL),y)
-  CRYPTO_CSRCS += idgen.c
-  CRYPTO_CSRCS += curve25519.c
+
+# BLAKE2s hash algorithm
+
+ifeq ($(CONFIG_CRYPTO_BLAKE2S),y)
+  CRYPTO_CSRCS += blake2s.c
 endif
-CRYPTO_CSRCS += key_wrap.c
-CRYPTO_CSRCS += siphash.c
-CRYPTO_CSRCS += hmac_buff.c
-CRYPTO_CSRCS += bn.c
 
 # Entropy pool random number generator
 
@@ -99,13 +93,9 @@ $(COBJS): %$(OBJEXT): %.c
 $(BIN): $(OBJS)
 	$(call ARCHIVE, $@, $(OBJS))
 
-makedepfile: $(CSRCS:.c=.ddc) $(ASRCS:.S=.dds)
-	$(call CATFILE, Make.dep, $^)
-	$(call DELFILE, $^)
-
-.depend: Makefile $(SRCS) $(TOPDIR)$(DELIM).config
+.depend: Makefile $(SRCS)
 ifeq ($(CONFIG_CRYPTO),y)
-	$(Q) $(MAKE) makedepfile
+	$(Q) $(MKDEP) --dep-path . "$(CC)" -- $(CFLAGS) -- $(SRCS) >Make.dep
 endif
 	$(Q) touch $@
 
