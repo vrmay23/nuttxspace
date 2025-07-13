@@ -1,7 +1,5 @@
 /****************************************************************************
- * apps/examples/userfs/userfs_main.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * examples/userfs/userfs_main.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -26,14 +24,12 @@
 
 #include <nuttx/config.h>
 
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
 #include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <sched.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 
 #include <nuttx/fs/userfs.h>
 
@@ -121,10 +117,6 @@ static int     ufstest_rename(FAR void *volinfo, FAR const char *oldrelpath,
 static int     ufstest_stat(FAR void *volinfo, FAR const char *relpath,
                  FAR struct stat *buf);
 static int     ufstest_destroy(FAR void *volinfo);
-static int     ufstest_fchstat(FAR void *volinfo, FAR void *openinfo,
-                 FAR const struct stat *buf, int flags);
-static int     ufstest_chstat(FAR void *volinfo, FAR const char *relpath,
-                 FAR const struct stat *buf, int flags);
 
 /****************************************************************************
  * Private Data
@@ -183,9 +175,7 @@ static const struct userfs_operations_s g_ufstest_ops =
   ufstest_rmdir,
   ufstest_rename,
   ufstest_stat,
-  ufstest_destroy,
-  ufstest_fchstat,
-  ufstest_chstat
+  ufstest_destroy
 };
 
 /****************************************************************************
@@ -524,7 +514,7 @@ static int ufstest_rename(FAR void *volinfo, FAR const char *oldrelpath,
   file = ufstest_findbyname(oldrelpath);
   if (file != NULL)
     {
-      strlcpy(file->entry.d_name, newrelpath, NAME_MAX);
+      strncpy(file->entry.d_name, newrelpath, NAME_MAX + 1);
       return OK;
     }
 
@@ -562,18 +552,6 @@ static int ufstest_stat(FAR void *volinfo, FAR const char *relpath,
 }
 
 static int ufstest_destroy(FAR void *volinfo)
-{
-  return OK;
-}
-
-static int ufstest_fchstat(FAR void *volinfo, FAR void *openinfo,
-                           FAR const struct stat *buf, int flags)
-{
-  return OK;
-}
-
-static int ufstest_chstat(FAR void *volinfo, FAR const char *relpath,
-                          FAR const struct stat *buf, int flags)
 {
   return OK;
 }

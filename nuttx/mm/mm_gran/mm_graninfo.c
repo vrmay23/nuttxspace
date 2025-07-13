@@ -1,8 +1,6 @@
 /****************************************************************************
  * mm/mm_gran/mm_graninfo.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,7 +25,6 @@
 #include <nuttx/config.h>
 
 #include <assert.h>
-#include <errno.h>
 
 #include <nuttx/mm/gran.h>
 
@@ -617,9 +614,7 @@ void gran_info(GRAN_HANDLE handle, FAR struct graninfo_s *info)
         }
     }
 
-  /* Check if the last, unterminated sequence of free granules was
-   * the longest
-   */
+  /* Check if the last, unterminated sequence of free granules was the longest */
 
   if (mxfree > info->mxfree)
     {

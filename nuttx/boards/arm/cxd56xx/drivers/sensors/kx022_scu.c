@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/cxd56xx/drivers/sensors/kx022_scu.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +42,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fixedmath.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <arch/types.h>
@@ -46,7 +58,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_SENSORS_KX022_SCU_DECI
+#ifdef CONFIG_CXD56_DECI_KX022
 #  define KX022_SEQ_TYPE SEQ_TYPE_DECI
 #else
 #  define KX022_SEQ_TYPE SEQ_TYPE_NORMAL
@@ -93,18 +105,19 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
 /* Structure for kx022 device */
 
 struct kx022_dev_s
 {
-  struct i2c_master_s *i2c; /* I2C interface */
-  uint8_t       addr;       /* I2C address */
-  int           port;       /* I2C port */
-  struct seq_s *seq;        /* Sequencer instance */
-  int           fifoid;     /* FIFO ID */
+  FAR struct i2c_master_s *i2c; /* I2C interface */
+  uint8_t       addr;           /* I2C address */
+  int           port;           /* I2C port */
+
+  struct seq_s *seq;            /* Sequencer instance */
+  int           fifoid;         /* FIFO ID */
 };
 
 /****************************************************************************
@@ -113,13 +126,13 @@ struct kx022_dev_s
 
 /* Character driver methods */
 
-static int kx022_open(struct file *filep);
-static int kx022_close(struct file *filep);
-static ssize_t kx022_read(struct file *filep, char *buffer,
+static int kx022_open(FAR struct file *filep);
+static int kx022_close(FAR struct file *filep);
+static ssize_t kx022_read(FAR struct file *filep, FAR char *buffer,
                           size_t buflen);
-static ssize_t kx022_write(struct file *filep, const char *buffer,
+static ssize_t kx022_write(FAR struct file *filep, FAR const char *buffer,
                            size_t buflen);
-static int kx022_ioctl(struct file *filep, int cmd, unsigned long arg);
+static int kx022_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -131,8 +144,12 @@ static const struct file_operations g_kx022fops =
   kx022_close,                 /* close */
   kx022_read,                  /* read */
   kx022_write,                 /* write */
-  NULL,                        /* seek */
+  0,                           /* seek */
   kx022_ioctl,                 /* ioctl */
+#ifndef CONFIG_DISABLE_POLL
+  0,                           /* poll */
+#endif
+  0                            /* unlink */
 };
 
 /* Take XYZ data. */
@@ -163,7 +180,7 @@ static struct seq_s *g_seq = NULL;
  *
  ****************************************************************************/
 
-static uint8_t kx022_getreg8(struct kx022_dev_s *priv, uint8_t regaddr)
+static uint8_t kx022_getreg8(FAR struct kx022_dev_s *priv, uint8_t regaddr)
 {
   uint8_t regval = 0;
   uint16_t inst[2];
@@ -186,7 +203,7 @@ static uint8_t kx022_getreg8(struct kx022_dev_s *priv, uint8_t regaddr)
  *
  ****************************************************************************/
 
-static void kx022_putreg8(struct kx022_dev_s *priv, uint8_t regaddr,
+static void kx022_putreg8(FAR struct kx022_dev_s *priv, uint8_t regaddr,
                           uint8_t regval)
 {
   uint16_t inst[2];
@@ -207,7 +224,7 @@ static void kx022_putreg8(struct kx022_dev_s *priv, uint8_t regaddr,
  *
  ****************************************************************************/
 
-static int kx022_checkid(struct kx022_dev_s *priv)
+static int kx022_checkid(FAR struct kx022_dev_s *priv)
 {
   uint8_t devid;
 
@@ -234,7 +251,7 @@ static int kx022_checkid(struct kx022_dev_s *priv)
  *
  ****************************************************************************/
 
-static void kx022_initialize(struct kx022_dev_s *priv)
+static void kx022_initialize(FAR struct kx022_dev_s *priv)
 {
   uint8_t val;
 
@@ -249,7 +266,7 @@ static void kx022_initialize(struct kx022_dev_s *priv)
   kx022_putreg8(priv, KX022_ODCNTL, val);
 }
 
-static int kx022_seqinit(struct kx022_dev_s *priv)
+static int kx022_seqinit(FAR struct kx022_dev_s *priv)
 {
   DEBUGASSERT(g_seq == NULL);
 
@@ -267,14 +284,8 @@ static int kx022_seqinit(struct kx022_dev_s *priv)
 
   /* Set instruction and sample data information to sequencer */
 
-  seq_setinstruction(priv->seq,
-                     g_kx022inst,
-                     itemsof(g_kx022inst));
-  seq_setsample(priv->seq,
-                KX022_BYTESPERSAMPLE,
-                0,
-                KX022_ELEMENTSIZE,
-                false);
+  seq_setinstruction(priv->seq, g_kx022inst, itemsof(g_kx022inst));
+  seq_setsample(priv->seq, KX022_BYTESPERSAMPLE, 0, KX022_ELEMENTSIZE, false);
 
   return OK;
 }
@@ -287,10 +298,10 @@ static int kx022_seqinit(struct kx022_dev_s *priv)
  *
  ****************************************************************************/
 
-static int kx022_open(struct file *filep)
+static int kx022_open(FAR struct file *filep)
 {
-  struct inode *inode = filep->f_inode;
-  struct kx022_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct kx022_dev_s *priv = inode->i_private;
   uint8_t val;
 
   if (g_refcnt == 0)
@@ -330,10 +341,10 @@ static int kx022_open(struct file *filep)
  *
  ****************************************************************************/
 
-static int kx022_close(struct file *filep)
+static int kx022_close(FAR struct file *filep)
 {
-  struct inode *inode = filep->f_inode;
-  struct kx022_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct kx022_dev_s *priv = inode->i_private;
   uint8_t val;
 
   g_refcnt--;
@@ -364,11 +375,11 @@ static int kx022_close(struct file *filep)
  * Name: kx022_read
  ****************************************************************************/
 
-static ssize_t kx022_read(struct file *filep, char *buffer,
+static ssize_t kx022_read(FAR struct file *filep, FAR char *buffer,
                           size_t len)
 {
-  struct inode *inode = filep->f_inode;
-  struct kx022_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct kx022_dev_s *priv = inode->i_private;
 
   len = len / KX022_BYTESPERSAMPLE * KX022_BYTESPERSAMPLE;
   len = seq_read(priv->seq, priv->fifoid, buffer, len);
@@ -380,7 +391,7 @@ static ssize_t kx022_read(struct file *filep, char *buffer,
  * Name: kx022_write
  ****************************************************************************/
 
-static ssize_t kx022_write(struct file *filep, const char *buffer,
+static ssize_t kx022_write(FAR struct file *filep, FAR const char *buffer,
                            size_t buflen)
 {
   return -ENOSYS;
@@ -390,10 +401,10 @@ static ssize_t kx022_write(struct file *filep, const char *buffer,
  * Name: kx022_ioctl
  ****************************************************************************/
 
-static int kx022_ioctl(struct file *filep, int cmd, unsigned long arg)
+static int kx022_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
-  struct inode *inode = filep->f_inode;
-  struct kx022_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct kx022_dev_s *priv = inode->i_private;
   int ret = OK;
 
   switch (cmd)
@@ -438,10 +449,10 @@ static int kx022_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-int kx022_init(struct i2c_master_s *i2c, int port)
+int kx022_init(FAR struct i2c_master_s *i2c, int port)
 {
-  struct kx022_dev_s tmp;
-  struct kx022_dev_s *priv = &tmp;
+  FAR struct kx022_dev_s tmp;
+  FAR struct kx022_dev_s *priv = &tmp;
   int ret;
 
   /* Setup temporary device structure for initialization */
@@ -485,16 +496,16 @@ int kx022_init(struct i2c_master_s *i2c, int port)
  *
  ****************************************************************************/
 
-int kx022_register(const char *devpath, int minor,
-                   struct i2c_master_s *i2c, int port)
+int kx022_register(FAR const char *devpath, int minor,
+                   FAR struct i2c_master_s *i2c, int port)
 {
-  struct kx022_dev_s *priv;
+  FAR struct kx022_dev_s *priv;
   char path[16];
   int ret;
 
   /* Initialize the KX022 device structure */
 
-  priv = kmm_malloc(sizeof(struct kx022_dev_s));
+  priv = (FAR struct kx022_dev_s *)kmm_malloc(sizeof(struct kx022_dev_s));
   if (!priv)
     {
       snerr("Failed to allocate instance\n");

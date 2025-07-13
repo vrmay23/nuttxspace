@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/nrf52/nrf52840-dk/src/nrf52_bringup.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,52 +42,11 @@
 #include <sys/types.h>
 #include <syslog.h>
 
-#include <nuttx/fs/fs.h>
-
-#ifdef CONFIG_USBMONITOR
-#  include <nuttx/usb/usbmonitor.h>
-#endif
-
 #ifdef CONFIG_USERLED
 #  include <nuttx/leds/userled.h>
 #endif
 
-#ifdef CONFIG_INPUT_BUTTONS
-#  include <nuttx/input/buttons.h>
-#endif
-
-#ifdef CONFIG_RNDIS
-#  include <nuttx/usb/rndis.h>
-#endif
-
-#ifdef CONFIG_TIMER
-#  include "nrf52_timer.h"
-#endif
-
-#ifdef CONFIG_NRF52_PROGMEM
-#  include "nrf52_progmem.h"
-#endif
-
-#ifdef CONFIG_NRF52_SOFTDEVICE_CONTROLLER
-#  include "nrf52_sdc.h"
-#endif
-
-#ifdef CONFIG_SENSORS_LSM9DS1
-#  include "nrf52_lsm9ds1.h"
-#endif
-
-#ifdef CONFIG_NRF52_RADIO_IEEE802154
-#  include "nrf52_ieee802154.h"
-#endif
-
 #include "nrf52840-dk.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define NRF52_TIMER    (2)
-#define LMS9DS1_I2CBUS (0)
 
 /****************************************************************************
  * Public Functions
@@ -141,7 +113,7 @@ static void nrf52_i2ctool(void)
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_LIB_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -149,17 +121,6 @@ static void nrf52_i2ctool(void)
 int nrf52_bringup(void)
 {
   int ret;
-
-#ifdef CONFIG_FS_PROCFS
-  /* Mount the procfs file system */
-
-  ret = nx_mount(NULL, NRF52_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR,
-             "ERROR: Failed to mount the PROC filesystem: %d\n",  ret);
-    }
-#endif /* CONFIG_FS_PROCFS */
 
 #ifdef CONFIG_USERLED
   /* Register the LED driver */
@@ -170,25 +131,6 @@ int nrf52_bringup(void)
       syslog(LOG_ERR,
              "ERROR: userled_lower_initialize() failed: %d\n",
              ret);
-    }
-#endif
-
-#ifdef CONFIG_NRF52840DK_BTNLEDS_GPIO
-  ret = nrf52_gpioleds_initialize();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR,
-             "ERROR: nrf52_gpioleds_initialize() failed: %d\n", ret);
-    }
-#endif
-
-#ifdef CONFIG_INPUT_BUTTONS
-  /* Register the BUTTON driver */
-
-  ret = btn_lower_initialize("/dev/buttons");
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: btn_lower_initialize() failed: %d\n", ret);
     }
 #endif
 
@@ -231,107 +173,6 @@ int nrf52_bringup(void)
              ret);
     }
 #endif /* CONFIG_LPWAN_SX127X */
-
-#if defined(CONFIG_TIMER) && defined(CONFIG_NRF52_TIMER)
-  /* Configure TIMER driver */
-
-  ret = nrf52_timer_driver_setup("/dev/timer0", NRF52_TIMER);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR,
-             "ERROR: Failed to initialize timer driver: %d\n",
-             ret);
-    }
-#endif
-
-#ifdef CONFIG_PWM
-  /* Configure PWM driver */
-
-  ret = nrf52_pwm_setup();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR,
-             "ERROR: Failed to initialize PWM driver: %d\n",
-             ret);
-    }
-#endif
-
-#ifdef CONFIG_ADC
-  /* Configure ADC driver */
-
-  ret = nrf52_adc_setup();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR,
-             "ERROR: Failed to initialize ADC driver: %d\n",
-             ret);
-    }
-#endif
-
-#ifdef CONFIG_USBMONITOR
-  /* Start the USB Monitor */
-
-  ret = usbmonitor_start();
-  if (ret != OK)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to start USB monitor: %d\n", ret);
-    }
-#endif
-
-#if defined(CONFIG_RNDIS) && !defined(CONFIG_RNDIS_COMPOSITE)
-  uint8_t mac[6];
-  mac[0] = 0xa0; /* TODO */
-  mac[1] = (CONFIG_NETINIT_MACADDR_2 >> (8 * 0)) & 0xff;
-  mac[2] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 3)) & 0xff;
-  mac[3] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 2)) & 0xff;
-  mac[4] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 1)) & 0xff;
-  mac[5] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 0)) & 0xff;
-  usbdev_rndis_initialize(mac);
-#endif
-
-#ifdef CONFIG_NRF52_QSPI
-  /* Initialize the MX25 QSPU memory */
-
-  ret = nrf52_mx25_initialize();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: nrf52_mx25_initialize() failed: %d\n", ret);
-    }
-#endif
-
-#ifdef CONFIG_NRF52_SOFTDEVICE_CONTROLLER
-  ret = nrf52_sdc_initialize();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: nrf52_sdc_initialize() failed: %d\n", ret);
-    }
-#endif
-
-#ifdef CONFIG_NRF52_PROGMEM
-  ret = nrf52_progmem_init();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to initialize MTD progmem: %d\n", ret);
-    }
-#endif /* CONFIG_MTD */
-
-#ifdef CONFIG_SENSORS_LSM9DS1
-  ret = nrf52_lsm9ds1_initialize(LMS9DS1_I2CBUS);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to initialize LSM9DS1 driver: %d\n",
-             ret);
-    }
-#endif /* CONFIG_SENSORS_LSM6DSL */
-
-#ifdef CONFIG_NRF52_RADIO_IEEE802154
-  ret = nrf52_ieee802154_initialize();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: Failed to initialize IEE802154 radio: %d\n",
-             ret);
-    }
-#endif
 
   UNUSED(ret);
   return OK;

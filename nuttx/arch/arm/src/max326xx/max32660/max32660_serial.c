@@ -1,22 +1,35 @@
 /****************************************************************************
- * arch/arm/src/max326xx/max32660/max32660_serial.c
+ * arch/arm/src/max326xx/max326_serial.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,18 +44,18 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/spinlock.h>
 #include <nuttx/serial/serial.h>
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "chip.h"
 #include "max326_config.h"
 #include "hardware/max326_uart.h"
@@ -50,12 +63,13 @@
 #include "max326_lowputc.h"
 #include "max326_serial.h"
 
+#include <arch/board/board.h>
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
 /* Some sanity checks *******************************************************/
-
 /* Is there at least one UART enabled and configured as a RS-232 device? */
 
 #ifndef HAVE_UART_DEVICE
@@ -127,7 +141,6 @@ struct max326_dev_s
 {
   uintptr_t uartbase;  /* Base address of UART registers */
   uint8_t   irq;       /* IRQ associated with this UART */
-  spinlock_t lock;     /* Spinlock */
 
   /* UART configuration */
 
@@ -144,7 +157,7 @@ static int  max326_attach(struct uart_dev_s *dev);
 static void max326_detach(struct uart_dev_s *dev);
 static int  max326_interrupt(int irq, void *context, void *arg);
 static int  max326_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  max326_receive(struct uart_dev_s *dev, unsigned int *status);
+static int  max326_receive(struct uart_dev_s *dev, uint32_t *status);
 static void max326_rxint(struct uart_dev_s *dev, bool enable);
 static bool max326_rxavailable(struct uart_dev_s *dev);
 static void max326_send(struct uart_dev_s *dev, int ch);
@@ -193,7 +206,6 @@ static struct max326_dev_s g_uart0priv =
 {
   .uartbase       = MAX326_UART0_BASE,
   .irq            = MAX326_IRQ_UART0,
-  .lock           = SP_UNLOCKED,
   .config         =
   {
     .baud         = CONFIG_UART0_BAUD,
@@ -225,7 +237,7 @@ static uart_dev_t g_uart0port =
   {
     .size   = CONFIG_UART0_TXBUFSIZE,
     .buffer = g_uart0txbuffer,
-  },
+   },
   .ops      = &g_uart_ops,
   .priv     = &g_uart0priv,
 };
@@ -238,7 +250,6 @@ static struct max326_dev_s g_uart1priv =
 {
   .uartbase       = MAX326_UART1_BASE,
   .irq            = MAX326_IRQ_UART1,
-  .lock           = SP_UNLOCKED,
   .config         =
   {
     .baud         = CONFIG_UART1_BAUD,
@@ -270,7 +281,7 @@ static uart_dev_t g_uart1port =
   {
     .size   = CONFIG_UART1_TXBUFSIZE,
     .buffer = g_uart1txbuffer,
-  },
+   },
   .ops      = &g_uart_ops,
   .priv     = &g_uart1priv,
 };
@@ -301,6 +312,27 @@ static inline void max326_serialout(struct max326_dev_s *priv,
 }
 
 /****************************************************************************
+ * Name: max326_modifyreg
+ ****************************************************************************/
+
+static inline void max326_modifyreg(struct max326_dev_s *priv, unsigned int offset,
+                                   uint32_t setbits, uint32_t clrbits)
+{
+  irqstate_t flags;
+  uintptr_t regaddr = priv->uartbase + offset;
+  uint32_t regval;
+
+  flags   = enter_critical_section();
+
+  regval  = getreg32(regaddr);
+  regval &= ~clrbits;
+  regval |= setbits;
+  putreg32(regval, regaddr);
+
+  leave_critical_section(flags);
+}
+
+/****************************************************************************
  * Name: max326_int_enable
  ****************************************************************************/
 
@@ -310,11 +342,11 @@ static inline void max326_int_enable(struct max326_dev_s *priv,
   irqstate_t flags;
   uint32_t regval;
 
-  flags   = spin_lock_irqsave(&priv->lock);
+  flags   = spin_lock_irqsave();
   regval  = max326_serialin(priv, MAX326_UART_INTEN_OFFSET);
   regval |= intset;
   max326_serialout(priv, MAX326_UART_INTEN_OFFSET, regval);
-  spin_unlock_irqrestore(&priv->lock, flags);
+  spin_unlock_irqrestore(flags);
 }
 
 /****************************************************************************
@@ -327,11 +359,11 @@ static inline void max326_int_disable(struct max326_dev_s *priv,
   irqstate_t flags;
   uint32_t regval;
 
-  flags   = spin_lock_irqsave(&priv->lock);
+  flags   = spin_lock_irqsave();
   regval  = max326_serialin(priv, MAX326_UART_INTEN_OFFSET);
   regval &= ~intset;
   max326_serialout(priv, MAX326_UART_INTEN_OFFSET, regval);
-  spin_unlock_irqrestore(&priv->lock, flags);
+  spin_unlock_irqrestore(flags);
 }
 
 /****************************************************************************
@@ -343,14 +375,14 @@ static void max326_int_disableall(struct max326_dev_s *priv,
 {
   irqstate_t flags;
 
-  flags = spin_lock_irqsave(&priv->lock);
+  flags = spin_lock_irqsave();
   if (intset)
     {
       *intset = max326_serialin(priv, MAX326_UART_INTEN_OFFSET);
     }
 
   max326_serialout(priv, MAX326_UART_INTEN_OFFSET, 0);
-  spin_unlock_irqrestore(&priv->lock, flags);
+  spin_unlock_irqrestore(flags);
 }
 
 /****************************************************************************
@@ -404,15 +436,14 @@ static void max326_shutdown(struct uart_dev_s *dev)
  * Name: max326_attach
  *
  * Description:
- *   Configure the UART to operation in interrupt driven mode.  This method
- *   is called when the serial port is opened.  Normally, this is just after
+ *   Configure the UART to operation in interrupt driven mode.  This method is
+ *   called when the serial port is opened.  Normally, this is just after the
  *   the setup() method is called, however, the serial console may operate in
  *   a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless
- *   the hardware supports multiple levels of interrupt enabling).  The RX
- *   and TX interrupts are not enabled until the txint() and rxint() methods
- *   are called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless the
+ *   hardware supports multiple levels of interrupt enabling).  The RX and TX
+ *   interrupts are not enabled until the txint() and rxint() methods are called.
  *
  ****************************************************************************/
 
@@ -438,9 +469,9 @@ static int max326_attach(struct uart_dev_s *dev)
  * Name: max326_detach
  *
  * Description:
- *   Detach UART interrupts.  This method is called when the serial port
- *   is closed normally just before the shutdown method is called.  The
- *   exception is the serial console which is never shutdown.
+ *   Detach UART interrupts.  This method is called when the serial port is
+ *   closed normally just before the shutdown method is called.  The exception
+ *   is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -462,11 +493,9 @@ static void max326_detach(struct uart_dev_s *dev)
  * Name: max326_interrupt
  *
  * Description:
- *   This is the UART interrupt handler.  It will be invoked when an
- *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
- *   uart_recvchars to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'arg' to the
- *   appropriate uart_dev_s structure in order to call these functions.
+ *   This is the UART status interrupt handler.  It will be invoked when an
+ *   interrupt received on the 'irq'  It should call uart_transmitchars or
+ *   uart_receivechar to perform the appropriate data transfers.
  *
  ****************************************************************************/
 
@@ -566,6 +595,7 @@ static int max326_ioctl(struct file *filep, int cmd, unsigned long arg)
   struct max326_dev_s *priv;
   int ret = OK;
 
+  DEBUGASSERT(filep, filep->f_inode);
   inode = filep->f_inode;
   dev   = inode->i_private;
 
@@ -598,11 +628,11 @@ static int max326_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int max326_receive(struct uart_dev_s *dev, unsigned int *status)
+static int max326_receive(struct uart_dev_s *dev, uint32_t *status)
 {
   struct max326_dev_s *priv = (struct max326_dev_s *)dev->priv;
 
-  /* Return receiver control information. */
+  /* Return receiver control information */
 
   if (status)
     {
@@ -611,7 +641,7 @@ static int max326_receive(struct uart_dev_s *dev, unsigned int *status)
 
   /* Then return the actual received data. */
 
-  return max326_serialin(priv, MAX326_UART_FIFO_OFFSET);
+ return max326_serialin(priv, MAX326_UART_FIFO_OFFSET);
 }
 
 /****************************************************************************
@@ -629,8 +659,8 @@ static void max326_rxint(struct uart_dev_s *dev, bool enable)
   if (enable)
     {
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
-      /* Receive an interrupt when there is anything in the Rx data register
-       * (or an Rx timeout occurs).
+      /* Receive an interrupt when their is anything in the Rx data register (or an Rx
+       * timeout occurs).
        */
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -763,24 +793,26 @@ static bool max326_txempty(struct uart_dev_s *dev)
  *
  * Description:
  *   Performs the low level UART initialization early in debug so that the
- *   serial console will be available during boot up.  This must be called
+ *   serial console will be available during bootup.  This must be called
  *   before max326_serialinit.  NOTE:  This function depends on GPIO pin
- *   configuration performed in max326_lowsetup() and main clock
- *   initialization performed in max326_clockconfig().
+ *   configuration performed in xmc_lowsetup() and main clock iniialization
+ *   performed in xmc_clock_configure().
  *
  ****************************************************************************/
 
 #ifdef USE_EARLYSERIALINIT
 void max326_earlyserialinit(void)
 {
-  /* Disable interrupts from all UARTS. */
+  /* Disable interrupts from all UARTS.  The console is enabled in
+   * pic32mx_consoleinit()
+   */
 
   max326_int_disableall(TTYS0_DEV.priv, NULL);
 #ifdef TTYS1_DEV
   max326_int_disableall(TTYS1_DEV.priv, NULL);
 #endif
 
-  /* Configuration whichever one is the console. */
+  /* Configuration whichever one is the console */
 
 #ifdef HAVE_UART_CONSOLE
   CONSOLE_DEV.isconsole = true;
@@ -790,7 +822,7 @@ void max326_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: arm_serialinit
+ * Name: up_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
@@ -804,7 +836,7 @@ void max326_earlyserialinit(void)
  *
  ****************************************************************************/
 
-void arm_serialinit(void)
+void up_serialinit(void)
 {
 #ifdef HAVE_UART_CONSOLE
   /* Register the serial console */
@@ -828,16 +860,28 @@ void arm_serialinit(void)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_UART_CONSOLE
   struct max326_dev_s *priv = (struct max326_dev_s *)CONSOLE_DEV.priv;
   uint32_t intset;
 
   max326_int_disableall(priv, &intset);
-  arm_lowputc(ch);
+
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
   max326_int_enable(priv, intset);
 #endif
+
+  return ch;
 }
 
 #else /* USE_SERIALDRIVER */
@@ -850,10 +894,20 @@ void up_putc(int ch)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_UART_CONSOLE
-  arm_lowputc(ch);
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
+  return ch;
 }
 #endif
 

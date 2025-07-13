@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/misoc/src/minerva/minerva_swint.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *           Ramtin Amin <keytwo@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -43,6 +57,40 @@
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: up_registerdump
+ ****************************************************************************/
+
+#ifdef CONFIG_DEBUG_SYSCALL_INFO
+static void up_registerdump(const uint32_t * regs)
+{
+#if 0
+  svcinfo("EPC:%08x\n", regs[REG_CSR_MEPC]);
+  svcinfo("A0:%08x A1:%08x A2:%08x A3:%08x A4:%08x A5:%08x A6:%08x A7:%08x\n",
+          regs[REG_A0], regs[REG_A1], regs[REG_A2], regs[REG_A3],
+          regs[REG_A4], regs[REG_A5], regs[REG_A6], regs[REG_A7]);
+  svcinfo("T0:%08x T1:%08x T2:%08x T3:%08x T4:%08x T5:%08x T6:%08x\n",
+          regs[REG_T0], regs[REG_T1], regs[REG_T2], regs[REG_T3],
+          regs[REG_T4], regs[REG_T5], regs[REG_T6]);
+  svcinfo("S0:%08x S1:%08x S2:%08x S3:%08x S4:%08x S5:%08x S6:%08x S7:%08x\n",
+          regs[REG_S0], regs[REG_S1], regs[REG_S2], regs[REG_S3],
+          regs[REG_S4], regs[REG_S5], regs[REG_S6], regs[REG_S7]);
+  svcinfo("S8:%08x S9:%08x S10:%08x S11:%08x\n",
+          regs[REG_S8], regs[REG_S9], regs[REG_S10], regs[REG_S11]);
+#ifdef MINERVA32_SAVE_GP
+  svcinfo("GP:%08x SP:%08x FP:%08x TP:%08x RA:%08x\n",
+          regs[REG_GP], regs[REG_SP], regs[REG_FP], regs[REG_TP],
+          regs[REG_RA]);
+#else
+  svcinfo("SP:%08x FP:%08x TP:%08x RA:%08x\n",
+          regs[REG_SP], regs[REG_FP], regs[REG_TP], regs[REG_RA]);
+#endif
+#endif
+}
+#else
+#  define up_registerdump(regs)
+#endif
+
+/****************************************************************************
  * Name: dispatch_syscall
  *
  * Description:
@@ -56,25 +104,23 @@ static void dispatch_syscall(void) naked_function;
 {
 #error "Missing logic"
 
-  /* Refer to arch/arm/src/armv7-m/up_svcall.h for how this is done for
-   * ARM
-   */
+/* Refer to arch/arm/src/armv7-m/up_svcall.h for how this is done for ARM */
 
-  /* __asm__ __volatile__ */
+/* __asm__ __volatile__ */
 
-  /* Save registers */
+/* Save registers */
 
-  /* Get the base of the stub lookup table */
+/* Get the base of the stub lookup table */
 
-  /* Get the offset of the stub for this syscall */
+/* Get the offset of the stub for this syscall */
 
-  /* Load the entry of the stub for this syscall */
+/* Load the entry of the stub for this syscall */
 
-  /* Call the stub */
+/* Call the stub */
 
-  /* Restore registers */
+/* Restore registers */
 
-  /* Return from the syscall */
+/* Return from the syscall */
 }
 #endif
 
@@ -91,11 +137,11 @@ static void dispatch_syscall(void) naked_function;
  *
  ****************************************************************************/
 
-int minerva_swint(int irq, void *context, void *arg)
+int minerva_swint(int irq, FAR void *context, FAR void *arg)
 {
   uint32_t *regs = (uint32_t *) context;
 
-  DEBUGASSERT(regs != NULL && regs == up_current_regs());
+  DEBUGASSERT(regs != NULL && regs == g_current_regs);
 
   /* Software interrupt 0 is invoked with REG_A0 (REG_X10) = system call
    * command and REG_A1-6 = variable number of arguments depending on the
@@ -104,28 +150,13 @@ int minerva_swint(int irq, void *context, void *arg)
 
 #ifdef CONFIG_DEBUG_SYSCALL_INFO
   svcinfo("Entry: regs: %p cmd: %d\n", regs, regs[REG_A0]);
-  minerva_registerdump(regs);
+  up_registerdump(regs);
 #endif
 
   /* Handle the SWInt according to the command in $a0 */
 
   switch (regs[REG_A0])
     {
-      /* A0=SYS_save_context: This a save context command: void
-       * int up_saveusercontext(void *saveregs);
-       * At this point, the following values are saved in context: A0 =
-       * SYS_save_context A1 = saveregs A2 = saveregs. In this case, we
-       * save the context registers to the save register area referenced by
-       * the saved contents of R5.
-       */
-
-      case SYS_save_context:
-        {
-          DEBUGASSERT(regs[REG_A1] != 0);
-          minerva_copystate((uint32_t *) regs[REG_A1], regs);
-        }
-        break;
-
       /* A0=SYS_restore_context: This a restore context command: void
        * up_fullcontextrestore(uint32_t *restoreregs) noreturn_function; At
        * this point, the following values are saved in context: A0 =
@@ -139,13 +170,13 @@ int minerva_swint(int irq, void *context, void *arg)
     case SYS_restore_context:
       {
         DEBUGASSERT(regs[REG_A1] != 0);
-        up_set_current_regs((uint32_t *)regs[REG_A1]);
+        g_current_regs = (uint32_t *) regs[REG_A1];
       }
       break;
 
       /* A0=SYS_switch_context: This a switch context command: void
-       * misoc_switchcontext(uint32_t *saveregs, uint32_t *restoreregs);
-       * At this point, the following values are saved in context: A0 =
+       * up_switchcontext(uint32_t *saveregs, uint32_t *restoreregs); At this
+       * point, the following values are saved in context: A0 =
        * SYS_switch_context A1 = saveregs A2 = restoreregs. In this case, we
        * save the context registers to the save register area referenced by
        * the saved contents of R5 and then set g_current_regs to the save
@@ -156,32 +187,31 @@ int minerva_swint(int irq, void *context, void *arg)
       {
         DEBUGASSERT(regs[REG_A1] != 0 && regs[REG_A2] != 0);
         minerva_copystate((uint32_t *) regs[REG_A1], regs);
-        up_set_current_regs((uint32_t *)regs[REG_A2]);
+        g_current_regs = (uint32_t *) regs[REG_A2];
       }
       break;
 
       /* A0=SYS_syscall_return: This a switch context command: void
-       * up_sycall_return(void); At this point, the following values are
-       * saved in context: A0 = SYS_syscall_return We need to restore the
-       * saved return address and return in unprivileged thread mode.
+       * up_sycall_return(void); At this point, the following values are saved
+       * in context: A0 = SYS_syscall_return We need to restore the saved
+       * return address and return in unprivileged thread mode.
        */
 
 #ifdef CONFIG_BUILD_KERNEL
     case SYS_syscall_return:
       {
-        struct tcb_s *rtcb = this_task();
+        struct tcb_s *rtcb = sched_self();
         int index = (int)rtcb->xcp.nsyscalls - 1;
 
         /* Make sure that there is a saved syscall return address. */
 
         DEBUGASSERT(index >= 0);
 
-        /* Setup to return to the saved syscall return address in the
-         * original mode.
+        /* Setup to return to the saved syscall return address in the original
+         * mode.
          */
 
-        up_current_regs()[REG_CSR_MEPC] =
-          rtcb->xcp.syscall[index].sysreturn;
+        g_current_regs[REG_CSR_MEPC] = rtcb->xcp.syscall[index].sysreturn;
 #error "Missing logic -- need to restore the original mode"
         rtcb->xcp.nsyscalls          = index;
 
@@ -203,12 +233,12 @@ int minerva_swint(int irq, void *context, void *arg)
     default:
       {
 #ifdef CONFIG_BUILD_KERNEL
-        struct tcb_s *rtcb = this_task();
+        FAR struct tcb_s *rtcb = sched_self();
         int index = rtcb->xcp.nsyscalls;
 
         /* Verify that the SYS call number is within range */
 
-        DEBUGASSERT(up_current_regs()[REG_A0] < SYS_maxsyscall);
+        DEBUGASSERT(g_current_regs[REG_A0] < SYS_maxsyscall);
 
         /* Make sure that we got here that there is a no saved syscall return
          * address.  We cannot yet handle nested system calls.
@@ -228,7 +258,7 @@ int minerva_swint(int irq, void *context, void *arg)
 
         /* Offset R0 to account for the reserved values */
 
-        up_current_regs()[REG_A0] -= CONFIG_SYS_RESERVED;
+        g_current_regs[REG_A0] -= CONFIG_SYS_RESERVED;
 
         /* Indicate that we are in a syscall handler. */
 
@@ -245,14 +275,42 @@ int minerva_swint(int irq, void *context, void *arg)
    */
 
 #ifdef CONFIG_DEBUG_SYSCALL_INFO
-  if (regs != up_current_regs())
+  if (regs != g_current_regs)
     {
       svcinfo("SWInt Return: Context switch!\n");
-      minerva_registerdump(up_current_regs());
+      up_registerdump((const uint32_t *)g_current_regs);
     }
   else
     {
       svcinfo("SWInt Return: %d\n", regs[REG_A0]);
+    }
+#endif
+
+#if defined(CONFIG_ARCH_FPU) || defined(CONFIG_ARCH_ADDRENV)
+  /* Check for a context switch.  If a context switch occurred, then
+   * g_current_regs will have a different value than it did on entry.  If an
+   * interrupt level context switch has occurred, then restore the floating
+   * point state and the establish the correct address environment before
+   * returning from the interrupt.
+   */
+
+  if (regs != g_current_regs)
+    {
+#ifdef CONFIG_ARCH_FPU
+      /* Restore floating point registers */
+
+      up_restorefpu((uint32_t *) g_current_regs);
+#endif
+
+#ifdef CONFIG_ARCH_ADDRENV
+      /* Make sure that the address environment for the previously running
+       * task is closed down gracefully (data caches dump, MMU flushed) and
+       * set up the address environment for the new thread at the head of
+       * the ready-to-run list.
+       */
+
+      group_addrenv(NULL);
+#endif
     }
 #endif
 

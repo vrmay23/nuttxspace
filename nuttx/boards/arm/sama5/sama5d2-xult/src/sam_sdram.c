@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/sama5/sama5d2-xult/src/sam_sdram.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  boards/arm/sama5/sama5d2-xult/src/sam_sdram.c
  *
  *  Licensed to the Apache Software Foundation (ASF) under one or more
  *  contributor license agreements.  See the NOTICE file distributed with
@@ -28,7 +26,8 @@
 
 #include <debug.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "sam_periphclks.h"
 #include "hardware/sam_memorymap.h"
 #include "hardware/sam_pmc.h"
@@ -259,7 +258,7 @@ void sam_sdram_config(void)
            MPDDRC_CR_OCD_EXIT | /* Off-chip Driver */
            MPDDRC_CR_8BANKS |   /* Number of Banks */
            MPDDRC_CR_NDQS |     /* Not DQS */
-           MPDDRC_CR_UNAL;      /* support Unaligned Access */
+           MPDDRC_CR_UNAL;      /* upport Unaligned Access */
 
 #elif defined(CONFIG_SAMA5D3XPLAINED_MT47H64M16HR)
   /* For MT47H64M16HR
@@ -286,7 +285,7 @@ void sam_sdram_config(void)
            MPDDRC_CR_OCD_EXIT | /* Off-chip Driver */
            MPDDRC_CR_8BANKS |   /* Number of Banks */
            MPDDRC_CR_NDQS |     /* Not DQS */
-           MPDDRC_CR_UNAL;      /* support Unaligned Access */
+           MPDDRC_CR_UNAL;      /* upport Unaligned Access */
 
 #else
 #  error Unknown SDRAM type

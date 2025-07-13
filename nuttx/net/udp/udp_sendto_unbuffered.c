@@ -1,22 +1,36 @@
 /****************************************************************************
  * net/udp/udp_sendto_unbuffered.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2011-2016, 2018-2019 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -64,7 +78,9 @@
 
 struct sendto_s
 {
-  FAR struct udp_conn_s *st_conn;     /* The UDP connection of interest */
+#ifdef NEED_IPDOMAIN_SUPPORT
+  FAR struct socket *st_sock;         /* Points to the parent socket structure */
+#endif
   FAR struct devif_callback_s *st_cb; /* Reference to callback instance */
   FAR struct net_driver_s *st_dev;    /* Driver that will perform the transmission */
   sem_t st_sem;                       /* Semaphore signals sendto completion */
@@ -102,13 +118,12 @@ struct sendto_s
 static inline void sendto_ipselect(FAR struct net_driver_s *dev,
                                    FAR struct sendto_s *pstate)
 {
-  FAR struct udp_conn_s *conn = pstate->st_conn;
+  FAR struct socket *psock = pstate->st_sock;
+  DEBUGASSERT(psock);
 
   /* Which domain the socket support */
 
-  if (conn->domain == PF_INET ||
-      (conn->domain == PF_INET6 &&
-       ip6_is_ipv4addr((FAR struct in6_addr *)conn->u.ipv6.raddr)))
+  if (psock->s_domain == PF_INET)
     {
       /* Select the IPv4 domain */
 
@@ -118,6 +133,7 @@ static inline void sendto_ipselect(FAR struct net_driver_s *dev,
     {
       /* Select the IPv6 domain */
 
+      DEBUGASSERT(psock->s_domain == PF_INET6);
       udp_ipv6_select(dev);
     }
 }
@@ -132,6 +148,7 @@ static inline void sendto_ipselect(FAR struct net_driver_s *dev,
  *
  * Input Parameters:
  *   dev        The structure of the network driver that caused the event
+ *   conn       An instance of the UDP connection structure cast to void *
  *   pvpriv     An instance of struct sendto_s cast to void*
  *   flags      Set of events describing why the callback was invoked
  *
@@ -144,9 +161,10 @@ static inline void sendto_ipselect(FAR struct net_driver_s *dev,
  ****************************************************************************/
 
 static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
-                                    FAR void *pvpriv, uint16_t flags)
+                                    FAR void *conn, FAR void *pvpriv,
+                                    uint16_t flags)
 {
-  FAR struct sendto_s *pstate = pvpriv;
+  FAR struct sendto_s *pstate = (FAR struct sendto_s *)pvpriv;
 
   DEBUGASSERT(pstate != NULL && pstate->st_dev != NULL);
   if (pstate != NULL)
@@ -195,16 +213,6 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
 
       else
         {
-          /* Copy the user data into d_appdata and send it */
-
-          int ret = devif_send(dev, pstate->st_buffer, pstate->st_buflen,
-                               udpip_hdrsize(pstate->st_conn));
-          if (ret <= 0)
-            {
-              pstate->st_sndlen = ret;
-              goto end_wait;
-            }
-
 #ifdef NEED_IPDOMAIN_SUPPORT
           /* If both IPv4 and IPv6 support are enabled, then we will need to
            * select which one to use when generating the outgoing packet.
@@ -215,16 +223,17 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
           sendto_ipselect(dev, pstate);
 #endif
 
+          /* Copy the user data into d_appdata and send it */
+
+          devif_send(dev, pstate->st_buffer, pstate->st_buflen);
           pstate->st_sndlen = pstate->st_buflen;
         }
 
-end_wait:
-
       /* Don't allow any further call backs. */
 
-      pstate->st_cb->flags = 0;
-      pstate->st_cb->priv  = NULL;
-      pstate->st_cb->event = NULL;
+      pstate->st_cb->flags   = 0;
+      pstate->st_cb->priv    = NULL;
+      pstate->st_cb->event   = NULL;
 
       /* Wake up the waiting thread */
 
@@ -264,21 +273,12 @@ end_wait:
  ****************************************************************************/
 
 ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
-                         size_t len, int flags,
-                         FAR const struct sockaddr *to, socklen_t tolen)
+                         size_t len, int flags, FAR const struct sockaddr *to,
+                         socklen_t tolen)
 {
   FAR struct udp_conn_s *conn;
   struct sendto_s state;
-  int ret = OK;
-
-  /* Verify that the sockfd corresponds to valid, allocated socket */
-
-  if (psock == NULL || psock->s_type != SOCK_DGRAM ||
-      psock->s_conn == NULL)
-    {
-      nerr("ERROR: Invalid socket\n");
-      return -EBADF;
-    }
+  int ret;
 
   /* If the UDP socket was previously assigned a remote peer address via
    * connect(), then as with connection-mode socket, sendto() may not be
@@ -286,9 +286,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
    * used with such connected UDP sockets.
    */
 
-  conn = psock->s_conn;
-
-  if (to != NULL && _SS_ISCONNECTED(conn->sconn.s_flags))
+  if (to != NULL && _SS_ISCONNECTED(psock->s_flags))
     {
       /* EISCONN - A destination address was specified and the socket is
        * already connected.
@@ -301,7 +299,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
    * must be provided.
    */
 
-  else if (to == NULL && !_SS_ISCONNECTED(conn->sconn.s_flags))
+  else if (to == NULL && !_SS_ISCONNECTED(psock->s_flags))
     {
       /* EDESTADDRREQ - The socket is not connection-mode and no peer\
        * address is set.
@@ -310,19 +308,26 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
       return -EDESTADDRREQ;
     }
 
+  /* Get the underlying the UDP connection structure.  */
+
+  conn = (FAR struct udp_conn_s *)psock->s_conn;
+  DEBUGASSERT(conn);
+
 #if defined(CONFIG_NET_ARP_SEND) || defined(CONFIG_NET_ICMPv6_NEIGHBOR)
 #ifdef CONFIG_NET_ARP_SEND
   /* Assure the the IPv4 destination address maps to a valid MAC address in
    * the ARP table.
    */
 
+#ifdef CONFIG_NET_ICMPv6_NEIGHBOR
   if (psock->s_domain == PF_INET)
+#endif
     {
       in_addr_t destipaddr;
 
       /* Check if the socket is connection mode */
 
-      if (_SS_ISCONNECTED(conn->sconn.s_flags))
+      if (_SS_ISCONNECTED(psock->s_flags))
         {
           /* Yes.. use the connected remote address (the 'to' address is
            * null).
@@ -353,13 +358,15 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
    * the neighbor table.
    */
 
-  if (psock->s_domain == PF_INET6)
+#ifdef CONFIG_NET_ARP_SEND
+  else
+#endif
     {
       FAR const uint16_t *destipaddr;
 
       /* Check if the socket is connection mode */
 
-      if (_SS_ISCONNECTED(conn->sconn.s_flags))
+      if (_SS_ISCONNECTED(psock->s_flags))
         {
           /* Yes.. use the connected remote address (the 'to' address is
            * null).
@@ -381,7 +388,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
 
       /* Make sure that the IP address mapping is in the Neighbor Table */
 
-      ret = icmpv6_neighbor(NULL, destipaddr);
+      ret = icmpv6_neighbor(destipaddr);
     }
 #endif /* CONFIG_NET_ICMPv6_NEIGHBOR */
 
@@ -401,20 +408,28 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
 
   net_lock();
   memset(&state, 0, sizeof(struct sendto_s));
+
+  /* This semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
   nxsem_init(&state.st_sem, 0, 0);
+  nxsem_setprotocol(&state.st_sem, SEM_PRIO_NONE);
 
   state.st_buflen = len;
   state.st_buffer = buf;
 
-  /* Save the reference to the conn structure if it will be needed for
+#ifdef NEED_IPDOMAIN_SUPPORT
+  /* Save the reference to the socket structure if it will be needed for
    * asynchronous processing.
    */
 
-  state.st_conn   = conn;
+  state.st_sock = psock;
+#endif
 
   /* Check if the socket is connected */
 
-  if (!_SS_ISCONNECTED(conn->sconn.s_flags))
+  if (!_SS_ISCONNECTED(psock->s_flags))
     {
       /* No.. Call udp_connect() to set the remote address in the connection
        * structure to the sendto() destination address.
@@ -432,7 +447,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
    * should never be NULL.
    */
 
-  state.st_dev = udp_find_raddr_device(conn, NULL);
+  state.st_dev = udp_find_raddr_device(conn);
   if (state.st_dev == NULL)
     {
       nerr("ERROR: udp_find_raddr_device failed\n");
@@ -464,17 +479,14 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
       netdev_txnotify_dev(state.st_dev);
 
       /* Wait for either the receive to complete or for an error/timeout to
-       * occur. NOTES:  net_sem_timedwait will also terminate if a signal
+       * occur. NOTES:  net_timedwait will also terminate if a signal
        * is received.
        */
 
-      ret = net_sem_timedwait(&state.st_sem,
-                          _SO_TIMEOUT(conn->sconn.s_sndtimeo));
+      ret = net_timedwait(&state.st_sem, _SO_TIMEOUT(psock->s_sndtimeo));
       if (ret >= 0)
         {
-          /* The result of the sendto operation is the number of bytes
-           * transferred.
-           */
+          /* The result of the sendto operation is the number of bytes transferred */
 
           ret = state.st_sndlen;
         }
@@ -505,7 +517,7 @@ errout_with_lock:
  *   write occurs first.
  *
  * Input Parameters:
- *   conn     A reference to UDP connection structure.
+ *   psock    An instance of the internal socket structure.
  *
  * Returned Value:
  *   OK (Always can send).
@@ -515,7 +527,7 @@ errout_with_lock:
  *
  ****************************************************************************/
 
-int psock_udp_cansend(FAR struct udp_conn_s *conn)
+int psock_udp_cansend(FAR struct socket *psock)
 {
   return OK;
 }

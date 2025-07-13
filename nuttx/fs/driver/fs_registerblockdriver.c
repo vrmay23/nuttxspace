@@ -1,8 +1,6 @@
 /****************************************************************************
  * fs/driver/fs_registerblockdriver.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -32,7 +30,6 @@
 #include <nuttx/fs/fs.h>
 
 #include "inode/inode.h"
-#include "vfs/vfs.h"
 
 #ifndef CONFIG_DISABLE_MOUNTPOINT
 
@@ -49,7 +46,7 @@
  * Input Parameters:
  *   path - The path to the inode to create
  *   bops - The block driver operations structure
- *   mode - inmode privileges
+ *   mode - inmode privileges (not used)
  *   priv - Private, user data that will be associated with the inode.
  *
  * Returned Value:
@@ -76,8 +73,13 @@ int register_blockdriver(FAR const char *path,
    * valid data.
    */
 
-  inode_lock();
-  ret = inode_reserve(path, mode, &node);
+  ret = inode_semtake();
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = inode_reserve(path, &node);
   if (ret >= 0)
     {
       /* We have it, now populate it with block driver specific information.
@@ -87,15 +89,14 @@ int register_blockdriver(FAR const char *path,
       INODE_SET_BLOCK(node);
 
       node->u.i_bops  = bops;
-      node->i_private = priv;
-      inode_unlock();
-#ifdef CONFIG_FS_NOTIFY
-      notify_create(path);
+#ifdef CONFIG_FILE_MODE
+      node->i_mode    = mode;
 #endif
-      return OK;
+      node->i_private = priv;
+      ret             = OK;
     }
 
-  inode_unlock();
+  inode_semgive();
   return ret;
 }
 

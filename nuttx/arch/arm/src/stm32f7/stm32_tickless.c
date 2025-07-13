@@ -1,11 +1,10 @@
 /****************************************************************************
- * arch/arm/src/stm32f7/stm32_tickless.c
+ * arch/arm/src/stm32/stm32_tickless.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016-2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2017 Ansync Labs. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: Konstantin Berezenko <kpberezenko@gmail.com>
+ *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2017 Ansync Labs. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Konstantin Berezenko <kpberezenko@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,7 +34,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
 /****************************************************************************
  * Tickless OS Support.
  *
@@ -45,10 +43,10 @@
  *
  *   void up_timer_initialize(void): Initializes the timer facilities.
  *     Called early in the initialization sequence (by up_initialize()).
- *   int up_timer_gettime(struct timespec *ts):  Returns the current
+ *   int up_timer_gettime(FAR struct timespec *ts):  Returns the current
  *     time from the platform specific time source.
  *   int up_timer_cancel(void):  Cancels the interval timer.
- *   int up_timer_start(const struct timespec *ts): Start (or re-starts)
+ *   int up_timer_start(FAR const struct timespec *ts): Start (or re-starts)
  *     the interval timer.
  *
  * The RTOS will provide the following interfaces for use by the platform-
@@ -90,7 +88,8 @@
 #include <nuttx/arch.h>
 #include <debug.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "stm32_tim.h"
 #include "stm32_dbgmcu.h"
 
@@ -113,13 +112,13 @@
 #endif
 
 #if CONFIG_STM32F7_TICKLESS_CHANNEL == 1
-#define DIER_CAPT_IE          GTIM_DIER_CC1IE
+#define DIER_CAPT_IE          ATIM_DIER_CC1IE
 #elif CONFIG_STM32F7_TICKLESS_CHANNEL == 2
-#define DIER_CAPT_IE          GTIM_DIER_CC2IE
+#define DIER_CAPT_IE          ATIM_DIER_CC2IE
 #elif CONFIG_STM32F7_TICKLESS_CHANNEL == 3
-#define DIER_CAPT_IE          GTIM_DIER_CC3IE
+#define DIER_CAPT_IE          ATIM_DIER_CC3IE
 #elif CONFIG_STM32F7_TICKLESS_CHANNEL == 4
-#define DIER_CAPT_IE          GTIM_DIER_CC4IE
+#define DIER_CAPT_IE          ATIM_DIER_CC4IE
 #endif
 
 /****************************************************************************
@@ -128,15 +127,19 @@
 
 struct stm32_tickless_s
 {
-  uint8_t timer;               /* The timer/counter in use */
-  uint8_t channel;             /* The timer channel to use for intervals */
-  struct stm32_tim_dev_s *tch; /* Handle returned by stm32_tim_init() */
+  uint8_t timer;                   /* The timer/counter in use */
+  uint8_t channel;                 /* The timer channel to use for intervals */
+  FAR struct stm32_tim_dev_s *tch; /* Handle returned by stm32_tim_init() */
   uint32_t frequency;
-  uint32_t overflow;           /* Timer counter overflow */
-  volatile bool pending;       /* True: pending task */
-  uint32_t period;             /* Interval period */
+#ifdef CONFIG_CLOCK_TIMEKEEPING
+  uint64_t counter_mask;
+#else
+  uint32_t overflow;               /* Timer counter overflow */
+#endif
+  volatile bool pending;           /* True: pending task */
+  uint32_t period;                 /* Interval period */
   uint32_t base;
-#ifdef CONFIG_SCHED_TICKLESS_ALARM
+#if CONFIG_SCHED_TICKLESS_ALARM
   uint64_t last_alrm;
 #endif
 };
@@ -220,7 +223,7 @@ static inline void stm32_tickless_ackint(int channel)
 
 /****************************************************************************
  * Name: stm32_tickless_getint
- ****************************************************************************/
+ ******************************************************************************/
 
 static inline uint16_t stm32_tickless_getint(void)
 {
@@ -248,8 +251,7 @@ static int stm32_tickless_setchannel(uint8_t channel)
 
   /* Assume that channel is disabled and polarity is active high */
 
-  ccer_val &= ~((GTIM_CCER_CC1P | GTIM_CCER_CC1E) <<
-                GTIM_CCER_CCXBASE(channel));
+  ccer_val &= ~(3 << (channel << 2));
 
   /* This function is not supported on basic timers. To enable or
    * disable it, simply set its clock to valid frequency or zero.
@@ -265,11 +267,11 @@ static int stm32_tickless_setchannel(uint8_t channel)
    * disabled.
    */
 
-  ccmr_val = (GTIM_CCMR_MODE_FRZN << GTIM_CCMR1_OC1M_SHIFT);
+  ccmr_val = (ATIM_CCMR_MODE_FRZN << ATIM_CCMR1_OC1M_SHIFT);
 
   /* Set polarity */
 
-  ccer_val |= GTIM_CCER_CC1P << GTIM_CCER_CCXBASE(channel);
+  ccer_val |= ATIM_CCER_CC1P << (channel << 2);
 
   /* Define its position (shift) and get register offset */
 
@@ -348,12 +350,14 @@ static void stm32_interval_handler(void)
  *
  ****************************************************************************/
 
+#ifndef CONFIG_CLOCK_TIMEKEEPING
 static void stm32_timing_handler(void)
 {
   g_tickless.overflow++;
 
-  STM32_TIM_ACKINT(g_tickless.tch, GTIM_SR_UIF);
+  STM32_TIM_ACKINT(g_tickless.tch, 0);
 }
+#endif /* CONFIG_CLOCK_TIMEKEEPING */
 
 /****************************************************************************
  * Name: stm32_tickless_handler
@@ -374,10 +378,12 @@ static int stm32_tickless_handler(int irq, void *context, void *arg)
 {
   int interrupt_flags = stm32_tickless_getint();
 
-  if (interrupt_flags & GTIM_SR_UIF)
+#ifndef CONFIG_CLOCK_TIMEKEEPING
+  if (interrupt_flags & ATIM_SR_UIF)
     {
       stm32_timing_handler();
     }
+#endif /* CONFIG_CLOCK_TIMEKEEPING */
 
   if (interrupt_flags & (1 << g_tickless.channel))
     {
@@ -385,22 +391,6 @@ static int stm32_tickless_handler(int irq, void *context, void *arg)
     }
 
   return OK;
-}
-
-/****************************************************************************
- * Name: stm32_get_counter
- *
- ****************************************************************************/
-
-static uint64_t stm32_get_counter(void)
-{
-#ifdef HAVE_32BIT_TICKLESS
-  return ((uint64_t)g_tickless.overflow << 32) |
-         STM32_TIM_GETCOUNTER(g_tickless.tch);
-#else
-  return ((uint64_t)g_tickless.overflow << 16) |
-         STM32_TIM_GETCOUNTER(g_tickless.tch);
-#endif
 }
 
 /****************************************************************************
@@ -439,7 +429,6 @@ void up_timer_initialize(void)
 #ifdef CONFIG_STM32F7_TIM1
       case 1:
         g_tickless.base = STM32_TIM1_BASE;
-        modifyreg32(STM32_DBGMCU_APB2_FZ, 0, DBGMCU_APB2_TIM1STOP);
         break;
 #endif
 
@@ -453,20 +442,17 @@ void up_timer_initialize(void)
 #ifdef CONFIG_STM32F7_TIM3
       case 3:
         g_tickless.base = STM32_TIM3_BASE;
-        modifyreg32(STM32_DBGMCU_APB1_FZ, 0, DBGMCU_APB1_TIM3STOP);
         break;
 #endif
 
 #ifdef CONFIG_STM32F7_TIM4
       case 4:
         g_tickless.base = STM32_TIM4_BASE;
-        modifyreg32(STM32_DBGMCU_APB1_FZ, 0, DBGMCU_APB1_TIM4STOP);
         break;
 #endif
 #ifdef CONFIG_STM32F7_TIM5
       case 5:
         g_tickless.base = STM32_TIM5_BASE;
-        modifyreg32(STM32_DBGMCU_APB1_FZ, 0, DBGMCU_APB1_TIM5STOP);
         break;
 #endif
 
@@ -475,7 +461,7 @@ void up_timer_initialize(void)
 
         /* Basic timers not supported by this implementation */
 
-        DEBUGPANIC();
+        DEBUGASSERT(0);
         break;
 #endif
 
@@ -484,84 +470,68 @@ void up_timer_initialize(void)
 
         /* Basic timers not supported by this implementation */
 
-        DEBUGPANIC();
+        DEBUGASSERT(0);
         break;
 #endif
 
 #ifdef CONFIG_STM32F7_TIM8
       case 8:
         g_tickless.base = STM32_TIM8_BASE;
-        modifyreg32(STM32_DBGMCU_APB2_FZ, 0, DBGMCU_APB2_TIM8STOP);
         break;
 #endif
 
 #ifdef CONFIG_STM32F7_TIM9
       case 9:
         g_tickless.base = STM32_TIM9_BASE;
-        modifyreg32(STM32_DBGMCU_APB2_FZ, 0, DBGMCU_APB2_TIM9STOP);
         break;
 #endif
 #ifdef CONFIG_STM32F7_TIM10
       case 10:
         g_tickless.base = STM32_TIM10_BASE;
-        modifyreg32(STM32_DBGMCU_APB2_FZ, 0, DBGMCU_APB2_TIM10STOP);
         break;
 #endif
 
 #ifdef CONFIG_STM32F7_TIM11
       case 11:
         g_tickless.base = STM32_TIM11_BASE;
-        modifyreg32(STM32_DBGMCU_APB2_FZ, 0, DBGMCU_APB2_TIM11STOP);
         break;
 #endif
 #ifdef CONFIG_STM32F7_TIM12
       case 12:
         g_tickless.base = STM32_TIM12_BASE;
-        modifyreg32(STM32_DBGMCU_APB1_FZ, 0, DBGMCU_APB1_TIM12STOP);
         break;
 #endif
 #ifdef CONFIG_STM32F7_TIM13
       case 13:
         g_tickless.base = STM32_TIM13_BASE;
-        modifyreg32(STM32_DBGMCU_APB1_FZ, 0, DBGMCU_APB1_TIM13STOP);
         break;
 #endif
 
 #ifdef CONFIG_STM32F7_TIM14
       case 14:
         g_tickless.base = STM32_TIM14_BASE;
-        modifyreg32(STM32_DBGMCU_APB1_FZ, 0, DBGMCU_APB1_TIM14STOP);
         break;
 #endif
 #ifdef CONFIG_STM32F7_TIM15
       case 15:
         g_tickless.base = STM32_TIM15_BASE;
-
-        /* A freeze bit for TIM15 doesn't seem to exist */
-
         break;
 #endif
 
 #ifdef CONFIG_STM32F7_TIM16
       case 16:
         g_tickless.base = STM32_TIM16_BASE;
-
-        /* A freeze bit for TIM16 doesn't seem to exist */
-
         break;
 #endif
 
 #ifdef CONFIG_STM32F7_TIM17
       case 17:
         g_tickless.base = STM32_TIM17_BASE;
-
-        /* A freeze bit for TIM17 doesn't seem to exist */
-
         break;
 #endif
 
       default:
-        DEBUGPANIC();
+        DEBUGASSERT(0);
     }
 
   /* Get the TC frequency that corresponds to the requested resolution */
@@ -571,23 +541,31 @@ void up_timer_initialize(void)
   g_tickless.channel   = CONFIG_STM32F7_TICKLESS_CHANNEL;
   g_tickless.pending   = false;
   g_tickless.period    = 0;
-  g_tickless.overflow  = 0;
 
-  tmrinfo("timer=%d channel=%d frequency=%lu Hz\n",
+  tmrinfo("timer=%d channel=%d frequency=%d Hz\n",
            g_tickless.timer, g_tickless.channel, g_tickless.frequency);
 
   g_tickless.tch = stm32_tim_init(g_tickless.timer);
   if (!g_tickless.tch)
     {
       tmrerr("ERROR: Failed to allocate TIM%d\n", g_tickless.timer);
-      DEBUGPANIC();
+      DEBUGASSERT(0);
     }
 
   STM32_TIM_SETCLOCK(g_tickless.tch, g_tickless.frequency);
 
+#ifdef CONFIG_CLOCK_TIMEKEEPING
+
+  /* Should this be changed to 0xffff because we use 16 bit timers? */
+
+  g_tickless.counter_mask = 0xffffffffull;
+#else
+  g_tickless.overflow     = 0;
+
   /* Set up to receive the callback when the counter overflow occurs */
 
   STM32_TIM_SETISR(g_tickless.tch, stm32_tickless_handler, NULL, 0);
+#endif
 
   /* Initialize interval to zero */
 
@@ -617,7 +595,7 @@ void up_timer_initialize(void)
 
   /* Start the timer */
 
-  STM32_TIM_ACKINT(g_tickless.tch, ~0);
+  STM32_TIM_ACKINT(g_tickless.tch, 0);
   STM32_TIM_ENABLEINT(g_tickless.tch, 0);
 }
 
@@ -629,7 +607,7 @@ void up_timer_initialize(void)
  *   up_timer_initialize() was called).  This function is functionally
  *   equivalent to:
  *
- *      int clock_gettime(clockid_t clockid, struct timespec *ts);
+ *      int clock_gettime(clockid_t clockid, FAR struct timespec *ts);
  *
  *   when clockid is CLOCK_MONOTONIC.
  *
@@ -654,7 +632,8 @@ void up_timer_initialize(void)
  *
  ****************************************************************************/
 
-int up_timer_gettime(struct timespec *ts)
+#ifndef CONFIG_CLOCK_TIMEKEEPING
+int up_timer_gettime(FAR struct timespec *ts)
 {
   uint64_t usec;
   uint32_t counter;
@@ -685,7 +664,7 @@ int up_timer_gettime(struct timespec *ts)
 
   overflow = g_tickless.overflow;
   counter  = STM32_TIM_GETCOUNTER(g_tickless.tch);
-  pending  = STM32_TIM_CHECKINT(g_tickless.tch, GTIM_SR_UIF);
+  pending  = STM32_TIM_CHECKINT(g_tickless.tch, 0);
   verify   = STM32_TIM_GETCOUNTER(g_tickless.tch);
 
   /* If an interrupt was pending before we re-enabled interrupts,
@@ -694,7 +673,7 @@ int up_timer_gettime(struct timespec *ts)
 
   if (pending)
     {
-      STM32_TIM_ACKINT(g_tickless.tch, GTIM_SR_UIF);
+      STM32_TIM_ACKINT(g_tickless.tch, 0);
 
       /* Increment the overflow count and use the value of the
        * guaranteed to be AFTER the overflow occurred.
@@ -713,7 +692,7 @@ int up_timer_gettime(struct timespec *ts)
   tmrinfo("counter=%lu (%lu) overflow=%lu, pending=%i\n",
          (unsigned long)counter,  (unsigned long)verify,
          (unsigned long)overflow, pending);
-  tmrinfo("frequency=%lu\n", g_tickless.frequency);
+  tmrinfo("frequency=%u\n", g_tickless.frequency);
 
   /* Convert the whole thing to units of microseconds.
    *
@@ -735,33 +714,21 @@ int up_timer_gettime(struct timespec *ts)
   ts->tv_sec  = sec;
   ts->tv_nsec = (usec - (sec * USEC_PER_SEC)) * NSEC_PER_USEC;
 
-  tmrinfo("usec=%llu ts=(%lu, %lu)\n",
+  tmrinfo("usec=%llu ts=(%u, %lu)\n",
           usec, (unsigned long)ts->tv_sec, (unsigned long)ts->tv_nsec);
 
   return OK;
 }
 
-#ifdef CONFIG_CLOCK_TIMEKEEPING
+#else
 
-/****************************************************************************
- * Name: up_timer_gettick
- *
- * Description:
- *   To be provided
- *
- * Input Parameters:
- *   cycles - 64-bit return value
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-int up_timer_gettick(clock_t *ticks)
+int up_timer_getcounter(FAR uint64_t *cycles)
 {
-  *ticks = (clock_t)STM32_TIM_GETCOUNTER(g_tickless.tch);
+  *cycles = (uint64_t)STM32_TIM_GETCOUNTER(g_tickless.tch);
   return OK;
 }
+
+#endif /* CONFIG_CLOCK_TIMEKEEPING */
 
 /****************************************************************************
  * Name: up_timer_getmask
@@ -777,16 +744,12 @@ int up_timer_gettick(clock_t *ticks)
  *
  ****************************************************************************/
 
-void up_timer_getmask(clock_t *mask)
+#ifdef CONFIG_CLOCK_TIMEKEEPING
+void up_timer_getmask(FAR uint64_t *mask)
 {
   DEBUGASSERT(mask != NULL);
-#ifdef HAVE_32BIT_TICKLESS
-  *mask = UINT32_MAX;
-#else
-  *mask = UINT16_MAX;
-#endif
+  *mask = g_tickless.counter_mask;
 }
-
 #endif /* CONFIG_CLOCK_TIMEKEEPING */
 
 /****************************************************************************
@@ -826,7 +789,7 @@ void up_timer_getmask(clock_t *mask)
  ****************************************************************************/
 
 #ifndef CONFIG_SCHED_TICKLESS_ALARM
-int up_timer_cancel(struct timespec *ts)
+int up_timer_cancel(FAR struct timespec *ts)
 {
   irqstate_t flags;
   uint64_t usec;
@@ -956,7 +919,7 @@ int up_timer_cancel(struct timespec *ts)
  ****************************************************************************/
 
 #ifndef CONFIG_SCHED_TICKLESS_ALARM
-int up_timer_start(const struct timespec *ts)
+int up_timer_start(FAR const struct timespec *ts)
 {
   uint64_t usec;
   uint64_t period;
@@ -1025,53 +988,29 @@ int up_timer_start(const struct timespec *ts)
 }
 #endif
 
-#ifdef CONFIG_SCHED_TICKLESS_ALARM
-int up_alarm_start(const struct timespec *ts)
+int up_alarm_start(FAR const struct timespec *ts)
 {
-  size_t offset = 1;
   uint64_t tm = ((uint64_t)ts->tv_sec * NSEC_PER_SEC + ts->tv_nsec) /
                 NSEC_PER_TICK;
-  irqstate_t flags;
+  uint64_t counter = ((uint64_t)g_tickless.overflow << 32) |
+                     STM32_TIM_GETCOUNTER(g_tickless.tch);
 
-  flags = enter_critical_section();
+  g_tickless.last_alrm = tm;
+
+  int32_t diff = tm / NSEC_PER_TICK + counter;
 
   STM32_TIM_SETCOMPARE(g_tickless.tch, CONFIG_STM32F7_TICKLESS_CHANNEL, tm);
 
   stm32_tickless_ackint(g_tickless.channel);
   stm32_tickless_enableint(CONFIG_STM32F7_TICKLESS_CHANNEL);
 
-  g_tickless.pending = true;
-
-  /* If we have already passed this time, there is a chance we didn't set the
-   * compare register in time and we've missed the interrupt. If we don't
-   * catch this case, we won't interrupt until a full loop of the clock.
-   *
-   * Since we can't make assumptions about the clock speed and tick rate,
-   * we simply keep adding an offset to the current time, until we can leave
-   * certain that the interrupt is going to fire as soon as we leave the
-   * critical section.
-   */
-
-  while (tm <= stm32_get_counter())
-    {
-      tm = stm32_get_counter() + offset++;
-      STM32_TIM_SETCOMPARE(g_tickless.tch, CONFIG_STM32F7_TICKLESS_CHANNEL,
-                           tm);
-    }
-
-  leave_critical_section(flags);
   return OK;
 }
 
-int up_alarm_cancel(struct timespec *ts)
+int up_alarm_cancel(FAR struct timespec *ts)
 {
-#ifdef HAVE_32BIT_TICKLESS
   uint64_t nsecs = (((uint64_t)g_tickless.overflow << 32) |
                     STM32_TIM_GETCOUNTER(g_tickless.tch)) * NSEC_PER_TICK;
-#else
-  uint64_t nsecs = (((uint64_t)g_tickless.overflow << 16) |
-                    STM32_TIM_GETCOUNTER(g_tickless.tch)) * NSEC_PER_TICK;
-#endif
 
   ts->tv_sec = nsecs / NSEC_PER_SEC;
   ts->tv_nsec = nsecs - ts->tv_sec * NSEC_PER_SEC;
@@ -1080,6 +1019,5 @@ int up_alarm_cancel(struct timespec *ts)
 
   return 0;
 }
-#endif
 
 #endif /* CONFIG_SCHED_TICKLESS */

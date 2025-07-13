@@ -1,31 +1,49 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/stm32/stm32_tim.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011 Uros Platise. All rights reserved.
+ *   Author: Uros Platise <uros.platise@isotel.eu>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * With modifications and updates by:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright (C) 2011-2012, 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- ****************************************************************************/
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_STM32_STM32_TIM_H
 #define __ARCH_ARM_SRC_STM32_STM32_TIM_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -34,11 +52,10 @@
 
 #include <nuttx/irq.h>
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
-
-/* Helpers ******************************************************************/
+ ************************************************************************************/
+/* Helpers **************************************************************************/
 
 #define STM32_TIM_SETMODE(d,mode)       ((d)->ops->setmode(d,mode))
 #define STM32_TIM_SETCLOCK(d,freq)      ((d)->ops->setclock(d,freq))
@@ -54,12 +71,10 @@
 #define STM32_TIM_DISABLEINT(d,s)       ((d)->ops->disableint(d,s))
 #define STM32_TIM_ACKINT(d,s)           ((d)->ops->ackint(d,s))
 #define STM32_TIM_CHECKINT(d,s)         ((d)->ops->checkint(d,s))
-#define STM32_TIM_ENABLE(d)             ((d)->ops->enable(d))
-#define STM32_TIM_DISABLE(d)            ((d)->ops->disable(d))
 
-/****************************************************************************
+/************************************************************************************
  * Public Types
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ASSEMBLY__
 
@@ -97,26 +112,20 @@ typedef enum
   /* One of the following */
 
   STM32_TIM_MODE_CK_INT       = 0x0000,
-
-  /* STM32_TIM_MODE_CK_INT_TRIG  = 0x0400, */
-
-  /* STM32_TIM_MODE_CK_EXT       = 0x0800, */
-
-  /* STM32_TIM_MODE_CK_EXT_TRIG  = 0x0C00, */
+//STM32_TIM_MODE_CK_INT_TRIG  = 0x0400,
+//STM32_TIM_MODE_CK_EXT       = 0x0800,
+//STM32_TIM_MODE_CK_EXT_TRIG  = 0x0C00,
 
   /* Clock sources, OR'ed with CK_EXT */
 
-  /* STM32_TIM_MODE_CK_CHINVALID = 0x0000, */
-
-  /* STM32_TIM_MODE_CK_CH1       = 0x0001, */
-
-  /* STM32_TIM_MODE_CK_CH2       = 0x0002, */
-
-  /* STM32_TIM_MODE_CK_CH3       = 0x0003, */
-
-  /* STM32_TIM_MODE_CK_CH4       = 0x0004  */
+//STM32_TIM_MODE_CK_CHINVALID = 0x0000,
+//STM32_TIM_MODE_CK_CH1       = 0x0001,
+//STM32_TIM_MODE_CK_CH2       = 0x0002,
+//STM32_TIM_MODE_CK_CH3       = 0x0003,
+//STM32_TIM_MODE_CK_CH4       = 0x0004
 
   /* Todo: external trigger block */
+
 } stm32_tim_mode_t;
 
 /* TIM Channel Modes */
@@ -136,17 +145,14 @@ typedef enum
 
   /* Output Compare Modes */
 
-  STM32_TIM_CH_OUTPWM         = 0x04,     /* Enable standard PWM mode, active high when counter < compare */
+  STM32_TIM_CH_OUTPWM         = 0x04,     /** Enable standard PWM mode, active high when counter < compare */
+//STM32_TIM_CH_OUTCOMPARE     = 0x06,
 
-  /* STM32_TIM_CH_OUTCOMPARE     = 0x06, */
+  // TODO other modes ... as PWM capture, ENCODER and Hall Sensor
+//STM32_TIM_CH_INCAPTURE      = 0x10,
+//STM32_TIM_CH_INPWM          = 0x20
+//STM32_TIM_CH_DRIVE_OC   -- open collector mode
 
-  /* TODO other modes ... as PWM capture, ENCODER and Hall Sensor */
-
-  /* STM32_TIM_CH_INCAPTURE      = 0x10, */
-
-  /* STM32_TIM_CH_INPWM          = 0x20  */
-
-  /* STM32_TIM_CH_DRIVE_OC   -- open collector mode */
 } stm32_tim_channel_t;
 
 /* TIM Operations */
@@ -155,44 +161,41 @@ struct stm32_tim_ops_s
 {
   /* Basic Timers */
 
-  void (*enable)(struct stm32_tim_dev_s *dev);
-  void (*disable)(struct stm32_tim_dev_s *dev);
-  int  (*setmode)(struct stm32_tim_dev_s *dev, stm32_tim_mode_t mode);
-  int  (*setclock)(struct stm32_tim_dev_s *dev, uint32_t freq);
-  void (*setperiod)(struct stm32_tim_dev_s *dev, uint32_t period);
-  uint32_t (*getcounter)(struct stm32_tim_dev_s *dev);
-  void (*setcounter)(struct stm32_tim_dev_s *dev, uint32_t count);
+  int  (*setmode)(FAR struct stm32_tim_dev_s *dev, stm32_tim_mode_t mode);
+  int  (*setclock)(FAR struct stm32_tim_dev_s *dev, uint32_t freq);
+  void (*setperiod)(FAR struct stm32_tim_dev_s *dev, uint32_t period);
+  uint32_t (*getcounter)(FAR struct stm32_tim_dev_s *dev);
+  void (*setcounter)(FAR struct stm32_tim_dev_s *dev, uint32_t count);
 
   /* General and Advanced Timers Adds */
 
-  int  (*getwidth)(struct stm32_tim_dev_s *dev);
-  int  (*setchannel)(struct stm32_tim_dev_s *dev, uint8_t channel,
+  int  (*getwidth)(FAR struct stm32_tim_dev_s *dev);
+  int  (*setchannel)(FAR struct stm32_tim_dev_s *dev, uint8_t channel,
                      stm32_tim_channel_t mode);
-  int  (*setcompare)(struct stm32_tim_dev_s *dev, uint8_t channel,
+  int  (*setcompare)(FAR struct stm32_tim_dev_s *dev, uint8_t channel,
                      uint32_t compare);
-  int  (*getcapture)(struct stm32_tim_dev_s *dev, uint8_t channel);
+  int  (*getcapture)(FAR struct stm32_tim_dev_s *dev, uint8_t channel);
 
   /* Timer interrupts */
 
-  int  (*setisr)(struct stm32_tim_dev_s *dev,
-                  xcpt_t handler, void * arg, int source);
-  void (*enableint)(struct stm32_tim_dev_s *dev, int source);
-  void (*disableint)(struct stm32_tim_dev_s *dev, int source);
-  void (*ackint)(struct stm32_tim_dev_s *dev, int source);
-  int  (*checkint)(struct stm32_tim_dev_s *dev, int source);
+  int  (*setisr)(FAR struct stm32_tim_dev_s *dev, xcpt_t handler, void * arg, int source);
+  void (*enableint)(FAR struct stm32_tim_dev_s *dev, int source);
+  void (*disableint)(FAR struct stm32_tim_dev_s *dev, int source);
+  void (*ackint)(FAR struct stm32_tim_dev_s *dev, int source);
+  int  (*checkint)(FAR struct stm32_tim_dev_s *dev, int source);
 };
 
-/****************************************************************************
- * Public Functions Prototypes
- ****************************************************************************/
+/************************************************************************************
+ * Public Functions
+ ************************************************************************************/
 
 /* Power-up timer and get its structure */
 
-struct stm32_tim_dev_s *stm32_tim_init(int timer);
+FAR struct stm32_tim_dev_s *stm32_tim_init(int timer);
 
 /* Power-down timer, mark it as unused */
 
-int stm32_tim_deinit(struct stm32_tim_dev_s *dev);
+int stm32_tim_deinit(FAR struct stm32_tim_dev_s *dev);
 
 /****************************************************************************
  * Name: stm32_timer_initialize
@@ -202,8 +205,7 @@ int stm32_tim_deinit(struct stm32_tim_dev_s *dev);
  *   register the timer drivers at 'devpath'
  *
  * Input Parameters:
- *   devpath - The full path to the timer device.
- *              This should be of the form /dev/timer0
+ *   devpath - The full path to the timer device. This should be of the form /dev/timer0
  *   timer - the timer number.
  *
  * Returned Value:
@@ -213,7 +215,7 @@ int stm32_tim_deinit(struct stm32_tim_dev_s *dev);
  ****************************************************************************/
 
 #ifdef CONFIG_TIMER
-int stm32_timer_initialize(const char *devpath, int timer);
+int stm32_timer_initialize(FAR const char *devpath, int timer);
 #endif
 
 #undef EXTERN

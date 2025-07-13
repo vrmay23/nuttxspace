@@ -1,11 +1,19 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/lpc17xx_40xx/lpc17_40_can.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2010,2012 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2011 Li Zhuoyi. All rights reserved.
- * SPDX-FileContributor: Li Zhuoyi <lzyy.cn@gmail.com>
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2011 Li Zhuoyi. All rights reserved.
+ *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
+ *   Authors:
+ *     Li Zhuoyi <lzyy.cn@gmail.com>
+ *     Gregory Nutt <gnutt@nuttx.org>
+ *   History:
+ *     2011-07-12: Initial version (Li Zhuoyi)
+ *     2011-08-03: Support CAN1/CAN2 (Li Zhuoyi)
+ *     2012-01-02: Add support for CAN loopback mode (Gregory Nutt)
+ *
+ * This file is a part of NuttX:
+ *
+ *   Copyright (C) 2010 Gregory Nutt. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,47 +42,25 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
-
-/****************************************************************************
- * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
-#if defined(CONFIG_CAN)
-#  define CHRDEV_CAN
-#endif
-
-#if defined(CONFIG_NET_CAN)
-#  define SOCKET_CAN
-#endif
-
 #include <stdio.h>
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <arch/board/board.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/can/can.h>
 
-#if defined(CHRDEV_CAN)
-#  include <nuttx/can/can.h>
-#endif
+#include "up_internal.h"
+#include "up_arch.h"
 
-#if defined(SOCKET_CAN)
-#  include <nuttx/net/netdev.h>
-#  include <nuttx/net/can.h>
-#  include <nuttx/wqueue.h>
-#  include <string.h>
-#endif
-
-#include "arm_internal.h"
 #include "chip.h"
 #include "hardware/lpc17_40_syscon.h"
 #include "lpc17_40_gpio.h"
@@ -82,39 +68,26 @@
 
 #if defined(CONFIG_LPC17_40_CAN1) || defined(CONFIG_LPC17_40_CAN2)
 
-#if defined(CHRDEV_CAN) && defined(SOCKET_CAN)
-# error "Both chrdev CAN or SocketCAN have been enabled"
-#endif
-
-#if !defined(CHRDEV_CAN) && !defined(SOCKET_CAN)
-# error "No upper CAN driver enabled"
-#endif
-
-#if defined(CHRDEV_CAN)
-#define lpc17_40_can_s can_dev_s
-#endif
-
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Configuration ************************************************************/
 
 #ifdef CONFIG_LPC17_40_CAN1
 
-/* A CAN bit rate must be provided */
+   /* A CAN bit rate must be provided */
 
 #  ifndef CONFIG_LPC17_40_CAN1_BAUD
 #    error "CONFIG_LPC17_40_CAN1_BAUD is not defined"
 #  endif
 
-/* If no divsor is provided, use a divisor of 4 */
+   /* If no divsor is provided, use a divisor of 4 */
 
 #  ifndef CONFIG_LPC17_40_CAN1_DIVISOR
 #    define CONFIG_LPC17_40_CAN1_DIVISOR 4
 #  endif
 
-/* Get the SYSCON_PCLKSEL value for CAN1 the implements this divisor */
+   /* Get the SYSCON_PCLKSEL value for CAN1 the implements this divisor */
 
 #  if CONFIG_LPC17_40_CAN1_DIVISOR == 1
 #    define CAN1_CCLK_DIVISOR SYSCON_PCLKSEL_CCLK
@@ -131,19 +104,19 @@
 
 #ifdef CONFIG_LPC17_40_CAN2
 
-/* A CAN bit rate must be provided */
+   /* A CAN bit rate must be provided */
 
 #  ifndef CONFIG_LPC17_40_CAN2_BAUD
 #    error "CONFIG_LPC17_40_CAN2_BAUD is not defined"
 #  endif
 
-/* If no divsor is provided, use a divisor of 4 */
+   /* If no divsor is provided, use a divisor of 4 */
 
 #  ifndef CONFIG_LPC17_40_CAN2_DIVISOR
 #    define CONFIG_LPC17_40_CAN2_DIVISOR 4
 #  endif
 
-/* Get the SYSCON_PCLKSEL value for CAN2 the implements this divisor */
+   /* Get the SYSCON_PCLKSEL value for CAN2 the implements this divisor */
 
 #  if CONFIG_LPC17_40_CAN2_DIVISOR == 1
 #    define CAN2_CCLK_DIVISOR SYSCON_PCLKSEL_CCLK
@@ -184,7 +157,6 @@
 #define CAN_BIT_QUANTA (CONFIG_LPC17_40_CAN_TSEG1 + CONFIG_LPC17_40_CAN_TSEG2 + 1)
 
 /* Debug ********************************************************************/
-
 /* Non-standard debug that may be enabled just for testing CAN */
 
 #ifndef CONFIG_DEBUG_CAN_INFO
@@ -192,7 +164,6 @@
 #endif
 
 /* Timing *******************************************************************/
-
 /* CAN clocking is provided at CCLK divided by the configured divisor */
 
 #ifdef BOARD_CCLKSEL_DIVIDER
@@ -200,13 +171,6 @@
     ((uint32_t)LPC17_40_CCLK * BOARD_CCLKSEL_DIVIDER / (uint32_t)(d))
 #else
 #  define CAN_CLOCK_FREQUENCY(d) ((uint32_t)LPC17_40_CCLK / (uint32_t)(d))
-#endif
-
-#if defined(SOCKET_CAN)
-
-#define FLAGEFF  (1 << 31) /* Extended frame format */
-#define FLAGRTR  (1 << 30) /* Remote transmission request */
-#define POOL_SIZE 1
 #endif
 
 /****************************************************************************
@@ -221,37 +185,9 @@ struct up_dev_s
   uint32_t base;    /* CAN register base address */
 };
 
-#if defined(SOCKET_CAN)
-struct lpc17_40_can_s
-{
-  bool bifup;                   /* true:ifup false:ifdown */
-#ifdef TX_TIMEOUT_WQ
-  WDOG_ID txtimeout[TXMBCOUNT]; /* TX timeout timer */
-#endif
-  struct work_s irqwork;        /* For deferring interrupt work to the wq */
-
-  struct can_frame *txdesc;     /* A pointer to the list of TX descriptor */
-  struct can_frame *rxdesc;     /* A pointer to the list of RX descriptors */
-
-  /* This holds the information visible to the NuttX network */
-
-  struct net_driver_s dev;      /* Interface understood by the network */
-
-  void *cd_priv;                /* Used by the arch-specific logic */
-
-  uint8_t tx_prio;              /* Used to enforce TX fifo behaviour */
-
-#ifdef CONFIG_NET_CAN_RAW_TX_DEADLINE
-  struct txmbstats txmb[TXMBCOUNT];
-#endif
-};
-
-#endif
-
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
-
 /* CAN Register access */
 
 #ifdef CONFIG_LPC17_40_CAN_REGDEBUG
@@ -271,46 +207,30 @@ static void can_putcommon(uint32_t addr, uint32_t value);
 
 /* CAN methods */
 
-static void lpc17can_reset(struct lpc17_40_can_s *dev);
-static int  lpc17can_setup(struct lpc17_40_can_s *dev);
-static void lpc17can_shutdown(struct lpc17_40_can_s *dev);
-static void lpc17can_rxint(struct lpc17_40_can_s *dev, bool enable);
-static void lpc17can_txint(struct lpc17_40_can_s *dev, bool enable);
-static int  lpc17can_ioctl(struct lpc17_40_can_s *dev, int cmd,
-                           unsigned long arg);
-static int  lpc17can_remoterequest(struct lpc17_40_can_s *dev, uint16_t id);
-#if defined(CHRDEV_CAN)
-static int  lpc17can_send(struct lpc17_40_can_s *dev,
-                          struct can_msg_s *msg);
-#endif
-static bool lpc17can_txready(struct lpc17_40_can_s *dev);
-static bool lpc17can_txempty(struct lpc17_40_can_s *dev);
+static void lpc17can_reset(FAR struct can_dev_s *dev);
+static int  lpc17can_setup(FAR struct can_dev_s *dev);
+static void lpc17can_shutdown(FAR struct can_dev_s *dev);
+static void lpc17can_rxint(FAR struct can_dev_s *dev, bool enable);
+static void lpc17can_txint(FAR struct can_dev_s *dev, bool enable);
+static int  lpc17can_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg);
+static int  lpc17can_remoterequest(FAR struct can_dev_s *dev, uint16_t id);
+static int  lpc17can_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg);
+static bool lpc17can_txready(FAR struct can_dev_s *dev);
+static bool lpc17can_txempty(FAR struct can_dev_s *dev);
 
 /* CAN interrupts */
 
-static void can_interrupt(struct lpc17_40_can_s *dev);
-static int  can12_interrupt(int irq, void *context, void *arg);
+static void can_interrupt(FAR struct can_dev_s *dev);
+static int  can12_interrupt(int irq, void *context, FAR void *arg);
 
 /* Initialization */
 
 static int can_bittiming(struct up_dev_s *priv);
 
-/* SocketCAN network methods */
-#if defined(SOCKET_CAN)
-static int  lpc17can_ifup(struct net_driver_s *dev);
-static int  lpc17can_ifdown(struct net_driver_s *dev);
-static int  lpc17can_txavail(struct net_driver_s *dev);
-
-static bool lpc17can_txringfull(struct lpc17_40_can_s *dev);
-static int lpc17can_txpoll(struct net_driver_s *dev);
-static int lpc17can_transmit(struct lpc17_40_can_s *dev);
-#endif
-
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-#if defined(CHRDEV_CAN)
 static const struct can_ops_s g_canops =
 {
   .co_reset         = lpc17can_reset,
@@ -324,7 +244,6 @@ static const struct can_ops_s g_canops =
   .co_txready       = lpc17can_txready,
   .co_txempty       = lpc17can_txempty,
 };
-#endif
 
 #ifdef CONFIG_LPC17_40_CAN1
 static struct up_dev_s g_can1priv =
@@ -334,13 +253,12 @@ static struct up_dev_s g_can1priv =
   .baud    = CONFIG_LPC17_40_CAN1_BAUD,
   .base    = LPC17_40_CAN1_BASE,
 };
-#  if defined(CHRDEV_CAN)
-static struct lpc17_40_can_s g_can1dev =
+
+static struct can_dev_s g_can1dev =
 {
   .cd_ops  = &g_canops,
   .cd_priv = &g_can1priv,
 };
-#  endif
 #endif
 
 #ifdef CONFIG_LPC17_40_CAN2
@@ -351,40 +269,17 @@ static struct up_dev_s g_can2priv =
   .baud    = CONFIG_LPC17_40_CAN2_BAUD,
   .base    = LPC17_40_CAN2_BASE,
 };
-#  if defined(CHRDEV_CAN)
-static struct lpc17_40_can_s g_can2dev =
+
+static struct can_dev_s g_can2dev =
 {
   .cd_ops  = &g_canops,
   .cd_priv = &g_can2priv,
 };
-#  endif
-#endif
-
-#if defined(SOCKET_CAN)
-
-static uint8_t g_tx_pool[sizeof(struct can_frame)*POOL_SIZE];
-static uint8_t g_rx_pool[sizeof(struct can_frame)*POOL_SIZE];
-
-#ifdef CONFIG_LPC17_40_CAN1
-static struct lpc17_40_can_s g_can1dev =
-{
-  .cd_priv = &g_can1priv,
-};
-#endif
-
-#ifdef CONFIG_LPC17_40_CAN2
-static struct lpc17_40_can_s g_can2dev =
-{
-  .cd_priv = &g_can2priv,
-};
-#endif
-
 #endif
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
 /****************************************************************************
  * Name: can_printreg
  *
@@ -434,7 +329,7 @@ static void can_printreg(uint32_t addr, uint32_t value)
         {
           /* Yes.. then show how many times the value repeated */
 
-          caninfo("[repeats %d more times]\n", count - 3);
+          caninfo("[repeats %d more times]\n", count-3);
         }
 
       /* Save the new address, value, and count */
@@ -590,9 +485,9 @@ static void can_putcommon(uint32_t addr, uint32_t value)
  *
  ****************************************************************************/
 
-static void lpc17can_reset(struct lpc17_40_can_s *dev)
+static void lpc17can_reset(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
   irqstate_t flags;
   int ret;
 
@@ -620,11 +515,7 @@ static void lpc17can_reset(struct lpc17_40_can_s *dev)
 #ifdef CONFIG_CAN_LOOPBACK
   can_putreg(priv, LPC17_40_CAN_MOD_OFFSET, CAN_MOD_STM); /* Leave Reset Mode, enter Test Mode */
 #else
-#  if defined(SOCKET_CAN)
-  can_putreg(priv, LPC17_40_CAN_MOD_OFFSET, CAN_MOD_TPM); /* Leave Reset Mode, TX prio for FIFO */
-#  else
   can_putreg(priv, LPC17_40_CAN_MOD_OFFSET, 0);           /* Leave Reset Mode */
-#  endif
 #endif
   can_putcommon(LPC17_40_CANAF_AFMR, CANAF_AFMR_ACCBP);   /* All RX messages accepted */
   leave_critical_section(flags);
@@ -647,9 +538,11 @@ static void lpc17can_reset(struct lpc17_40_can_s *dev)
  *
  ****************************************************************************/
 
-static int lpc17can_setup(struct lpc17_40_can_s *dev)
+static int lpc17can_setup(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+#ifdef CONFIG_DEBUG_CAN_INFO
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
+#endif
   int ret;
 
   caninfo("CAN%d\n", priv->port);
@@ -678,10 +571,10 @@ static int lpc17can_setup(struct lpc17_40_can_s *dev)
  *
  ****************************************************************************/
 
-static void lpc17can_shutdown(struct lpc17_40_can_s *dev)
+static void lpc17can_shutdown(FAR struct can_dev_s *dev)
 {
 #ifdef CONFIG_DEBUG_CAN_INFO
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
 
   caninfo("CAN%d\n", priv->port);
 #endif
@@ -704,9 +597,9 @@ static void lpc17can_shutdown(struct lpc17_40_can_s *dev)
  *
  ****************************************************************************/
 
-static void lpc17can_rxint(struct lpc17_40_can_s *dev, bool enable)
+static void lpc17can_rxint(FAR struct can_dev_s *dev, bool enable)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
   uint32_t regval;
   irqstate_t flags;
 
@@ -745,9 +638,9 @@ static void lpc17can_rxint(struct lpc17_40_can_s *dev, bool enable)
  *
  ****************************************************************************/
 
-static void lpc17can_txint(struct lpc17_40_can_s *dev, bool enable)
+static void lpc17can_txint(FAR struct can_dev_s *dev, bool enable)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
   uint32_t regval;
   irqstate_t flags;
 
@@ -760,8 +653,8 @@ static void lpc17can_txint(struct lpc17_40_can_s *dev, bool enable)
 
   if (!enable)
     {
-      /* TX interrupts are also disabled from the interrupt handler, so we
-       * have to protect this code section.
+      /* TX interrupts are also disabled from the interrupt handler, so we have
+       * to protect this code section.
        */
 
       flags = enter_critical_section();
@@ -773,6 +666,7 @@ static void lpc17can_txint(struct lpc17_40_can_s *dev, bool enable)
       can_putreg(priv, LPC17_40_CAN_IER_OFFSET, regval);
       leave_critical_section(flags);
     }
+
 }
 
 /****************************************************************************
@@ -789,8 +683,7 @@ static void lpc17can_txint(struct lpc17_40_can_s *dev, bool enable)
  *
  ****************************************************************************/
 
-static int lpc17can_ioctl(struct lpc17_40_can_s *dev, int cmd,
-                          unsigned long arg)
+static int lpc17can_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
 {
   canerr("ERROR: Fix me -- Not Implemented\n");
   return 0;
@@ -810,13 +703,11 @@ static int lpc17can_ioctl(struct lpc17_40_can_s *dev, int cmd,
  *
  ****************************************************************************/
 
-static int lpc17can_remoterequest(struct lpc17_40_can_s *dev, uint16_t id)
+static int lpc17can_remoterequest(FAR struct can_dev_s *dev, uint16_t id)
 {
   canerr("ERROR: Fix me -- Not Implemented\n");
   return 0;
 }
-
-#if defined(CHRDEV_CAN)
 
 /****************************************************************************
  * Name: lpc17can_send
@@ -841,18 +732,17 @@ static int lpc17can_remoterequest(struct lpc17_40_can_s *dev, uint16_t id)
  *
  ****************************************************************************/
 
-static int lpc17can_send(struct lpc17_40_can_s *dev,
-                         struct can_msg_s *msg)
+static int lpc17can_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
   uint32_t tid = (uint32_t)msg->cm_hdr.ch_id;
   uint32_t tfi = (uint32_t)msg->cm_hdr.ch_dlc << 16;
   uint32_t regval;
   irqstate_t flags;
   int ret = OK;
 
-  caninfo("CAN%d ID: %" PRId32 " DLC: %d\n",
-          priv->port, (uint32_t)msg->cm_hdr.ch_id, msg->cm_hdr.ch_dlc);
+  caninfo("CAN%d ID: %d DLC: %d\n",
+          priv->port, msg->cm_hdr.ch_id, msg->cm_hdr.ch_dlc);
 
   if (msg->cm_hdr.ch_rtr)
     {
@@ -903,10 +793,8 @@ static int lpc17can_send(struct lpc17_40_can_s *dev,
 
       can_putreg(priv, LPC17_40_CAN_TFI1_OFFSET, tfi);
       can_putreg(priv, LPC17_40_CAN_TID1_OFFSET, tid);
-      can_putreg(priv, LPC17_40_CAN_TDA1_OFFSET,
-                 *(uint32_t *)&msg->cm_data[0]);
-      can_putreg(priv, LPC17_40_CAN_TDB1_OFFSET,
-                 *(uint32_t *)&msg->cm_data[4]);
+      can_putreg(priv, LPC17_40_CAN_TDA1_OFFSET, *(uint32_t *)&msg->cm_data[0]);
+      can_putreg(priv, LPC17_40_CAN_TDB1_OFFSET, *(uint32_t *)&msg->cm_data[4]);
 
       /* Send the message */
 
@@ -935,10 +823,8 @@ static int lpc17can_send(struct lpc17_40_can_s *dev,
 
       can_putreg(priv, LPC17_40_CAN_TFI2_OFFSET, tfi);
       can_putreg(priv, LPC17_40_CAN_TID2_OFFSET, tid);
-      can_putreg(priv, LPC17_40_CAN_TDA2_OFFSET,
-                 *(uint32_t *)&msg->cm_data[0]);
-      can_putreg(priv, LPC17_40_CAN_TDB2_OFFSET,
-                 *(uint32_t *)&msg->cm_data[4]);
+      can_putreg(priv, LPC17_40_CAN_TDA2_OFFSET, *(uint32_t *)&msg->cm_data[0]);
+      can_putreg(priv, LPC17_40_CAN_TDB2_OFFSET, *(uint32_t *)&msg->cm_data[4]);
 
       /* Send the message */
 
@@ -967,10 +853,8 @@ static int lpc17can_send(struct lpc17_40_can_s *dev,
 
       can_putreg(priv, LPC17_40_CAN_TFI3_OFFSET, tfi);
       can_putreg(priv, LPC17_40_CAN_TID3_OFFSET, tid);
-      can_putreg(priv, LPC17_40_CAN_TDA3_OFFSET,
-                 *(uint32_t *)&msg->cm_data[0]);
-      can_putreg(priv, LPC17_40_CAN_TDB3_OFFSET,
-                 *(uint32_t *)&msg->cm_data[4]);
+      can_putreg(priv, LPC17_40_CAN_TDA3_OFFSET, *(uint32_t *)&msg->cm_data[0]);
+      can_putreg(priv, LPC17_40_CAN_TDB3_OFFSET, *(uint32_t *)&msg->cm_data[4]);
 
       /* Send the message */
 
@@ -982,270 +866,13 @@ static int lpc17can_send(struct lpc17_40_can_s *dev,
     }
   else
     {
-      canerr("ERROR: No available transmission buffer, SR: %08" PRIx32 "\n",
-             regval);
+      canerr("ERROR: No available transmission buffer, SR: %08x\n", regval);
       ret = -EBUSY;
     }
 
   leave_critical_section(flags);
   return ret;
 }
-
-#endif
-
-#if defined(SOCKET_CAN)
-
-/****************************************************************************
- * Function: lpc17can_txringfull
- *
- * Description:
- *   Check if all of the TX descriptors are in use.
- *
- * Input Parameters:
- *   priv  - Reference to the driver state structure
- *
- * Returned Value:
- *   true is the TX ring is full; false if there are free slots at the
- *   head index.
- *
- ****************************************************************************/
-
-static inline bool lpc17can_txringfull(struct lpc17_40_can_s *dev)
-{
-  if (dev->tx_prio == 255)
-    {
-      return true;
-    }
-  else
-    {
-      return !lpc17can_txready(dev);
-    }
-}
-
-/****************************************************************************
- * Name: lpc17can_txpoll
- *
- * Description:
- *   The transmitter is available, check if the network has any outgoing
- *   packets ready to send.  This is a callback from devif_poll().
- *   devif_poll() may be called:
- *
- *   1. When the preceding TX packet send is complete,
- *   2. When the preceding TX packet send timesout and the interface is reset
- *   3. During normal TX polling
- *
- * Input Parameters:
- *   dev  - Reference to the NuttX driver state structure
- *
- * Returned Value:
- *   OK on success; a negated errno on failure
- *
- ****************************************************************************/
-
-static int lpc17can_txpoll(struct net_driver_s *dev)
-{
-  struct lpc17_40_can_s *priv =
-    (struct lpc17_40_can_s *)dev->d_private;
-
-  /* If the polling resulted in data that should be sent out on the network,
-   * the field d_len is set to a value > 0.
-   */
-
-  if (priv->dev.d_len > 0)
-    {
-      /* Check if there is room in the device to hold another packet. If
-       * not, return a non-zero value to terminate the poll.
-       */
-
-      if (lpc17can_txringfull(priv))
-        {
-          return -EBUSY;
-        }
-      else
-        {
-          /* Send the packet */
-
-          lpc17can_transmit(priv);
-        }
-    }
-
-  /* If zero is returned, the polling will continue until all connections
-   * have been examined.
-   */
-
-  return 0;
-}
-
-/****************************************************************************
- * Function: lpc17can_transmit
- *
- * Description:
- *   Start hardware transmission.  Called either from the txdone interrupt
- *   handling or from watchdog based polling.
- *
- * Input Parameters:
- *   priv  - Reference to the driver state structure
- *
- * Returned Value:
- *   OK on success; a negated errno on failure
- *
- * Assumptions:
- *   May or may not be called from an interrupt handler.  In either case,
- *   global interrupts are disabled, either explicitly or indirectly through
- *   interrupt handling logic.
- *
- ****************************************************************************/
-
-static int lpc17can_transmit(struct lpc17_40_can_s *dev)
-{
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
-  struct can_frame *frame = (struct can_frame *)dev->dev.d_buf;
-  uint32_t tid = (uint32_t)frame->can_id;
-  uint32_t tfi = (uint32_t)frame->can_dlc << 16;
-  uint32_t regval;
-  irqstate_t flags;
-  int ret = OK;
-
-  ninfo("CAN%d ID: %ld DLC: %d\n",
-          priv->port, frame->can_id, frame->can_dlc);
-
-  if (tid & FLAGRTR)
-    {
-      tfi |= CAN_TFI_RTR;
-    }
-
-  /* Set the FF bit in the TFI register if this message should be sent with
-   * the extended frame format (and 29-bit extended ID).
-   */
-
-  if (tid & FLAGEFF)
-    {
-      /* The provided ID should be 29 bits */
-
-      DEBUGASSERT((tid & ~CAN_TID_ID29_MASK) == 0);
-      tfi |= CAN_TFI_FF;
-    }
-  else
-    {
-      /* The provided ID should be 11 bits */
-
-      DEBUGASSERT((tid & ~CAN_TID_ID11_MASK) == 0);
-    }
-
-  flags = enter_critical_section();
-
-  tfi |= dev->tx_prio++;
-
-  /* Pick a transmit buffer */
-
-  regval = can_getreg(priv, LPC17_40_CAN_SR_OFFSET);
-  if ((regval & CAN_SR_TBS1) != 0)
-    {
-      /* Make sure that buffer 1 TX interrupts are enabled BEFORE sending the
-       * message. The TX interrupt is generated when the TBSn bit in CANxSR
-       * goes from 0 to 1 when the TIEn bit in CANxIER is 1.  If we don't
-       * enable it now, we may miss the TIE1 interrupt.
-       *
-       * NOTE: The IER is also modified from the interrupt handler, but the
-       * following is safe because interrupts are disabled here.
-       */
-
-      regval  = can_getreg(priv, LPC17_40_CAN_IER_OFFSET);
-      regval |= CAN_IER_TIE1;
-      can_putreg(priv, LPC17_40_CAN_IER_OFFSET, regval);
-
-      /* Set up the transfer */
-
-      can_putreg(priv, LPC17_40_CAN_TFI1_OFFSET, tfi);
-      can_putreg(priv, LPC17_40_CAN_TID1_OFFSET, tid);
-      can_putreg(priv, LPC17_40_CAN_TDA1_OFFSET,
-                 *(uint32_t *)&frame->data[0]);
-      can_putreg(priv, LPC17_40_CAN_TDB1_OFFSET,
-                 *(uint32_t *)&frame->data[4]);
-
-      /* Send the message */
-
-#ifdef CONFIG_CAN_LOOPBACK
-      can_putreg(priv, LPC17_40_CAN_CMR_OFFSET, CAN_CMR_STB1 | CAN_CMR_SRR);
-#else
-      can_putreg(priv, LPC17_40_CAN_CMR_OFFSET, CAN_CMR_STB1 | CAN_CMR_TR);
-#endif
-    }
-  else if ((regval & CAN_SR_TBS2) != 0)
-    {
-      /* Make sure that buffer 2 TX interrupts are enabled BEFORE sending the
-       * message. The TX interrupt is generated when the TBSn bit in CANxSR
-       * goes from 0 to 1 when the TIEn bit in CANxIER is 1.  If we don't
-       * enable it now, we may miss the TIE2 interrupt.
-       *
-       * NOTE: The IER is also modified from the interrupt handler, but the
-       * following is safe because interrupts are disabled here.
-       */
-
-      regval  = can_getreg(priv, LPC17_40_CAN_IER_OFFSET);
-      regval |= CAN_IER_TIE2;
-      can_putreg(priv, LPC17_40_CAN_IER_OFFSET, regval);
-
-      /* Set up the transfer */
-
-      can_putreg(priv, LPC17_40_CAN_TFI2_OFFSET, tfi);
-      can_putreg(priv, LPC17_40_CAN_TID2_OFFSET, tid);
-      can_putreg(priv, LPC17_40_CAN_TDA2_OFFSET,
-                 *(uint32_t *)&frame->data[0]);
-      can_putreg(priv, LPC17_40_CAN_TDB2_OFFSET,
-                 *(uint32_t *)&frame->data[4]);
-
-      /* Send the message */
-
-#ifdef CONFIG_CAN_LOOPBACK
-      can_putreg(priv, LPC17_40_CAN_CMR_OFFSET, CAN_CMR_STB2 | CAN_CMR_SRR);
-#else
-      can_putreg(priv, LPC17_40_CAN_CMR_OFFSET, CAN_CMR_STB2 | CAN_CMR_TR);
-#endif
-    }
-  else if ((regval & CAN_SR_TBS3) != 0)
-    {
-      /* Make sure that buffer 3 TX interrupts are enabled BEFORE sending the
-       * message. The TX interrupt is generated when the TBSn bit in CANxSR
-       * goes from 0 to 1 when the TIEn bit in CANxIER is 1.  If we don't
-       * enable it now, we may miss the TIE3 interrupt.
-       *
-       * NOTE: The IER is also modified from the interrupt handler, but the
-       * following is safe because interrupts are disabled here.
-       */
-
-      regval  = can_getreg(priv, LPC17_40_CAN_IER_OFFSET);
-      regval |= CAN_IER_TIE3;
-      can_putreg(priv, LPC17_40_CAN_IER_OFFSET, regval);
-
-      /* Set up the transfer */
-
-      can_putreg(priv, LPC17_40_CAN_TFI3_OFFSET, tfi);
-      can_putreg(priv, LPC17_40_CAN_TID3_OFFSET, tid);
-      can_putreg(priv, LPC17_40_CAN_TDA3_OFFSET,
-                 *(uint32_t *)&frame->data[0]);
-      can_putreg(priv, LPC17_40_CAN_TDB3_OFFSET,
-                 *(uint32_t *)&frame->data[4]);
-
-      /* Send the message */
-
-#ifdef CONFIG_CAN_LOOPBACK
-      can_putreg(priv, LPC17_40_CAN_CMR_OFFSET, CAN_CMR_STB3 | CAN_CMR_SRR);
-#else
-      can_putreg(priv, LPC17_40_CAN_CMR_OFFSET, CAN_CMR_STB3 | CAN_CMR_TR);
-#endif
-    }
-  else
-    {
-      nerr("ERROR: No available transmission buffer, SR: %08lx\n", regval);
-      ret = -EBUSY;
-    }
-
-  leave_critical_section(flags);
-  return ret;
-}
-
-#endif
 
 /****************************************************************************
  * Name: lpc17can_txready
@@ -1261,9 +888,9 @@ static int lpc17can_transmit(struct lpc17_40_can_s *dev)
  *
  ****************************************************************************/
 
-static bool lpc17can_txready(struct lpc17_40_can_s *dev)
+static bool lpc17can_txready(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
   uint32_t regval = can_getreg(priv, LPC17_40_CAN_SR_OFFSET);
   return ((regval & (CAN_SR_TBS1 | CAN_SR_TBS2 | CAN_SR_TBS3)) != 0);
 }
@@ -1286,9 +913,9 @@ static bool lpc17can_txready(struct lpc17_40_can_s *dev)
  *
  ****************************************************************************/
 
-static bool lpc17can_txempty(struct lpc17_40_can_s *dev)
+static bool lpc17can_txempty(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
   uint32_t regval = can_getreg(priv, LPC17_40_CAN_GSR_OFFSET);
   return ((regval & CAN_GSR_TBS) != 0);
 }
@@ -1307,22 +934,19 @@ static bool lpc17can_txempty(struct lpc17_40_can_s *dev)
  *
  ****************************************************************************/
 
-static void can_interrupt(struct lpc17_40_can_s *dev)
+static void can_interrupt(FAR struct can_dev_s *dev)
 {
-  struct up_dev_s *priv = (struct up_dev_s *)dev->cd_priv;
-  uint32_t regval;
-  uint32_t rfs;
-  uint32_t rid;
-#if defined(CHRDEV_CAN)
+  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->cd_priv;
   struct can_hdr_s hdr;
   uint32_t data[2];
+  uint32_t rfs;
+  uint32_t rid;
+  uint32_t regval;
 
-  /* Read the interrupt and capture register (also clearing most status
-   * bits)
-   */
+  /* Read the interrupt and capture register (also clearing most status bits) */
 
   regval = can_getreg(priv, LPC17_40_CAN_ICR_OFFSET);
-  caninfo("CAN%d ICR: %08" PRIx32 "\n", priv->port, regval);
+  caninfo("CAN%d ICR: %08x\n",  priv->port, regval);
 
   /* Check for a receive interrupt */
 
@@ -1348,12 +972,11 @@ static void can_interrupt(struct lpc17_40_can_s *dev)
 #ifdef CONFIG_CAN_EXTID
       hdr.ch_extid  = ((rfs & CAN_RFS_FF) != 0);
 #else
-      hdr.ch_tcf    = 0;
+      hdr.ch_unused = 0;
 
       if ((rfs & CAN_RFS_FF) != 0)
         {
-          canerr("ERROR: Received message with extended identifier.  "
-                 "Dropped\n");
+          canerr("ERROR: Received message with extended identifier.  Dropped\n");
         }
       else
 #endif
@@ -1363,70 +986,6 @@ static void can_interrupt(struct lpc17_40_can_s *dev)
           can_receive(dev, &hdr, (uint8_t *)data);
         }
     }
-
-#endif
-
-#if defined(SOCKET_CAN)
-  struct can_frame *frame = dev->rxdesc;
-
-  /* Read the interrupt and capture register
-   * (also clearing most status bits)
-   */
-
-  regval = can_getreg(priv, LPC17_40_CAN_ICR_OFFSET);
-  caninfo("CAN%d ICR: %08lx\n",  priv->port, regval);
-
-  /* Check for a receive interrupt */
-
-  if ((regval & CAN_ICR_RI) != 0)
-    {
-      rfs     = can_getreg(priv, LPC17_40_CAN_RFS_OFFSET);
-      rid     = can_getreg(priv, LPC17_40_CAN_RID_OFFSET);
-
-      frame->can_id = rid;
-
-      if ((rfs & CAN_RFS_FF) != 0)
-        {
-          frame->can_id |= FLAGEFF;
-        }
-
-      if ((rfs & CAN_RFS_RTR) != 0)
-        {
-          frame->can_id |= FLAGRTR;
-        }
-
-      frame->can_dlc = (rfs & CAN_RFS_DLC_MASK) >> CAN_RFS_DLC_SHIFT;
-
-      memcpy(&frame->data,
-             (uint32_t *)(priv->base + LPC17_40_CAN_RDA_OFFSET),
-             frame->can_dlc);
-
-      /* Release the receive buffer */
-
-      can_putreg(priv, LPC17_40_CAN_CMR_OFFSET, CAN_CMR_RRB);
-
-      /* Process the received CAN packet */
-
-      dev->dev.d_len = sizeof(struct can_frame);
-      dev->dev.d_buf = (uint8_t *)frame;
-
-      /* Send to socket interface */
-
-      NETDEV_RXPACKETS(&dev->dev);
-
-      can_input(&dev->dev);
-
-      /* Point the packet buffer back to the next Tx buffer that will be
-       * used during the next write.  If the write queue is full, then
-       * this will point at an active buffer, which must not be written
-       * to.  This is OK because devif_poll won't be called unless the
-       * queue is not full.
-       */
-
-      dev->dev.d_buf = (uint8_t *)dev->txdesc;
-    }
-
-#endif
 
   /* Check for TX buffer 1 complete */
 
@@ -1440,18 +999,7 @@ static void can_interrupt(struct lpc17_40_can_s *dev)
 
       /* Indicate that the TX is done and a new TX buffer is available */
 
-#if defined(CHRDEV_CAN)
       can_txdone(dev);
-#elif defined(SOCKET_CAN)
-      NETDEV_TXDONE(&priv->dev);
-      regval = can_getreg(priv, LPC17_40_CAN_GSR_OFFSET);
-      if ((regval & CAN_GSR_TBS) != 0)
-        {
-          /* All TX clear reset prio fifo counter */
-
-          dev->tx_prio = 0;
-        }
-#endif
     }
 
   /* Check for TX buffer 2 complete */
@@ -1466,18 +1014,7 @@ static void can_interrupt(struct lpc17_40_can_s *dev)
 
       /* Indicate that the TX is done and a new TX buffer is available */
 
-#if defined(CHRDEV_CAN)
       can_txdone(dev);
-#elif defined(SOCKET_CAN)
-      NETDEV_TXDONE(&priv->dev);
-      regval = can_getreg(priv, LPC17_40_CAN_GSR_OFFSET);
-      if ((regval & CAN_GSR_TBS) != 0)
-        {
-          /* All TX clear reset prio fifo counter */
-
-          dev->tx_prio = 0;
-        }
-#endif
     }
 
   /* Check for TX buffer 3 complete */
@@ -1492,18 +1029,7 @@ static void can_interrupt(struct lpc17_40_can_s *dev)
 
       /* Indicate that the TX is done and a new TX buffer is available */
 
-#if defined(CHRDEV_CAN)
       can_txdone(dev);
-#elif defined(SOCKET_CAN)
-      NETDEV_TXDONE(&priv->dev);
-      regval = can_getreg(priv, LPC17_40_CAN_GSR_OFFSET);
-      if ((regval & CAN_GSR_TBS) != 0)
-        {
-          /* All TX clear reset prio fifo counter */
-
-          dev->tx_prio = 0;
-        }
-#endif
     }
 }
 
@@ -1523,7 +1049,7 @@ static void can_interrupt(struct lpc17_40_can_s *dev)
  *
  ****************************************************************************/
 
-static int can12_interrupt(int irq, void *context, void *arg)
+static int can12_interrupt(int irq, void *context, FAR void *arg)
 {
   /* Handle CAN1/2 interrupts */
 
@@ -1585,8 +1111,7 @@ static int can12_interrupt(int irq, void *context, void *arg)
  *   Tq = brp * Tcan
  *
  * Where:
- *   Tcan is the period of the APB clock (PCLK =
- *   CCLK / CONFIG_LPC17_40_CAN1_DIVISOR).
+ *   Tcan is the period of the APB clock (PCLK = CCLK / CONFIG_LPC17_40_CAN1_DIVISOR).
  *
  * Input Parameters:
  *   priv - A reference to the CAN block status
@@ -1605,8 +1130,8 @@ static int can_bittiming(struct up_dev_s *priv)
   uint32_t ts2;
   uint32_t sjw;
 
-  caninfo("CAN%d PCLK: %" PRId32 " baud: %" PRId32 "\n", priv->port,
-          (uint32_t)CAN_CLOCK_FREQUENCY(priv->divisor), priv->baud);
+  caninfo("CAN%d PCLK: %d baud: %d\n", priv->port,
+          CAN_CLOCK_FREQUENCY(priv->divisor), priv->baud);
 
   /* Try to get CAN_BIT_QUANTA quanta in one bit_time.
    *
@@ -1643,9 +1168,9 @@ static int can_bittiming(struct up_dev_s *priv)
         }
     }
 
-  /* Otherwise, nquanta is CAN_BIT_QUANTA, ts1 is CONFIG_LPC17_40_CAN_TSEG1,
-   * ts2 is CONFIG_LPC17_40_CAN_TSEG2 and we calculate brp to achieve
-   * CAN_BIT_QUANTA quanta in the bit time
+  /* Otherwise, nquanta is CAN_BIT_QUANTA, ts1 is CONFIG_LPC17_40_CAN_TSEG1, ts2 is
+   * CONFIG_LPC17_40_CAN_TSEG2 and we calculate brp to achieve CAN_BIT_QUANTA quanta
+   * in the bit time
    */
 
   else
@@ -1653,14 +1178,12 @@ static int can_bittiming(struct up_dev_s *priv)
       ts1 = CONFIG_LPC17_40_CAN_TSEG1;
       ts2 = CONFIG_LPC17_40_CAN_TSEG2;
       brp = (nclks + (CAN_BIT_QUANTA / 2)) / CAN_BIT_QUANTA;
-      DEBUGASSERT(brp >= 1 && brp <= CAN_BTR_BRP_MAX);
+      DEBUGASSERT(brp >=1 && brp <= CAN_BTR_BRP_MAX);
     }
 
   sjw = 1;
 
-  caninfo("TS1: %" PRId32 " TS2: %" PRId32
-          " BRP: %" PRId32 " SJW= %" PRId32 "\n",
-          ts1, ts2, brp, sjw);
+  caninfo("TS1: %d TS2: %d BRP: %d SJW= %d\n", ts1, ts2, brp, sjw);
 
   /* Configure bit timing */
 
@@ -1677,176 +1200,14 @@ static int can_bittiming(struct up_dev_s *priv)
   btr |= CAN_BTR_SAM;
 #endif
 
-  caninfo("Setting CANxBTR= 0x%08" PRIx32 "\n", btr);
+  caninfo("Setting CANxBTR= 0x%08x\n", btr);
   can_putreg(priv, LPC17_40_CAN_BTR_OFFSET, btr);        /* Set bit timing */
   return OK;
 }
 
-#if defined(SOCKET_CAN)
-
-/****************************************************************************
- * Function: s32k1xx_txavail
- *
- * Description:
- *   Driver callback invoked when new TX data is available.  This is a
- *   stimulus perform an out-of-cycle poll and, thereby, reduce the TX
- *   latency.
- *
- * Input Parameters:
- *   dev  - Reference to the NuttX driver state structure
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *   Called in normal user mode
- *
- ****************************************************************************/
-
-static int lpc17can_txavail(struct net_driver_s *dev)
-{
-  struct lpc17_40_can_s *priv =
-    (struct lpc17_40_can_s *)dev->d_private;
-
-  /* Ignore the notification if the interface is not yet up */
-
-  net_lock();
-  if (priv->bifup)
-    {
-      /* Check if there is room in the hardware to hold another outgoing
-       * packet.
-       */
-
-      if (!lpc17can_txringfull(priv))
-        {
-          /* No, there is space for another transfer.  Poll the network for
-           * new XMIT data.
-           */
-
-          devif_poll(&priv->dev, lpc17can_txpoll);
-        }
-    }
-
-  net_unlock();
-
-  return OK;
-}
-
-/****************************************************************************
- * Function: s32k1xx_ifup
- *
- * Description:
- *   NuttX Callback: Bring up the Ethernet interface when an IP address is
- *   provided
- *
- * Input Parameters:
- *   dev  - Reference to the NuttX driver state structure
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *
- ****************************************************************************/
-
-static int lpc17can_ifup(struct net_driver_s *dev)
-{
-  struct lpc17_40_can_s *priv =
-    (struct lpc17_40_can_s *)dev->d_private;
-
-  priv->bifup = true;
-  priv->tx_prio = 0;
-
-  priv->txdesc = (struct can_frame *)&g_tx_pool;
-  priv->rxdesc = (struct can_frame *)&g_rx_pool;
-
-  priv->dev.d_buf = (uint8_t *)priv->txdesc;
-
-  lpc17can_setup(priv);
-  lpc17can_rxint(priv, true);
-  lpc17can_txint(priv, true);
-
-  return OK;
-}
-
-/****************************************************************************
- * Function: lpc17can_ifdown
- *
- * Description:
- *   NuttX Callback: Stop the interface.
- *
- * Input Parameters:
- *   dev  - Reference to the NuttX driver state structure
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *
- ****************************************************************************/
-
-static int lpc17can_ifdown(struct net_driver_s *dev)
-{
-  struct lpc17_40_can_s *priv =
-    (struct lpc17_40_can_s *)dev->d_private;
-
-  lpc17can_reset(priv);
-
-  priv->bifup = false;
-  return OK;
-}
-
-/****************************************************************************
- * Name: lpc17_40_netinitialize
- *
- * Description:
- *   Initialize the network driver structure
- *
- * Input Parameters:
- *   CAN device priv instance
- *
- * Returned Value:
- *   OK
- *
- ****************************************************************************/
-
-int lpc17_40_netinitialize(struct lpc17_40_can_s * priv)
-{
-  /* Initialize the driver structure */
-
-  priv->dev.d_ifup    = lpc17can_ifup;     /* I/F up (new IP address) callback */
-  priv->dev.d_ifdown  = lpc17can_ifdown;   /* I/F down callback */
-  priv->dev.d_txavail = lpc17can_txavail;  /* New TX data callback */
-  priv->dev.d_private = (void *)priv;      /* Used to recover private state from dev */
-
-#ifdef TX_TIMEOUT_WQ
-  for (int i = 0; i < TXMBCOUNT; i++)
-    {
-      priv->txtimeout[i] = wd_create();    /* Create TX timeout timer */
-    }
-#endif
-
-  /* Put the interface in the down state.  This usually amounts to resetting
-   * the device and/or calling s32k1xx_ifdown().
-   */
-
-  ninfo("callbacks done\r\n");
-
-  lpc17can_ifdown(&priv->dev);
-
-  /* Register the device with the OS so that socket IOCTLs can be performed */
-
-  netdev_register(&priv->dev, NET_LL_CAN);
-
-  return OK;
-}
-
-#endif
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
-
 /****************************************************************************
  * Name: lpc17_40_caninitialize
  *
@@ -1861,9 +1222,9 @@ int lpc17_40_netinitialize(struct lpc17_40_can_s * priv)
  *
  ****************************************************************************/
 
-struct lpc17_40_can_s *lpc17_40_caninitialize(int port)
+FAR struct can_dev_s *lpc17_40_caninitialize(int port)
 {
-  struct lpc17_40_can_s *candev;
+  FAR struct can_dev_s *candev;
   irqstate_t flags;
   uint32_t regval;
 
@@ -1949,19 +1310,4 @@ struct lpc17_40_can_s *lpc17_40_caninitialize(int port)
   leave_critical_section(flags);
   return candev;
 }
-
-#if defined(SOCKET_CAN) && !defined(CONFIG_NETDEV_LATEINIT)
-
-void arm_netinitialize(void)
-{
-#ifdef CONFIG_LPC17_40_CAN1
-  lpc17_40_netinitialize(lpc17_40_caninitialize(1));
-#endif
-
-#ifdef CONFIG_LPC17_40_CAN2
-  lpc17_40_netinitialize(lpc17_40_caninitialize(2));
-#endif
-}
-#endif
-
 #endif

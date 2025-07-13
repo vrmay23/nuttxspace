@@ -1,10 +1,9 @@
 /****************************************************************************
  * libs/libc/stdio/lib_vdprintf.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2012 Andrew Tridgell. All rights reserved.
- * SPDX-FileContributor: Andrew Tridgell <andrew@tridgell.net>
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2012 Andrew Tridgell. All rights reserved.
+ *   Authors: Author: Andrew Tridgell <andrew@tridgell.net>
+ *            Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,7 +38,11 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/streams.h>
+#include <nuttx/config.h>
+
+#include <stdio.h>
+
+#include "libc.h"
 
 /****************************************************************************
  * Public Functions
@@ -47,15 +50,10 @@
 
 int vdprintf(int fd, FAR const IPTR char *fmt, va_list ap)
 {
-  int ret;
   struct lib_rawoutstream_s rawoutstream;
-  struct lib_bufferedoutstream_s outstream;
 
   /* Wrap the fd in a stream object and let lib_vsprintf do the work. */
 
-  lib_rawoutstream(&rawoutstream, fd);
-  lib_bufferedoutstream(&outstream, &rawoutstream.common);
-  ret = lib_vsprintf(&outstream.common, fmt, ap);
-  lib_stream_flush(&outstream.common);
-  return ret;
+   lib_rawoutstream(&rawoutstream, fd);
+   return lib_vsprintf(&rawoutstream.public, fmt, ap);
 }

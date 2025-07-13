@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/wdog/wdog.h
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -34,18 +32,28 @@
 
 #include <nuttx/compiler.h>
 #include <nuttx/clock.h>
-#include <nuttx/queue.h>
 #include <nuttx/wdog.h>
-#include <nuttx/list.h>
-#include <nuttx/spinlock_type.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Redefine to the standard list */
+/****************************************************************************
+ * Name: wd_elapse
+ *
+ * Description:
+ *   This function is used to get time-elapse from last time wd_timer() be
+ *   called. In case of CONFIG_SCHED_TICKLESS configured, wd_timer() may
+ *   take lots of ticks, during this time, wd_start()/wd_cancel() may
+ *   called, so we need wd_elapse() to correct the delay/lag.
+ *
+ ****************************************************************************/
 
-#define list_node wdlist_node
+#ifdef CONFIG_SCHED_TICKLESS
+#  define wd_elapse() (clock_systimer() - g_wdtickbase)
+#else
+#  define wd_elapse() (0)
+#endif
 
 /****************************************************************************
  * Public Data
@@ -59,17 +67,58 @@ extern "C"
 #define EXTERN extern
 #endif
 
+/* The g_wdfreelist data structure is a singly linked list of watchdogs
+ * available to the system for delayed function use.
+ */
+
+extern sq_queue_t g_wdfreelist;
+
 /* The g_wdactivelist data structure is a singly linked list ordered by
  * watchdog expiration time. When watchdog timers expire,the functions on
  * this linked list are removed and the function is called.
  */
 
-extern struct list_node g_wdactivelist;
-extern spinlock_t g_wdspinlock;
+extern sq_queue_t g_wdactivelist;
+
+/* This is the number of free, pre-allocated watchdog structures in the
+ * g_wdfreelist.  This value is used to enforce a reserve for interrupt
+ * handlers.
+ */
+
+extern uint16_t g_wdnfree;
+
+/* This is wdog tickbase, for wd_gettime() may called many times
+ * between 2 times of wd_timer(), we use it to update wd_gettime().
+ */
+
+#ifdef CONFIG_SCHED_TICKLESS
+extern clock_t g_wdtickbase;
+#endif
 
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: wd_initialize
+ *
+ * Description:
+ * This function initializes the watchdog data structures
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ * Assumptions:
+ *   This function must be called early in the initialization sequence
+ *   before the timer interrupt is attached and before any watchdog
+ *   services are used.
+ *
+ ****************************************************************************/
+
+void weak_function wd_initialize(void);
 
 /****************************************************************************
  * Name: wd_timer
@@ -85,7 +134,6 @@ extern spinlock_t g_wdspinlock;
  *     in the interval that just expired is provided.  Otherwise,
  *     this function is called on each timer interrupt and a value of one
  *     is implicit.
- *   noswitches - True: Can't do context switches now.
  *
  * Returned Value:
  *   If CONFIG_SCHED_TICKLESS is defined then the number of ticks for the
@@ -98,9 +146,9 @@ extern spinlock_t g_wdspinlock;
  ****************************************************************************/
 
 #ifdef CONFIG_SCHED_TICKLESS
-clock_t wd_timer(clock_t ticks, bool noswitches);
+unsigned int wd_timer(int ticks);
 #else
-void wd_timer(clock_t ticks);
+void wd_timer(void);
 #endif
 
 /****************************************************************************

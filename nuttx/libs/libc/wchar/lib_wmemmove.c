@@ -1,8 +1,8 @@
 /****************************************************************************
  * libs/libc/wchar/lib_wmemmove.c
  *
- * SPDX-License-Identifier: BSD-2-Clause
- * SPDX-FileCopyrightText: 1999 Citrus Project, All rights reserved.
+ *   Copyright (c)1999 Citrus Project,
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,8 +32,11 @@
  * Included Files
  ****************************************************************************/
 
+#include <nuttx/config.h>
 #include <string.h>
 #include <wchar.h>
+
+#ifdef CONFIG_LIBC_WCHAR
 
 /****************************************************************************
  * Public Functions
@@ -43,13 +46,14 @@
  * Name: wmemmove
  *
  * Description:
- *   The wmemmove() function is the wide-character equivalent of the
- *   memmove() function. It copies n wide characters from the array starting
- *   at src to the array starting at dest.  The arrays may overlap.
+ *   The wmemmove() function is the wide-character equivalent of the memmove()
+ *   function. It copies n wide characters from the array starting at src to
+ *   the array starting at dest.  The arrays may overlap.
  *
  ****************************************************************************/
 
 FAR wchar_t *wmemmove(FAR wchar_t *d, FAR const wchar_t *s, size_t n)
 {
-  return memmove(d, s, n * sizeof(wchar_t));
+  return (FAR wchar_t *) memmove(d, s, n * sizeof(wchar_t));
 }
+#endif

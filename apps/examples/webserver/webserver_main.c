@@ -1,5 +1,5 @@
 /****************************************************************************
- * apps/examples/webserver/webserver_main.c
+ * examples/webserver/webserver_main.c
  *
  *   Copyright (C) 2007, 2009-2012, 2015 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
@@ -56,6 +56,7 @@
 #include <net/if.h>
 #include <netinet/in.h>
 
+#include <nuttx/net/arp.h>
 #include "netutils/netlib.h"
 
 #ifdef CONFIG_EXAMPLES_WEBSERVER_DHCPC
@@ -69,7 +70,7 @@
 /* DHCPC may be used in conjunction with any other feature (or not) */
 
 #ifdef CONFIG_EXAMPLES_WEBSERVER_DHCPC
-#  include "netutils/dhcpc.h"
+# include "netutils/dhcpc.h"
 #endif
 
 /* Include uIP webserver definitions */
@@ -81,10 +82,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#ifndef CONFIG_NETUTILS_WEBSERVER
-#  error "CONFIG_NETUTILS_WEBSERVER is required to get WebServer working"
-#endif
 
 /****************************************************************************
  * Private Data
@@ -110,10 +107,10 @@ int main(int argc, FAR char *argv[])
   uint8_t mac[IFHWADDRLEN];
 #endif
 #ifdef CONFIG_EXAMPLES_WEBSERVER_DHCPC
-  FAR void *handle;
+  void *handle;
 #endif
 
-  /* Many embedded network interfaces must have a software assigned MAC */
+/* Many embedded network interfaces must have a software assigned MAC */
 
 #ifdef CONFIG_EXAMPLES_WEBSERVER_NOMAC
   mac[0] = 0x00;
@@ -159,37 +156,34 @@ int main(int argc, FAR char *argv[])
 
   handle = dhcpc_open("eth0", &mac, IFHWADDRLEN);
 
-  /* Get an IP address.  Note:  there is no logic here for renewing the
-   * address in this example.  The address should be renewed in
-   * ds.lease_time/2 seconds.
+  /* Get an IP address.  Note:  there is no logic here for renewing the address in this
+   * example.  The address should be renewed in ds.lease_time/2 seconds.
    */
 
   printf("Getting IP address\n");
   if (handle)
     {
-      struct dhcpc_state ds;
-      char inetaddr[INET_ADDRSTRLEN];
+        struct dhcpc_state ds;
+        dhcpc_request(handle, &ds);
+        netlib_set_ipv4addr("eth0", &ds.ipaddr);
 
-      dhcpc_request(handle, &ds);
-      netlib_set_ipv4addr("eth0", &ds.ipaddr);
+        if (ds.netmask.s_addr != 0)
+          {
+            netlib_set_ipv4netmask("eth0", &ds.netmask);
+          }
 
-      if (ds.netmask.s_addr != 0)
-        {
-          netlib_set_ipv4netmask("eth0", &ds.netmask);
-        }
+        if (ds.default_router.s_addr != 0)
+          {
+            netlib_set_dripv4addr("eth0", &ds.default_router);
+          }
 
-      if (ds.default_router.s_addr != 0)
-        {
-          netlib_set_dripv4addr("eth0", &ds.default_router);
-        }
+        if (ds.dnsaddr.s_addr != 0)
+          {
+            netlib_set_ipv4dnsaddr(&ds.dnsaddr);
+          }
 
-      if (ds.dnsaddr.s_addr != 0)
-        {
-          netlib_set_ipv4dnsaddr(&ds.dnsaddr);
-        }
-
-      dhcpc_close(handle);
-      printf("IP: %s\n", inet_ntoa_r(ds.ipaddr, inetaddr, sizeof(inetaddr)));
+        dhcpc_close(handle);
+        printf("IP: %s\n", inet_ntoa(ds.ipaddr));
     }
 #endif
 #endif /* CONFIG_NSH_NETINIT */
@@ -203,7 +197,6 @@ int main(int argc, FAR char *argv[])
   httpd_listen();
 #endif
 
-#ifndef CONFIG_NSH_NETINIT
   /* We are running standalone (as opposed to a NSH built-in app). Therefore
    * we should not exit after httpd failure.
    */
@@ -214,24 +207,6 @@ int main(int argc, FAR char *argv[])
       printf("webserver_main: Still running\n");
       fflush(stdout);
     }
-
-#else /* CONFIG_NSH_NETINIT */
-  /* We are running as a NSH built-in app.  Therefore we should exit.  This
-   * allows to 'kill -9' the webserver app, assuming it was started as a
-   * background process.  For example:
-   *
-   *    nsh> webserver &
-   *    webserver [6:100]
-   *    nsh> Starting webserver
-   *
-   *    nsh> kill -9 6
-   *    nsh> webserver_main: Exiting
-   */
-
-  printf("webserver_main: Exiting\n");
-  fflush(stdout);
-
-#endif /* CONFIG_NSH_NETINIT */
 
   return 0;
 }

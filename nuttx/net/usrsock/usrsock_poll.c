@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/usrsock/usrsock_poll.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *  Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
+ *  Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -47,14 +60,14 @@
  * Private Functions
  ****************************************************************************/
 
-static uint16_t poll_event(FAR struct net_driver_s *dev,
+static uint16_t poll_event(FAR struct net_driver_s *dev, FAR void *pvconn,
                            FAR void *pvpriv, uint16_t flags)
 {
-  FAR struct usrsock_poll_s *info = pvpriv;
-  FAR struct usrsock_conn_s *conn = info->conn;
+  FAR struct usrsock_poll_s *info = (FAR struct usrsock_poll_s *)pvpriv;
+  FAR struct usrsock_conn_s *conn = pvconn;
   pollevent_t eventset = 0;
 
-  DEBUGASSERT(!info || info->fds);
+  DEBUGASSERT(!info || (info->psock && info->fds));
 
   if (info == NULL)
     {
@@ -104,7 +117,24 @@ static uint16_t poll_event(FAR struct net_driver_s *dev,
         }
     }
 
-  poll_notify(&info->fds, 1, eventset);
+  /* Filter I/O events depending on requested events. */
+
+  eventset &= (~(POLLOUT | POLLIN) | info->fds->events);
+
+  /* POLLOUT and PULLHUP are mutually exclusive. */
+
+  if ((eventset & POLLOUT) && (eventset & POLLHUP))
+    {
+      eventset &= ~POLLOUT;
+    }
+
+  /* Awaken the caller of poll() is requested event occurred. */
+
+  if (eventset)
+    {
+      info->fds->revents |= eventset;
+      nxsem_post(info->fds->sem);
+    }
 
   return flags;
 }
@@ -124,13 +154,11 @@ static uint16_t poll_event(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-static int usrsock_pollsetup(FAR struct socket *psock,
-                             FAR struct pollfd *fds)
+static int usrsock_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 {
   FAR struct usrsock_conn_s *conn = psock->s_conn;
   FAR struct usrsock_poll_s *info;
   FAR struct devif_callback_s *cb;
-  pollevent_t eventset = 0;
   int ret = OK;
 
   /* Sanity check */
@@ -147,7 +175,7 @@ static int usrsock_pollsetup(FAR struct socket *psock,
   /* Find a container to hold the poll information */
 
   info = conn->pollinfo;
-  while (info->conn != NULL)
+  while (info->psock != NULL)
     {
       if (++info >= &conn->pollinfo[CONFIG_NET_USRSOCK_NPOLLWAITERS])
         {
@@ -158,7 +186,7 @@ static int usrsock_pollsetup(FAR struct socket *psock,
 
   /* Allocate a usrsock callback structure */
 
-  cb = devif_callback_alloc(NULL, &conn->sconn.list, &conn->sconn.list_tail);
+  cb = devif_callback_alloc(NULL, &conn->list);
   if (cb == NULL)
     {
       ret = -EBUSY;
@@ -167,26 +195,26 @@ static int usrsock_pollsetup(FAR struct socket *psock,
 
   /* Initialize the poll info container */
 
-  info->conn = conn;
-  info->fds  = fds;
-  info->cb   = cb;
+  info->psock  = psock;
+  info->fds    = fds;
+  info->cb     = cb;
 
   /* Initialize the callback structure.  Save the reference to the info
    * structure as callback private data so that it will be available during
    * callback processing.
    */
 
-  cb->flags = USRSOCK_EVENT_ABORT | USRSOCK_EVENT_CONNECT_READY |
-              USRSOCK_EVENT_SENDTO_READY | USRSOCK_EVENT_RECVFROM_AVAIL |
-              USRSOCK_EVENT_REMOTE_CLOSED;
-  cb->priv  = info;
-  cb->event = poll_event;
+  cb->flags    = USRSOCK_EVENT_ABORT | USRSOCK_EVENT_CONNECT_READY |
+                 USRSOCK_EVENT_SENDTO_READY | USRSOCK_EVENT_RECVFROM_AVAIL |
+                 USRSOCK_EVENT_REMOTE_CLOSED;
+  cb->priv     = (FAR void *)info;
+  cb->event    = poll_event;
 
   /* Save the reference in the poll info structure as fds private as well
    * for use during poll teardown as well.
    */
 
-  fds->priv = info;
+  fds->priv    = (FAR void *)info;
 
   /* Check if socket is in error state */
 
@@ -197,19 +225,17 @@ static int usrsock_pollsetup(FAR struct socket *psock,
             conn->state == USRSOCK_CONN_STATE_UNINITIALIZED ?
                 "uninitialized" : "aborted");
 
-      eventset |= (POLLERR | POLLHUP);
+      fds->revents |= (POLLERR | POLLHUP);
     }
 
   /* Stream sockets need to be connected or connecting (or listening). */
 
-  else if ((psock->s_type == SOCK_STREAM ||
-            psock->s_type == SOCK_SEQPACKET) &&
-          !(conn->connected || conn->state ==
-            USRSOCK_CONN_STATE_CONNECTING))
+  else if ((conn->type == SOCK_STREAM || conn->type == SOCK_SEQPACKET) &&
+           !(conn->connected || conn->state == USRSOCK_CONN_STATE_CONNECTING))
     {
       ninfo("stream socket not connected and not connecting.\n");
 
-      eventset |= (POLLOUT | POLLIN | POLLHUP);
+      fds->revents |= (POLLOUT | POLLIN | POLLHUP);
     }
   else if (conn->flags & USRSOCK_EVENT_REMOTE_CLOSED)
     {
@@ -217,7 +243,7 @@ static int usrsock_pollsetup(FAR struct socket *psock,
 
       /* Remote closed. */
 
-      eventset |= (POLLHUP | POLLIN);
+      fds->revents |= (POLLHUP | POLLIN);
     }
   else
     {
@@ -227,20 +253,36 @@ static int usrsock_pollsetup(FAR struct socket *psock,
         {
           ninfo("socket send ready.\n");
 
-          eventset |= POLLOUT;
+          fds->revents |= POLLOUT;
         }
 
       if (conn->flags & USRSOCK_EVENT_RECVFROM_AVAIL)
         {
           ninfo("socket recv avail.\n");
 
-          eventset |= POLLIN;
+          fds->revents |= POLLIN;
         }
+    }
+
+  /* Filter I/O events depending on requested events. */
+
+  fds->revents &= (~(POLLOUT | POLLIN) | info->fds->events);
+
+  /* POLLOUT and PULLHUP are mutually exclusive. */
+
+  if ((fds->revents & POLLOUT) && (fds->revents & POLLHUP))
+    {
+      fds->revents &= ~POLLOUT;
     }
 
   /* Check if any requested events are already in effect */
 
-  poll_notify(&fds, 1, eventset);
+  if (fds->revents != 0)
+    {
+      /* Yes.. then signal the poll logic */
+
+      nxsem_post(fds->sem);
+    }
 
 errout_unlock:
   net_unlock();
@@ -286,10 +328,7 @@ static int usrsock_pollteardown(FAR struct socket *psock,
     {
       /* Release the callback */
 
-      devif_conn_callback_free(NULL,
-                               info->cb,
-                               &conn->sconn.list,
-                               &conn->sconn.list_tail);
+      devif_conn_callback_free(NULL, info->cb, &conn->list);
 
       /* Release the poll/select data slot */
 
@@ -297,7 +336,7 @@ static int usrsock_pollteardown(FAR struct socket *psock,
 
       /* Then free the poll info container */
 
-      info->conn = NULL;
+      info->psock = NULL;
     }
 
   return OK;
@@ -324,8 +363,7 @@ static int usrsock_pollteardown(FAR struct socket *psock,
  *
  ****************************************************************************/
 
-int usrsock_poll(FAR struct socket *psock,
-                 FAR struct pollfd *fds, bool setup)
+int usrsock_poll(FAR struct socket *psock, FAR struct pollfd *fds, bool setup)
 {
   if (setup)
     {

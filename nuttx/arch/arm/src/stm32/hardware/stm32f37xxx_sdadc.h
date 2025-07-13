@@ -1,12 +1,10 @@
-/****************************************************************************
+/****************************************************************************************************
  * arch/arm/src/stm32/hardware/stm32f37xxx_sdadc.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016 Studelec SA. All rights reserved.
- * SPDX-FileCopyrightText: 2011, 2013 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2009 Gregory Nutt. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: Marc Rechté <mrechte@studelec-sa.com>
+ *   Copyright (C) 2009, 2011, 2013 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2016 Studelec SA. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Marc Rechté <mrechte@studelec-sa.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,24 +33,24 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ****************************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_STM32_HARDWARE_STM32F37XXX_SDADC_H
 #define __ARCH_ARM_SRC_STM32_HARDWARE_STM32F37XXX_SDADC_H
 
-/****************************************************************************
+/****************************************************************************************************
  * Included Files
- ****************************************************************************/
+ ****************************************************************************************************/
 
 #include <nuttx/config.h>
 
 #include "chip.h"
 
-/****************************************************************************
+/****************************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ****************************************************************************************************/
 
-/* Register Offsets *********************************************************/
+/* Register Offsets *********************************************************************************/
 
 #define STM32_SDADC_CR1_OFFSET       0x0000  /* SDADC control register 1 */
 #define STM32_SDADC_CR2_OFFSET       0x0004  /* SDADC control register 2 */
@@ -71,7 +69,8 @@
 #define STM32_SDADC_JDATA13R_OFFSET  0x0078  /* SDADC1 and SDADC3 injected data register */
 #define STM32_SDADC_RDATA13R_OFFSET  0x007c  /* SDADC1 and SDADC3 regular data register */
 
-/* Register Addresses *******************************************************/
+
+/* Register Addresses *******************************************************************************/
 
 #define STM32_SDADC1_CR1             (STM32_SDADC1_BASE+STM32_SDADC_CR1_OFFSET)
 #define STM32_SDADC1_CR2             (STM32_SDADC1_BASE+STM32_SDADC_CR2_OFFSET)
@@ -116,8 +115,8 @@
 #define STM32_SDADC3_JDATAR          (STM32_SDADC3_BASE+STM32_SDADC_JDATAR_OFFSET)
 #define STM32_SDADC3_RDATAR          (STM32_SDADC3_BASE+STM32_SDADC_RDATAR_OFFSET)
 
-/* Register Bitfield Definitions ********************************************/
 
+/* Register Bitfield Definitions ********************************************************************/
 /* SDADC control register 1 */
 
 #define SDADC_CR1_EOCALIE            (1 << 0)  /* Bit 0: End of calibration interrupt enable */
@@ -290,16 +289,16 @@
 #define SDADC_RDATA13R_RDATA3_SHIFT  (16)       /* Bit 16-31: Regular conversion data for SDADC3 */
 #define SDADC_RDATA13R_RDATA3_MASK   (0xffff << SDADC_RDATA13R_RDATA3_SHIFT)
 
-/****************************************************************************
+/****************************************************************************************************
  * Public Types
- ****************************************************************************/
+ ****************************************************************************************************/
 
-/****************************************************************************
+/****************************************************************************************************
  * Public Data
- ****************************************************************************/
+ ****************************************************************************************************/
 
-/****************************************************************************
+/****************************************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ****************************************************************************************************/
 
 #endif /* __ARCH_ARM_SRC_STM32_HARDWARE_STM32F37XXX_SDADC_H */

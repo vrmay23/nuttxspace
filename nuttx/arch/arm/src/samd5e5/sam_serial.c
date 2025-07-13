@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/samd5e5/sam_serial.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -39,11 +51,12 @@
 #include <nuttx/arch.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/serial/serial.h>
-#include <nuttx/spinlock.h>
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "sam_config.h"
 #include "sam_usart.h"
 #include "sam_lowputc.h"
@@ -54,7 +67,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* If we are not using the serial driver for the console, then we still must
  * provide some minimal implementation of up_putc.
  */
@@ -307,7 +319,7 @@ static inline void
             sam_serialout16(struct sam_dev_s *priv, int offset,
               uint16_t regval);
 static void sam_disableallints(struct sam_dev_s *priv);
-static int  sam_interrupt(int irq, void *context, void *arg);
+static int  sam_interrupt(int irq, void *context, FAR void *arg);
 
 /* UART methods */
 
@@ -316,7 +328,7 @@ static void sam_shutdown(struct uart_dev_s *dev);
 static int  sam_attach(struct uart_dev_s *dev);
 static void sam_detach(struct uart_dev_s *dev);
 static int  sam_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  sam_receive(struct uart_dev_s *dev, unsigned int *status);
+static int  sam_receive(struct uart_dev_s *dev, uint32_t *status);
 static void sam_rxint(struct uart_dev_s *dev, bool enable);
 static bool sam_rxavailable(struct uart_dev_s *dev);
 static void sam_send(struct uart_dev_s *dev, int ch);
@@ -326,10 +338,6 @@ static bool sam_txempty(struct uart_dev_s *dev);
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-#ifdef HAVE_SERIAL_CONSOLE
-static spinlock_t g_sam_serial_lock = SP_UNLOCKED;
-#endif
 
 static const struct uart_ops_s g_uart_ops =
 {
@@ -504,7 +512,7 @@ static uart_dev_t g_usart4port =
   {
     .size   = CONFIG_USART4_TXBUFSIZE,
     .buffer = g_usart4txbuffer,
-  },
+   },
   .ops      = &g_uart_ops,
   .priv     = &g_usart4priv,
 };
@@ -529,7 +537,7 @@ static uart_dev_t g_usart5port =
   {
     .size   = CONFIG_USART5_TXBUFSIZE,
     .buffer = g_usart5txbuffer,
-  },
+   },
   .ops      = &g_uart_ops,
   .priv     = &g_usart5priv,
 };
@@ -554,7 +562,7 @@ static uart_dev_t g_usart6port =
   {
     .size   = CONFIG_USART6_TXBUFSIZE,
     .buffer = g_usart6txbuffer,
-  },
+   },
   .ops      = &g_uart_ops,
   .priv     = &g_usart6priv,
 };
@@ -579,7 +587,7 @@ static uart_dev_t g_usart7port =
   {
     .size   = CONFIG_USART7_TXBUFSIZE,
     .buffer = g_usart7txbuffer,
-  },
+   },
   .ops      = &g_uart_ops,
   .priv     = &g_usart7priv,
 };
@@ -643,14 +651,14 @@ static void sam_disableallints(struct sam_dev_s *priv)
  *
  * Description:
  *   This is the USART interrupt handler.  It will be invoked when an
- *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
- *   uart_recvchars to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'arg' to the
+ *   interrupt received on the 'irq'  It should call uart_transmitchars or
+ *   uart_receivechar to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'irq' number into the
  *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
-static int sam_interrupt(int irq, void *context, void *arg)
+static int sam_interrupt(int irq, void *context, FAR void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   struct sam_dev_s *priv;
@@ -871,7 +879,7 @@ static int sam_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int sam_receive(struct uart_dev_s *dev, unsigned int *status)
+static int sam_receive(struct uart_dev_s *dev, uint32_t *status)
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)dev->priv;
 
@@ -899,9 +907,7 @@ static void sam_rxint(struct uart_dev_s *dev, bool enable)
   if (enable)
     {
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
-      /* Receive an interrupt when their is anything in the Rx data
-       * register
-       */
+      /* Receive an interrupt when their is anything in the Rx data register */
 
       sam_serialout8(priv, SAM_USART_INTENSET_OFFSET, USART_INT_RXC);
 #endif
@@ -923,8 +929,7 @@ static void sam_rxint(struct uart_dev_s *dev, bool enable)
 static bool sam_rxavailable(struct uart_dev_s *dev)
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)dev->priv;
-  return ((sam_serialin8(priv, SAM_USART_INTFLAG_OFFSET) & USART_INT_RXC)
-          != 0);
+  return ((sam_serialin8(priv, SAM_USART_INTFLAG_OFFSET) & USART_INT_RXC) != 0);
 }
 
 /****************************************************************************
@@ -992,8 +997,7 @@ static void sam_txint(struct uart_dev_s *dev, bool enable)
 static bool sam_txempty(struct uart_dev_s *dev)
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)dev->priv;
-  return ((sam_serialin8(priv, SAM_USART_INTFLAG_OFFSET) & USART_INT_DRE)
-          != 0);
+  return ((sam_serialin8(priv, SAM_USART_INTFLAG_OFFSET) & USART_INT_DRE) != 0);
 }
 
 /****************************************************************************
@@ -1003,20 +1007,20 @@ static bool sam_txempty(struct uart_dev_s *dev)
 #ifdef USE_EARLYSERIALINIT
 
 /****************************************************************************
- * Name: arm_earlyserialinit
+ * Name: up_earlyserialinit
  *
  * Description:
  *   Performs the low level USART initialization early in debug so that the
- *   serial console will be available during boot up.  This must be called
+ *   serial console will be available during bootup.  This must be called
  *   before sam_serialinit.
  *
- *   NOTE: On this platform arm_earlyserialinit() does not really do
+ *   NOTE: On this platform up_earlyserialinit() does not really do
  *   anything of consequence and probably could be eliminated with little
  *   effort.
  *
  ****************************************************************************/
 
-void arm_earlyserialinit(void)
+void up_earlyserialinit(void)
 {
   /* Disable all USARTS */
 
@@ -1052,7 +1056,7 @@ void arm_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: arm_serialinit
+ * Name: up_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
@@ -1060,7 +1064,7 @@ void arm_earlyserialinit(void)
  *
  ****************************************************************************/
 
-void arm_serialinit(void)
+void up_serialinit(void)
 {
   /* Register the console */
 
@@ -1102,7 +1106,7 @@ void arm_serialinit(void)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   irqstate_t flags;
@@ -1111,10 +1115,21 @@ void up_putc(int ch)
    * interrupts from firing in the serial driver code.
    */
 
-  flags = spin_lock_irqsave(&g_sam_serial_lock);
+  flags = enter_critical_section();
+
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      sam_lowputc('\r');
+    }
+
   sam_lowputc(ch);
-  spin_unlock_irqrestore(&g_sam_serial_lock, flags);
+  leave_critical_section(flags);
 #endif
+  return ch;
 }
 
 #else /* USE_SERIALDRIVER */
@@ -1127,11 +1142,21 @@ void up_putc(int ch)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      sam_lowputc('\r');
+    }
+
   sam_lowputc(ch);
 #endif
+  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */

@@ -1,22 +1,36 @@
 /****************************************************************************
  * net/tcp/tcp_backlog.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2011-2013, 2020 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,10 +44,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <queue.h>
 #include <debug.h>
 
 #include <nuttx/kmalloc.h>
-#include <nuttx/queue.h>
 #include <nuttx/net/net.h>
 
 #include "devif/devif.h"
@@ -99,7 +113,7 @@ int tcp_backlogcreate(FAR struct tcp_conn_s *conn, int nblg)
 
       /* Then allocate that much */
 
-      bls = kmm_zalloc(size);
+      bls = (FAR struct tcp_backlog_s *)kmm_zalloc(size);
       if (!bls)
         {
           nerr("ERROR: Failed to allocate backlog\n");
@@ -122,9 +136,9 @@ int tcp_backlogcreate(FAR struct tcp_conn_s *conn, int nblg)
   tcp_backlogdestroy(conn);
 
   /* Now install the backlog tear-off in the connection.  NOTE that bls may
-   * actually be NULL if nblg is <= 0;  In that case, we are disabling
-   * backlog support.  Since the network is locked, destroying the old
-   * backlog and replace it with the new is an atomic operation
+   * actually be NULL if nblg is <= 0;  In that case, we are disabling backlog
+   * support.  Since the network is locked, destroying the old backlog and
+   * replace it with the new is an atomic operation
    */
 
   conn->backlog = bls;
@@ -179,9 +193,7 @@ int tcp_backlogdestroy(FAR struct tcp_conn_s *conn)
           blconn = blc->bc_conn;
           if (blconn)
             {
-              /* REVISIT
-               * -- such connections really need to be gracefully closed
-               */
+              /* REVISIT -- such connections really need to be gracefully closed */
 
               blconn->blparent = NULL;
               blconn->backlog  = NULL;
@@ -211,8 +223,7 @@ int tcp_backlogdestroy(FAR struct tcp_conn_s *conn)
  *
  ****************************************************************************/
 
-int tcp_backlogadd(FAR struct tcp_conn_s *conn,
-                   FAR struct tcp_conn_s *blconn)
+int tcp_backlogadd(FAR struct tcp_conn_s *conn, FAR struct tcp_conn_s *blconn)
 {
   FAR struct tcp_backlog_s     *bls;
   FAR struct tcp_blcontainer_s *blc;
@@ -254,7 +265,7 @@ int tcp_backlogadd(FAR struct tcp_conn_s *conn,
 }
 
 /****************************************************************************
- * Name: tcp_backlogpending
+ * Name: tcp_backlogremove
  *
  * Description:
  *  Called from poll().  Before waiting for a new connection, poll will
@@ -265,26 +276,9 @@ int tcp_backlogadd(FAR struct tcp_conn_s *conn,
  *
  ****************************************************************************/
 
-bool tcp_backlogpending(FAR struct tcp_conn_s *conn)
-{
-  return (conn && conn->backlog && !sq_empty(&conn->backlog->bl_pending));
-}
-
-/****************************************************************************
- * Name: tcp_backlogavailable
- *
- * Description:
- *  Called from tcp_input().  Before alloc a new accept connection, tcp_input
- *  will call this API to see if there are free node in the backlog.
- *
- * Assumptions:
- *   Called from network socket logic with the network locked
- *
- ****************************************************************************/
-
 bool tcp_backlogavailable(FAR struct tcp_conn_s *conn)
 {
-  return (conn && conn->backlog && !sq_empty(&conn->backlog->bl_free));
+  return (conn && conn->backlog && !sq_empty(&conn->backlog->bl_pending));
 }
 
 /****************************************************************************
@@ -373,8 +367,7 @@ int tcp_backlogdelete(FAR struct tcp_conn_s *conn,
       for (blc = (FAR struct tcp_blcontainer_s *)sq_peek(&bls->bl_pending),
            prev = NULL;
            blc;
-           prev = blc,
-            blc = (FAR struct tcp_blcontainer_s *)sq_next(&blc->bc_node))
+           prev = blc, blc = (FAR struct tcp_blcontainer_s *)sq_next(&blc->bc_node))
         {
           if (blc->bc_conn == blconn)
             {

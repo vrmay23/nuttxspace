@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/stm32f0l0g0/stm32l0_rcc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Mateusz Szafoni <raiden00@railab.me>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -182,25 +195,33 @@ static inline void rcc_enableapb1(void)
 #ifdef CONFIG_STM32F0L0G0_TIM2
   /* Timer 2 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_TIM2EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_TIM3
   /* Timer 3 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_TIM3EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_TIM6
   /* Timer 6 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_TIM6EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_TIM7
   /* Timer 7 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_TIM7EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_LCD
@@ -224,37 +245,49 @@ static inline void rcc_enableapb1(void)
 #ifdef CONFIG_STM32F0L0G0_USART2
   /* USART 2 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_USART2EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_USART3
   /* USART 3 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_USART3EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_USART4
   /* USART 4 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_USART4EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_USART5
   /* USART 5 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_USART5EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_I2C1
   /* I2C 1 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_I2C1EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_I2C2
   /* I2C 2 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_I2C2EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_USB
@@ -284,7 +317,9 @@ static inline void rcc_enableapb1(void)
 #ifdef CONFIG_STM32F0L0G0_I2C3
   /* I2C 3 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB1ENR_I2C4EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_LPTIM1
@@ -323,13 +358,17 @@ static inline void rcc_enableapb2(void)
 #ifdef CONFIG_STM32F0L0G0_TIM21
   /* TIM21 Timer clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB2ENR_TIM21EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_TIM22
   /* TIM22 Timer clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB2ENR_TIM10EN;
+#endif
 #endif
 
 #ifdef CONFIG_STM32F0L0G0_ADC1
@@ -347,7 +386,9 @@ static inline void rcc_enableapb2(void)
 #ifdef CONFIG_STM32F0L0G0_USART1
   /* USART1 clock enable */
 
+#ifdef CONFIG_STM32F0L0G0_FORCEPOWER
   regval |= RCC_APB2ENR_USART1EN;
+#endif
 #endif
 
 #if 0
@@ -443,7 +484,7 @@ static inline bool stm32_rcc_enablehse(void)
  *
  ****************************************************************************/
 
-#ifndef CONFIG_ARCH_BOARD_STM32F0G0L0_CUSTOM_CLOCKCONFIG
+#ifndef CONFIG_ARCH_BOARD_STM32_CUSTOM_CLOCKCONFIG
 static void stm32_stdclockconfig(void)
 {
   uint32_t regval;
@@ -460,8 +501,7 @@ static void stm32_stdclockconfig(void)
   putreg32(regval, STM32_RCC_APB1ENR);
 
   /* Go to the high performance voltage range 1 if necessary.  In this mode,
-   * the PLL VCO frequency can be up to 96MHz.
-   * USB and SDIO can be supported.
+   * the PLL VCO frequency can be up to 96MHz.  USB and SDIO can be supported.
    *
    * Range 1: PLLVCO up to 96MHz in range 1 (1.8V)
    * Range 2: PLLVCO up to 48MHz in range 2 (1.5V) (default)
@@ -576,26 +616,25 @@ static void stm32_stdclockconfig(void)
 #if (STM32_SYSCLK_SW != RCC_CFGR_SW_MSI)
   /* Increasing the CPU frequency (in the same voltage range):
    *
-   * After reset, the used clock is the MSI (2 MHz) with 0 WS configured in
-   * the FLASH_ACR register. 32-bit access is enabled and prefetch is
-   * disabled. ST strongly recommends to use the following software sequences
-   * to tune the number of wait states needed to access the Flash memory with
-   * the CPU frequency.
+   * After reset, the used clock is the MSI (2 MHz) with 0 WS configured in the
+   * FLASH_ACR register. 32-bit access is enabled and prefetch is disabled.
+   * ST strongly recommends to use the following software sequences to tune the
+   * number of wait states needed to access the Flash memory with the CPU
+   * frequency.
    *
    *   - Program the 64-bit access by setting the ACC64 bit in Flash access
    *     control register (FLASH_ACR)
    *   - Check that 64-bit access is taken into account by reading FLASH_ACR
    *   - Program 1 WS to the LATENCY bit in FLASH_ACR
-   *   - Check that the new number of WS is taken into account by reading
-   *     FLASH_ACR
+   *   - Check that the new number of WS is taken into account by reading FLASH_ACR
    *   - Modify the CPU clock source by writing to the SW bits in the Clock
    *     configuration register (RCC_CFGR)
-   *   - If needed, modify the CPU clock prescaler by writing to the HPRE
-   *     bits in RCC_CFGR
-   *   - Check that the new CPU clock source or/and the new CPU clock
-   *     prescaler value is/are taken into account by reading the clock
-   *     source status (SWS bits) or/and the AHB prescaler value (HPRE bits),
-   *     respectively, in the RCC_CFGR register
+   *   - If needed, modify the CPU clock prescaler by writing to the HPRE bits in
+   *     RCC_CFGR
+   *   - Check that the new CPU clock source or/and the new CPU clock prescaler
+   *     value is/are taken into account by reading the clock source status (SWS
+   *     bits) or/and the AHB prescaler value (HPRE bits), respectively, in the
+   *     RCC_CFGR register
    */
 
   regval = getreg32(STM32_FLASH_ACR);
@@ -646,8 +685,8 @@ static void stm32_stdclockconfig(void)
 #if STM32_SYSCLK_SW == RCC_CFGR_SW_PLL
 
   /* Set the PLL divider and multiplier.  NOTE:  The PLL needs to be disabled
-   * to do these operation.  We know this is the case here because
-   * pll_reset() was previously called by stm32_clockconfig().
+   * to do these operation.  We know this is the case here because pll_reset()
+   * was previously called by stm32_clockconfig().
    */
 
   regval  = getreg32(STM32_RCC_CFGR);
@@ -706,6 +745,7 @@ static void stm32_stdclockconfig(void)
 
   stm32_rcc_enablelse();
 #endif
+
 }
 #endif
 

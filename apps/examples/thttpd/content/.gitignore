@@ -1,4 +1,15 @@
+/Make.dep
+/.depend
+/.built
+/*.asm
+/*.obj
+/*.rel
+/*.lst
+/*.sym
+/*.adb
+/*.lib
+/*.src
 /romfs
-/romfs.c
+/romfs.h
 /romfs.img
-/symtab.c
+/symtab.h

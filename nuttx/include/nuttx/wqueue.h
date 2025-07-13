@@ -1,22 +1,36 @@
 /****************************************************************************
  * include/nuttx/wqueue.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009, 2011-2014, 2017-2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,10 +45,9 @@
 
 #include <sys/types.h>
 #include <stdint.h>
+#include <queue.h>
 
 #include <nuttx/clock.h>
-#include <nuttx/list.h>
-#include <nuttx/wdog.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -59,6 +72,8 @@
  *   priority worker thread.  Default: 224
  * CONFIG_SCHED_HPWORKSTACKSIZE - The stack size allocated for the worker
  *   thread.  Default: 2048.
+ * CONFIG_SIG_SIGWORK - The signal number that will be used to wake-up
+ *   the worker thread.  Default: 17
  *
  * CONFIG_SCHED_LPWORK. If CONFIG_SCHED_LPWORK is selected then a lower-
  *   priority work queue will be created.  This lower priority work queue
@@ -77,37 +92,46 @@
  * builds.  This those configurations, the user-mode work queue provides the
  * same (non-standard) facility for use by applications.
  *
- * CONFIG_LIBC_USRWORK. If CONFIG_LIBC_USRWORK is also defined then the
+ * CONFIG_LIB_USRWORK. If CONFIG_LIB_USRWORK is also defined then the
  *   user-mode work queue will be created.
- * CONFIG_LIBC_USRWORKPRIORITY - The minimum execution priority of the lower
+ * CONFIG_LIB_USRWORKPRIORITY - The minimum execution priority of the lower
  *   priority worker thread.  Default: 100
- * CONFIG_LIBC_USRWORKSTACKSIZE - The stack size allocated for the lower
+ * CONFIG_LIB_USRWORKSTACKSIZE - The stack size allocated for the lower
  *   priority worker thread.  Default: 2048.
  */
 
-/* Is this a flat build (CONFIG_BUILD_FLAT=y) */
+/* Is this a protected build (CONFIG_BUILD_PROTECTED=y) */
 
-#if defined(CONFIG_BUILD_FLAT)
+#if defined(CONFIG_BUILD_PROTECTED)
 
-  /* Yes.. user-space worker threads are not built in a flat build */
-
-#  undef CONFIG_LIBC_USRWORK
-
-#elif !defined(__KERNEL__)
-
-  /* Kernel worker threads are not built in a kernel build when we are
+  /* Yes.. kernel worker threads are not built in a kernel build when we are
    * building the user-space libraries.
    */
 
-#  undef CONFIG_SCHED_HPWORK
-#  undef CONFIG_SCHED_LPWORK
-#  undef CONFIG_SCHED_WORKQUEUE
+#  ifndef __KERNEL__
+
+#    undef CONFIG_SCHED_HPWORK
+#    undef CONFIG_SCHED_LPWORK
+#    undef CONFIG_SCHED_WORKQUEUE
 
   /* User-space worker threads are not built in a kernel build when we are
    * building the kernel-space libraries (but we still need to know that it
    * is configured).
    */
 
+#  endif
+
+#elif defined(CONFIG_BUILD_KERNEL)
+  /* The kernel only build is equivalent to the kernel part of the protected
+   * build.
+   */
+
+#else
+  /* User-space worker threads are not built in a flat build
+   * (CONFIG_BUILD_PROTECTED=n && CONFIG_BUILD_KERNEL=n)
+   */
+
+#  undef CONFIG_LIB_USRWORK
 #endif
 
 /* High priority, kernel work queue configuration ***************************/
@@ -179,17 +203,17 @@
 
 /* User space work queue configuration **************************************/
 
-#ifdef CONFIG_LIBC_USRWORK
+#ifdef CONFIG_LIB_USRWORK
 
-#  ifndef CONFIG_LIBC_USRWORKPRIORITY
-#    define CONFIG_LIBC_USRWORKPRIORITY 100
+#  ifndef CONFIG_LIB_USRWORKPRIORITY
+#    define CONFIG_LIB_USRWORKPRIORITY 100
 #  endif
 
-#  ifndef CONFIG_LIBC_USRWORKSTACKSIZE
-#    define CONFIG_LIBC_USRWORKSTACKSIZE CONFIG_IDLETHREAD_STACKSIZE
+#  ifndef CONFIG_LIB_USRWORKSTACKSIZE
+#    define CONFIG_LIB_USRWORKSTACKSIZE CONFIG_IDLETHREAD_STACKSIZE
 #  endif
 
-#endif /* CONFIG_LIBC_USRWORK */
+#endif /* CONFIG_LIB_USRWORK */
 
 /* Work queue IDs:
  *
@@ -208,7 +232,7 @@
  *     priority work queue (if there is one).
  */
 
-#if defined(CONFIG_LIBC_USRWORK) && !defined(__KERNEL__)
+#if defined(CONFIG_LIB_USRWORK) && !defined(__KERNEL__)
 /* User mode */
 
 #  define USRWORK  2          /* User mode work queue */
@@ -226,17 +250,13 @@
 #  endif
 #  define USRWORK  LPWORK     /* Redirect user-mode references */
 
-#endif /* CONFIG_LIBC_USRWORK && !__KERNEL__ */
+#endif /* CONFIG_LIB_USRWORK && !__KERNEL__ */
 
 /****************************************************************************
  * Public Types
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
-
-/* Work queue forward declaration */
-
-struct kwork_wqueue_s;
 
 /* Defines the work callback */
 
@@ -249,10 +269,11 @@ typedef CODE void (*worker_t)(FAR void *arg);
 
 struct work_s
 {
-  struct list_node node;   /* Implements a double linked list */
-  clock_t          qtime;  /* Time work queued */
-  worker_t         worker; /* Work callback */
-  FAR void        *arg;    /* Callback argument */
+  struct dq_entry_s dq;  /* Implements a doubly linked list */
+  worker_t  worker;      /* Work callback */
+  FAR void *arg;         /* Callback argument */
+  clock_t qtime;         /* Time work queued */
+  clock_t delay;         /* Delay until work performed */
 };
 
 /* This is an enumeration of the various events that may be
@@ -261,17 +282,14 @@ struct work_s
 
 enum work_evtype_e
 {
-  WORK_IOB_AVAIL  = 1,     /* Notify availability of an IOB */
-  WORK_NET_DOWN,           /* Notify that the network is down */
-  WORK_TCP_READAHEAD,      /* Notify that TCP read-ahead data is available */
-  WORK_TCP_WRITEBUFFER,    /* Notify that TCP write buffer is empty */
-  WORK_TCP_DISCONNECT,     /* Notify loss of TCP connection */
-  WORK_UDP_READAHEAD,      /* Notify that UDP read-ahead data is available */
-  WORK_UDP_WRITEBUFFER,    /* Notify that UDP write buffer is empty */
-  WORK_NETLINK_RESPONSE,   /* Notify that Netlink response is available */
-  WORK_CAN_READAHEAD,      /* Notify that CAN read-ahead data is available */
-  WORK_USB_MSC_CONNECT,    /* Notify that an USB MSC connect occurred */
-  WORK_USB_MSC_DISCONNECT  /* Notify that an USB MSC connect occurred */
+  WORK_IOB_AVAIL  = 1,   /* Notify availability of an IOB */
+  WORK_NET_DOWN,         /* Notify that the network is down */
+  WORK_TCP_READAHEAD,    /* Notify that TCP read-ahead data is available */
+  WORK_TCP_WRITEBUFFER,  /* Notify that TCP write buffer is empty */
+  WORK_TCP_DISCONNECT,   /* Notify loss of TCP connection */
+  WORK_UDP_READAHEAD,    /* Notify that UDP read-ahead data is available */
+  WORK_UDP_WRITEBUFFER,  /* Notify that UDP write buffer is empty */
+  WORK_NETLINK_RESPONSE  /* Notify that Netlink response is available */
 };
 
 /* This structure describes one notification and is provided as input to
@@ -288,10 +306,6 @@ struct work_notifier_s
   FAR void *arg;       /* User-defined worker function argument */
   worker_t worker;     /* The worker function to schedule */
 };
-
-/* This is the callback type used by work_foreach() */
-
-typedef CODE void (*work_foreach_t)(int tid, FAR void *arg);
 
 /****************************************************************************
  * Public Data
@@ -324,57 +338,12 @@ extern "C"
  *
  ****************************************************************************/
 
-#if defined(CONFIG_LIBC_USRWORK) && !defined(__KERNEL__)
+#if defined(CONFIG_LIB_USRWORK) && !defined(__KERNEL__)
 int work_usrstart(void);
 #endif
 
 /****************************************************************************
- * Name: work_queue_create
- *
- * Description:
- *   Create a new work queue. The work queue is identified by its work
- *   queue ID, which is used to queue works to the work queue and to
- *   perform other operations on the work queue.
- *   This function will create a work thread pool with nthreads threads.
- *   The work queue ID is returned on success.
- *
- * Input Parameters:
- *   name       - Name of the new task
- *   priority   - Priority of the new task
- *   stack_addr - Stack buffer of the new task
- *   stack_size - size (in bytes) of the stack needed
- *   nthreads   - Number of work thread should be created
- *
- * Returned Value:
- *   The work queue handle returned on success.  Otherwise, NULL
- *
- ****************************************************************************/
-
-FAR struct kwork_wqueue_s *work_queue_create(FAR const char *name,
-                                             int priority,
-                                             FAR void *stack_addr,
-                                             int stack_size, int nthreads);
-
-/****************************************************************************
- * Name: work_queue_free
- *
- * Description:
- *   Destroy a work queue. The work queue is identified by its work queue ID.
- *   All worker threads will be destroyed and the work queue will be freed.
- *   The work queue ID is invalid after this function returns.
- *
- * Input Parameters:
- *  wqueue - The work queue handle
- *
- * Returned Value:
- *   Zero on success, a negated errno value on failure.
- *
- ****************************************************************************/
-
-int work_queue_free(FAR struct kwork_wqueue_s *wqueue);
-
-/****************************************************************************
- * Name: work_queue/work_queue_wq
+ * Name: work_queue
  *
  * Description:
  *   Queue work to be performed at a later time.  All queued work will be
@@ -384,15 +353,14 @@ int work_queue_free(FAR struct kwork_wqueue_s *wqueue);
  *   the caller.  Otherwise, the work structure is completely managed by the
  *   work queue logic.  The caller should never modify the contents of the
  *   work queue structure directly.  If work_queue() is called before the
- *   previous work has been performed and removed from the queue, then any
+ *   previous work as been performed and removed from the queue, then any
  *   pending work will be canceled and lost.
  *
  * Input Parameters:
- *   qid    - The work queue ID (must be HPWORK or LPWORK)
- *   wqueue - The work queue handle
+ *   qid    - The work queue ID
  *   work   - The work structure to queue
- *   worker - The worker callback to be invoked.  The callback will be
- *            invoked on the worker thread of execution.
+ *   worker - The worker callback to be invoked.  The callback will invoked
+ *            on the worker thread of execution.
  *   arg    - The argument that will be passed to the worker callback when
  *            it is invoked.
  *   delay  - Delay (in clock ticks) from the time queue until the worker
@@ -405,73 +373,18 @@ int work_queue_free(FAR struct kwork_wqueue_s *wqueue);
 
 int work_queue(int qid, FAR struct work_s *work, worker_t worker,
                FAR void *arg, clock_t delay);
-int work_queue_wq(FAR struct kwork_wqueue_s *wqueue,
-                  FAR struct work_s *work, worker_t worker,
-                  FAR void *arg, clock_t delay);
 
 /****************************************************************************
- * Name: work_queue_next/work_queue_next_wq
- *
- * Description:
- *   Queue work to be performed at a later time based on the last expiration
- *   time. This function can be used to implement a periodic workqueue.
- *   E.g, Call this function instead of work_queue in the work callback to
- *   restart the next work for better timing accuracy.
- *   Note that calling this function outside the work callback requires
- *   the work->qtime being set.
- *
- * Input Parameters:
- *   qid    - The work queue ID (must be HPWORK or LPWORK)
- *   wqueue - The work queue handle
- *   work   - The work structure to queue
- *   worker - The worker callback to be invoked.  The callback will be
- *            invoked on the worker thread of execution.
- *   arg    - The argument that will be passed to the worker callback when
- *            it is invoked.
- *   delay  - Delay (in clock ticks) from the time queue until the worker
- *            is invoked. Zero means to perform the work immediately.
- *
- * Returned Value:
- *   Zero on success, a negated errno on failure
- *
- ****************************************************************************/
-
-int work_queue_next(int qid, FAR struct work_s *work, worker_t worker,
-                    FAR void *arg, clock_t delay);
-int work_queue_next_wq(FAR struct kwork_wqueue_s *wqueue,
-                       FAR struct work_s *work, worker_t worker,
-                       FAR void *arg, clock_t delay);
-
-/****************************************************************************
- * Name: work_queue_pri
- *
- * Description: Get priority of the wqueue. We believe that all worker
- *   threads have the same priority.
- *
- * Input Parameters:
- *  wqueue - The work queue handle
- *
- * Returned Value:
- *   SCHED_PRIORITY_MIN ~ SCHED_PRIORITY_MAX  on success,
- *   a negated errno value on failure.
- *
- ****************************************************************************/
-
-int work_queue_priority(int qid);
-int work_queue_priority_wq(FAR struct kwork_wqueue_s *wqueue);
-
-/****************************************************************************
- * Name: work_cancel/work_cancel_wq
+ * Name: work_cancel
  *
  * Description:
  *   Cancel previously queued work.  This removes work from the work queue.
- *   After work has been cancelled, it may be requeued by calling
+ *   After work has been cancelled, it may be re-queue by calling
  *   work_queue() again.
  *
  * Input Parameters:
- *   qid    - The work queue ID (must be HPWORK or LPWORK)
- *   wqueue - The work queue handle
- *   work   - The previously queued work structure to cancel
+ *   qid    - The work queue ID
+ *   work   - The previously queue work structure to cancel
  *
  * Returned Value:
  *   Zero on success, a negated errno on failure
@@ -482,36 +395,24 @@ int work_queue_priority_wq(FAR struct kwork_wqueue_s *wqueue);
  ****************************************************************************/
 
 int work_cancel(int qid, FAR struct work_s *work);
-int work_cancel_wq(FAR struct kwork_wqueue_s *wqueue,
-                   FAR struct work_s *work);
 
 /****************************************************************************
- * Name: work_cancel_sync/work_cancel_sync_wq
+ * Name: work_signal
  *
  * Description:
- *   Blocked cancel previously queued user-mode work.  This removes work
- *   from the user mode work queue.  After work has been cancelled, it may
- *   be requeued by calling work_queue() again.
+ *   Signal the worker thread to process the work queue now.  This function
+ *   is used internally by the work logic but could also be used by the
+ *   user to force an immediate re-assessment of pending work.
  *
  * Input Parameters:
- *   qid    - The work queue ID (must be HPWORK or LPWORK)
- *   wqueue - The work queue handle
- *   work   - The previously queued work structure to cancel
+ *   qid    - The work queue ID
  *
  * Returned Value:
- *   Zero means the work was successfully cancelled.
- *   One means the work was not cancelled because it is currently being
- *   processed by work thread, but wait for it to finish.
- *   A negated errno value is returned on any failure:
- *
- *   -ENOENT - There is no such work queued.
- *   -EINVAL - An invalid work queue was specified
+ *   Zero on success, a negated errno on failure
  *
  ****************************************************************************/
 
-int work_cancel_sync(int qid, FAR struct work_s *work);
-int work_cancel_sync_wq(FAR struct kwork_wqueue_s *wqueue,
-                        FAR struct work_s *work);
+int work_signal(int qid);
 
 /****************************************************************************
  * Name: work_available
@@ -529,25 +430,6 @@ int work_cancel_sync_wq(FAR struct kwork_wqueue_s *wqueue,
  ****************************************************************************/
 
 #define work_available(work) ((work)->worker == NULL)
-
-/****************************************************************************
- * Name: work_timeleft
- *
- * Description:
- *   This function returns the time remaining before the specified work
- *   start.
- *
- * Input Parameters:
- *   work - The work queue structure to check.
- *
- * Returned Value:
- *   The time in system ticks remaining until the work start.
- *   Zero means either that work is not valid or that work has already
- *   started.
- *
- ****************************************************************************/
-
-#define work_timeleft(work) ((sclock_t)((work)->qtime - clock()))
 
 /****************************************************************************
  * Name: lpwork_boostpriority
@@ -628,12 +510,13 @@ int work_notifier_setup(FAR struct work_notifier_s *info);
  *         work_notifier_setup().
  *
  * Returned Value:
- *   None.
+ *   Zero (OK) is returned on success; a negated errno value is returned on
+ *   any failure.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_WQUEUE_NOTIFIER
-void work_notifier_teardown(int key);
+int work_notifier_teardown(int key);
 #endif
 
 /****************************************************************************

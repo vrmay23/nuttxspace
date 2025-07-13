@@ -1,7 +1,5 @@
 /****************************************************************************
- * sched/mqueue/mq_notify.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  sched/mqueue/mq_notify.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -31,7 +29,6 @@
 #include <string.h>
 #include <errno.h>
 
-#include <nuttx/irq.h>
 #include <nuttx/sched.h>
 
 #include "sched/sched.h"
@@ -96,36 +93,24 @@
 
 int mq_notify(mqd_t mqdes, FAR const struct sigevent *notification)
 {
-#ifndef CONFIG_DISABLE_MQUEUE_NOTIFICATION
-  FAR struct mqueue_inode_s *msgq;
-  FAR struct inode *inode;
-  FAR struct file *filep;
   FAR struct tcb_s *rtcb;
-  irqstate_t flags;
+  FAR struct mqueue_inode_s *msgq;
   int errval;
-
-  errval = file_get(mqdes, &filep);
-  if (errval < 0)
-    {
-      errval = -errval;
-      goto errout_without_lock;
-    }
-
-  inode = filep->f_inode;
 
   /* Was a valid message queue descriptor provided? */
 
-  if (!inode->i_private)
+  if (!mqdes)
     {
       /* No.. return EBADF */
 
       errval = EBADF;
-      goto errout_with_filep;
+      goto errout;
     }
 
   /* Get a pointer to the message queue */
 
-  flags = enter_critical_section();
+  sched_lock();
+  msgq = mqdes->msgq;
 
   /* Get the current process ID */
 
@@ -133,8 +118,7 @@ int mq_notify(mqd_t mqdes, FAR const struct sigevent *notification)
 
   /* Is there already a notification attached */
 
-  msgq = inode->i_private;
-  if (msgq->ntpid == INVALID_PROCESS_ID)
+  if (!msgq->ntmqdes)
     {
       /* No... Have we been asked to establish one? */
 
@@ -155,7 +139,8 @@ int mq_notify(mqd_t mqdes, FAR const struct sigevent *notification)
           memcpy(&msgq->ntevent, notification,
                  sizeof(struct sigevent));
 
-          msgq->ntpid = rtcb->pid;
+          msgq->ntpid   = rtcb->pid;
+          msgq->ntmqdes = mqdes;
         }
     }
 
@@ -163,7 +148,7 @@ int mq_notify(mqd_t mqdes, FAR const struct sigevent *notification)
    * Is it trying to remove it?
    */
 
-  else if ((msgq->ntpid != rtcb->pid) || (notification != NULL))
+  else if ((msgq->ntpid != rtcb->pid) || (notification))
     {
       /* This thread does not own the notification OR it is
        * not trying to remove it.  Return EBUSY.
@@ -179,25 +164,16 @@ int mq_notify(mqd_t mqdes, FAR const struct sigevent *notification)
        */
 
       memset(&msgq->ntevent, 0, sizeof(struct sigevent));
-      msgq->ntpid = INVALID_PROCESS_ID;
+      msgq->ntpid   = INVALID_PROCESS_ID;
+      msgq->ntmqdes = NULL;
       nxsig_cancel_notification(&msgq->ntwork);
     }
 
-  leave_critical_section(flags);
-  file_put(filep);
+  sched_unlock();
   return OK;
 
 errout:
-  leave_critical_section(flags);
-
-errout_with_filep:
-  file_put(filep);
-
-errout_without_lock:
   set_errno(errval);
+  sched_unlock();
   return ERROR;
-#else
-  set_errno(ENOSYS);
-  return ERROR;
-#endif
 }

@@ -1,29 +1,41 @@
 /****************************************************************************
  * boards/mips/pic32mx/pic32mx7mmb/src/pic32_mio283qt2.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/* Interface definition for the MI0283QT-2 LCD
+ * Interface definition for the MI0283QT-2 LCD
  * from Multi-Inno Technology Co., Ltd.
  * This LCD is based on the Himax HX8347-D LCD controller.
- */
+ *
+ *   Copyright (C) 2012, 2015 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -34,7 +46,6 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -45,9 +56,9 @@
 
 #include <arch/board/board.h>
 
-#include "mips_internal.h"
+#include "up_arch.h"
 #include "pic32mx.h"
-#include "pic32mx_pmp.h"
+#include "pic32mx-pmp.h"
 #include "pic32mx7mmb.h"
 
 /****************************************************************************
@@ -62,38 +73,37 @@
 
 /* PIC32MX7MMB LCD Hardware Definitions *************************************/
 
-/* --- ---------------------------------- ---------- --------------
- * PIN CONFIGURATIONS                     SIGNAL NAME   ON-BOARD
- *     (Family Data Sheet Table 1-1)     (PIC32MX7      CONNECTIONS
- *                                        Schematic)
- * --- ---------------------------------- ---------- ------------------------
- *   6 RC1/T2CK                           LCD_RST    TFT display
- *  43 PMA1/AETXD3/AN14/ERXD2/PMALH/RB14  LCD-CS#    TFT display, HDR2 pin 3
- *  77 OC3/RD2                            LCD_BLED   LCD backlight LED
- *  44 PMA0/AETXD2/AN15/CN12/ERXD3/OCFB/  LCD-RS     TFT display
+/* --- ---------------------------------- -------------------- ------------------------
+ * PIN CONFIGURATIONS                     SIGNAL NAME          ON-BOARD CONNECTIONS
+ *     (Family Data Sheet Table 1-1)     (PIC32MX7 Schematic)
+ * --- ---------------------------------- -------------------- ------------------------
+ *   6 RC1/T2CK                           LCD_RST              TFT display
+ *  43 PMA1/AETXD3/AN14/ERXD2/PMALH/RB14  LCD-CS#              TFT display, HDR2 pin 3
+ *  77 OC3/RD2                            LCD_BLED             LCD backlight LED
+ *  44 PMA0/AETXD2/AN15/CN12/ERXD3/OCFB/  LCD-RS               TFT display
  *     PMALL/RB15
  *
- *  34 PMA13/AN10/RB10/CVREFOUT           LCD-YD     TFT display
- *  35 PMA12/AETXERR/AN11/ERXERR/RB11     LCD-XR     TFT display
- *  41 PMA11/AECRS/AN12/ERXD0/RB12        LCD-YU     TFT display
- *  42 PMA10/AECOL/AN13/ERXD1/RB13        LCD-XL     TFT display
+ *  34 PMA13/AN10/RB10/CVREFOUT           LCD-YD               TFT display
+ *  35 PMA12/AETXERR/AN11/ERXERR/RB11     LCD-XR               TFT display
+ *  41 PMA11/AECRS/AN12/ERXD0/RB12        LCD-YU               TFT display
+ *  42 PMA10/AECOL/AN13/ERXD1/RB13        LCD-XL               TFT display
  *
- *  93 PMD0/RE0                           PMPD0      TFT display, HDR1 pin 18
- *  94 PMD1/RE1                           PMPD1      TFT display, HDR1 pin 17
- *  98 PMD2/RE2                           PMPD2      TFT display, HDR1 pin 16
- *  99 PMD3/RE3                           PMPD3      TFT display, HDR1 pin 15
- * 100 PMD4/RE4                           PMPD4      TFT display, HDR1 pin 14
- *   3 PMD5/RE5                           PMPD5      TFT display, HDR1 pin 13
- *   4 PMD6/RE6                           PMPD6      TFT display, HDR1 pin 12
- *   5 PMD7/RE7                           PMPD7      TFT display, HDR1 pin 11
- *  90 PMD8/C2RX/RG0                      PMPD8      TFT display, HDR1 pin 10
- *  89 PMD9/C2TX/ETXERR/RG1               PMPD9      TFT display, HDR1 pin 9
- *  88 PMD10/C1TX/ETXD0/RF1               PMPD10     TFT display, HDR1 pin 8
- *  87 PMD11/C1RX/ETXD1/RF0               PMPD11     TFT display, HDR1 pin 7
- *  79 PMD12/ETXD2/IC5/RD12               PMPD12     TFT display, HDR1 pin 6
- *  80 PMD13/CN19/ETXD3/RD13              PMPD13     TFT display, HDR1 pin 5
- *  83 PMD14/CN15/ETXEN/RD6               PMPD14     TFT display, HDR1 pin 4
- *  84 PMD15/CN16/ETXCLK/RD7              PMPD15     TFT display, HDR1 pin 3
+ *  93 PMD0/RE0                           PMPD0                TFT display, HDR1 pin 18
+ *  94 PMD1/RE1                           PMPD1                TFT display, HDR1 pin 17
+ *  98 PMD2/RE2                           PMPD2                TFT display, HDR1 pin 16
+ *  99 PMD3/RE3                           PMPD3                TFT display, HDR1 pin 15
+ * 100 PMD4/RE4                           PMPD4                TFT display, HDR1 pin 14
+ *   3 PMD5/RE5                           PMPD5                TFT display, HDR1 pin 13
+ *   4 PMD6/RE6                           PMPD6                TFT display, HDR1 pin 12
+ *   5 PMD7/RE7                           PMPD7                TFT display, HDR1 pin 11
+ *  90 PMD8/C2RX/RG0                      PMPD8                TFT display, HDR1 pin 10
+ *  89 PMD9/C2TX/ETXERR/RG1               PMPD9                TFT display, HDR1 pin 9
+ *  88 PMD10/C1TX/ETXD0/RF1               PMPD10               TFT display, HDR1 pin 8
+ *  87 PMD11/C1RX/ETXD1/RF0               PMPD11               TFT display, HDR1 pin 7
+ *  79 PMD12/ETXD2/IC5/RD12               PMPD12               TFT display, HDR1 pin 6
+ *  80 PMD13/CN19/ETXD3/RD13              PMPD13               TFT display, HDR1 pin 5
+ *  83 PMD14/CN15/ETXEN/RD6               PMPD14               TFT display, HDR1 pin 4
+ *  84 PMD15/CN16/ETXCLK/RD7              PMPD15               TFT display, HDR1 pin 3
  *
  *  82 CN14/PMRD/RD5                      PMPRD
  *  81 CN13/OC5/PMWR/RD4                  PMPWR
@@ -118,7 +128,7 @@
 #ifdef CONFIG_LCD_MIO283QT2
 
 /****************************************************************************
- * Private Types
+ * Private Type Definition
  ****************************************************************************/
 
 struct pic32mx7mmb_dev_s
@@ -127,7 +137,7 @@ struct pic32mx7mmb_dev_s
   bool                   data;     /* true=data selected */
   bool                   selected; /* true=LCD selected */
   bool                   reading;  /* true=We are in a read sequence */
-  struct lcd_dev_s      *drvr;     /* The saved instance of the LCD driver */
+  FAR struct lcd_dev_s  *drvr;     /* The saved instance of the LCD driver */
 };
 
 /****************************************************************************
@@ -136,22 +146,20 @@ struct pic32mx7mmb_dev_s
 
 /* Low Level LCD access */
 
-static void pic32mx_select(struct mio283qt2_lcd_s *dev);
-static void pic32mx_deselect(struct mio283qt2_lcd_s *dev);
-static void pic32mx_index(struct mio283qt2_lcd_s *dev, uint8_t index);
+static void pic32mx_select(FAR struct mio283qt2_lcd_s *dev);
+static void pic32mx_deselect(FAR struct mio283qt2_lcd_s *dev);
+static void pic32mx_index(FAR struct mio283qt2_lcd_s *dev, uint8_t index);
 #ifndef CONFIG_MIO283QT2_WRONLY
-static uint16_t pic32mx_read(struct mio283qt2_lcd_s *dev);
+static uint16_t pic32mx_read(FAR struct mio283qt2_lcd_s *dev);
 #endif
-static void pic32mx_write(struct mio283qt2_lcd_s *dev, uint16_t data);
-static void pic32mx_backlight(struct mio283qt2_lcd_s *dev, int power);
+static void pic32mx_write(FAR struct mio283qt2_lcd_s *dev, uint16_t data);
+static void pic32mx_backlight(FAR struct mio283qt2_lcd_s *dev, int power);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-/* This is the driver state structure (there is no retained state
- * information)
- */
+/* This is the driver state structure (there is no retained state information) */
 
 static struct pic32mx7mmb_dev_s g_pic32mx7mmb_lcd =
 {
@@ -179,7 +187,7 @@ static struct pic32mx7mmb_dev_s g_pic32mx7mmb_lcd =
  *
  ****************************************************************************/
 
-static void pic32mx_command(struct pic32mx7mmb_dev_s *priv)
+static void pic32mx_command(FAR struct pic32mx7mmb_dev_s *priv)
 {
   /* Low selects command */
 
@@ -200,7 +208,7 @@ static void pic32mx_command(struct pic32mx7mmb_dev_s *priv)
  *
  ****************************************************************************/
 
-static void pic32mx_data(struct pic32mx7mmb_dev_s *priv)
+static void pic32mx_data(FAR struct pic32mx7mmb_dev_s *priv)
 {
   /* Hi selects data */
 
@@ -234,9 +242,9 @@ static void pic32mx_busywait(void)
  *
  ****************************************************************************/
 
-static void pic32mx_select(struct mio283qt2_lcd_s *dev)
+static void pic32mx_select(FAR struct mio283qt2_lcd_s *dev)
 {
-  struct pic32mx7mmb_dev_s *priv = (struct pic32mx7mmb_dev_s *)dev;
+  FAR struct pic32mx7mmb_dev_s *priv = (FAR struct pic32mx7mmb_dev_s *)dev;
 
   /* CS low selects */
 
@@ -257,9 +265,9 @@ static void pic32mx_select(struct mio283qt2_lcd_s *dev)
  *
  ****************************************************************************/
 
-static void pic32mx_deselect(struct mio283qt2_lcd_s *dev)
+static void pic32mx_deselect(FAR struct mio283qt2_lcd_s *dev)
 {
-  struct pic32mx7mmb_dev_s *priv = (struct pic32mx7mmb_dev_s *)dev;
+  FAR struct pic32mx7mmb_dev_s *priv = (FAR struct pic32mx7mmb_dev_s *)dev;
 
   /* CS high de-selects */
 
@@ -280,9 +288,9 @@ static void pic32mx_deselect(struct mio283qt2_lcd_s *dev)
  *
  ****************************************************************************/
 
-static void pic32mx_index(struct mio283qt2_lcd_s *dev, uint8_t index)
+static void pic32mx_index(FAR struct mio283qt2_lcd_s *dev, uint8_t index)
 {
-  struct pic32mx7mmb_dev_s *priv = (struct pic32mx7mmb_dev_s *)dev;
+  FAR struct pic32mx7mmb_dev_s *priv = (FAR struct pic32mx7mmb_dev_s *)dev;
 
   /* Make sure that the PMP is not busy from the last transaction.
    * Read data is not available until the busy bit becomes zero.
@@ -305,9 +313,9 @@ static void pic32mx_index(struct mio283qt2_lcd_s *dev, uint8_t index)
  ****************************************************************************/
 
 #ifndef CONFIG_MIO283QT2_WRONLY
-static uint16_t pic32mx_read(struct mio283qt2_lcd_s *dev)
+static uint16_t pic32mx_read(FAR struct mio283qt2_lcd_s *dev)
 {
-  struct pic32mx7mmb_dev_s *priv = (struct pic32mx7mmb_dev_s *)dev;
+  FAR struct pic32mx7mmb_dev_s *priv = (FAR struct pic32mx7mmb_dev_s *)dev;
   uint16_t data;
 
   /* Make sure that the PMP is not busy from the last transaction.
@@ -342,9 +350,9 @@ static uint16_t pic32mx_read(struct mio283qt2_lcd_s *dev)
  *
  ****************************************************************************/
 
-static void pic32mx_write(struct mio283qt2_lcd_s *dev, uint16_t data)
+static void pic32mx_write(FAR struct mio283qt2_lcd_s *dev, uint16_t data)
 {
-  struct pic32mx7mmb_dev_s *priv = (struct pic32mx7mmb_dev_s *)dev;
+  FAR struct pic32mx7mmb_dev_s *priv = (FAR struct pic32mx7mmb_dev_s *)dev;
 
   /* Make sure that the PMP is not busy from the last transaction */
 
@@ -368,7 +376,7 @@ static void pic32mx_write(struct mio283qt2_lcd_s *dev, uint16_t data)
  *
  ****************************************************************************/
 
-static void pic32mx_backlight(struct mio283qt2_lcd_s *dev, int power)
+static void pic32mx_backlight(FAR struct mio283qt2_lcd_s *dev, int power)
 {
   /* For now, we just control the backlight as a discrete.
    * Pulse width modulation would be required to vary the backlight level.
@@ -386,7 +394,7 @@ static void pic32mx_backlight(struct mio283qt2_lcd_s *dev, int power)
  * Name:  board_lcd_initialize
  *
  * Description:
- *   Initialize the LCD video hardware. The initial state of the LCD is fully
+ *   Initialize the LCD video hardware.  The initial state of the LCD is fully
  *   initialized, display memory cleared, and the LCD ready to use, but with
  *   the power setting at 0 (full off).
  *
@@ -441,8 +449,7 @@ int board_lcd_initialize(void)
       /* Configure and enable the LCD */
 
       up_mdelay(50);
-      g_pic32mx7mmb_lcd.drvr =
-        mio283qt2_lcdinitialize(&g_pic32mx7mmb_lcd.dev);
+      g_pic32mx7mmb_lcd.drvr = mio283qt2_lcdinitialize(&g_pic32mx7mmb_lcd.dev);
       if (!g_pic32mx7mmb_lcd.drvr)
         {
           lcderr("ERROR: mio283qt2_lcdinitialize failed\n");
@@ -471,7 +478,7 @@ int board_lcd_initialize(void)
  *
  ****************************************************************************/
 
-struct lcd_dev_s *board_lcd_getdev(int lcddev)
+FAR struct lcd_dev_s *board_lcd_getdev(int lcddev)
 {
   DEBUGASSERT(lcddev == 0);
   return g_pic32mx7mmb_lcd.drvr;

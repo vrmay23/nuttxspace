@@ -1,8 +1,6 @@
 ;**************************************************************************
 ; arch/z80/src/ez80/ez80_getsp.asm
 ;
-; SPDX-License-Identifier: Apache-2.0
-;
 ; Licensed to the Apache Software Foundation (ASF) under one or more
 ; contributor license agreements.  See the NOTICE file distributed with
 ; this work for additional information regarding copyright ownership.  The
@@ -24,7 +22,7 @@
 ; Global Symbols Exported
 ;**************************************************************************
 
-	xdef	_up_getsp
+	xdef	_z80_getsp
 
 ;**************************************************************************
 ; Code
@@ -34,15 +32,15 @@
 	.assume ADL=1
 
 ;**************************************************************************
-;* Name: _up_getsp
+;* Name: _z80_getsp
 ;*
 ;* Description:
 ;*   Return the current value of the stack pointer
 ;*
 ;**************************************************************************
 
-_up_getsp:
-	ld		hl, 0			; Initialize HL to zero
+_z80_getsp:
+	ld		hl, #0			; Initialize HL to zero
 	add		hl, sp			; Add the stack pointer to HL
 	ret						; Return stack pointer in HL
 

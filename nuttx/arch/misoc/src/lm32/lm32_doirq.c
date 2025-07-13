@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/misoc/src/lm32/lm32_doirq.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *           Ramtin Amin <keytwo@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,15 +44,14 @@
 #include <assert.h>
 #include <debug.h>
 
-#include <nuttx/addrenv.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
 
 #include <arch/irq.h>
 #include <arch/board/board.h>
-#include <sched/sched.h>
 
+#include "group/group.h"
 #include "lm32.h"
 
 /****************************************************************************
@@ -47,14 +60,6 @@
 
 uint32_t *lm32_doirq(int irq, uint32_t *regs)
 {
-  struct tcb_s **running_task = &g_running_tasks[this_cpu()];
-  struct tcb_s *tcb;
-
-  if (*running_task != NULL)
-    {
-      lm32_copystate((*running_task)->xcp.regs, regs);
-    }
-
   board_autoled_on(LED_INIRQ);
 
   /* Current regs non-zero indicates that we are processing an interrupt;
@@ -63,11 +68,11 @@ uint32_t *lm32_doirq(int irq, uint32_t *regs)
    * Nested interrupts are not supported
    */
 
-  DEBUGASSERT(up_current_regs() == NULL);
-  up_set_current_regs(regs);
+  DEBUGASSERT(g_current_regs == NULL);
+  g_current_regs = regs;
 
-  /* Disable further occurrences of this interrupt (until the interrupt
-   * sources have been clear by the driver).
+  /* Disable further occurrences of this interrupt (until the interrupt sources
+   * have been clear by the driver).
    */
 
   up_disable_irq(irq);
@@ -76,6 +81,7 @@ uint32_t *lm32_doirq(int irq, uint32_t *regs)
 
   irq_dispatch(irq, regs);
 
+#if defined(CONFIG_ARCH_FPU) || defined(CONFIG_ARCH_ADDRENV)
   /* Check for a context switch.  If a context switch occurred, then
    * g_current_regs will have a different value than it did on entry.  If an
    * interrupt level context switch has occurred, then restore the floating
@@ -83,14 +89,12 @@ uint32_t *lm32_doirq(int irq, uint32_t *regs)
    * returning from the interrupt.
    */
 
-  if (regs != up_current_regs())
+  if (regs != g_current_regs)
     {
-      tcb = this_task();
-
 #ifdef CONFIG_ARCH_FPU
       /* Restore floating point registers */
 
-      up_restorefpu(up_current_regs());
+      up_restorefpu((uint32_t *)g_current_regs);
 #endif
 
 #ifdef CONFIG_ARCH_ADDRENV
@@ -100,16 +104,10 @@ uint32_t *lm32_doirq(int irq, uint32_t *regs)
        * thread at the head of the ready-to-run list.
        */
 
-      addrenv_switch(tcb);
+      group_addrenv(NULL);
 #endif
-
-      /* Record the new "running" task when context switch occurred.
-       * g_running_tasks[] is only used by assertion logic for reporting
-       * crashes.
-       */
-
-      g_running_tasks[this_cpu()] = tcb;
     }
+#endif
 
   /* If a context switch occurred while processing the interrupt then
    * g_current_regs may have change value.  If we return any value different
@@ -117,13 +115,13 @@ uint32_t *lm32_doirq(int irq, uint32_t *regs)
    * switch occurred during interrupt processing.
    */
 
-  regs = up_current_regs();
+  regs = (uint32_t *)g_current_regs;
 
   /* Set g_current_regs to NULL to indicate that we are no longer in an
    * interrupt handler.
    */
 
-  up_set_current_regs(NULL);
+  g_current_regs = NULL;
 
   /* Unmask the last interrupt (global interrupts are still disabled) */
 

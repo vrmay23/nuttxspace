@@ -1,22 +1,36 @@
 /****************************************************************************
  * libs/libc/netdb/lib_dnscache.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2009, 2012, 2014-2016 Gregory Nutt.
+ *   All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,9 +48,20 @@
 #include <debug.h>
 
 #include "netdb/lib_dns.h"
-#include "netdb/lib_netdb.h"
 
 #if CONFIG_NETDB_DNSCLIENT_ENTRIES > 0
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+/* Use clock monotonic, if possible */
+
+#ifdef CONFIG_CLOCK_MONOTONIC
+#  define DNS_CLOCK CLOCK_MONOTONIC
+#else
+#  define DNS_CLOCK CLOCK_REALTIME
+#endif
 
 /****************************************************************************
  * Private Types
@@ -56,7 +81,6 @@ struct dns_cache_s
   char              name[CONFIG_NETDB_DNSCLIENT_NAMESIZE];
   uint8_t           naddr;      /* How many addresses per name */
   union dns_addr_u  addr[CONFIG_NETDB_MAX_IPADDR];
-  uint32_t          ttl;
 };
 
 /****************************************************************************
@@ -88,7 +112,6 @@ static struct dns_cache_s g_dns_cache[CONFIG_NETDB_DNSCLIENT_ENTRIES];
  *   hostname - The hostname string to be cached.
  *   addr     - The IP addresses associated with the hostname.
  *   naddr    - The count of the IP addresses.
- *   ttl      - The TTL of the IP addresses.
  *
  * Returned Value:
  *   None
@@ -96,8 +119,7 @@ static struct dns_cache_s g_dns_cache[CONFIG_NETDB_DNSCLIENT_ENTRIES];
  ****************************************************************************/
 
 void dns_save_answer(FAR const char *hostname,
-                     FAR const union dns_addr_u *addr, int naddr,
-                     uint32_t ttl)
+                     FAR const union dns_addr_u *addr, int naddr)
 {
   FAR struct dns_cache_s *entry;
 #if CONFIG_NETDB_DNSCLIENT_LIFESEC > 0
@@ -111,7 +133,7 @@ void dns_save_answer(FAR const char *hostname,
 
   /* Get exclusive access to the DNS cache */
 
-  dns_lock();
+  dns_semtake();
 
   /* Get the index to the new head of the list */
 
@@ -142,46 +164,20 @@ void dns_save_answer(FAR const char *hostname,
   entry = &g_dns_cache[ndx];
 
 #if CONFIG_NETDB_DNSCLIENT_LIFESEC > 0
-  /* Get the current time */
+  /* Get the current time, using CLOCK_MONOTONIC if possible */
 
-  clock_gettime(CLOCK_MONOTONIC, &now);
+  clock_gettime(DNS_CLOCK, &now);
   entry->ctime = (time_t)now.tv_sec;
 #endif
 
-  strlcpy(entry->name, hostname, CONFIG_NETDB_DNSCLIENT_NAMESIZE);
+  strncpy(entry->name, hostname, CONFIG_NETDB_DNSCLIENT_NAMESIZE);
   memcpy(&entry->addr, addr, naddr * sizeof(*addr));
   entry->naddr = naddr;
-  entry->ttl = ttl;
 
   /* Save the updated head index */
 
   g_dns_head = next;
-  dns_unlock();
-}
-
-/****************************************************************************
- * Name: dns_clear_answer
- *
- * Description:
- *   Clear the resolved hostname in the DNS cache
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-void dns_clear_answer(void)
-{
-  /* Get exclusive access to the DNS cache */
-
-  dns_lock();
-
-  /* Reset the circular of DNS cache */
-
-  g_dns_head = 0;
-  g_dns_tail = 0;
-
-  dns_unlock();
+  dns_semgive();
 }
 
 /****************************************************************************
@@ -220,12 +216,12 @@ int dns_find_answer(FAR const char *hostname, FAR union dns_addr_u *addr,
 
   /* Get exclusive access to the DNS cache */
 
-  dns_lock();
+  dns_semtake();
 
 #if CONFIG_NETDB_DNSCLIENT_LIFESEC > 0
-  /* Get the current time */
+  /* Get the current time, using CLOCK_MONOTONIC if possible */
 
-  ret = clock_gettime(CLOCK_MONOTONIC, &now);
+  ret = clock_gettime(DNS_CLOCK, &now);
 #endif
 
   for (ndx = g_dns_tail; ndx != g_dns_head; ndx = next)
@@ -249,8 +245,7 @@ int dns_find_answer(FAR const char *hostname, FAR union dns_addr_u *addr,
        */
 
       elapsed = (uint32_t)now.tv_sec - (uint32_t)entry->ctime;
-      if (ret >= 0 &&
-          (elapsed > CONFIG_NETDB_DNSCLIENT_LIFESEC || elapsed > entry->ttl))
+      if (ret >= 0 && elapsed > CONFIG_NETDB_DNSCLIENT_LIFESEC)
         {
           /* This entry has expired.  Increment the tail index to exclude
            * this entry on future traversals.
@@ -282,7 +277,7 @@ int dns_find_answer(FAR const char *hostname, FAR union dns_addr_u *addr,
 
               memcpy(addr, &entry->addr, *naddr * sizeof(*addr));
 
-              dns_unlock();
+              dns_semgive();
               return OK;
             }
         }
@@ -290,7 +285,7 @@ int dns_find_answer(FAR const char *hostname, FAR union dns_addr_u *addr,
 
   ret = -ENOENT;
 
-  dns_unlock();
+  dns_semgive();
   return ret;
 }
 

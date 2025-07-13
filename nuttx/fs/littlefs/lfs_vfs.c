@@ -1,22 +1,46 @@
 /****************************************************************************
  * fs/littlefs/lfs_vfs.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ * This file is a part of NuttX:
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Ported by:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ *   Copyright (C) 2019 Pinecone Inc. All rights reserved.
+ *   Author: lihaichen <li8303@163.com>
+ *
+ * This port derives from ARM mbed logic which has a compatible 3-clause
+ * BSD license:
+ *
+ *   Copyright (c) 2017, Arm Limited. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the names ARM, NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,43 +54,20 @@
 #include <fcntl.h>
 #include <string.h>
 
+#include <nuttx/fs/dirent.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/fs/ioctl.h>
-#include <nuttx/kmalloc.h>
 #include <nuttx/mtd/mtd.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 
 #include <sys/stat.h>
 #include <sys/statfs.h>
 
-#include "inode/inode.h"
-#include "littlefs/lfs.h"
-#include "littlefs/lfs_util.h"
-#include "fs_heap.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifndef CONFIG_C99_BOOL
-#  error littlefs requires CONFIG_C99_BOOL to be selected
-#endif
+#include "lfs.h"
+#include "lfs_util.h"
 
 /****************************************************************************
  * Private Types
  ****************************************************************************/
-
-struct littlefs_dir_s
-{
-  struct fs_dirent_s    base;
-  struct lfs_dir        dir;
-};
-
-struct littlefs_file_s
-{
-  struct lfs_file       file;
-  int                   refs;
-};
 
 /* This structure represents the overall mountpoint state. An instance of
  * this structure is retained as inode private data on each mountpoint that
@@ -75,36 +76,19 @@ struct littlefs_file_s
 
 struct littlefs_mountpt_s
 {
-  mutex_t               lock;
+  sem_t                 sem;
   FAR struct inode     *drv;
   struct mtd_geometry_s geo;
-  struct lfs_config     cfg;
-  struct lfs            lfs;
-  bool                  readonly;
-};
-
-/* NuttX specific file attributes.
- *
- * If CONFIG_FS_LITTLEFS_ATTR_UPDATE is enabled, we store this structure
- * on-disk as a littlefs user attribute with type=0.
- *
- * Note: the fields of this structure are in the host-endian, even on-disk.
- */
-
-struct littlefs_attr_s
-{
-  uint32_t at_ver;     /* For the later extension */
-  uint32_t at_mode;    /* File type, attributes, and access mode bits */
-  uint32_t at_uid;     /* User ID of file */
-  uint32_t at_gid;     /* Group ID of file */
-  uint64_t at_atim;    /* Time of last access */
-  uint64_t at_mtim;    /* Time of last modification */
-  uint64_t at_ctim;    /* Time of last status change */
+  struct lfs_config_s   cfg;
+  lfs_t                 lfs;
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
+
+static void    littlefs_semgive(FAR struct littlefs_mountpt_s *fs);
+static int     littlefs_semtake(FAR struct littlefs_mountpt_s *fs);
 
 static int     littlefs_open(FAR struct file *filep, FAR const char *relpath,
                              int oflags, mode_t mode);
@@ -128,12 +112,11 @@ static int     littlefs_truncate(FAR struct file *filep,
 
 static int     littlefs_opendir(FAR struct inode *mountpt,
                                 FAR const char *relpath,
-                                FAR struct fs_dirent_s **dir);
+                                FAR struct fs_dirent_s *dir);
 static int     littlefs_closedir(FAR struct inode *mountpt,
                                  FAR struct fs_dirent_s *dir);
 static int     littlefs_readdir(FAR struct inode *mountpt,
-                                FAR struct fs_dirent_s *dir,
-                                FAR struct dirent *entry);
+                                FAR struct fs_dirent_s *dir);
 static int     littlefs_rewinddir(FAR struct inode *mountpt,
                                   FAR struct fs_dirent_s *dir);
 
@@ -155,13 +138,6 @@ static int     littlefs_rename(FAR struct inode *mountpt,
                                FAR const char *newrelpath);
 static int     littlefs_stat(FAR struct inode *mountpt,
                              FAR const char *relpath, FAR struct stat *buf);
-#ifdef CONFIG_FS_LITTLEFS_ATTR_UPDATE
-static int     littlefs_fchstat(FAR const struct file *filep,
-                                FAR const struct stat *buf, int flags);
-static int     littlefs_chstat(FAR struct inode *mountpt,
-                               FAR const char *relpath,
-                               FAR const struct stat *buf, int flags);
-#endif
 
 /****************************************************************************
  * Public Data
@@ -172,7 +148,7 @@ static int     littlefs_chstat(FAR struct inode *mountpt,
  * with any compiler.
  */
 
-const struct mountpt_operations g_littlefs_operations =
+const struct mountpt_operations littlefs_operations =
 {
   littlefs_open,          /* open */
   littlefs_close,         /* close */
@@ -180,20 +156,11 @@ const struct mountpt_operations g_littlefs_operations =
   littlefs_write,         /* write */
   littlefs_seek,          /* seek */
   littlefs_ioctl,         /* ioctl */
-  NULL,                   /* mmap */
-  littlefs_truncate,      /* truncate */
-  NULL,                   /* poll */
-  NULL,                   /* readv */
-  NULL,                   /* writev */
 
   littlefs_sync,          /* sync */
   littlefs_dup,           /* dup */
   littlefs_fstat,         /* fstat */
-#ifdef CONFIG_FS_LITTLEFS_ATTR_UPDATE
-  littlefs_fchstat,       /* fchstat */
-#else
-  NULL,
-#endif
+  littlefs_truncate,      /* truncate */
 
   littlefs_opendir,       /* opendir */
   littlefs_closedir,      /* closedir */
@@ -208,12 +175,7 @@ const struct mountpt_operations g_littlefs_operations =
   littlefs_mkdir,         /* mkdir */
   littlefs_rmdir,         /* rmdir */
   littlefs_rename,        /* rename */
-  littlefs_stat,          /* stat */
-#ifdef CONFIG_FS_LITTLEFS_ATTR_UPDATE
-  littlefs_chstat         /* chstat */
-#else
-  NULL,
-#endif
+  littlefs_stat           /* stat */
 };
 
 /****************************************************************************
@@ -221,59 +183,21 @@ const struct mountpt_operations g_littlefs_operations =
  ****************************************************************************/
 
 /****************************************************************************
- * Name: littlefs_convert_result
+ * Name: littlefs_semtake
  ****************************************************************************/
 
-static int littlefs_convert_result(int ret)
+static int littlefs_semtake(FAR struct littlefs_mountpt_s *fs)
 {
-  switch (ret)
-    {
-      case LFS_ERR_IO:
-        return -EIO;
+  return nxsem_wait_uninterruptible(&fs->sem);
+}
 
-      case LFS_ERR_CORRUPT:
-        return -EFAULT;
+/****************************************************************************
+ * Name: littlefs_semgive
+ ****************************************************************************/
 
-      case LFS_ERR_NOENT:
-        return -ENOENT;
-
-      case LFS_ERR_EXIST:
-        return -EEXIST;
-
-      case LFS_ERR_NOTDIR:
-        return -ENOTDIR;
-
-      case LFS_ERR_ISDIR:
-        return -EISDIR;
-
-      case LFS_ERR_NOTEMPTY:
-        return -ENOTEMPTY;
-
-      case LFS_ERR_BADF:
-        return -EBADF;
-
-      case LFS_ERR_FBIG:
-        return -EFBIG;
-
-      case LFS_ERR_INVAL:
-        return -EINVAL;
-
-      case LFS_ERR_NOSPC:
-        return -ENOSPC;
-
-      case LFS_ERR_NOMEM:
-        return -ENOMEM;
-
-      case LFS_ERR_NOATTR:
-        return -ENODATA;
-
-      case LFS_ERR_NAMETOOLONG:
-        return -ENAMETOOLONG;
-
-      case LFS_ERR_OK:
-      default:
-        return ret;
-    }
+static void littlefs_semgive(FAR struct littlefs_mountpt_s *fs)
+{
+  nxsem_post(&fs->sem);
 }
 
 /****************************************************************************
@@ -318,24 +242,6 @@ static int littlefs_convert_oflags(int oflags)
 }
 
 /****************************************************************************
- * Name: littlefs_convert_path
- ****************************************************************************/
-
-static FAR const char *littlefs_convert_path(FAR const char *path)
-{
-  /* littlefs 2.10.0 and later rejects an empty path ("").
-   * use "/" instead.
-   */
-
-  if (path[0] == '\0')
-    {
-      path = "/";
-    }
-
-  return path;
-}
-
-/****************************************************************************
  * Name: littlefs_open
  ****************************************************************************/
 
@@ -343,7 +249,7 @@ static int littlefs_open(FAR struct file *filep, FAR const char *relpath,
                          int oflags, mode_t mode)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
+  FAR struct lfs_file_s *priv;
   FAR struct inode *inode;
   int ret;
 
@@ -356,37 +262,24 @@ static int littlefs_open(FAR struct file *filep, FAR const char *relpath,
 
   /* Allocate memory for the open file */
 
-  priv = fs_heap_malloc(sizeof(*priv));
+  priv = kmm_malloc(sizeof(*priv));
   if (priv == NULL)
     {
       return -ENOMEM;
     }
 
-  priv->refs = 1;
+  /* Take the semaphore */
 
-  /* Lock */
-
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
-      goto errlock;
+      goto errsem;
     }
 
   /* Try to open the file */
 
-  relpath = littlefs_convert_path(relpath);
   oflags = littlefs_convert_oflags(oflags);
-  if (fs->readonly)
-    {
-      if (oflags != LFS_O_RDONLY)
-        {
-          ret = -EROFS;
-          goto errout;
-        }
-    }
-
-  ret = littlefs_convert_result(lfs_file_open(&fs->lfs, &priv->file,
-                                              relpath, oflags));
+  ret = lfs_file_open(&fs->lfs, priv, relpath, oflags);
   if (ret < 0)
     {
       /* Error opening file */
@@ -394,36 +287,13 @@ static int littlefs_open(FAR struct file *filep, FAR const char *relpath,
       goto errout;
     }
 
-#ifdef CONFIG_FS_LITTLEFS_ATTR_UPDATE
-  if (oflags & LFS_O_CREAT)
-    {
-      struct littlefs_attr_s attr;
-      struct timespec time;
-
-      clock_gettime(CLOCK_REALTIME, &time);
-      memset(&attr, 0, sizeof(attr));
-      attr.at_mode = mode;
-      attr.at_ctim = 1000000000ull * time.tv_sec + time.tv_nsec;
-      attr.at_atim = attr.at_ctim;
-      attr.at_mtim = attr.at_ctim;
-      ret = littlefs_convert_result(lfs_setattr(&fs->lfs, relpath, 0,
-                                                &attr, sizeof(attr)));
-      if (ret < 0)
-        {
-          lfs_remove(&fs->lfs, relpath);
-          goto errout_with_file;
-        }
-    }
-#endif
-
   /* In append mode, we need to set the file pointer to the end of the
    * file.
    */
 
   if (oflags & LFS_O_APPEND)
     {
-      ret = littlefs_convert_result(lfs_file_seek(&fs->lfs, &priv->file,
-                                                  0, LFS_SEEK_END));
+      ret = lfs_file_seek(&fs->lfs, priv, 0, LFS_SEEK_END);
       if (ret >= 0)
         {
           filep->f_pos = ret;
@@ -434,27 +304,7 @@ static int littlefs_open(FAR struct file *filep, FAR const char *relpath,
         }
     }
 
-  /* In case of O_TRUNC, sync to commit the truncation.
-   *
-   * For example, consider a 6MB file on an 8MB filesystem.
-   * Open the file with O_TRUNC and (re)write some data until it grows
-   * to 6MB. Without this sync, it ends up with ENOSPC because
-   * littlefs doesn't commit the updates until sync/close and thus
-   * doesn't recycle the truncated space. Although it's normal for
-   * filesystems like littlefs, we automatically sync the truncation
-   * here to allow such a sequence to succeed, assuming it's what many
-   * of NuttX users expect.
-   *
-   * CAVEAT: On the other hand, this might surprise users who are familiar
-   * with the bare littlefs semantics.
-   */
-
-  if (oflags & LFS_O_TRUNC)
-    {
-      lfs_file_sync(&fs->lfs, &priv->file);
-    }
-
-  nxmutex_unlock(&fs->lock);
+  littlefs_semgive(fs);
 
   /* Attach the private date to the struct file instance */
 
@@ -462,11 +312,11 @@ static int littlefs_open(FAR struct file *filep, FAR const char *relpath,
   return OK;
 
 errout_with_file:
-  lfs_file_close(&fs->lfs, &priv->file);
+  lfs_file_close(&fs->lfs, priv);
 errout:
-  nxmutex_unlock(&fs->lock);
-errlock:
-  fs_heap_free(priv);
+  littlefs_semgive(fs);
+errsem:
+  kmm_free(priv);
   return ret;
 }
 
@@ -477,7 +327,7 @@ errlock:
 static int littlefs_close(FAR struct file *filep)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
+  FAR struct lfs_file_s *priv;
   FAR struct inode *inode;
   int ret;
 
@@ -489,24 +339,20 @@ static int littlefs_close(FAR struct file *filep)
 
   /* Close the file */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
-      return ret;
+      goto errsem;
     }
 
-  if (--priv->refs <= 0)
-    {
-      ret = littlefs_convert_result(lfs_file_close(&fs->lfs, &priv->file));
-    }
+  lfs_file_close(&fs->lfs, priv);
+  littlefs_semgive(fs);
 
-  nxmutex_unlock(&fs->lock);
-  if (priv->refs <= 0)
-    {
-      fs_heap_free(priv);
-    }
+  /* Now free the pointer */
 
-  return ret;
+errsem:
+  kmm_free(priv);
+  return OK;
 }
 
 /****************************************************************************
@@ -517,9 +363,10 @@ static ssize_t littlefs_read(FAR struct file *filep, FAR char *buffer,
                              size_t buflen)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
+  FAR struct lfs_file_s *priv;
   FAR struct inode *inode;
   ssize_t ret;
+  int semret;
 
   /* Recover our private data from the struct file instance */
 
@@ -529,32 +376,20 @@ static ssize_t littlefs_read(FAR struct file *filep, FAR char *buffer,
 
   /* Call LFS to perform the read */
 
-  ret = nxmutex_lock(&fs->lock);
-  if (ret < 0)
+  semret = littlefs_semtake(fs);
+  if (semret < 0)
     {
-      return ret;
+      return (ssize_t)semret;
     }
 
-  if (filep->f_pos != priv->file.pos)
-    {
-      ret = littlefs_convert_result(lfs_file_seek(&fs->lfs, &priv->file,
-                                                  filep->f_pos,
-                                                  LFS_SEEK_SET));
-      if (ret < 0)
-        {
-          goto out;
-        }
-    }
-
-  ret = littlefs_convert_result(lfs_file_read(&fs->lfs, &priv->file,
-                                              buffer, buflen));
+  ret = lfs_file_read(&fs->lfs, priv, buffer, buflen);
   if (ret > 0)
     {
       filep->f_pos += ret;
     }
 
-out:
-  nxmutex_unlock(&fs->lock);
+  littlefs_semgive(fs);
+
   return ret;
 }
 
@@ -566,9 +401,10 @@ static ssize_t littlefs_write(FAR struct file *filep, const char *buffer,
                               size_t buflen)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
+  FAR struct lfs_file_s *priv;
   FAR struct inode *inode;
   ssize_t ret;
+  int semret;
 
   /* Recover our private data from the struct file instance */
 
@@ -578,32 +414,20 @@ static ssize_t littlefs_write(FAR struct file *filep, const char *buffer,
 
   /* Call LFS to perform the write */
 
-  ret = nxmutex_lock(&fs->lock);
-  if (ret < 0)
+  semret = littlefs_semtake(fs);
+  if (semret < 0)
     {
-      return ret;
+      return semret;
     }
 
-  if (filep->f_pos != priv->file.pos)
-    {
-      ret = littlefs_convert_result(lfs_file_seek(&fs->lfs, &priv->file,
-                                                  filep->f_pos,
-                                                  LFS_SEEK_SET));
-      if (ret < 0)
-        {
-          goto out;
-        }
-    }
-
-  ret = littlefs_convert_result(lfs_file_write(&fs->lfs, &priv->file,
-                                               buffer, buflen));
+  ret = lfs_file_write(&fs->lfs, priv, buffer, buflen);
   if (ret > 0)
     {
       filep->f_pos += ret;
     }
 
-out:
-  nxmutex_unlock(&fs->lock);
+  littlefs_semgive(fs);
+
   return ret;
 }
 
@@ -614,9 +438,10 @@ out:
 static off_t littlefs_seek(FAR struct file *filep, off_t offset, int whence)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
+  FAR struct lfs_file_s *priv;
   FAR struct inode *inode;
   off_t ret;
+  int semret;
 
   /* Recover our private data from the struct file instance */
 
@@ -626,20 +451,20 @@ static off_t littlefs_seek(FAR struct file *filep, off_t offset, int whence)
 
   /* Call LFS to perform the seek */
 
-  ret = nxmutex_lock(&fs->lock);
-  if (ret < 0)
+  semret = littlefs_semtake(fs);
+  if (semret < 0)
     {
-      return ret;
+      return (off_t)semret;
     }
 
-  ret = littlefs_convert_result(lfs_file_seek(&fs->lfs, &priv->file,
-                                              offset, whence));
+  ret = lfs_file_seek(&fs->lfs, priv, offset, whence);
   if (ret >= 0)
     {
       filep->f_pos = ret;
     }
 
-  nxmutex_unlock(&fs->lock);
+  littlefs_semgive(fs);
+
   return ret;
 }
 
@@ -650,74 +475,23 @@ static off_t littlefs_seek(FAR struct file *filep, off_t offset, int whence)
 static int littlefs_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
   FAR struct littlefs_mountpt_s *fs;
-#ifdef CONFIG_FS_LITTLEFS_GETPATH
-  FAR struct littlefs_file_s *priv;
-#endif
   FAR struct inode *inode;
   FAR struct inode *drv;
-  int ret;
 
   /* Recover our private data from the struct file instance */
 
-#ifdef CONFIG_FS_LITTLEFS_GETPATH
-  priv  = filep->f_priv;
-#endif
   inode = filep->f_inode;
   fs    = inode->i_private;
   drv   = fs->drv;
 
-  ret = nxmutex_lock(&fs->lock);
-  if (ret < 0)
+  if (INODE_IS_MTD(drv))
     {
-      return ret;
+      return MTD_IOCTL(drv->u.i_mtd, cmd, arg);
     }
-
-  switch (cmd)
+  else
     {
-#ifdef CONFIG_FS_LITTLEFS_GETPATH
-      case FIOC_FILEPATH:
-        {
-          FAR char *path = (FAR char *)(uintptr_t)arg;
-          ret = inode_getpath(inode, path, PATH_MAX);
-          if (ret >= 0)
-            {
-              size_t len = strlen(path);
-              if (path[len - 1] != '/')
-                {
-                  path[len++] = '/';
-                }
-
-              ret = littlefs_convert_result(lfs_file_path(&fs->lfs,
-                                                          &priv->file,
-                                                          path + len,
-                                                          PATH_MAX - len));
-            }
-        }
-        break;
-#endif
-
-      default:
-        {
-          if (INODE_IS_MTD(drv))
-            {
-              ret = MTD_IOCTL(drv->u.i_mtd, cmd, arg);
-            }
-          else
-            {
-              if (drv->u.i_bops->ioctl != NULL)
-                {
-                  ret = drv->u.i_bops->ioctl(drv, cmd, arg);
-                }
-              else
-                {
-                  ret = -ENOTTY;
-                }
-            }
-        }
+      return drv->u.i_bops->ioctl(drv, cmd, arg);
     }
-
-  nxmutex_unlock(&fs->lock);
-  return ret;
 }
 
 /****************************************************************************
@@ -731,7 +505,7 @@ static int littlefs_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 static int littlefs_sync(FAR struct file *filep)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
+  FAR struct lfs_file_s *priv;
   FAR struct inode *inode;
   int ret;
 
@@ -741,14 +515,14 @@ static int littlefs_sync(FAR struct file *filep)
   inode = filep->f_inode;
   fs    = inode->i_private;
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = littlefs_convert_result(lfs_file_sync(&fs->lfs, &priv->file));
-  nxmutex_unlock(&fs->lock);
+  ret = lfs_file_sync(&fs->lfs, priv);
+  littlefs_semgive(fs);
 
   return ret;
 }
@@ -762,28 +536,7 @@ static int littlefs_sync(FAR struct file *filep)
 
 static int littlefs_dup(FAR const struct file *oldp, FAR struct file *newp)
 {
-  FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
-  FAR struct inode *inode;
-  int ret;
-
-  /* Recover our private data from the struct file instance */
-
-  priv  = oldp->f_priv;
-  inode = oldp->f_inode;
-  fs    = inode->i_private;
-
-  ret = nxmutex_lock(&fs->lock);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  priv->refs++;
-  newp->f_priv = priv;
-  nxmutex_unlock(&fs->lock);
-
-  return ret;
+  return -ENOSYS;
 }
 
 /****************************************************************************
@@ -798,11 +551,8 @@ static int littlefs_dup(FAR const struct file *oldp, FAR struct file *newp)
 static int littlefs_fstat(FAR const struct file *filep, FAR struct stat *buf)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
+  FAR struct lfs_file_s *priv;
   FAR struct inode *inode;
-#ifdef CONFIG_FS_LITTLEFS_ATTR_UPDATE
-  struct littlefs_attr_s attr;
-#endif
   int ret;
 
   memset(buf, 0, sizeof(*buf));
@@ -815,132 +565,26 @@ static int littlefs_fstat(FAR const struct file *filep, FAR struct stat *buf)
 
   /* Call LFS to get file size */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  buf->st_size = lfs_file_size(&fs->lfs, &priv->file);
+  buf->st_size = lfs_file_size(&fs->lfs, priv);
+  littlefs_semgive(fs);
+
   if (buf->st_size < 0)
     {
-      ret = littlefs_convert_result(buf->st_size);
-      goto errout;
+      return buf->st_size;
     }
 
-#ifdef CONFIG_FS_LITTLEFS_ATTR_UPDATE
-  ret = littlefs_convert_result(lfs_file_getattr(&fs->lfs, &priv->file, 0,
-                                                 &attr, sizeof(attr)));
-  if (ret < 0)
-    {
-      if (ret != -ENODATA && ret != -ENOENT)
-        {
-          goto errout;
-        }
+  buf->st_mode    = S_IRWXO | S_IRWXG | S_IRWXU | S_IFREG;
+  buf->st_blksize = fs->cfg.block_size;
+  buf->st_blocks  = (buf->st_size + buf->st_blksize - 1) / buf->st_blksize;
 
-      memset(&attr, 0, sizeof(attr));
-      attr.at_mode = S_IRWXG | S_IRWXU | S_IRWXO;
-    }
-
-  ret = 0;
-  buf->st_mode         = attr.at_mode | S_IFREG;
-  buf->st_uid          = attr.at_uid;
-  buf->st_gid          = attr.at_gid;
-  buf->st_atim.tv_sec  = attr.at_atim / 1000000000ull;
-  buf->st_atim.tv_nsec = attr.at_atim % 1000000000ull;
-  buf->st_mtim.tv_sec  = attr.at_mtim / 1000000000ull;
-  buf->st_mtim.tv_nsec = attr.at_mtim % 1000000000ull;
-  buf->st_ctim.tv_sec  = attr.at_ctim / 1000000000ull;
-  buf->st_ctim.tv_nsec = attr.at_ctim % 1000000000ull;
-#endif /* CONFIG_FS_LITTLEFS_ATTR_UPDATE */
-  buf->st_blksize      = fs->cfg.block_size;
-  buf->st_blocks       = (buf->st_size + buf->st_blksize - 1) /
-                         buf->st_blksize;
-
-errout:
-  nxmutex_unlock(&fs->lock);
-  return ret;
+  return OK;
 }
-
-#ifdef CONFIG_FS_LITTLEFS_ATTR_UPDATE
-static int littlefs_fchstat(FAR const struct file *filep,
-                            FAR const struct stat *buf, int flags)
-{
-  FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
-  FAR struct inode *inode;
-  struct littlefs_attr_s attr;
-  int ret;
-
-  /* Recover our private data from the struct file instance */
-
-  priv  = filep->f_priv;
-  inode = filep->f_inode;
-  fs    = inode->i_private;
-
-  /* Call LFS to get file size */
-
-  ret = nxmutex_lock(&fs->lock);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  ret = littlefs_convert_result(lfs_file_getattr(&fs->lfs, &priv->file,
-                                                 0, &attr, sizeof(attr)));
-  if (ret < 0)
-    {
-      if (ret != -ENODATA)
-        {
-          goto errout;
-        }
-
-      memset(&attr, 0, sizeof(attr));
-      attr.at_mode = S_IRWXG | S_IRWXU | S_IRWXO;
-    }
-
-  if ((CH_STAT_MODE & flags) == CH_STAT_MODE)
-    {
-      attr.at_mode = buf->st_mode;
-    }
-
-  if ((CH_STAT_UID & flags) == CH_STAT_UID)
-    {
-      attr.at_uid = buf->st_uid;
-    }
-
-  if ((CH_STAT_GID & flags) == CH_STAT_GID)
-    {
-      attr.at_gid = buf->st_gid;
-    }
-
-  attr.at_ctim = 1000000000ull * buf->st_ctim.tv_sec +
-                 buf->st_ctim.tv_nsec;
-
-  if ((CH_STAT_ATIME & flags) == CH_STAT_ATIME)
-    {
-      attr.at_atim = 1000000000ull * buf->st_atim.tv_sec +
-                     buf->st_atim.tv_nsec;
-    }
-
-  if ((CH_STAT_MTIME & flags) == CH_STAT_MTIME)
-    {
-      attr.at_mtim = 1000000000ull * buf->st_mtim.tv_sec +
-                     buf->st_mtim.tv_nsec;
-    }
-
-  ret = littlefs_convert_result(lfs_file_setattr(&fs->lfs, &priv->file, 0,
-                                                 &attr, sizeof(attr)));
-  if (ret < 0)
-    {
-      goto errout;
-    }
-
-errout:
-  nxmutex_unlock(&fs->lock);
-  return ret;
-}
-#endif
 
 /****************************************************************************
  * Name: littlefs_truncate
@@ -954,7 +598,7 @@ errout:
 static int littlefs_truncate(FAR struct file *filep, off_t length)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_file_s *priv;
+  FAR struct lfs_file_s *priv;
   FAR struct inode *inode;
   int ret;
 
@@ -966,15 +610,14 @@ static int littlefs_truncate(FAR struct file *filep, off_t length)
 
   /* Call LFS to perform the truncate */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = littlefs_convert_result(lfs_file_truncate(&fs->lfs, &priv->file,
-                                                  length));
-  nxmutex_unlock(&fs->lock);
+  ret = lfs_file_truncate(&fs->lfs, priv, length);
+  littlefs_semgive(fs);
 
   return ret;
 }
@@ -988,10 +631,10 @@ static int littlefs_truncate(FAR struct file *filep, off_t length)
 
 static int littlefs_opendir(FAR struct inode *mountpt,
                             FAR const char *relpath,
-                            FAR struct fs_dirent_s **dir)
+                            FAR struct fs_dirent_s *dir)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_dir_s *ldir;
+  FAR struct lfs_dir_s *priv;
   int ret;
 
   /* Recover our private data from the inode instance */
@@ -1000,37 +643,38 @@ static int littlefs_opendir(FAR struct inode *mountpt,
 
   /* Allocate memory for the open directory */
 
-  ldir = fs_heap_malloc(sizeof(*ldir));
-  if (ldir == NULL)
+  priv = kmm_malloc(sizeof(*priv));
+  if (priv == NULL)
     {
       return -ENOMEM;
     }
 
-  /* Take the lock */
+  /* Take the semaphore */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
-      goto errlock;
+      goto errsem;
     }
 
   /* Call the LFS's opendir function */
 
-  relpath = littlefs_convert_path(relpath);
-  ret = littlefs_convert_result(lfs_dir_open(&fs->lfs, &ldir->dir, relpath));
+  ret = lfs_dir_open(&fs->lfs, priv, relpath);
   if (ret < 0)
     {
       goto errout;
     }
 
-  nxmutex_unlock(&fs->lock);
-  *dir = &ldir->base;
+  dir->fd_position = lfs_dir_tell(&fs->lfs, priv);
+
+  littlefs_semgive(fs);
+  dir->u.littlefs = priv;
   return OK;
 
 errout:
-  nxmutex_unlock(&fs->lock);
-errlock:
-  fs_heap_free(ldir);
+  littlefs_semgive(fs);
+errsem:
+  kmm_free(priv);
   return ret;
 }
 
@@ -1044,27 +688,28 @@ errlock:
 static int littlefs_closedir(FAR struct inode *mountpt,
                              FAR struct fs_dirent_s *dir)
 {
-  FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_dir_s *ldir;
+  struct littlefs_mountpt_s *fs;
+  FAR struct lfs_dir_s *priv;
   int ret;
 
   /* Recover our private data from the inode instance */
 
-  ldir = (FAR struct littlefs_dir_s *)dir;
+  priv = dir->u.littlefs;
   fs   = mountpt->i_private;
 
   /* Call the LFS's closedir function */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
-      return ret;
+      goto errsem;
     }
 
-  lfs_dir_close(&fs->lfs, &ldir->dir);
-  nxmutex_unlock(&fs->lock);
+  lfs_dir_close(&fs->lfs, priv);
+  littlefs_semgive(fs);
 
-  fs_heap_free(ldir);
+errsem:
+  kmm_free(priv);
   return OK;
 }
 
@@ -1076,47 +721,48 @@ static int littlefs_closedir(FAR struct inode *mountpt,
  ****************************************************************************/
 
 static int littlefs_readdir(FAR struct inode *mountpt,
-                            FAR struct fs_dirent_s *dir,
-                            FAR struct dirent *entry)
+                            FAR struct fs_dirent_s *dir)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_dir_s *ldir;
-  struct lfs_info info;
+  FAR struct lfs_dir_s *priv;
+  struct lfs_info_s info;
   int ret;
 
   /* Recover our private data from the inode instance */
 
-  ldir = (FAR struct littlefs_dir_s *)dir;
+  priv = dir->u.littlefs;
   fs   = mountpt->i_private;
 
   /* Call the LFS's readdir function */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = littlefs_convert_result(lfs_dir_read(&fs->lfs, &ldir->dir, &info));
+  ret = lfs_dir_read(&fs->lfs, priv, &info);
   if (ret > 0)
     {
+      dir->fd_position = lfs_dir_tell(&fs->lfs, priv);
       if (info.type == LFS_TYPE_REG)
         {
-          entry->d_type = DTYPE_FILE;
+          dir->fd_dir.d_type = DTYPE_FILE;
         }
       else
         {
-          entry->d_type = DTYPE_DIRECTORY;
+          dir->fd_dir.d_type = DTYPE_DIRECTORY;
         }
 
-      strlcpy(entry->d_name, info.name, sizeof(entry->d_name));
+      strcpy(dir->fd_dir.d_name, info.name);
     }
   else if (ret == 0)
     {
       ret = -ENOENT;
     }
 
-  nxmutex_unlock(&fs->lock);
+  littlefs_semgive(fs);
+
   return ret;
 }
 
@@ -1130,34 +776,46 @@ static int littlefs_readdir(FAR struct inode *mountpt,
 static int littlefs_rewinddir(FAR struct inode *mountpt,
                               FAR struct fs_dirent_s *dir)
 {
-  FAR struct littlefs_mountpt_s *fs;
-  FAR struct littlefs_dir_s *ldir;
+  struct littlefs_mountpt_s *fs;
+  FAR struct lfs_dir_s *priv;
   int ret;
 
   /* Recover our private data from the inode instance */
 
-  ldir = (FAR struct littlefs_dir_s *)dir;
+  priv = dir->u.littlefs;
   fs   = mountpt->i_private;
 
   /* Call the LFS's rewinddir function */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = littlefs_convert_result(lfs_dir_rewind(&fs->lfs, &ldir->dir));
+  ret = lfs_dir_rewind(&fs->lfs, priv);
+  if (ret >= 0)
+    {
+      dir->fd_position = lfs_dir_tell(&fs->lfs, priv);
+    }
 
-  nxmutex_unlock(&fs->lock);
+  littlefs_semgive(fs);
+
   return ret;
 }
 
 /****************************************************************************
- * Name: littlefs_read_block
+ * Name: littlefs_bind
+ *
+ * Description: This implements a portion of the mount operation. This
+ *  function allocates and initializes the mountpoint private data and
+ *  binds the driver inode to the filesystem private data. The final
+ *  binding of the private data (containing the driver) to the
+ *  mountpoint is performed by mount().
+ *
  ****************************************************************************/
 
-static int littlefs_read_block(FAR const struct lfs_config *c,
+static int littlefs_read_block(FAR const struct lfs_config_s *c,
                                lfs_block_t block, lfs_off_t off,
                                FAR void *buffer, lfs_size_t size)
 {
@@ -1185,7 +843,7 @@ static int littlefs_read_block(FAR const struct lfs_config *c,
  * Name: littlefs_write_block
  ****************************************************************************/
 
-static int littlefs_write_block(FAR const struct lfs_config *c,
+static int littlefs_write_block(FAR const struct lfs_config_s *c,
                                 lfs_block_t block, lfs_off_t off,
                                 FAR const void *buffer, lfs_size_t size)
 {
@@ -1193,11 +851,6 @@ static int littlefs_write_block(FAR const struct lfs_config *c,
   FAR struct mtd_geometry_s *geo = &fs->geo;
   FAR struct inode *drv = fs->drv;
   int ret;
-
-  if (fs->readonly)
-    {
-      return -EROFS;
-    }
 
   block = (block * c->block_size + off) / geo->blocksize;
   size  = size / geo->blocksize;
@@ -1218,17 +871,12 @@ static int littlefs_write_block(FAR const struct lfs_config *c,
  * Name: littlefs_erase_block
  ****************************************************************************/
 
-static int littlefs_erase_block(FAR const struct lfs_config *c,
+static int littlefs_erase_block(FAR const struct lfs_config_s *c,
                                 lfs_block_t block)
 {
   FAR struct littlefs_mountpt_s *fs = c->context;
   FAR struct inode *drv = fs->drv;
   int ret = OK;
-
-  if (fs->readonly)
-    {
-      return -EROFS;
-    }
 
   if (INODE_IS_MTD(drv))
     {
@@ -1246,16 +894,11 @@ static int littlefs_erase_block(FAR const struct lfs_config *c,
  * Name: littlefs_sync_block
  ****************************************************************************/
 
-static int littlefs_sync_block(FAR const struct lfs_config *c)
+static int littlefs_sync_block(FAR const struct lfs_config_s *c)
 {
   FAR struct littlefs_mountpt_s *fs = c->context;
   FAR struct inode *drv = fs->drv;
   int ret;
-
-  if (fs->readonly)
-    {
-      return -EROFS;
-    }
 
   if (INODE_IS_MTD(drv))
     {
@@ -1263,14 +906,7 @@ static int littlefs_sync_block(FAR const struct lfs_config *c)
     }
   else
     {
-      if (drv->u.i_bops->ioctl != NULL)
-        {
-          ret = drv->u.i_bops->ioctl(drv, BIOC_FLUSH, 0);
-        }
-      else
-        {
-          ret = -ENOTTY;
-        }
+      ret = drv->u.i_bops->ioctl(drv, BIOC_FLUSH, 0);
     }
 
   return ret == -ENOTTY ? OK : ret;
@@ -1278,13 +914,6 @@ static int littlefs_sync_block(FAR const struct lfs_config *c)
 
 /****************************************************************************
  * Name: littlefs_bind
- *
- * Description: This implements a portion of the mount operation. This
- *  function allocates and initializes the mountpoint private data and
- *  binds the driver inode to the filesystem private data. The final
- *  binding of the private data (containing the driver) to the
- *  mountpoint is performed by mount().
- *
  ****************************************************************************/
 
 static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
@@ -1306,7 +935,7 @@ static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
 
   /* Create an instance of the mountpt state structure */
 
-  fs = fs_heap_zalloc(sizeof(*fs));
+  fs = kmm_zalloc(sizeof(*fs));
   if (!fs)
     {
       ret = -ENOMEM;
@@ -1318,8 +947,8 @@ static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
    * have to addref() here (but does have to release in unbind().
    */
 
-  fs->drv = driver;        /* Save the driver reference */
-  nxmutex_init(&fs->lock); /* Initialize the access control mutex */
+  fs->drv = driver;           /* Save the driver reference */
+  nxsem_init(&fs->sem, 0, 0); /* Initialize the access control semaphore */
 
   if (INODE_IS_MTD(driver))
     {
@@ -1332,16 +961,8 @@ static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
     {
       /* Try to get FLT MTD geometry first */
 
-      if (driver->u.i_bops->ioctl != NULL)
-        {
-          ret = driver->u.i_bops->ioctl(driver, MTDIOC_GEOMETRY,
-                                        (unsigned long)&fs->geo);
-        }
-      else
-        {
-          ret = -ENOTTY;
-        }
-
+      ret = driver->u.i_bops->ioctl(driver, MTDIOC_GEOMETRY,
+                                    (unsigned long)&fs->geo);
       if (ret < 0)
         {
           struct geometry geometry;
@@ -1367,33 +988,21 @@ static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
 
   /* Initialize lfs_config structure */
 
-  fs->cfg.context        = fs;
-  fs->cfg.read           = littlefs_read_block;
-  fs->cfg.prog           = littlefs_write_block;
-  fs->cfg.erase          = littlefs_erase_block;
-  fs->cfg.sync           = littlefs_sync_block;
-  fs->cfg.read_size      = fs->geo.blocksize *
-                           CONFIG_FS_LITTLEFS_READ_SIZE_FACTOR;
-  fs->cfg.prog_size      = fs->geo.blocksize *
-                           CONFIG_FS_LITTLEFS_PROGRAM_SIZE_FACTOR;
-  fs->cfg.block_size     = fs->geo.erasesize *
-                           CONFIG_FS_LITTLEFS_BLOCK_SIZE_FACTOR;
-  fs->cfg.block_count    = fs->geo.neraseblocks /
-                           CONFIG_FS_LITTLEFS_BLOCK_SIZE_FACTOR;
-  fs->cfg.block_cycles   = CONFIG_FS_LITTLEFS_BLOCK_CYCLE;
-  fs->cfg.cache_size     = fs->geo.blocksize *
-                           CONFIG_FS_LITTLEFS_CACHE_SIZE_FACTOR;
+  fs->cfg.context     = fs;
+  fs->cfg.read        = littlefs_read_block;
+  fs->cfg.prog        = littlefs_write_block;
+  fs->cfg.erase       = littlefs_erase_block;
+  fs->cfg.sync        = littlefs_sync_block;
+  fs->cfg.read_size   = fs->geo.blocksize;
+  fs->cfg.prog_size   = fs->geo.blocksize;
+  fs->cfg.block_size  = fs->geo.erasesize;
+  fs->cfg.block_count = fs->geo.neraseblocks;
+  fs->cfg.lookahead   = 32 * ((fs->cfg.block_count + 31) / 32);
 
-#if CONFIG_FS_LITTLEFS_LOOKAHEAD_SIZE == 0
-  fs->cfg.lookahead_size = lfs_min(lfs_alignup(fs->cfg.block_count, 64) / 8,
-                                   fs->cfg.read_size);
-#else
-  fs->cfg.lookahead_size = CONFIG_FS_LITTLEFS_LOOKAHEAD_SIZE;
-#endif
-
-#ifdef CONFIG_FS_LITTLEFS_MULTI_VERSION
-  fs->cfg.disk_version   = CONFIG_FS_LITTLEFS_DISK_VERSION;
-#endif
+  if (fs->cfg.lookahead > 32 * fs->cfg.read_size)
+    {
+      fs->cfg.lookahead = 32 * fs->cfg.read_size;
+    }
 
   /* Then get information about the littlefs filesystem on the devices
    * managed by this driver.
@@ -1403,29 +1012,25 @@ static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
 
   if (data && strcmp(data, "forceformat") == 0)
     {
-      ret = littlefs_convert_result(lfs_format(&fs->lfs, &fs->cfg));
+      ret = lfs_format(&fs->lfs, &fs->cfg);
       if (ret < 0)
         {
           goto errout_with_fs;
         }
     }
 
-  if (data && !strcmp(data, "ro"))
-    {
-      fs->readonly = true;
-    }
-
-  ret = littlefs_convert_result(lfs_mount(&fs->lfs, &fs->cfg));
+  ret = lfs_mount(&fs->lfs, &fs->cfg);
   if (ret < 0)
     {
       /* Auto format the device if -o autoformat */
 
-      if (ret != -EFAULT || !data || strcmp(data, "autoformat"))
+      if (ret != LFS_ERR_CORRUPT ||
+          !data || strcmp(data, "autoformat"))
         {
           goto errout_with_fs;
         }
 
-      ret = littlefs_convert_result(lfs_format(&fs->lfs, &fs->cfg));
+      ret = lfs_format(&fs->lfs, &fs->cfg);
       if (ret < 0)
         {
           goto errout_with_fs;
@@ -1433,7 +1038,7 @@ static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
 
       /* Try to mount the device again */
 
-      ret = littlefs_convert_result(lfs_mount(&fs->lfs, &fs->cfg));
+      ret = lfs_mount(&fs->lfs, &fs->cfg);
       if (ret < 0)
         {
           goto errout_with_fs;
@@ -1441,11 +1046,12 @@ static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
     }
 
   *handle = fs;
+  littlefs_semgive(fs);
   return OK;
 
 errout_with_fs:
-  nxmutex_destroy(&fs->lock);
-  fs_heap_free(fs);
+  nxsem_destroy(&fs->sem);
+  kmm_free(fs);
 errout_with_block:
   if (INODE_IS_BLOCK(driver) && driver->u.i_bops->close)
     {
@@ -1472,14 +1078,14 @@ static int littlefs_unbind(FAR void *handle, FAR struct inode **driver,
 
   /* Unmount */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = littlefs_convert_result(lfs_unmount(&fs->lfs));
-  nxmutex_unlock(&fs->lock);
+  ret = lfs_unmount(&fs->lfs);
+  littlefs_semgive(fs);
 
   if (ret >= 0)
     {
@@ -1503,11 +1109,25 @@ static int littlefs_unbind(FAR void *handle, FAR struct inode **driver,
 
       /* Release the mountpoint private data */
 
-      nxmutex_destroy(&fs->lock);
-      fs_heap_free(fs);
+      nxsem_destroy(&fs->sem);
+      kmm_free(fs);
     }
 
   return ret;
+}
+
+/****************************************************************************
+ * Name: littlefs_used_block
+ ****************************************************************************/
+
+static int littlefs_used_block(void *arg, lfs_block_t block)
+{
+  FAR struct statfs *buf = arg;
+
+  buf->f_bfree--;
+  buf->f_bavail--;
+
+  return 0;
 }
 
 /****************************************************************************
@@ -1528,6 +1148,7 @@ static int littlefs_statfs(FAR struct inode *mountpt, FAR struct statfs *buf)
 
   /* Return something for the file system description */
 
+  memset(buf, 0, sizeof(*buf));
   buf->f_type    = LITTLEFS_SUPER_MAGIC;
   buf->f_namelen = LFS_NAME_MAX;
   buf->f_bsize   = fs->cfg.block_size;
@@ -1535,22 +1156,15 @@ static int littlefs_statfs(FAR struct inode *mountpt, FAR struct statfs *buf)
   buf->f_bfree   = fs->cfg.block_count;
   buf->f_bavail  = fs->cfg.block_count;
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = littlefs_convert_result(lfs_fs_size(&fs->lfs));
-  if (ret > 0)
-    {
-      buf->f_bfree -= ret;
-      buf->f_bavail -= ret;
+  ret = lfs_traverse(&fs->lfs, littlefs_used_block, buf);
+  littlefs_semgive(fs);
 
-      ret = 0;
-    }
-
-  nxmutex_unlock(&fs->lock);
   return ret;
 }
 
@@ -1573,15 +1187,14 @@ static int littlefs_unlink(FAR struct inode *mountpt,
 
   /* Call the LFS to perform the unlink */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  relpath = littlefs_convert_path(relpath);
-  ret = littlefs_convert_result(lfs_remove(&fs->lfs, relpath));
-  nxmutex_unlock(&fs->lock);
+  ret = lfs_remove(&fs->lfs, relpath);
+  littlefs_semgive(fs);
 
   return ret;
 }
@@ -1597,31 +1210,7 @@ static int littlefs_mkdir(FAR struct inode *mountpt, FAR const char *relpath,
                           mode_t mode)
 {
   FAR struct littlefs_mountpt_s *fs;
-  FAR char *path;
-  size_t len = strlen(relpath);
   int ret;
-
-  relpath = littlefs_convert_path(relpath);
-  path = (FAR char *)relpath;
-
-  /* We need remove all the '/' in the end of relpath */
-
-  if (len > 0 && relpath[len - 1] == '/')
-    {
-      path = lib_get_pathbuffer();
-      if (path == NULL)
-        {
-          return -ENOMEM;
-        }
-
-      while (len > 0 && relpath[len - 1] == '/')
-        {
-          len--;
-        }
-
-      memcpy(path, relpath, len);
-      path[len] = '\0';
-    }
 
   /* Get the mountpoint private data from the inode structure */
 
@@ -1629,39 +1218,14 @@ static int littlefs_mkdir(FAR struct inode *mountpt, FAR const char *relpath,
 
   /* Call LFS to do the mkdir */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
-      goto errout;
+      return ret;
     }
 
-  ret = littlefs_convert_result(lfs_mkdir(&fs->lfs, path));
-  if (ret >= 0)
-    {
-      struct littlefs_attr_s attr;
-      struct timespec time;
-
-      clock_gettime(CLOCK_REALTIME, &time);
-      memset(&attr, 0, sizeof(attr));
-      attr.at_mode = mode;
-      attr.at_ctim = 1000000000ull * time.tv_sec + time.tv_nsec;
-      attr.at_atim = attr.at_ctim;
-      attr.at_mtim = attr.at_ctim;
-      ret = littlefs_convert_result(lfs_setattr(&fs->lfs, path, 0,
-                                                &attr, sizeof(attr)));
-      if (ret < 0)
-        {
-          lfs_remove(&fs->lfs, path);
-        }
-    }
-
-  nxmutex_unlock(&fs->lock);
-
-errout:
-  if (path != relpath)
-    {
-      lib_put_pathbuffer(path);
-    }
+  ret = lfs_mkdir(&fs->lfs, relpath);
+  littlefs_semgive(fs);
 
   return ret;
 }
@@ -1675,24 +1239,7 @@ errout:
 
 static int littlefs_rmdir(FAR struct inode *mountpt, FAR const char *relpath)
 {
-  struct stat buf;
-  int ret;
-
-  relpath = littlefs_convert_path(relpath);
-  ret = littlefs_stat(mountpt, relpath, &buf);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  if (S_ISDIR(buf.st_mode))
-    {
-      return littlefs_unlink(mountpt, relpath);
-    }
-  else
-    {
-      return -ENOTDIR;
-    }
+  return littlefs_unlink(mountpt, relpath);
 }
 
 /****************************************************************************
@@ -1715,17 +1262,14 @@ static int littlefs_rename(FAR struct inode *mountpt,
 
   /* Call LFS to do the rename */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  oldrelpath = littlefs_convert_path(oldrelpath);
-  newrelpath = littlefs_convert_path(newrelpath);
-  ret = littlefs_convert_result(lfs_rename(&fs->lfs, oldrelpath,
-                                           newrelpath));
-  nxmutex_unlock(&fs->lock);
+  ret = lfs_rename(&fs->lfs, oldrelpath, newrelpath);
+  littlefs_semgive(fs);
 
   return ret;
 }
@@ -1741,8 +1285,7 @@ static int littlefs_stat(FAR struct inode *mountpt, FAR const char *relpath,
                          FAR struct stat *buf)
 {
   FAR struct littlefs_mountpt_s *fs;
-  struct lfs_info info;
-  struct littlefs_attr_s attr;
+  struct lfs_info_s info;
   int ret;
 
   memset(buf, 0, sizeof(*buf));
@@ -1753,135 +1296,34 @@ static int littlefs_stat(FAR struct inode *mountpt, FAR const char *relpath,
 
   /* Call the LFS to do the stat operation */
 
-  ret = nxmutex_lock(&fs->lock);
+  ret = littlefs_semtake(fs);
   if (ret < 0)
     {
       return ret;
     }
 
-  relpath = littlefs_convert_path(relpath);
   ret = lfs_stat(&fs->lfs, relpath, &info);
-  if (ret < 0)
-    {
-      goto errout;
-    }
+  littlefs_semgive(fs);
 
-  ret = littlefs_convert_result(lfs_getattr(&fs->lfs, relpath, 0,
-                                            &attr, sizeof(attr)));
-  if (ret < 0)
+  if (ret >= 0)
     {
-      if (ret != -ENODATA)
+      /* Convert info to stat */
+
+      buf->st_mode = S_IRWXO | S_IRWXG | S_IRWXU;
+      if (info.type == LFS_TYPE_REG)
         {
-          goto errout;
+          buf->st_mode |= S_IFREG;
+        }
+      else
+        {
+          buf->st_mode |= S_IFDIR;
         }
 
-      memset(&attr, 0, sizeof(attr));
-      attr.at_mode = S_IRWXG | S_IRWXU | S_IRWXO;
+      buf->st_size    = info.size;
+      buf->st_blksize = fs->cfg.block_size;
+      buf->st_blocks  = (buf->st_size + buf->st_blksize - 1) /
+                        buf->st_blksize;
     }
 
-  ret = 0;
-  buf->st_mode         = attr.at_mode;
-  buf->st_uid          = attr.at_uid;
-  buf->st_gid          = attr.at_gid;
-  buf->st_atim.tv_sec  = attr.at_atim / 1000000000ull;
-  buf->st_atim.tv_nsec = attr.at_atim % 1000000000ull;
-  buf->st_mtim.tv_sec  = attr.at_mtim / 1000000000ull;
-  buf->st_mtim.tv_nsec = attr.at_mtim % 1000000000ull;
-  buf->st_ctim.tv_sec  = attr.at_ctim / 1000000000ull;
-  buf->st_ctim.tv_nsec = attr.at_ctim % 1000000000ull;
-  buf->st_blksize      = fs->cfg.block_size;
-  buf->st_blocks       = (buf->st_size + buf->st_blksize - 1) /
-                         buf->st_blksize;
-
-  if (info.type == LFS_TYPE_REG)
-    {
-      buf->st_mode |= S_IFREG;
-      buf->st_size = info.size;
-    }
-  else
-    {
-      buf->st_mode |= S_IFDIR;
-      buf->st_size = 0;
-    }
-
-errout:
-  nxmutex_unlock(&fs->lock);
   return ret;
 }
-
-#ifdef CONFIG_FS_LITTLEFS_ATTR_UPDATE
-static int littlefs_chstat(FAR struct inode *mountpt,
-                           FAR const char *relpath,
-                           FAR const struct stat *buf, int flags)
-{
-  FAR struct littlefs_mountpt_s *fs;
-  struct littlefs_attr_s attr;
-  int ret;
-
-  /* Get the mountpoint private data from the inode structure */
-
-  fs = mountpt->i_private;
-
-  /* Call LFS to get file size */
-
-  ret = nxmutex_lock(&fs->lock);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  relpath = littlefs_convert_path(relpath);
-  ret = littlefs_convert_result(lfs_getattr(&fs->lfs, relpath, 0,
-                                            &attr, sizeof(attr)));
-  if (ret < 0)
-    {
-      if (ret != -ENODATA)
-        {
-          goto errout;
-        }
-
-      memset(&attr, 0, sizeof(attr));
-    }
-
-  if ((CH_STAT_MODE & flags) == CH_STAT_MODE)
-    {
-      attr.at_mode = buf->st_mode;
-    }
-
-  if ((CH_STAT_UID & flags) == CH_STAT_UID)
-    {
-      attr.at_uid = buf->st_uid;
-    }
-
-  if ((CH_STAT_GID & flags) == CH_STAT_GID)
-    {
-      attr.at_gid = buf->st_gid;
-    }
-
-  attr.at_ctim = 1000000000ull * buf->st_ctim.tv_sec +
-                 buf->st_ctim.tv_nsec;
-
-  if ((CH_STAT_ATIME & flags) == CH_STAT_ATIME)
-    {
-      attr.at_atim = 1000000000ull * buf->st_atim.tv_sec +
-                     buf->st_atim.tv_nsec;
-    }
-
-  if ((CH_STAT_MTIME & flags) == CH_STAT_MTIME)
-    {
-      attr.at_mtim = 1000000000ull * buf->st_mtim.tv_sec +
-                     buf->st_mtim.tv_nsec;
-    }
-
-  ret = littlefs_convert_result(lfs_setattr(&fs->lfs, relpath, 0,
-                                            &attr, sizeof(attr)));
-  if (ret < 0)
-    {
-      goto errout;
-    }
-
-errout:
-  nxmutex_unlock(&fs->lock);
-  return ret;
-}
-#endif

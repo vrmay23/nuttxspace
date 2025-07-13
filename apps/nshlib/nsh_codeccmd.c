@@ -1,22 +1,37 @@
 /****************************************************************************
  * apps/nshlib/nsh_codeccmd.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ * This file is part of NuttX, contributed by Darcy Gong
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
+ *   Author: Darcy Gong 2012-10-30
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,6 +45,7 @@
 #include <sys/stat.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -98,7 +114,8 @@
 #endif
 
 #if defined(HAVE_CODECS_URLENCODE) || defined(HAVE_CODECS_URLDECODE) || \
-    defined(HAVE_CODECS_BASE64ENC) || defined(HAVE_CODECS_BASE64DEC)
+    defined(HAVE_CODECS_BASE64ENC) || defined(HAVE_CODECS_BASE64DEC) || \
+    defined(HAVE_CODECS_HASH_MD5)
 #  define NEED_CMD_CODECS_PROC 1
 #endif
 
@@ -186,6 +203,18 @@ static void b64dec_cb(FAR char *src, int srclen, FAR char *dest,
 #endif
 
 /****************************************************************************
+ * Name: md5_cb
+ ****************************************************************************/
+
+#ifdef HAVE_CODECS_HASH_MD5
+static void md5_cb(FAR char *src, int srclen, FAR char *dest,
+                   FAR int *destlen, int mode)
+{
+  md5_update((MD5_CTX *)dest, (unsigned char *)src, srclen);
+}
+#endif
+
+/****************************************************************************
  * Name: calc_codec_buffsize
  ****************************************************************************/
 
@@ -221,9 +250,17 @@ static int calc_codec_buffsize(int srclen, uint8_t mode)
 
 #ifdef NEED_CMD_CODECS_PROC
 static int cmd_codecs_proc(FAR struct nsh_vtbl_s *vtbl, int argc,
-                           FAR char **argv, uint8_t mode,
+                           char **argv, uint8_t mode,
                            codec_callback_t func)
 {
+#ifdef HAVE_CODECS_HASH_MD5
+  static const unsigned char hexchars[] = "0123456789abcdef";
+  MD5_CTX ctx;
+  unsigned char mac[16];
+  FAR char *src;
+  FAR char *dest;
+#endif
+
   FAR char *localfile = NULL;
   FAR char *srcbuf = NULL;
   FAR char *destbuf = NULL;
@@ -288,7 +325,7 @@ static int cmd_codecs_proc(FAR struct nsh_vtbl_s *vtbl, int argc,
     {
       sdata = argv[optind];
     }
-  else if (optind < argc)
+  else if (optind >= argc)
     {
       fmt = g_fmttoomanyargs;
       goto errout;
@@ -298,6 +335,13 @@ static int cmd_codecs_proc(FAR struct nsh_vtbl_s *vtbl, int argc,
       fmt = g_fmtargrequired;
       goto errout;
     }
+
+#ifdef HAVE_CODECS_HASH_MD5
+  if (mode == CODEC_MODE_HASH_MD5)
+    {
+      md5_init(&ctx);
+    }
+#endif
 
   if (isfile)
     {
@@ -377,13 +421,41 @@ static int cmd_codecs_proc(FAR struct nsh_vtbl_s *vtbl, int argc,
           memset(destbuf, 0, buflen);
           if (func)
             {
-              func(srcbuf, ret, destbuf, &buflen, iswebsafe ? 1 : 0);
-              nsh_output(vtbl, "%s", destbuf);
+#ifdef HAVE_CODECS_HASH_MD5
+              if (mode == CODEC_MODE_HASH_MD5)
+                {
+                  func(srcbuf, ret, (char *)&ctx, &buflen, 0);
+                }
+              else
+#endif
+                {
+                  func(srcbuf, ret, destbuf, &buflen, iswebsafe ? 1 : 0);
+                  nsh_output(vtbl, "%s", destbuf);
+                }
             }
 
           buflen = calc_codec_buffsize(srclen + 2, mode);
         }
 
+#ifdef HAVE_CODECS_HASH_MD5
+      if (mode == CODEC_MODE_HASH_MD5)
+        {
+          int i;
+
+          md5_final(mac, &ctx);
+          src = (FAR char *)&mac;
+          dest = destbuf;
+          for (i = 0; i < 16; i++, src++)
+            {
+              *dest++ = hexchars[(*src) >> 4];
+              *dest++ = hexchars[(*src) & 0x0f];
+            }
+
+          *dest = '\0';
+          nsh_output(vtbl, "%s\n", destbuf);
+        }
+
+#endif
       ret = OK;
       goto exit;
     }
@@ -402,7 +474,28 @@ static int cmd_codecs_proc(FAR struct nsh_vtbl_s *vtbl, int argc,
       memset(destbuf, 0, buflen);
       if (func)
         {
-          func(srcbuf, srclen, destbuf, &buflen, iswebsafe ? 1 : 0);
+#ifdef HAVE_CODECS_HASH_MD5
+          if (mode == CODEC_MODE_HASH_MD5)
+            {
+              int i;
+
+              func(srcbuf, srclen, (char *)&ctx, &buflen, 0);
+              md5_final(mac, &ctx);
+              src = (char *)&mac;
+              dest = destbuf;
+              for (i = 0; i < 16; i++, src++)
+                {
+                  *dest++ = hexchars[(*src) >> 4];
+                  *dest++ = hexchars[(*src) & 0x0f];
+                }
+
+              *dest = '\0';
+            }
+          else
+#endif
+            {
+              func(srcbuf, srclen, destbuf, &buflen, iswebsafe ? 1 : 0);
+            }
         }
 
       nsh_output(vtbl, "%s\n", destbuf);
@@ -449,7 +542,7 @@ errout:
  ****************************************************************************/
 
 #ifdef HAVE_CODECS_URLENCODE
-int cmd_urlencode(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_urlencode(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   return cmd_codecs_proc(vtbl, argc, argv, CODEC_MODE_URLENCODE,
                          urlencode_cb);
@@ -461,7 +554,7 @@ int cmd_urlencode(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
  ****************************************************************************/
 
 #ifdef HAVE_CODECS_URLDECODE
-int cmd_urldecode(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_urldecode(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   return cmd_codecs_proc(vtbl, argc, argv, CODEC_MODE_URLDECODE,
                          urldecode_cb);
@@ -473,7 +566,7 @@ int cmd_urldecode(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
  ****************************************************************************/
 
 #ifdef HAVE_CODECS_BASE64ENC
-int cmd_base64encode(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_base64encode(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   return cmd_codecs_proc(vtbl, argc, argv, CODEC_MODE_BASE64ENC, b64enc_cb);
 }
@@ -484,7 +577,7 @@ int cmd_base64encode(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
  ****************************************************************************/
 
 #ifdef HAVE_CODECS_BASE64DEC
-int cmd_base64decode(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_base64decode(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   return cmd_codecs_proc(vtbl, argc, argv, CODEC_MODE_BASE64DEC, b64dec_cb);
 }
@@ -495,51 +588,9 @@ int cmd_base64decode(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
  ****************************************************************************/
 
 #ifdef HAVE_CODECS_HASH_MD5
-int cmd_md5(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_md5(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
-  int i;
-  int ret = OK;
-  unsigned char digest[16];
-
-  if (argc == 3 && !strncmp(argv[1], "-f", 2))
-    {
-      ret = md5_file(argv[2], digest);
-      if (ret < 0)
-        {
-          return ret;
-        }
-    }
-  else if (argc == 1)
-    {
-      MD5_CTX ctx;
-
-      md5_init(&ctx);
-
-      while (1)
-        {
-          ret = nsh_read(vtbl, digest, sizeof(digest));
-          if (ret <= 0)
-            {
-              ret = ret < 0 ? -errno : 0;
-              break;
-            }
-
-          md5_update(&ctx, digest, ret);
-        }
-
-      md5_final(digest, &ctx);
-    }
-  else
-    {
-      md5_sum((FAR unsigned char *)argv[1], strlen(argv[1]), digest);
-    }
-
-  for (i = 0; i < 16; i++)
-    {
-      nsh_output(vtbl, "%02x", digest[i]);
-    }
-
-  return ret;
+  return cmd_codecs_proc(vtbl, argc, argv, CODEC_MODE_HASH_MD5, md5_cb);
 }
 #endif
 

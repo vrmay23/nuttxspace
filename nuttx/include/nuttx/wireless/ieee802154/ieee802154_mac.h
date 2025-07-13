@@ -1,22 +1,41 @@
 /*****************************************************************************
  * include/nuttx/wireless/ieee802154/ieee802154_mac.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Sebastien Lorquet. All rights reserved.
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
+ *   Author: Anthony Merlino <anthony@vergeaero.com>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   The naming and comments for various fields are taken directly
+ *   from the IEEE 802.15.4 2011 standard.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  *****************************************************************************/
 
@@ -221,7 +240,6 @@
 
 #define IEEE802154_MAX_PHY_PACKET_SIZE        127
 #define IEEE802154_TURN_AROUND_TIME           12 /* symbol periods*/
-#define IEEE802154_SYMBOL_US                  16 /* 16us */
 
 /* IEEE 802.15.4 MAC constants */
 
@@ -254,11 +272,6 @@
 #define IEEE802154_MAX_SIFS_FRAME_SIZE        18
 #define IEEE802154_MIN_CAP_LENGTH             440
 #define IEEE802154_UNIT_BACKOFF_PERIOD        20
-#define IEEE802154_LIFS_SYMBOLS               40
-#define IEEE802154_SIFS_SYMBOLS               12
-#define IEEE802154_ACKIFS_SYMBOLS             12
-#define IEEE802154_TIMESLOT_US                (16 * 60)
-#define IEEE802154_ACK_FRAME_SIZE             5  /* ACK length (FCF + Seq + FCS) */
 
 /* IEEE 802.15.4 MAC PIB Attribute Defaults */
 
@@ -389,7 +402,6 @@ enum ieee802154_attr_e
   IEEE802154_ATTR_PHY_SYMBOL_DURATION,
   IEEE802154_ATTR_PHY_FCS_LEN,
   IEEE802154_ATTR_PHY_REGDUMP,
-  IEEE802154_ATTR_PHY_TRACEDUMP,
 
   /* MAC PIB Attributes */
 
@@ -731,7 +743,7 @@ struct ieee802154_frame_meta_s
 
   enum ieee802154_uwbprf_e uwbprf;
 
-  /* The UWB preamble symbol repetitions
+  /* The UWB preamble symbol repititions
    *  Should be one of:
    *    0, 16, 64, 1024, 4096
    */
@@ -836,7 +848,7 @@ struct ieee802154_data_ind_s
 
   enum ieee802154_uwbprf_e uwb_prf;
 
-  /* The UWB preamble symbol repetitions
+  /* The UWB preamble symbol repititions
    *  Should be one of:
    *    0, 16, 64, 1024, 4096
    */
@@ -1137,7 +1149,7 @@ struct ieee802154_disassoc_conf_s
 
   enum ieee802154_status_e status;
 
-  /* Address of device either requesting or being instructed to disassociate */
+  /* Address of device either requesting or being intructed to disassociate */
 
   struct ieee802154_addr_s dev_addr;
 };

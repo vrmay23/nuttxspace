@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/lcd/pcf8574_lcd_backpack.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: dev@ziggurat29.com
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,16 +44,14 @@
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
 #include <nuttx/ascii.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/lcd/slcd_codec.h>
 #include <nuttx/lcd/pcf8574_lcd_backpack.h>
 
-#ifndef CONFIG_LIBC_SLCDCODEC
+#ifndef CONFIG_LIB_SLCDCODEC
 #  error please also select Library Routines, Segment LCD CODEC
 #endif
 
@@ -83,7 +94,14 @@ struct pcf8574_lcd_dev_s
   uint8_t refs;                              /* Number of references */
   uint8_t unlinked;                          /* We are unlinked, so teardown
                                               * on last close */
-  mutex_t lock;                              /* mutex */
+  sem_t sem_excl;                            /* mutex */
+};
+
+struct lcd_instream_s
+{
+  struct lib_instream_s stream;
+  FAR const char *buffer;
+  ssize_t nbytes;
 };
 
 /****************************************************************************
@@ -102,8 +120,8 @@ static off_t pcf8574_lcd_seek(FAR struct file *filep, off_t offset,
                               int whence);
 static int pcf8574_lcd_ioctl(FAR struct file *filep, int cmd,
                              unsigned long arg);
-static int pcf8574_lcd_poll(FAR struct file *filep, FAR struct pollfd *fds,
-                            bool setup);
+static int pcf8574lcd_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                           bool setup);
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
 static int pcf8574_lcd_unlink(FAR struct inode *inode);
 #endif
@@ -120,13 +138,9 @@ static const struct file_operations g_pcf8574_lcd_fops =
   pcf8574_lcd_write,            /* write */
   pcf8574_lcd_seek,             /* seek */
   pcf8574_lcd_ioctl,            /* ioctl */
-  NULL,                         /* mmap */
-  NULL,                         /* truncate */
-  pcf8574_lcd_poll,             /* poll */
-  NULL,                         /* readv */
-  NULL                          /* writev */
+  pcf8574lcd_poll,              /* poll */
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , pcf8574_lcd_unlink          /* unlink */
+  pcf8574_lcd_unlink            /* unlink */
 #endif
 };
 
@@ -166,6 +180,8 @@ static void pca8574_write(FAR struct pcf8574_lcd_dev_s *priv, uint8_t data)
       lcdinfo("pca8574_write() failed: %d\n", ret);
       return;
     }
+
+  return;
 }
 
 /****************************************************************************
@@ -683,7 +699,7 @@ static void lcd_scroll_up(FAR struct pcf8574_lcd_dev_s *priv)
   int nrow;
   int ncol;
 
-  data = kmm_malloc(priv->cfg.cols);
+  data = (FAR uint8_t *)malloc(priv->cfg.cols);
   if (NULL == data)
     {
       lcdinfo("Failed to allocate buffer in lcd_scroll_up()\n");
@@ -713,7 +729,8 @@ static void lcd_scroll_up(FAR struct pcf8574_lcd_dev_s *priv)
 
   lcd_set_curpos(priv, priv->cfg.rows - 1, 0);
 
-  kmm_free(data);
+  free(data);
+  return;
 }
 
 /****************************************************************************
@@ -972,6 +989,29 @@ static void lcd_codec_action(FAR struct pcf8574_lcd_dev_s *priv,
 }
 
 /****************************************************************************
+ * Name: lcd_getstream
+ *
+ * Description:
+ *   Get one character from the LCD codec stream.
+ *
+ ****************************************************************************/
+
+static int lcd_getstream(FAR struct lib_instream_s *instream)
+{
+  FAR struct lcd_instream_s *lcdstream =
+    (FAR struct lcd_instream_s *)instream;
+
+  if (lcdstream->nbytes > 0)
+    {
+      lcdstream->nbytes--;
+      lcdstream->stream.nget++;
+      return (int)*lcdstream->buffer++;
+    }
+
+  return EOF;
+}
+
+/****************************************************************************
  * Name: lcd_fpos_to_curpos
  *
  * Description:
@@ -1031,14 +1071,13 @@ static int pcf8574_lcd_open(FAR struct file *filep)
 {
   FAR struct inode *inode = filep->f_inode;
   FAR struct pcf8574_lcd_dev_s *priv =
-    inode->i_private;
+    (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
 
   /* Increment the reference count */
 
-  nxmutex_lock(&priv->lock);
+  nxsem_wait(&priv->sem_excl);
   if (priv->refs == MAX_OPENCNT)
     {
-      nxmutex_unlock(&priv->lock);
       return -EMFILE;
     }
   else
@@ -1046,7 +1085,7 @@ static int pcf8574_lcd_open(FAR struct file *filep)
       priv->refs++;
     }
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->sem_excl);
   return OK;
 }
 
@@ -1062,12 +1101,12 @@ static int pcf8574_lcd_close(FAR struct file *filep)
 {
   FAR struct inode *inode = filep->f_inode;
   FAR struct pcf8574_lcd_dev_s *priv =
-    inode->i_private;
+    (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
   int ret;
 
   /* Decrement the reference count */
 
-  nxmutex_lock(&priv->lock);
+  nxsem_wait(&priv->sem_excl);
 
   if (priv->refs == 0)
     {
@@ -1089,7 +1128,7 @@ static int pcf8574_lcd_close(FAR struct file *filep)
       ret = OK;
     }
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->sem_excl);
   return ret;
 }
 
@@ -1108,14 +1147,14 @@ static ssize_t pcf8574_lcd_read(FAR struct file *filep, FAR char *buffer,
 {
   FAR struct inode *inode = filep->f_inode;
   FAR struct pcf8574_lcd_dev_s *priv =
-    inode->i_private;
+    (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
   int nidx;
   uint8_t addr;
   uint8_t row;
   uint8_t col;
   bool onlf;
 
-  nxmutex_lock(&priv->lock);
+  nxsem_wait(&priv->sem_excl);
 
   /* Get current cursor position so we can restore it */
 
@@ -1173,7 +1212,7 @@ static ssize_t pcf8574_lcd_read(FAR struct file *filep, FAR char *buffer,
 
   lcd_putcmd(priv, CMD_SET_DDADDR | addr);      /* Restore DDRAM address */
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->sem_excl);
   return nidx;
 }
 
@@ -1190,8 +1229,8 @@ static ssize_t pcf8574_lcd_write(FAR struct file *filep,
 {
   FAR struct inode *inode = filep->f_inode;
   FAR struct pcf8574_lcd_dev_s *priv =
-    inode->i_private;
-  struct lib_meminstream_s instream;
+    (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
+  struct lcd_instream_s instream;
   uint8_t row;
   uint8_t col;
   struct slcdstate_s state;
@@ -1199,11 +1238,14 @@ static ssize_t pcf8574_lcd_write(FAR struct file *filep,
   uint8_t ch;
   uint8_t count;
 
-  nxmutex_lock(&priv->lock);
+  nxsem_wait(&priv->sem_excl);
 
   /* Initialize the stream for use with the SLCD CODEC */
 
-  lib_meminstream(&instream, buffer, buflen);
+  instream.stream.get  = lcd_getstream;
+  instream.stream.nget = 0;
+  instream.buffer      = buffer;
+  instream.nbytes      = buflen;
 
   /* Get the current cursor position now; we'll keep track of it as we go */
 
@@ -1212,8 +1254,8 @@ static ssize_t pcf8574_lcd_write(FAR struct file *filep,
   /* Now decode and process every byte in the input buffer */
 
   memset(&state, 0, sizeof(struct slcdstate_s));
-  while ((result = slcd_decode(&instream.common,
-                               &state, &ch, &count)) != SLCDRET_EOF)
+  while ((result =
+          slcd_decode(&instream.stream, &state, &ch, &count)) != SLCDRET_EOF)
     {
       if (result == SLCDRET_CHAR)       /* A normal character was returned */
         {
@@ -1326,7 +1368,7 @@ static ssize_t pcf8574_lcd_write(FAR struct file *filep,
 
   lcd_curpos_to_fpos(priv, row, col, &filep->f_pos);
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->sem_excl);
   return buflen;
 }
 
@@ -1347,11 +1389,11 @@ static off_t pcf8574_lcd_seek(FAR struct file *filep, off_t offset,
 {
   FAR struct inode *inode = filep->f_inode;
   FAR struct pcf8574_lcd_dev_s *priv =
-    inode->i_private;
+    (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
   off_t pos;
   int maxpos;
 
-  nxmutex_lock(&priv->lock);
+  nxsem_wait(&priv->sem_excl);
 
   maxpos = priv->cfg.rows * priv->cfg.cols + (priv->cfg.rows - 1);
   pos = filep->f_pos;
@@ -1408,7 +1450,7 @@ static off_t pcf8574_lcd_seek(FAR struct file *filep, off_t offset,
       break;
     }
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->sem_excl);
   return pos;
 }
 
@@ -1430,7 +1472,7 @@ static int pcf8574_lcd_ioctl(FAR struct file *filep, int cmd,
       {
         FAR struct inode *inode = filep->f_inode;
         FAR struct pcf8574_lcd_dev_s *priv =
-          inode->i_private;
+          (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
         FAR struct slcd_attributes_s *attr =
           (FAR struct slcd_attributes_s *)((uintptr_t) arg);
 
@@ -1453,19 +1495,19 @@ static int pcf8574_lcd_ioctl(FAR struct file *filep, int cmd,
       {
         FAR struct inode *inode = filep->f_inode;
         FAR struct pcf8574_lcd_dev_s *priv =
-          inode->i_private;
+          (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
         FAR struct slcd_curpos_s *attr =
           (FAR struct slcd_curpos_s *)((uintptr_t) arg);
         uint8_t row;
         uint8_t col;
 
-        nxmutex_lock(&priv->lock);
+        nxsem_wait(&priv->sem_excl);
 
         lcd_get_curpos(priv, &row, &col);
         attr->row = row;
         attr->column = col;
 
-        nxmutex_unlock(&priv->lock);
+        nxsem_post(&priv->sem_excl);
       }
       break;
 
@@ -1473,7 +1515,7 @@ static int pcf8574_lcd_ioctl(FAR struct file *filep, int cmd,
       {
         FAR struct inode *inode = filep->f_inode;
         FAR struct pcf8574_lcd_dev_s *priv =
-          inode->i_private;
+          (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
         bool bon;
 
         bon = (priv->bl_bit && priv->cfg.bl_active_high) ||
@@ -1486,11 +1528,11 @@ static int pcf8574_lcd_ioctl(FAR struct file *filep, int cmd,
       {
         FAR struct inode *inode = filep->f_inode;
         FAR struct pcf8574_lcd_dev_s *priv =
-          inode->i_private;
+          (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
 
-        nxmutex_lock(&priv->lock);
+        nxsem_wait(&priv->sem_excl);
         lcd_backlight(priv, arg ? true : false);
-        nxmutex_unlock(&priv->lock);
+        nxsem_post(&priv->sem_excl);
       }
       break;
 
@@ -1498,13 +1540,13 @@ static int pcf8574_lcd_ioctl(FAR struct file *filep, int cmd,
       {
         FAR struct inode *inode = filep->f_inode;
         FAR struct pcf8574_lcd_dev_s *priv =
-          inode->i_private;
+          (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
         FAR struct slcd_createchar_s *attr =
           (FAR struct slcd_createchar_s *)((uintptr_t) arg);
 
-        nxmutex_lock(&priv->lock);
+        nxsem_wait(&priv->sem_excl);
         lcd_create_char(priv, attr->idx, attr->bmp);
-        nxmutex_unlock(&priv->lock);
+        nxsem_post(&priv->sem_excl);
       }
       break;
 
@@ -1521,17 +1563,21 @@ static int pcf8574_lcd_ioctl(FAR struct file *filep, int cmd,
 }
 
 /****************************************************************************
- * Name: pcf8574_lcd_poll
+ * Name: pcf8574lcd_poll
  ****************************************************************************/
 
-static int pcf8574_lcd_poll(FAR struct file *filep, FAR struct pollfd *fds,
-                            bool setup)
+static int pcf8574lcd_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                           bool setup)
 {
   if (setup)
     {
       /* Data is always available to be read */
 
-      poll_notify(&fds, 1, POLLIN | POLLOUT);
+      fds->revents |= (fds->events & (POLLIN | POLLOUT));
+      if (fds->revents != 0)
+        {
+          nxsem_post(fds->sem);
+        }
     }
 
   return OK;
@@ -1545,10 +1591,10 @@ static int pcf8574_lcd_poll(FAR struct file *filep, FAR struct pollfd *fds,
 static int pcf8574_lcd_unlink(FAR struct inode *inode)
 {
   FAR struct pcf8574_lcd_dev_s *priv =
-    inode->i_private;
+    (FAR struct pcf8574_lcd_dev_s *)inode->i_private;
   int ret = OK;
 
-  nxmutex_lock(&priv->lock);
+  nxsem_wait(&priv->sem_excl);
 
   priv->unlinked = true;
 
@@ -1561,7 +1607,7 @@ static int pcf8574_lcd_unlink(FAR struct inode *inode)
       ret = OK;
     }
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->sem_excl);
   return ret;
 }
 #endif
@@ -1618,17 +1664,11 @@ int pcf8574_lcd_backpack_register(FAR const char *devpath,
   priv->bl_bit = priv->cfg.bl_active_high ? 0 : (1 << priv->cfg.bl);
   priv->refs = 0;
   priv->unlinked = false;
-  nxmutex_init(&priv->lock);
+  nxsem_init(&priv->sem_excl, 0, 1);
 
   /* Initialize */
 
   lcd_init(priv);
-
-  /* If SLCD is console enable the backlight from start */
-
-#ifdef CONFIG_SLCD_CONSOLE
-  lcd_backlight(priv, true);
-#endif
 
   /* Register the character driver */
 
@@ -1636,7 +1676,6 @@ int pcf8574_lcd_backpack_register(FAR const char *devpath,
   if (ret < 0)
     {
       lcdinfo("Failed to register driver: %d\n", ret);
-      nxmutex_destroy(&priv->lock);
       kmm_free(priv);
     }
 

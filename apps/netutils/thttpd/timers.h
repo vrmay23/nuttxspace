@@ -1,12 +1,14 @@
 /****************************************************************************
- * apps/netutils/thttpd/timers.h
+ * netutils/thttpd/timers.h
+ * Header file for THTTPD timers package
  *
- * SPDX-License-Identifier: BSD-2-Clause
- * SPDX-FileCopyrightText: 2009 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2000 by Jef Poskanzer <jef@mail.acme.com>.
- * SPDX-FileCopyrightText: 1998, 1999 by Jef Poskanzer <jef@mail.acme.com>.
- * SPDX-FileCopyrightText: 1995 by Jef Poskanzer <jef@mail.acme.com>.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2009 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Derived from the file of the same name in THTTPD:
+ *
+ *   Copyright © 1995,1998,1999,2000 by Jef Poskanzer <jef@mail.acme.com>.
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,8 +34,8 @@
  *
  ****************************************************************************/
 
-#ifndef __APPS_NETUTILS_THTTPD_TIMERS_H
-#define __APPS_NETUTILS_THTTPD_TIMERS_H
+#ifndef __NETUTILS_THTTPD_TIMERS_H
+#define __NETUTILS_THTTPD_TIMERS_H
 
 /****************************************************************************
  * Included Files
@@ -63,34 +65,34 @@ typedef union
   void *p;
   int   i;
   long  l;
-} clientdata;
+} ClientData;
 
-/* The Timerproc gets called when the timer expires.  It gets passed
+/* The TimerProc gets called when the timer expires.  It gets passed
  * the ClientData associated with the timer, and a timeval in case
  * it wants to schedule another timer.
  */
 
-typedef void timerproc(clientdata client_data, struct timeval *nowp);
+typedef void TimerProc(ClientData client_data, struct timeval *nowP);
 
 /* The Timer struct. */
 
-typedef struct timerstruct
+typedef struct TimerStruct
 {
-  timerproc          *timer_proc;
-  clientdata          client_data;
+  TimerProc          *timer_proc;
+  ClientData          client_data;
   long                msecs;
   int                 periodic;
   struct timeval      time;
-  struct timerstruct *prev;
-  struct timerstruct *next;
+  struct TimerStruct *prev;
+  struct TimerStruct *next;
   int hash;
-} timer;
+} Timer;
 
 /****************************************************************************
  * Public Data
  ****************************************************************************/
 
-extern clientdata junkclientdata;       /* For use when you don't care */
+extern ClientData JunkClientData;       /* For use when you don't care */
 
 /****************************************************************************
  * Public Function Prototypes
@@ -100,31 +102,27 @@ extern clientdata junkclientdata;       /* For use when you don't care */
 
 extern void tmr_init(void);
 
-/* Set up a timer, either periodic or one-shot.
- * Returns (timer *)0 on errors.
- */
+/* Set up a timer, either periodic or one-shot. Returns (Timer*) 0 on errors. */
 
-extern timer *tmr_create(struct timeval *nowp, timerproc *timer_proc,
-                         clientdata client_data, long msecs, int periodic);
+extern Timer *tmr_create(struct timeval *nowP, TimerProc * timer_proc,
+                         ClientData client_data, long msecs, int periodic);
 
 /* Returns a timeout in milliseconds indicating how long until the next timer
  * triggers.  You can just put the call to this routine right in your poll().
  * Returns INFTIM (-1) if no timers are pending.
  */
 
-extern long tmr_mstimeout(struct timeval *nowp);
+extern long tmr_mstimeout(struct timeval *nowP);
 
-/* Run the list of timers.
- * Your main program needs to call this every so often.
- */
+/* Run the list of timers. Your main program needs to call this every so often. */
 
-extern void tmr_run(struct timeval *nowp);
+extern void tmr_run(struct timeval *nowP);
 
 /* Deschedule a timer.  Note that non-periodic timers are automatically
  * descheduled when they run, so you don't have to call this on them.
  */
 
-extern void tmr_cancel(timer *timer);
+extern void tmr_cancel(Timer *timer);
 
 /* Clean up the timers package, freeing any unused storage. */
 
@@ -134,4 +132,4 @@ extern void tmr_cleanup(void);
 
 extern void tmr_destroy(void);
 
-#endif /* __APPS_NETUTILS_THTTPD_TIMERS_H */
+#endif /* __NETUTILS_THTTPD_TIMERS_H */

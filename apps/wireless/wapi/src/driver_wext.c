@@ -1,11 +1,15 @@
 /****************************************************************************
  * apps/wireless/wapi/src/driver_wext.c
+ * Driver interaction with generic Wireless Extensions
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2017, 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2003-2015 Jouni Malinen <j@w1.fi>
- * SPDX-FileContributor: Simon Piriou <spiriou31@gmail.com>
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2017, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Simon Piriou <spiriou31@gmail.com>
+ *           Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Adapted for NuttX from the driver_ext.c of WPA suplicant written
+ * originally by Jouni Malinen
+ *
+ *   Copyright (c) 2003-2015, Jouni Malinen <j@w1.fi>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -53,7 +57,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <inttypes.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -91,11 +94,11 @@ int wpa_driver_wext_get_key_ext(int sockfd, FAR const char *ifname,
   ext = malloc(sizeof(*ext) + *req_len);
   if (ext == NULL)
     {
-      return -ENOMEM;
+      return -1;
     }
 
   memset(&iwr, 0, sizeof(iwr));
-  strlcpy(iwr.ifr_name, ifname, IFNAMSIZ);
+  strncpy(iwr.ifr_name, ifname, IFNAMSIZ);
 
   iwr.u.encoding.pointer = (caddr_t) ext;
   iwr.u.encoding.length = sizeof(*ext) + *req_len;
@@ -123,7 +126,7 @@ int wpa_driver_wext_get_key_ext(int sockfd, FAR const char *ifname,
 
           default:
             free(ext);
-            return -EINVAL;
+            return -1;
         }
 
      if (key && ext->key_len < *req_len)
@@ -163,11 +166,11 @@ int wpa_driver_wext_set_key_ext(int sockfd, FAR const char *ifname,
   ext = malloc(sizeof(*ext) + key_len);
   if (ext == NULL)
     {
-      return -ENOMEM;
+      return -1;
     }
 
   memset(&iwr, 0, sizeof(iwr));
-  strlcpy(iwr.ifr_name, ifname, IFNAMSIZ);
+  strncpy(iwr.ifr_name, ifname, IFNAMSIZ);
 
   iwr.u.encoding.pointer = (caddr_t) ext;
   iwr.u.encoding.length = sizeof(*ext) + key_len;
@@ -199,12 +202,12 @@ int wpa_driver_wext_set_key_ext(int sockfd, FAR const char *ifname,
       default:
         nerr("ERROR: Unknown algorithm %d", alg);
         free(ext);
-        return -EINVAL;
+        return -1;
     }
 
   if (ioctl(sockfd, SIOCSIWENCODEEXT, (unsigned long)&iwr) < 0)
     {
-      ret = -errno;
+      ret = errno == EOPNOTSUPP ? -2 : -1;
       nerr("ERROR: ioctl[SIOCSIWENCODEEXT]: %d", errno);
     }
 
@@ -241,7 +244,7 @@ int wpa_driver_wext_associate(FAR struct wpa_wconfig_s *wconfig)
 
   /* Get a socket (only so that we get access to the INET subsystem) */
 
-  sockfd = wapi_make_socket();
+  sockfd = socket(PF_INETX, SOCK_WAPI, 0);
   if (sockfd < 0)
     {
       return sockfd;
@@ -249,7 +252,7 @@ int wpa_driver_wext_associate(FAR struct wpa_wconfig_s *wconfig)
 
   /* Put the driver name into the request */
 
-  strlcpy(req.ifr_name, wconfig->ifname, IFNAMSIZ);
+  strncpy(req.ifr_name, wconfig->ifname, IFNAMSIZ);
 
   ret = wapi_set_mode(sockfd, wconfig->ifname, wconfig->sta_mode);
   if (ret < 0)
@@ -276,18 +279,6 @@ int wpa_driver_wext_associate(FAR struct wpa_wconfig_s *wconfig)
       goto close_socket;
     }
 
-  if (wconfig->freq)
-    {
-      ret = wapi_set_freq(sockfd, wconfig->ifname,
-                          wconfig->freq,
-                          wconfig->flag == WAPI_FREQ_FIXED ?
-                          IW_FREQ_FIXED : IW_FREQ_AUTO);
-      if (ret < 0)
-        {
-          nerr("WARNING: Fail set freq: %d\n", ret);
-        }
-    }
-
   if (wconfig->phraselen > 0)
     {
       ret = wpa_driver_wext_set_key_ext(sockfd, wconfig->ifname,
@@ -301,24 +292,11 @@ int wpa_driver_wext_associate(FAR struct wpa_wconfig_s *wconfig)
         }
     }
 
-  if (wconfig->ssid)
+  ret = wapi_set_essid(sockfd, wconfig->ifname, wconfig->ssid,
+                       WAPI_ESSID_ON);
+  if (ret < 0)
     {
-      ret = wapi_set_essid(sockfd, wconfig->ifname,
-                           wconfig->ssid, WAPI_ESSID_ON);
-      if (ret < 0)
-        {
-          nerr("ERROR: Fail set ssid: %d\n", ret);
-          goto close_socket;
-        }
-    }
-  else if (wconfig->bssid)
-    {
-      ret = wapi_set_ap(sockfd, wconfig->ifname,
-                        (FAR const struct ether_addr *)wconfig->bssid);
-      if (ret < 0)
-        {
-          nerr("ERROR: Fail set bssid: %d\n", ret);
-        }
+      nerr("ERROR: Fail set ssid: %d\n", ret);
     }
 
 close_socket:
@@ -350,7 +328,7 @@ static int wpa_driver_wext_process_auth_param(int sockfd,
   DEBUGASSERT(ifname != NULL);
 
   memset(&iwr, 0, sizeof(iwr));
-  strlcpy(iwr.ifr_name, ifname, IFNAMSIZ);
+  strncpy(iwr.ifr_name, ifname, IFNAMSIZ);
   iwr.u.param.flags = idx & IW_AUTH_INDEX;
   iwr.u.param.value = set ? *value : 0;
 
@@ -360,12 +338,11 @@ static int wpa_driver_wext_process_auth_param(int sockfd,
       errcode = errno;
       if (errcode != EOPNOTSUPP)
         {
-          nerr("ERROR: SIOCSIWAUTH(param %d value 0x%" PRIx32
-               ") failed: %d)",
-               idx, *value, errcode);
+          nerr("ERROR: SIOCSIWAUTH(param %d value 0x%x) failed: %d)",
+               idx, value, errcode);
         }
 
-      ret = -errcode;
+      ret = errcode == EOPNOTSUPP ? -2 : -1;
     }
 
   if (ret == 0 && !set)
@@ -425,7 +402,7 @@ int wpa_driver_wext_get_auth_param(int sockfd, FAR const char *ifname,
 
 void wpa_driver_wext_disconnect(int sockfd, FAR const char *ifname)
 {
-  uint8_t ssid[WAPI_ESSID_MAX_SIZE + 1];
+  uint8_t ssid[WAPI_ESSID_MAX_SIZE];
   const struct ether_addr bssid =
   {
   };
@@ -439,7 +416,7 @@ void wpa_driver_wext_disconnect(int sockfd, FAR const char *ifname)
    */
 
   memset(&iwr, 0, sizeof(iwr));
-  strlcpy(iwr.ifr_name, ifname, IFNAMSIZ);
+  strncpy(iwr.ifr_name, ifname, IFNAMSIZ);
 
   if (ioctl(sockfd, SIOCGIWMODE, (unsigned long)&iwr) < 0)
     {
@@ -466,8 +443,6 @@ void wpa_driver_wext_disconnect(int sockfd, FAR const char *ifname)
         {
           ssid[i] = rand() & 0xff;
         }
-
-      ssid[WAPI_ESSID_MAX_SIZE] = '\0';
 
       if (wapi_set_essid(sockfd, ifname,
                          (FAR const char *)ssid, WAPI_ESSID_OFF) < 0)

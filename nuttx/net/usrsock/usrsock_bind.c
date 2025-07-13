@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/usrsock/usrsock_bind.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *  Copyright (C) 2015-2017 Haltian Ltd. All rights reserved.
+ *  Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -45,11 +58,11 @@
  * Private Functions
  ****************************************************************************/
 
-static uint16_t bind_event(FAR struct net_driver_s *dev,
+static uint16_t bind_event(FAR struct net_driver_s *dev, FAR void *pvconn,
                            FAR void *pvpriv, uint16_t flags)
 {
   FAR struct usrsock_reqstate_s *pstate = pvpriv;
-  FAR struct usrsock_conn_s *conn = pstate->conn;
+  FAR struct usrsock_conn_s *conn = pvconn;
 
   if (flags & USRSOCK_EVENT_ABORT)
     {
@@ -59,9 +72,9 @@ static uint16_t bind_event(FAR struct net_driver_s *dev,
 
       /* Stop further callbacks */
 
-      pstate->cb->flags = 0;
-      pstate->cb->priv  = NULL;
-      pstate->cb->event = NULL;
+      pstate->cb->flags   = 0;
+      pstate->cb->priv    = NULL;
+      pstate->cb->event   = NULL;
 
       /* Wake up the waiting thread */
 
@@ -75,9 +88,9 @@ static uint16_t bind_event(FAR struct net_driver_s *dev,
 
       /* Stop further callbacks */
 
-      pstate->cb->flags = 0;
-      pstate->cb->priv  = NULL;
-      pstate->cb->event = NULL;
+      pstate->cb->flags   = 0;
+      pstate->cb->priv    = NULL;
+      pstate->cb->event   = NULL;
 
       /* Wake up the waiting thread */
 
@@ -112,7 +125,7 @@ static int do_bind_request(FAR struct usrsock_conn_s *conn,
   bufs[1].iov_base = (FAR void *)addr;
   bufs[1].iov_len = req.addrlen;
 
-  return usrsock_do_request(conn, bufs, nitems(bufs));
+  return usrsockdev_do_request(conn, bufs, ARRAY_SIZE(bufs));
 }
 
 /****************************************************************************
@@ -123,13 +136,13 @@ static int do_bind_request(FAR struct usrsock_conn_s *conn,
  * Name: usrsock_bind
  *
  * Description:
- *   usrsock_bind() gives the socket 'psock' the local address 'addr'. 'addr'
+ *   usrsock_bind() gives the socket 'conn' the local address 'addr'. 'addr'
  *   is 'addrlen' bytes long. Traditionally, this is called "assigning a name
  *   to a socket." When a socket is created with socket, it exists in a name
  *   space (address family) but has no name assigned.
  *
  * Input Parameters:
- *   psock    A reference to the socket structure of the socket to be bound
+ *   conn     usrsock socket connection structure
  *   addr     Socket local address
  *   addrlen  Length of 'addr'
  *
@@ -145,6 +158,8 @@ static int do_bind_request(FAR struct usrsock_conn_s *conn,
  *   ENOTSOCK
  *     psock is a descriptor for a file, not a socket.
  *
+ * Assumptions:
+ *
  ****************************************************************************/
 
 int usrsock_bind(FAR struct socket *psock,
@@ -156,7 +171,9 @@ int usrsock_bind(FAR struct socket *psock,
   {
   };
 
-  int ret;
+  ssize_t ret;
+
+  DEBUGASSERT(conn);
 
   net_lock();
 
@@ -165,7 +182,7 @@ int usrsock_bind(FAR struct socket *psock,
     {
       /* Invalid state or closed by daemon. */
 
-      ninfo("usockid=%d; bind() with uninitialized usrsock.\n",
+      ninfo("usockid=%d; connect() with uninitialized usrsock.\n",
             conn->usockid);
 
       ret = (conn->state == USRSOCK_CONN_STATE_ABORTED) ? -EPIPE :
@@ -184,14 +201,14 @@ int usrsock_bind(FAR struct socket *psock,
       goto errout_unlock;
     }
 
-  /* Request user-space daemon to bind address. */
+  /* Request user-space daemon to close socket. */
 
   ret = do_bind_request(conn, addr, addrlen);
   if (ret >= 0)
     {
       /* Wait for completion of request. */
 
-      net_sem_wait_uninterruptible(&state.recvsem);
+      net_lockedwait_uninterruptible(&state.recvsem);
       ret = state.result;
     }
 

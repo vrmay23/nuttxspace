@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/stm32/nucleo-f429zi/src/stm32_reset.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * boards/arm/stm32f4/nucleo-f429zi/src/stm32_reset.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with

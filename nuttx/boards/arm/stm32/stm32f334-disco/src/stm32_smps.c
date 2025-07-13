@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/stm32/stm32f334-disco/src/stm32_smps.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Mateusz Szafoni <raiden00@railab.me>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +43,6 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -50,7 +62,7 @@
 
 #include <arch/armv7-m/nvicpri.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
 #include "ram_vectors.h"
 
 #include "stm32_hrtim.h"
@@ -189,56 +201,56 @@ enum converter_mode_e
   CONVERTER_MODE_INIT,      /* Initial mode */
   CONVERTER_MODE_BUCK,      /* Buck mode operations  (V_in > V_out) */
   CONVERTER_MODE_BOOST,     /* Boost mode operations (V_in < V_out) */
-  CONVERTER_MODE_BUCKBOOST, /* Buck-boost operations (V_in near V_out) */
+  CONVERTER_MODE_BUCKBOOST, /* Buck-boost operations (V_in near V_out)*/
 };
 
 /* SMPS lower drivers structure */
 
 struct smps_lower_dev_s
 {
-  struct hrtim_dev_s     *hrtim; /* PWM generation */
-  struct stm32_adc_dev_s *adc;   /* input and output voltage sense */
-  struct comp_dev_s      *comp;  /* not used in this demo - only as reference */
-  struct dac_dev_s       *dac;   /* not used in this demo - only as reference */
-  struct opamp_dev_s     *opamp; /* not used in this demo - only as reference */
+  FAR struct hrtim_dev_s     *hrtim; /* PWM generation */
+  FAR struct stm32_adc_dev_s *adc;   /* input and output voltage sense */
+  FAR struct comp_dev_s      *comp;  /* not used in this demo - only as reference */
+  FAR struct dac_dev_s       *dac;   /* not used in this demo - only as reference */
+  FAR struct opamp_dev_s     *opamp; /* not used in this demo - only as reference */
 };
 
 /* Private data for smps */
 
 struct smps_priv_s
 {
-  uint8_t               conv_mode;   /* Converter mode */
-  uint16_t              v_in_raw;    /* Voltage input RAW value */
-  uint16_t              v_out_raw;   /* Voltage output RAW value */
-  float                 v_in;        /* Voltage input real value in V */
-  float                 v_out;       /* Voltage output real value in V  */
-  bool                  running;     /* Running flag */
-  pid_controller_f32_t  pid;         /* PID controller */
-  float                *c_limit_tab; /* Current limit tab */
+  uint8_t           conv_mode;   /* Converter mode */
+  uint16_t          v_in_raw;    /* Voltage input RAW value */
+  uint16_t          v_out_raw;   /* Voltage output RAW value */
+  float             v_in;        /* Voltage input real value in V */
+  float             v_out;       /* Voltage output real value in V  */
+  bool              running;     /* Running flag */
+  pid_controller_t  pid;         /* PID controller */
+  float            *c_limit_tab; /* Current limit tab */
 };
 
 /****************************************************************************
  * Private Function Protototypes
  ****************************************************************************/
 
-static int smps_setup(struct smps_dev_s *dev);
-static int smps_shutdown(struct smps_dev_s *dev);
-static int smps_start(struct smps_dev_s *dev);
-static int smps_stop(struct smps_dev_s *dev);
-static int smps_params_set(struct smps_dev_s *dev,
-                           struct smps_params_s *param);
-static int smps_mode_set(struct smps_dev_s *dev, uint8_t mode);
-static int smps_limits_set(struct smps_dev_s *dev,
-                           struct smps_limits_s *limits);
-static int smps_state_get(struct smps_dev_s *dev,
-                          struct smps_state_s *state);
-static int smps_fault_set(struct smps_dev_s *dev, uint8_t fault);
-static int smps_fault_get(struct smps_dev_s *dev,
-                          uint8_t *fault);
-static int smps_fault_clean(struct smps_dev_s *dev,
-                            uint8_t fault);
-static int smps_ioctl(struct smps_dev_s *dev, int cmd,
-                      unsigned long arg);
+static int smps_setup(FAR struct smps_dev_s *dev);
+static int smps_shutdown(FAR struct smps_dev_s *dev);
+static int smps_start(FAR struct smps_dev_s *dev);
+static int smps_stop(FAR struct smps_dev_s *dev);
+static int smps_params_set(FAR struct smps_dev_s *dev,
+                           FAR struct smps_params_s *param);
+static int smps_mode_set(FAR struct smps_dev_s *dev, uint8_t mode);
+static int smps_limits_set(FAR struct smps_dev_s *dev,
+                           FAR struct smps_limits_s *limits);
+static int smps_state_get(FAR struct smps_dev_s *dev,
+                          FAR struct smps_state_s *state);
+static int smps_fault_set(FAR struct smps_dev_s *dev, uint8_t fault);
+static int smps_fault_get(FAR struct smps_dev_s *dev,
+                              FAR uint8_t *fault);
+static int smps_fault_clean(FAR struct smps_dev_s *dev,
+                                uint8_t fault);
+static int smps_ioctl(FAR struct smps_dev_s *dev, int cmd,
+                          unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -317,10 +329,10 @@ static const uint32_t g_adc1pins[ADC1_NCHANNELS] =
  * Private Functions
  ****************************************************************************/
 
-static int smps_shutdown(struct smps_dev_s *dev)
+static int smps_shutdown(FAR struct smps_dev_s *dev)
 {
-  struct smps_s      *smps = (struct smps_s *)dev->priv;
-  struct smps_priv_s *priv = (struct smps_priv_s *)smps->priv;
+  FAR struct smps_s      *smps = (FAR struct smps_s *)dev->priv;
+  FAR struct smps_priv_s *priv = (struct smps_priv_s *)smps->priv;
 
   /* Stop smps if running */
 
@@ -346,15 +358,15 @@ static int smps_shutdown(struct smps_dev_s *dev)
  *
  ****************************************************************************/
 
-static int smps_setup(struct smps_dev_s *dev)
+static int smps_setup(FAR struct smps_dev_s *dev)
 {
-  struct smps_lower_dev_s *lower = dev->lower;
-  struct smps_s           *smps  = (struct smps_s *)dev->priv;
-  struct hrtim_dev_s      *hrtim = NULL;
-  struct stm32_adc_dev_s  *adc   = NULL;
-  struct smps_priv_s      *priv;
-  struct adc_channel_s     channels[ADC1_NCHANNELS];
-  struct adc_sample_time_s stime;
+  FAR struct smps_lower_dev_s *lower = dev->lower;
+  FAR struct smps_s           *smps  = (FAR struct smps_s *)dev->priv;
+  FAR struct hrtim_dev_s      *hrtim = NULL;
+  FAR struct stm32_adc_dev_s  *adc   = NULL;
+  FAR struct smps_priv_s      *priv;
+  struct adc_channel_s         channels[ADC1_NCHANNELS];
+  struct adc_sample_time_s     stime;
   int ret = OK;
   int i   = 0;
 
@@ -384,7 +396,7 @@ static int smps_setup(struct smps_dev_s *dev)
 
   /* Update ADC sample time */
 
-  for (i = 0; i < ADC1_NCHANNELS; i += 1)
+  for (i = 0; i < ADC1_NCHANNELS; i+= 1)
     {
       channels[i].sample_time = ADC_SMPR_61p5;
       channels[i].channel     = g_adc1chan[i];
@@ -395,8 +407,8 @@ static int smps_setup(struct smps_dev_s *dev)
   stime.channels_nbr = ADC1_NCHANNELS;
   stime.channel      = channels;
 
-  STM32_ADC_SAMPLETIME_SET(adc, &stime);
-  STM32_ADC_SAMPLETIME_WRITE(adc);
+  ADC_SAMPLETIME_SET(adc, &stime);
+  ADC_SAMPLETIME_WRITE(adc);
 
   /* TODO: create current limit table */
 
@@ -406,13 +418,13 @@ errout:
   return ret;
 }
 
-static int smps_start(struct smps_dev_s *dev)
+static int smps_start(FAR struct smps_dev_s *dev)
 {
-  struct smps_lower_dev_s *lower = dev->lower;
-  struct smps_s           *smps  = (struct smps_s *)dev->priv;
-  struct smps_priv_s      *priv  = (struct smps_priv_s *)smps->priv;
-  struct hrtim_dev_s      *hrtim = lower->hrtim;
-  struct stm32_adc_dev_s  *adc   = lower->adc;
+  FAR struct smps_lower_dev_s *lower = dev->lower;
+  FAR struct smps_s           *smps  = (FAR struct smps_s *)dev->priv;
+  FAR struct smps_priv_s      *priv  = (struct smps_priv_s *)smps->priv;
+  FAR struct hrtim_dev_s      *hrtim = lower->hrtim;
+  FAR struct stm32_adc_dev_s  *adc   = lower->adc;
   volatile uint64_t per = 0;
   uint64_t fclk = 0;
   int ret = OK;
@@ -433,20 +445,15 @@ static int smps_start(struct smps_dev_s *dev)
   /* Set PID controller saturation */
 
   pid_saturation_set(&priv->pid, 0.0, BOOST_VOLT_MAX);
-
-  /* Reset PI integral if saturated */
-
-  pi_ireset_enable(&priv->pid, true);
 #endif
 
   /* Get TIMA period value for given frequency */
 
   fclk = HRTIM_FCLK_GET(hrtim, HRTIM_TIMER_TIMA);
-  per = fclk / TIMA_PWM_FREQ;
+  per = fclk/TIMA_PWM_FREQ;
   if (per > HRTIM_PER_MAX)
     {
-      pwrerr("ERROR:  Can not achieve tima pwm "
-             "freq=%" PRIu32 " if fclk=%" PRIu64 "\n",
+      pwrerr("ERROR:  Can not achieve tima pwm freq=%u if fclk=%llu\n",
              (uint32_t)TIMA_PWM_FREQ, (uint64_t)fclk);
       ret = -EINVAL;
       goto errout;
@@ -459,11 +466,10 @@ static int smps_start(struct smps_dev_s *dev)
   /* Get TIMB period value for given frequency */
 
   fclk = HRTIM_FCLK_GET(hrtim, HRTIM_TIMER_TIMB);
-  per = fclk / TIMB_PWM_FREQ;
+  per = fclk/TIMB_PWM_FREQ;
   if (per > HRTIM_PER_MAX)
     {
-      pwrerr("ERROR:  Can not achieve timb pwm "
-             "freq=%" PRIu32 " if fclk=%" PRIu64 "\n",
+      pwrerr("ERROR:  Can not achieve timb pwm freq=%u if fclk=%llu\n",
              (uint32_t)TIMB_PWM_FREQ, (uint64_t)fclk);
       ret = -EINVAL;
       goto errout;
@@ -479,18 +485,14 @@ static int smps_start(struct smps_dev_s *dev)
 
   /* Configure TIMER A and TIMER B deadtime mode
    *
-   * NOTE: In deadtime mode we have to configure output 1 only
-   * (SETx1, RSTx1), output 2 configuration is not significant.
+   * NOTE: In deadtime mode we have to configure output 1 only (SETx1, RSTx1),
+   * output 2 configuration is not significant.
    */
 
-  HRTIM_DEADTIME_UPDATE(hrtim, HRTIM_TIMER_TIMA, HRTIM_DT_EDGE_RISING,
-                        DT_RISING);
-  HRTIM_DEADTIME_UPDATE(hrtim, HRTIM_TIMER_TIMA, HRTIM_DT_EDGE_FALLING,
-                        DT_FALLING);
-  HRTIM_DEADTIME_UPDATE(hrtim, HRTIM_TIMER_TIMB, HRTIM_DT_EDGE_RISING,
-                        DT_RISING);
-  HRTIM_DEADTIME_UPDATE(hrtim, HRTIM_TIMER_TIMB, HRTIM_DT_EDGE_FALLING,
-                        DT_FALLING);
+  HRTIM_DEADTIME_UPDATE(hrtim, HRTIM_TIMER_TIMA, HRTIM_DT_EDGE_RISING, DT_RISING);
+  HRTIM_DEADTIME_UPDATE(hrtim, HRTIM_TIMER_TIMA, HRTIM_DT_EDGE_FALLING, DT_FALLING);
+  HRTIM_DEADTIME_UPDATE(hrtim, HRTIM_TIMER_TIMB, HRTIM_DT_EDGE_RISING, DT_RISING);
+  HRTIM_DEADTIME_UPDATE(hrtim, HRTIM_TIMER_TIMB, HRTIM_DT_EDGE_FALLING, DT_FALLING);
 
   /* Set T4 and T12 to a low state.
    * Deadtime mode force T11 and T5 to a high state.
@@ -510,7 +512,7 @@ static int smps_start(struct smps_dev_s *dev)
 
   /* Enable ADC JEOS interrupts */
 
-  STM32_ADC_INT_ENABLE(adc, ADC_INT_JEOS);
+  ADC_INT_ENABLE(adc, ADC_INT_JEOS);
 
   /* Enable ADC12 interrupts */
 
@@ -518,19 +520,19 @@ static int smps_start(struct smps_dev_s *dev)
 
   /* Start injected conversion */
 
-  STM32_ADC_INJ_STARTCONV(adc, true);
+  ADC_INJ_STARTCONV(adc, true);
 
 errout:
   return ret;
 }
 
-static int smps_stop(struct smps_dev_s *dev)
+static int smps_stop(FAR struct smps_dev_s *dev)
 {
-  struct smps_lower_dev_s *lower = dev->lower;
-  struct smps_s           *smps  = (struct smps_s *)dev->priv;
-  struct smps_priv_s      *priv  = (struct smps_priv_s *)smps->priv;
-  struct hrtim_dev_s      *hrtim = lower->hrtim;
-  struct stm32_adc_dev_s  *adc   = lower->adc;
+  FAR struct smps_lower_dev_s *lower = dev->lower;
+  FAR struct smps_s           *smps  = (FAR struct smps_s *)dev->priv;
+  FAR struct smps_priv_s      *priv  = (struct smps_priv_s *)smps->priv;
+  FAR struct hrtim_dev_s      *hrtim = lower->hrtim;
+  FAR struct stm32_adc_dev_s  *adc   = lower->adc;
 
   /* Disable HRTIM outputs */
 
@@ -538,11 +540,11 @@ static int smps_stop(struct smps_dev_s *dev)
 
   /* Stop injected conversion */
 
-  STM32_ADC_INJ_STARTCONV(adc, false);
+  ADC_INJ_STARTCONV(adc, false);
 
   /* Disable ADC JEOS interrupts */
 
-  STM32_ADC_INT_DISABLE(adc, ADC_INT_JEOS);
+  ADC_INT_DISABLE(adc, ADC_INT_JEOS);
 
   /* Disable ADC12 interrupts */
 
@@ -555,10 +557,10 @@ static int smps_stop(struct smps_dev_s *dev)
   return OK;
 }
 
-static int smps_params_set(struct smps_dev_s *dev,
-                           struct smps_params_s *param)
+static int smps_params_set(FAR struct smps_dev_s *dev,
+                           FAR struct smps_params_s *param)
 {
-  struct smps_s *smps = (struct smps_s *)dev->priv;
+  FAR struct smps_s *smps = (FAR struct smps_s *)dev->priv;
   int ret = OK;
 
   /* Only output voltage */
@@ -580,9 +582,9 @@ static int smps_params_set(struct smps_dev_s *dev,
   return ret;
 }
 
-static int smps_mode_set(struct smps_dev_s *dev, uint8_t mode)
+static int smps_mode_set(FAR struct smps_dev_s *dev, uint8_t mode)
 {
-  struct smps_s *smps = (struct smps_s *)dev->priv;
+  FAR struct smps_s *smps = (FAR struct smps_s *)dev->priv;
   int ret = OK;
 
   /* Only constant voltage mode supported */
@@ -602,10 +604,10 @@ errout:
   return ret;
 }
 
-static int smps_limits_set(struct smps_dev_s *dev,
-                           struct smps_limits_s *limits)
+static int smps_limits_set(FAR struct smps_dev_s *dev,
+                           FAR struct smps_limits_s *limits)
 {
-  struct smps_s *smps = (struct smps_s *)dev->priv;
+  FAR struct smps_s *smps = (FAR struct smps_s *)dev->priv;
   int ret = OK;
 
   /* Some assertions */
@@ -633,28 +635,28 @@ static int smps_limits_set(struct smps_dev_s *dev,
 
   if (limits->v_out * 1000 > CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_LIMIT)
     {
-      limits->v_out = (float)CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_LIMIT / 1000.0;
+      limits->v_out = (float)CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_LIMIT/1000.0;
       pwrwarn("WARNING: "
-              "SMPS output voltage limiit > SMPS absolute output voltage "
-              "limit. Set output voltage limit to %.2f.\n",
+              "SMPS output voltage limiit > SMPS absolute output voltage limit."
+              " Set output voltage limit to %.2f.\n",
               limits->v_out);
     }
 
   if (limits->v_in * 1000 > CONFIG_EXAMPLES_SMPS_IN_VOLTAGE_LIMIT)
     {
-      limits->v_in = (float)CONFIG_EXAMPLES_SMPS_IN_VOLTAGE_LIMIT / 1000.0;
+      limits->v_in = (float)CONFIG_EXAMPLES_SMPS_IN_VOLTAGE_LIMIT/1000.0;
       pwrwarn("WARNING: "
-              "SMPS input voltage limiit > SMPS absolute input voltage "
-              "limit. Set input voltage limit to %.2f.\n",
+              "SMPS input voltage limiit > SMPS absolute input voltage limit."
+              " Set input voltage limit to %.2f.\n",
               limits->v_in);
     }
 
   if (limits->i_out * 1000 > CONFIG_EXAMPLES_SMPS_OUT_CURRENT_LIMIT)
     {
-      limits->i_out = (float)CONFIG_EXAMPLES_SMPS_OUT_CURRENT_LIMIT / 1000.0;
+      limits->i_out = (float)CONFIG_EXAMPLES_SMPS_OUT_CURRENT_LIMIT/1000.0;
       pwrwarn("WARNING: "
-              "SMPS output current limiit > SMPS absolute output current "
-              "limit. Set output current limit to %.2f.\n",
+              "SMPS output current limiit > SMPS absolute output current limit."
+              " Set output current limit to %.2f.\n",
               limits->i_out);
     }
 
@@ -678,12 +680,12 @@ errout:
   return ret;
 }
 
-static int smps_state_get(struct smps_dev_s *dev,
-                          struct smps_state_s *state)
+static int smps_state_get(FAR struct smps_dev_s *dev,
+                          FAR struct smps_state_s *state)
 {
-  struct smps_s *smps = (struct smps_s *)dev->priv;
+  FAR struct smps_s *smps = (FAR struct smps_s *)dev->priv;
 
-  /* Copy locally stored feedbacks data to status structure */
+  /* Copy localy stored feedbacks data to status structure */
 
   smps->state.fb.v_in  = g_smps_priv.v_in;
   smps->state.fb.v_out = g_smps_priv.v_out;
@@ -695,22 +697,22 @@ static int smps_state_get(struct smps_dev_s *dev,
   return OK;
 }
 
-static int smps_fault_set(struct smps_dev_s *dev, uint8_t fault)
+static int smps_fault_set(FAR struct smps_dev_s *dev, uint8_t fault)
 {
   return OK;
 }
 
-static int smps_fault_get(struct smps_dev_s *dev, uint8_t *fault)
+static int smps_fault_get(FAR struct smps_dev_s *dev, FAR uint8_t *fault)
 {
   return OK;
 }
 
-static int smps_fault_clean(struct smps_dev_s *dev, uint8_t fault)
+static int smps_fault_clean(FAR struct smps_dev_s *dev, uint8_t fault)
 {
   return OK;
 }
 
-static int smps_ioctl(struct smps_dev_s *dev, int cmd, unsigned long arg)
+static int smps_ioctl(FAR struct smps_dev_s *dev, int cmd, unsigned long arg)
 {
   return OK;
 }
@@ -719,7 +721,7 @@ static int smps_ioctl(struct smps_dev_s *dev, int cmd, unsigned long arg)
  * Name: smps_controller
  ****************************************************************************/
 
-static float smps_controller(struct smps_priv_s *priv, float err)
+static float smps_controller(FAR struct smps_priv_s *priv, float err)
 {
   float out = 0.0;
 
@@ -736,11 +738,10 @@ static float smps_controller(struct smps_priv_s *priv, float err)
  * Name: smps_duty_set
  ****************************************************************************/
 
-static void smps_duty_set(struct smps_priv_s *priv,
-                          struct smps_lower_dev_s *lower,
+static void smps_duty_set(struct smps_priv_s *priv, struct smps_lower_dev_s *lower,
                           float out)
 {
-  struct hrtim_dev_s *hrtim = lower->hrtim;
+  FAR struct hrtim_dev_s *hrtim = lower->hrtim;
   uint8_t mode = priv->conv_mode;
   uint16_t cmp = 0;
   float duty = 0.0;
@@ -760,7 +761,7 @@ static void smps_duty_set(struct smps_priv_s *priv,
           if (out >= priv->v_in) out = priv->v_in;
           if (out < 0.0) out = 0.0;
 
-          duty = out / priv->v_in;
+          duty = out/priv->v_in;
 
 #warning TODO: current limit in buck mode
 
@@ -768,7 +769,7 @@ static void smps_duty_set(struct smps_priv_s *priv,
 
           cmp = (uint16_t)(per * duty);
 
-          if (cmp > per - 30) cmp = per - 30;
+          if (cmp > per-30) cmp = per - 30;
 
           /* Set T4 duty cycle. T11 is complementary to T4 */
 
@@ -784,7 +785,7 @@ static void smps_duty_set(struct smps_priv_s *priv,
           if (out < priv->v_in) out = priv->v_in;
           if (out >= BOOST_VOLT_MAX) out = BOOST_VOLT_MAX;
 
-          duty = 1.0 - priv->v_in / out;
+          duty = 1.0 - priv->v_in/out;
 
 #warning TODO: current limit in boost mode
 
@@ -808,7 +809,7 @@ static void smps_duty_set(struct smps_priv_s *priv,
           if (out < priv->v_in) out = priv->v_in;
           if (out >= BOOST_VOLT_MAX) out = BOOST_VOLT_MAX;
 
-          duty = 1.0 - priv->v_in / out;
+          duty = 1.0 - priv->v_in/out;
 
 #warning TODO: current limit in buck boost mode
 
@@ -840,11 +841,10 @@ static void smps_duty_set(struct smps_priv_s *priv,
  *
  ****************************************************************************/
 
-static void smps_conv_mode_set(struct smps_priv_s *priv,
-                               struct smps_lower_dev_s *lower,
+static void smps_conv_mode_set(struct smps_priv_s *priv, struct smps_lower_dev_s *lower,
                                uint8_t mode)
 {
-  struct hrtim_dev_s *hrtim = lower->hrtim;
+  FAR struct hrtim_dev_s *hrtim = lower->hrtim;
 
   /* Disable all outputs */
 
@@ -854,6 +854,7 @@ static void smps_conv_mode_set(struct smps_priv_s *priv,
     {
       case CONVERTER_MODE_INIT:
         {
+
           break;
         }
 
@@ -861,19 +862,15 @@ static void smps_conv_mode_set(struct smps_priv_s *priv,
         {
           /* Set T12 low (T5 high) on the next PER */
 
-          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMB_CH1,
-                               HRTIM_OUT_SET_NONE);
-          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMB_CH1,
-                               HRTIM_OUT_RST_PER);
+          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMB_CH1, HRTIM_OUT_SET_NONE);
+          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMB_CH1, HRTIM_OUT_RST_PER);
+
 
           /* Set T4 to a high state on PER and reset on CMP1.
-           * T11 is complementary to T4.
-           */
+             T11 is complementary to T4. */
 
-          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMA_CH1,
-                               HRTIM_OUT_SET_PER);
-          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMA_CH1,
-                               HRTIM_OUT_RST_CMP1);
+          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMA_CH1, HRTIM_OUT_SET_PER);
+          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMA_CH1, HRTIM_OUT_RST_CMP1);
 
           break;
         }
@@ -882,19 +879,14 @@ static void smps_conv_mode_set(struct smps_priv_s *priv,
         {
           /* Set T4 high (T11 low) on the next PER */
 
-          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMA_CH1,
-                               HRTIM_OUT_SET_PER);
-          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMA_CH1,
-                               HRTIM_OUT_RST_NONE);
+          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMA_CH1, HRTIM_OUT_SET_PER);
+          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMA_CH1, HRTIM_OUT_RST_NONE);
 
           /* Set T12 to a high state on PER and reset on CMP1.
-           * T5 is complementary to T12.
-           */
+             T5 is complementary to T12. */
 
-          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMB_CH1,
-                               HRTIM_OUT_SET_PER);
-          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMB_CH1,
-                               HRTIM_OUT_RST_CMP1);
+          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMB_CH1, HRTIM_OUT_SET_PER);
+          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMB_CH1, HRTIM_OUT_RST_CMP1);
 
           break;
         }
@@ -902,28 +894,22 @@ static void smps_conv_mode_set(struct smps_priv_s *priv,
       case CONVERTER_MODE_BUCKBOOST:
         {
           /* Set T4 to a high state on PER and reset on CMP1.
-           * T11 is complementary to T4.
-           */
+             T11 is complementary to T4. */
 
-          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMA_CH1,
-                               HRTIM_OUT_SET_PER);
-          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMA_CH1,
-                               HRTIM_OUT_RST_CMP1);
+          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMA_CH1, HRTIM_OUT_SET_PER);
+          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMA_CH1, HRTIM_OUT_RST_CMP1);
 
           /* Set T12 to a high state on PER and reset on CMP1.
-           * T5 is complementary to T12.
-           */
+             T5 is complementary to T12. */
 
-          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMB_CH1,
-                               HRTIM_OUT_SET_PER);
-          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMB_CH1,
-                               HRTIM_OUT_RST_CMP1);
+          HRTIM_OUTPUT_SET_SET(hrtim, HRTIM_OUT_TIMB_CH1, HRTIM_OUT_SET_PER);
+          HRTIM_OUTPUT_RST_SET(hrtim, HRTIM_OUT_TIMB_CH1, HRTIM_OUT_RST_CMP1);
 
           /* Set fixed duty cycle (80%) on buck converter (T4 and T11) */
 
           HRTIM_CMP_SET(hrtim, HRTIM_TIMER_TIMA, HRTIM_CMP1,
-                        0.8 * ((uint16_t)HRTIM_PER_GET(hrtim,
-                                                       HRTIM_TIMER_TIMA)));
+                        0.8 * ((uint16_t)HRTIM_PER_GET(hrtim, HRTIM_TIMER_TIMA)));
+
 
           break;
         }
@@ -950,11 +936,11 @@ static void smps_conv_mode_set(struct smps_priv_s *priv,
 
 static void adc12_handler(void)
 {
-  struct smps_dev_s       *dev   = &g_smps_dev;
-  struct smps_s           *smps  = (struct smps_s *)dev->priv;
-  struct smps_priv_s      *priv  = (struct smps_priv_s *)smps->priv;
-  struct smps_lower_dev_s *lower = dev->lower;
-  struct stm32_adc_dev_s  *adc   = lower->adc;
+  FAR struct smps_dev_s       *dev   = &g_smps_dev;
+  FAR struct smps_s           *smps  = (FAR struct smps_s *)dev->priv;
+  FAR struct smps_priv_s      *priv  = (struct smps_priv_s *)smps->priv;
+  FAR struct smps_lower_dev_s *lower = dev->lower;
+  FAR struct stm32_adc_dev_s  *adc   = lower->adc;
   uint32_t pending;
   float ref = ADC_REF_VOLTAGE;
   float bit = ADC_VAL_MAX;
@@ -962,47 +948,39 @@ static void adc12_handler(void)
   float out;
   uint8_t mode;
 
-  pending = STM32_ADC_INT_GET(adc);
+  pending = ADC_INT_GET(adc);
 
   if (pending & ADC_INT_JEOC && priv->running == true)
     {
       /* Get raw ADC values */
 
-      priv->v_out_raw = STM32_ADC_INJDATA_GET(adc, V_OUT_ADC_INJ_CHANNEL);
-      priv->v_in_raw  = STM32_ADC_INJDATA_GET(adc, V_IN_ADC_INJ_CHANNEL);
+      priv->v_out_raw = ADC_INJDATA_GET(adc, V_OUT_ADC_INJ_CHANNEL);
+      priv->v_in_raw  = ADC_INJDATA_GET(adc, V_IN_ADC_INJ_CHANNEL);
 
       /* Convert raw values to real values */
 
       priv->v_out = (priv->v_out_raw * ref / bit) * V_OUT_RATIO;
       priv->v_in  = (priv->v_in_raw * ref / bit) * V_IN_RATIO;
 
-      /* According to measured voltages we set converter
-       * in appropriate mode
-       */
+      /* According to measured voltages we set converter in appropriate mode */
 
-      if (smps->param.v_out > (priv->v_in + SMPS_BUCKBOOST_RANGE))
+      if (smps->param.v_out > (priv->v_in+SMPS_BUCKBOOST_RANGE))
         {
-          /* Desired output voltage greater than input voltage - set
-           * boost converter
-           */
+          /* Desired output voltage greater than input voltage - set boost converter */
 
           mode = CONVERTER_MODE_BOOST;
         }
 
-      else if (smps->param.v_out < (priv->v_in - SMPS_BUCKBOOST_RANGE))
+      else if (smps->param.v_out < (priv->v_in-SMPS_BUCKBOOST_RANGE))
         {
-          /* Desired output voltage lower than input voltage - set
-           * buck converter
-           */
+          /* Desired output voltage lower than input voltage - set buck converter */
 
           mode = CONVERTER_MODE_BUCK;
         }
 
       else
         {
-          /* Desired output voltage close to input voltage - set
-           * buck-boost converter
-           */
+          /* Desired output voltage close to input voltage - set buck-boost converter */
 
           mode = CONVERTER_MODE_BUCKBOOST;
         }
@@ -1032,7 +1010,7 @@ static void adc12_handler(void)
 
   /* Clear pending */
 
-  STM32_ADC_INT_ACK(adc, pending);
+  ADC_INT_ACK(adc, pending);
 }
 
 /****************************************************************************
@@ -1054,12 +1032,12 @@ static void adc12_handler(void)
 
 int stm32_smps_setup(void)
 {
-  struct smps_lower_dev_s *lower = &g_smps_lower;
-  struct smps_dev_s *smps        = &g_smps_dev;
-  struct hrtim_dev_s *hrtim      = NULL;
-  struct adc_dev_s *adc          = NULL;
-  static bool initialized        = false;
-  int ret                        = OK;
+  FAR struct smps_lower_dev_s *lower = &g_smps_lower;
+  FAR struct smps_dev_s *smps        = &g_smps_dev;
+  FAR struct hrtim_dev_s *hrtim      = NULL;
+  FAR struct adc_dev_s *adc          = NULL;
+  static bool initialized            = false;
+  int ret                            = OK;
   int i;
 
   /* Initialize only once */
@@ -1101,10 +1079,10 @@ int stm32_smps_setup(void)
 
       /* Attach ADC12 ram vector */
 
-      ret = arm_ramvec_attach(STM32_IRQ_ADC12, adc12_handler);
+      ret = up_ramvec_attach(STM32_IRQ_ADC12, adc12_handler);
       if (ret < 0)
         {
-          pwrerr("ERROR:  arm_ramvec_attach failed: %d\n", ret);
+          pwrerr("ERROR:  up_ramvec_attach failed: %d\n", ret);
           ret = EXIT_FAILURE;
           goto errout;
         }
@@ -1123,9 +1101,8 @@ int stm32_smps_setup(void)
 
       adc->ad_ops->ao_setup(adc);
 
-      /* We do not need register character drivers for SMPS lower
-       * peripherals. All control should be done via SMPS character
-       * driver.
+      /* We do not need register character drivers for SMPS lower peripherals.
+       * All control should be done via SMPS character driver.
        */
 
       ret = smps_register(CONFIG_EXAMPLES_SMPS_DEVPATH, smps, (void *)lower);

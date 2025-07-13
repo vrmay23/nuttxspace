@@ -1,22 +1,37 @@
 /****************************************************************************
- * apps/examples/usrsocktest/usrsocktest_basic_daemon.c
+ * examples/usrsocktest/usrsocktest_basic_daemon.c
+ * Basic tests with socket daemon
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
+ *   Authors: Roman Saveljev <roman.saveljev@haltian.com>
+ *            Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -52,9 +67,7 @@
  ****************************************************************************/
 
 static bool started;
-static int sd;
-static int sd2;
-static int sd3;
+static int sd, sd2, sd3;
 
 /****************************************************************************
  * Public Data
@@ -65,7 +78,7 @@ static int sd3;
  ****************************************************************************/
 
 /****************************************************************************
- * Name: no_active_sockets
+ * Name: NoActiveSockets
  *
  * Description:
  *   Checks there is no active sockets on daemon startup
@@ -81,7 +94,7 @@ static int sd3;
  *
  ****************************************************************************/
 
-static void no_active_sockets(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void NoActiveSockets(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(dconf));
   started = true;
@@ -90,7 +103,7 @@ static void no_active_sockets(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: open_close
+ * Name: OpenClose
  *
  * Description:
  *   Open and close AF_INET socket, check active socket counter updates
@@ -106,7 +119,7 @@ static void no_active_sockets(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void open_close(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void OpenClose(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(dconf));
   started = true;
@@ -126,7 +139,7 @@ static void open_close(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: unsupported_type
+ * Name: UnsupportedType
  *
  * Description:
  *   Try open socket for unsupported type
@@ -142,7 +155,7 @@ static void open_close(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void unsupported_type(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void UnsupportedType(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(dconf));
   started = true;
@@ -159,7 +172,7 @@ static void unsupported_type(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: unsupported_proto
+ * Name: UnsupportedProto
  *
  * Description:
  *   Try open socket for unsupported protocol
@@ -175,7 +188,7 @@ static void unsupported_type(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void unsupported_proto(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void UnsupportedProto(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(dconf));
   started = true;
@@ -192,7 +205,7 @@ static void unsupported_proto(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: open_three
+ * Name: OpenThree
  *
  * Description:
  *   Open multiple sockets
@@ -208,7 +221,7 @@ static void unsupported_proto(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void open_three(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void OpenThree(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   int ret;
 
@@ -249,10 +262,10 @@ static void open_three(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: basic_daemon_dup
+ * Name: Dup
  *
  * Description:
- *   basic_daemon_dup opened socket
+ *   Dup opened socket
  *
  * Input Parameters:
  *   None
@@ -265,7 +278,7 @@ static void open_three(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void basic_daemon_dup(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void Dup(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   int ret;
 
@@ -304,7 +317,7 @@ static void basic_daemon_dup(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: basic_daemon_dup2
+ * Name: Dup2
  *
  * Description:
  *   Clone opened socket with dup2
@@ -320,7 +333,7 @@ static void basic_daemon_dup(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void basic_daemon_dup2(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void Dup2(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   int ret;
 
@@ -335,7 +348,7 @@ static void basic_daemon_dup2(FAR struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(2, usrsocktest_daemon_get_num_active_sockets());
 
   ret = dup2(sd2, sd);
-  TEST_ASSERT_EQUAL(sd, ret);
+  TEST_ASSERT_EQUAL(0, ret);
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
 
   ret = close(sd2);
@@ -354,7 +367,7 @@ static void basic_daemon_dup2(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: stops
+ * Name: Stops
  *
  * Description:
  *   Daemon stops unexpectedly
@@ -370,7 +383,7 @@ static void basic_daemon_dup2(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void stops(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void Stops(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   int ret;
 
@@ -391,6 +404,7 @@ static void stops(FAR struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(0, usrsocktest_endp_malloc_cnt);
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
 
+
   TEST_ASSERT_EQUAL(0, close(sd));
   sd = -1;
   TEST_ASSERT_EQUAL(0, close(sd2));
@@ -398,7 +412,7 @@ static void stops(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: stops_starts
+ * Name: StopsStarts
  *
  * Description:
  *   Daemon stops and restarts unexpectedly
@@ -414,7 +428,7 @@ static void stops(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void stops_starts(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void StopsStarts(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   int ret;
   struct sockaddr_in addr;
@@ -461,7 +475,7 @@ static void stops_starts(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: basic_daemon test group setup
+ * Name: BasicDaemon test group setup
  *
  * Description:
  *   Setup function executed before each testcase in this test group
@@ -477,7 +491,7 @@ static void stops_starts(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-TEST_SETUP(basic_daemon)
+TEST_SETUP(BasicDaemon)
 {
   sd = -1;
   sd2 = -1;
@@ -486,7 +500,7 @@ TEST_SETUP(basic_daemon)
 }
 
 /****************************************************************************
- * Name: basic_daemon test group teardown
+ * Name: BasicDaemon test group teardown
  *
  * Description:
  *   Setup function executed after each testcase in this test group
@@ -502,173 +516,170 @@ TEST_SETUP(basic_daemon)
  *
  ****************************************************************************/
 
-TEST_TEAR_DOWN(basic_daemon)
+TEST_TEAR_DOWN(BasicDaemon)
 {
-  int unused_data ret;
+  int ret;
   if (sd >= 0)
     {
       ret = close(sd);
-      TEST_ASSERT_TRUE(ret >= 0);
+      assert(ret >= 0);
     }
-
   if (sd2 >= 0)
     {
       ret = close(sd2);
-      TEST_ASSERT_TRUE(ret >= 0);
+      assert(ret >= 0);
     }
-
   if (sd3 >= 0)
     {
       ret = close(sd3);
-      TEST_ASSERT_TRUE(ret >= 0);
+      assert(ret >= 0);
     }
-
   if (started)
     {
       ret = usrsocktest_daemon_stop();
-      TEST_ASSERT_EQUAL(ret, OK);
+      assert(ret == OK);
     }
 }
 
-TEST(basic_daemon, no_active_sockets)
+TEST(BasicDaemon, NoActiveSockets)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  no_active_sockets(&usrsocktest_daemon_config);
+  NoActiveSockets(&usrsocktest_daemon_config);
 }
 
-TEST(basic_daemon, no_active_sockets_delay)
+TEST(BasicDaemon, NoActiveSocketsDelay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  no_active_sockets(&usrsocktest_daemon_config);
+  NoActiveSockets(&usrsocktest_daemon_config);
 }
 
-TEST(basic_daemon, open_close)
+TEST(BasicDaemon, OpenClose)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  open_close(&usrsocktest_daemon_config);
+  OpenClose(&usrsocktest_daemon_config);
 }
 
-TEST(basic_daemon, open_close_delay)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  usrsocktest_daemon_config.delay_all_responses = true;
-  open_close(&usrsocktest_daemon_config);
-}
-
-TEST(basic_daemon, unsupported_type)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  unsupported_type(&usrsocktest_daemon_config);
-}
-
-TEST(basic_daemon, unsupported_type_delay)
+TEST(BasicDaemon, OpenCloseDelay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  unsupported_type(&usrsocktest_daemon_config);
+  OpenClose(&usrsocktest_daemon_config);
 }
 
-TEST(basic_daemon, unsupported_proto)
+TEST(BasicDaemon, UnsupportedType)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  unsupported_proto(&usrsocktest_daemon_config);
+  UnsupportedType(&usrsocktest_daemon_config);
 }
 
-TEST(basic_daemon, unsupported_proto_delay)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  usrsocktest_daemon_config.delay_all_responses = true;
-  unsupported_proto(&usrsocktest_daemon_config);
-}
-
-TEST(basic_daemon, open_three)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  open_three(&usrsocktest_daemon_config);
-}
-
-TEST(basic_daemon, open_three_delay)
+TEST(BasicDaemon, UnsupportedTypeDelay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  open_three(&usrsocktest_daemon_config);
+  UnsupportedType(&usrsocktest_daemon_config);
 }
 
-TEST(basic_daemon, basic_daemon_dup)
+TEST(BasicDaemon, UnsupportedProto)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  basic_daemon_dup(&usrsocktest_daemon_config);
+  UnsupportedProto(&usrsocktest_daemon_config);
 }
 
-TEST(basic_daemon, basic_daemon_dup_delay)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  usrsocktest_daemon_config.delay_all_responses = true;
-  basic_daemon_dup(&usrsocktest_daemon_config);
-}
-
-TEST(basic_daemon, basic_daemon_dup2)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  basic_daemon_dup2(&usrsocktest_daemon_config);
-}
-
-TEST(basic_daemon, basic_daemon_dup2_delay)
+TEST(BasicDaemon, UnsupportedProtoDelay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  basic_daemon_dup2(&usrsocktest_daemon_config);
+  UnsupportedProto(&usrsocktest_daemon_config);
 }
 
-TEST(basic_daemon, stops)
+TEST(BasicDaemon, OpenThree)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  stops(&usrsocktest_daemon_config);
+  OpenThree(&usrsocktest_daemon_config);
 }
 
-TEST(basic_daemon, stops_delay)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  usrsocktest_daemon_config.delay_all_responses = true;
-  stops(&usrsocktest_daemon_config);
-}
-
-TEST(basic_daemon, stops_starts)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  stops_starts(&usrsocktest_daemon_config);
-}
-
-TEST(basic_daemon, stops_starts_delay)
+TEST(BasicDaemon, OpenThreeDelay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  stops_starts(&usrsocktest_daemon_config);
+  OpenThree(&usrsocktest_daemon_config);
+}
+
+TEST(BasicDaemon, Dup)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  Dup(&usrsocktest_daemon_config);
+}
+
+TEST(BasicDaemon, DupDelay)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  usrsocktest_daemon_config.delay_all_responses = true;
+  Dup(&usrsocktest_daemon_config);
+}
+
+TEST(BasicDaemon, Dup2)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  Dup2(&usrsocktest_daemon_config);
+}
+
+TEST(BasicDaemon, Dup2Delay)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  usrsocktest_daemon_config.delay_all_responses = true;
+  Dup2(&usrsocktest_daemon_config);
+}
+
+TEST(BasicDaemon, Stops)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  Stops(&usrsocktest_daemon_config);
+}
+
+TEST(BasicDaemon, StopsDelay)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  usrsocktest_daemon_config.delay_all_responses = true;
+  Stops(&usrsocktest_daemon_config);
+}
+
+TEST(BasicDaemon, StopsStarts)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  StopsStarts(&usrsocktest_daemon_config);
+}
+
+TEST(BasicDaemon, StopsStartsDelay)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  usrsocktest_daemon_config.delay_all_responses = true;
+  StopsStarts(&usrsocktest_daemon_config);
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-TEST_GROUP(basic_daemon)
+TEST_GROUP(BasicDaemon)
 {
-  RUN_TEST_CASE(basic_daemon, no_active_sockets);
-  RUN_TEST_CASE(basic_daemon, no_active_sockets_delay);
-  RUN_TEST_CASE(basic_daemon, open_close);
-  RUN_TEST_CASE(basic_daemon, open_close_delay);
-  RUN_TEST_CASE(basic_daemon, unsupported_type);
-  RUN_TEST_CASE(basic_daemon, unsupported_type_delay);
-  RUN_TEST_CASE(basic_daemon, unsupported_proto);
-  RUN_TEST_CASE(basic_daemon, unsupported_proto_delay);
-  RUN_TEST_CASE(basic_daemon, open_three);
-  RUN_TEST_CASE(basic_daemon, open_three_delay);
-  RUN_TEST_CASE(basic_daemon, basic_daemon_dup);
-  RUN_TEST_CASE(basic_daemon, basic_daemon_dup_delay);
-  RUN_TEST_CASE(basic_daemon, basic_daemon_dup2);
-  RUN_TEST_CASE(basic_daemon, basic_daemon_dup2_delay);
-  RUN_TEST_CASE(basic_daemon, stops);
-  RUN_TEST_CASE(basic_daemon, stops_delay);
-  RUN_TEST_CASE(basic_daemon, stops_starts);
-  RUN_TEST_CASE(basic_daemon, stops_starts_delay);
+  RUN_TEST_CASE(BasicDaemon, NoActiveSockets);
+  RUN_TEST_CASE(BasicDaemon, NoActiveSocketsDelay);
+  RUN_TEST_CASE(BasicDaemon, OpenClose);
+  RUN_TEST_CASE(BasicDaemon, OpenCloseDelay);
+  RUN_TEST_CASE(BasicDaemon, UnsupportedType);
+  RUN_TEST_CASE(BasicDaemon, UnsupportedTypeDelay);
+  RUN_TEST_CASE(BasicDaemon, UnsupportedProto);
+  RUN_TEST_CASE(BasicDaemon, UnsupportedProtoDelay);
+  RUN_TEST_CASE(BasicDaemon, OpenThree);
+  RUN_TEST_CASE(BasicDaemon, OpenThreeDelay);
+  RUN_TEST_CASE(BasicDaemon, Dup);
+  RUN_TEST_CASE(BasicDaemon, DupDelay);
+  RUN_TEST_CASE(BasicDaemon, Dup2);
+  RUN_TEST_CASE(BasicDaemon, Dup2Delay);
+  RUN_TEST_CASE(BasicDaemon, Stops);
+  RUN_TEST_CASE(BasicDaemon, StopsDelay);
+  RUN_TEST_CASE(BasicDaemon, StopsStarts);
+  RUN_TEST_CASE(BasicDaemon, StopsStartsDelay);
 }

@@ -1,8 +1,6 @@
 /****************************************************************************
  * include/nuttx/net/bluetooth.h
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,7 +26,10 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <string.h>
 #include <nuttx/wireless/bluetooth/bt_hci.h>
+
+#ifdef CONFIG_NET_BLUETOOTH
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -60,8 +61,6 @@
 #define BLUETOOTH_ADDRCOPY(d,s) memcpy((d),(s),BLUETOOTH_ADDRSIZE)
 #define BLUETOOTH_ADDRCMP(a,b)  (memcmp((a),(b),BLUETOOTH_ADDRSIZE) == 0)
 
-#ifdef CONFIG_NET_BLUETOOTH
-
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -72,7 +71,6 @@
 
 struct bluetooth_frame_meta_s
 {
-  uint8_t   bm_proto;                         /* Protocol */
   bt_addr_t bm_raddr;                         /* Connected remote address */
   uint8_t bm_channel;                         /* Connection channel */
 };

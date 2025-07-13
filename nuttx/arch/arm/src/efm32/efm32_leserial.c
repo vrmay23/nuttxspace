@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/efm32/efm32_leserial.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2024 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,18 +44,18 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/serial/serial.h>
-#include <nuttx/spinlock.h>
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "hardware/efm32_leuart.h"
 #include "efm32_config.h"
 #include "efm32_lowputc.h"
@@ -50,9 +63,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Some sanity checks *******************************************************/
-
 /* Is there at least one UART enabled and configured as a RS-232 device? */
 
 #ifndef HAVE_LEUART_DEVICE
@@ -65,9 +76,8 @@
 
 #ifdef USE_SERIALDRIVER
 
-/* Which LEUART with be ttyLE0/console and which ttyLE1?  The console will
- * always be ttyLE0.  If there is no console then will use the lowest
- * numbered LEUART.
+/* Which LEUART with be ttyLE0/console and which ttyLE1?  The console will always
+ * be ttyLE0.  If there is no console then will use the lowest numbered LEUART.
  */
 
 /* First pick the console and ttys0.  This could be either LEUART0-1 */
@@ -134,15 +144,13 @@ struct efm32_leuart_s
 {
   const struct efm32_config_s *config;
   uint16_t  ien;       /* Interrupts enabled */
-  spinlock_t lock;     /* Spinlock */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static inline uint32_t efm32_serialin(struct efm32_leuart_s *priv,
-                                      int offset);
+static inline uint32_t efm32_serialin(struct efm32_leuart_s *priv, int offset);
 static inline void efm32_serialout(struct efm32_leuart_s *priv, int offset,
                                    uint32_t value);
 static inline void efm32_setuartint(struct efm32_leuart_s *priv);
@@ -153,9 +161,9 @@ static int  efm32_setup(struct uart_dev_s *dev);
 static void efm32_shutdown(struct uart_dev_s *dev);
 static int  efm32_attach(struct uart_dev_s *dev);
 static void efm32_detach(struct uart_dev_s *dev);
-static int  efm32_interrupt(int irq, void *context, void *arg);
+static int  efm32_interrupt(int irq, void *context, FAR void *arg);
 static int  efm32_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  efm32_receive(struct uart_dev_s *dev, unsigned int *status);
+static int  efm32_receive(struct uart_dev_s *dev, uint32_t *status);
 static void efm32_rxint(struct uart_dev_s *dev, bool enable);
 static bool efm32_rxavailable(struct uart_dev_s *dev);
 static void efm32_send(struct uart_dev_s *dev, int ch);
@@ -213,7 +221,6 @@ static const struct efm32_config_s g_leuart0config =
 static struct efm32_leuart_s g_leuart0priv =
 {
   .config    = &g_leuart0config,
-  .lock      = SP_UNLOCKED
 };
 
 static struct uart_dev_s g_leuart0port =
@@ -227,7 +234,7 @@ static struct uart_dev_s g_leuart0port =
   {
     .size    = CONFIG_LEUART0_TXBUFSIZE,
     .buffer  = g_leuart0txbuffer,
-  },
+   },
   .ops       = &g_leuart_ops,
   .priv      = &g_leuart0priv,
 };
@@ -249,7 +256,6 @@ static struct efm32_config_s g_leuart1config =
 static struct efm32_leuart_s g_leuart1priv =
 {
   .config    = &g_leuart1config,
-  .lock      = SP_UNLOCKED
 };
 
 static struct uart_dev_s g_leuart1port =
@@ -263,7 +269,7 @@ static struct uart_dev_s g_leuart1port =
   {
     .size    = CONFIG_LEUART1_TXBUFSIZE,
     .buffer  = g_leuart1txbuffer,
-  },
+   },
   .ops       = &g_leuart_ops,
   .priv      = &g_leuart1priv,
 };
@@ -277,8 +283,7 @@ static struct uart_dev_s g_leuart1port =
  * Name: efm32_serialin
  ****************************************************************************/
 
-static inline uint32_t efm32_serialin(struct efm32_leuart_s *priv,
-                                      int offset)
+static inline uint32_t efm32_serialin(struct efm32_leuart_s *priv, int offset)
 {
   return getreg32(priv->config->uartbase + offset);
 }
@@ -288,7 +293,7 @@ static inline uint32_t efm32_serialin(struct efm32_leuart_s *priv,
  ****************************************************************************/
 
 static inline void efm32_serialout(struct efm32_leuart_s *priv, int offset,
-                                   uint32_t value)
+                                uint32_t value)
 {
   putreg32(value, priv->config->uartbase + offset);
 }
@@ -306,28 +311,16 @@ static inline void efm32_setuartint(struct efm32_leuart_s *priv)
  * Name: efm32_restoreuartint
  ****************************************************************************/
 
-static void efm32_restoreuartint_nolock(struct efm32_leuart_s *priv,
-                                        uint32_t ien)
-{
-  /* Re-enable/re-disable interrupts corresponding to the state of
-   * bits in ien.
-   */
-
-  priv->ien = ien;
-  efm32_setuartint(priv);
-}
-
 static void efm32_restoreuartint(struct efm32_leuart_s *priv, uint32_t ien)
 {
   irqstate_t flags;
 
-  /* Re-enable/re-disable interrupts corresponding to the state of
-   * bits in ien.
-   */
+  /* Re-enable/re-disable interrupts corresponding to the state of bits in ien */
 
-  flags = spin_lock_irqsave(&priv->lock);
-  efm32_restoreuartint_nolock(priv, ien);
-  spin_unlock_irqrestore(&priv->lock, flags);
+  flags     = enter_critical_section();
+  priv->ien = ien;
+  efm32_setuartint(priv);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -338,14 +331,14 @@ static void efm32_disableuartint(struct efm32_leuart_s *priv, uint32_t *ien)
 {
   irqstate_t flags;
 
-  flags = spin_lock_irqsave(&priv->lock);
+  flags = enter_critical_section();
   if (ien)
     {
       *ien = priv->ien;
     }
 
-  efm32_restoreuartint_nolock(priv, 0);
-  spin_unlock_irqrestore(&priv->lock, flags);
+  efm32_restoreuartint(priv, 0);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -405,15 +398,14 @@ static void efm32_shutdown(struct uart_dev_s *dev)
  * Name: efm32_attach
  *
  * Description:
- *   Configure the UART to operation in interrupt driven mode.  This method
- *   is called when the serial port is opened.  Normally, this is just after
+ *   Configure the UART to operation in interrupt driven mode.  This method is
+ *   called when the serial port is opened.  Normally, this is just after the
  *   the setup() method is called, however, the serial console may operate in
  *   a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless
- *   the hardware supports multiple levels of interrupt enabling).  The RX
- *   and TX interrupts are not enabled until the txint() and rxint() methods
- *   are called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless the
+ *   hardware supports multiple levels of interrupt enabling).  The RX and TX
+ *   interrupts are not enabled until the txint() and rxint() methods are called.
  *
  ****************************************************************************/
 
@@ -440,9 +432,9 @@ static int efm32_attach(struct uart_dev_s *dev)
  * Name: efm32_detach
  *
  * Description:
- *   Detach UART interrupts.  This method is called when the serial port
- *   is closed normally just before the shutdown method is called.  The
- *   exception is the serial console which is never shutdown.
+ *   Detach UART interrupts.  This method is called when the serial port is
+ *   closed normally just before the shutdown method is called.  The exception
+ *   is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -469,7 +461,7 @@ static void efm32_detach(struct uart_dev_s *dev)
  *
  ****************************************************************************/
 
-static int efm32_interrupt(int irq, void *context, void *arg)
+static int efm32_interrupt(int irq, void *context, FAR void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   struct efm32_leuart_s *priv;
@@ -550,6 +542,7 @@ static int efm32_ioctl(struct file *filep, int cmd, unsigned long arg)
   struct efm32_leuart_s *priv;
   int ret = OK;
 
+  DEBUGASSERT(filep, filep->f_inode);
   inode = filep->f_inode;
   dev   = inode->i_private;
 
@@ -582,7 +575,7 @@ static int efm32_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int efm32_receive(struct uart_dev_s *dev, unsigned int *status)
+static int efm32_receive(struct uart_dev_s *dev, uint32_t *status)
 {
   struct efm32_leuart_s *priv = (struct efm32_leuart_s *)dev->priv;
   uint32_t rxdatax;
@@ -620,11 +613,11 @@ static void efm32_rxint(struct uart_dev_s *dev, bool enable)
   struct efm32_leuart_s *priv = (struct efm32_leuart_s *)dev->priv;
   irqstate_t flags;
 
-  flags = spin_lock_irqsave(&priv->lock);
+  flags = enter_critical_section();
   if (enable)
     {
-      /* Receive an interrupt when there is anything in the Rx data register
-       * (or an Rx timeout occurs).
+      /* Receive an interrupt when their is anything in the Rx data register (or an Rx
+       * timeout occurs).
        */
 
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
@@ -638,14 +631,14 @@ static void efm32_rxint(struct uart_dev_s *dev, bool enable)
       efm32_setuartint(priv);
     }
 
-  spin_unlock_irqrestore(&priv->lock, flags);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
  * Name: efm32_rxavailable
  *
  * Description:
- *   Return true if the receive register is not empty.
+ *   Return true if the receive register is not empty
  *
  ****************************************************************************/
 
@@ -655,8 +648,7 @@ static bool efm32_rxavailable(struct uart_dev_s *dev)
 
   /* Return true if the receive data is available (RXDATAV). */
 
-  return (efm32_serialin(priv, EFM32_LEUART_STATUS_OFFSET) &
-          LEUART_STATUS_RXDATAV) != 0;
+  return (efm32_serialin(priv, EFM32_LEUART_STATUS_OFFSET) & LEUART_STATUS_RXDATAV) != 0;
 }
 
 /****************************************************************************
@@ -686,7 +678,7 @@ static void efm32_txint(struct uart_dev_s *dev, bool enable)
   struct efm32_leuart_s *priv = (struct efm32_leuart_s *)dev->priv;
   irqstate_t flags;
 
-  flags = spin_lock_irqsave(&priv->lock);
+  flags = enter_critical_section();
   if (enable)
     {
       /* Enable the TX interrupt */
@@ -710,7 +702,7 @@ static void efm32_txint(struct uart_dev_s *dev, bool enable)
       efm32_setuartint(priv);
     }
 
-  spin_unlock_irqrestore(&priv->lock, flags);
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -730,8 +722,7 @@ static bool efm32_txready(struct uart_dev_s *dev)
    * when it is full.
    */
 
-  return (efm32_serialin(priv, EFM32_LEUART_STATUS_OFFSET) &
-          LEUART_STATUS_TXBL) != 0;
+  return (efm32_serialin(priv, EFM32_LEUART_STATUS_OFFSET) & LEUART_STATUS_TXBL) != 0;
 }
 
 /****************************************************************************
@@ -750,8 +741,7 @@ static bool efm32_txempty(struct uart_dev_s *dev)
    * data is available in the transmit buffer.
    */
 
-  return (efm32_serialin(priv, EFM32_LEUART_STATUS_OFFSET) &
-          LEUART_STATUS_TXC) != 0;
+  return (efm32_serialin(priv, EFM32_LEUART_STATUS_OFFSET) & LEUART_STATUS_TXC) != 0;
 }
 
 /****************************************************************************
@@ -761,27 +751,29 @@ static bool efm32_txempty(struct uart_dev_s *dev)
 #ifdef USE_EARLYSERIALINIT
 
 /****************************************************************************
- * Name: arm_earlyserialinit
+ * Name: up_earlyserialinit
  *
  * Description:
  *   Performs the low level UART initialization early in debug so that the
- *   serial console will be available during boot up.  This must be called
- *   before arm_serialinit.  NOTE:  This function depends on GPIO pin
- *   configuration performed in efm32_consoleinit() and main clock
- *   initialization performed in efm32_clkinitialize().
+ *   serial console will be available during bootup.  This must be called
+ *   before up_serialinit.  NOTE:  This function depends on GPIO pin
+ *   configuration performed in efm32_consoleinit() and main clock iniialization
+ *   performed in efm32_clkinitialize().
  *
  ****************************************************************************/
 
-void arm_earlyserialinit(void)
+void up_earlyserialinit(void)
 {
-  /* Disable interrupts from all UARTS. */
+  /* Disable interrupts from all UARTS.  The console is enabled in
+   * pic32mx_consoleinit()
+   */
 
   efm32_restoreuartint(TTYLE0_DEV.priv, 0);
 #ifdef TTYLE1_DEV
   efm32_restoreuartint(TTYLE1_DEV.priv, 0);
 #endif
 
-  /* Configuration whichever one is the console. */
+  /* Configuration whichever one is the console */
 
 #ifdef CONSOLE_DEV
   CONSOLE_DEV.isconsole = true;
@@ -791,15 +783,15 @@ void arm_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: arm_serialinit
+ * Name: up_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes that
- *   arm_earlyserialinit was called previously.
+ *   up_earlyserialinit was called previously.
  *
  ****************************************************************************/
 
-void arm_serialinit(void)
+void up_serialinit(void)
 {
   /* Register the console */
 
@@ -824,14 +816,25 @@ void arm_serialinit(void)
  ****************************************************************************/
 
 #ifdef HAVE_LEUART_CONSOLE
-void up_putc(int ch)
+int up_putc(int ch)
 {
   struct efm32_leuart_s *priv = (struct efm32_leuart_s *)CONSOLE_DEV.priv;
   uint32_t ien;
 
   efm32_disableuartint(priv, &ien);
+
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      efm32_lowputc('\r');
+    }
+
   efm32_lowputc(ch);
   efm32_restoreuartint(priv, ien);
+  return ch;
 }
 #endif
 
@@ -846,9 +849,19 @@ void up_putc(int ch)
  ****************************************************************************/
 
 #ifdef HAVE_LEUART_CONSOLE
-void up_putc(int ch)
+int up_putc(int ch)
 {
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      efm32_lowputc('\r');
+    }
+
   efm32_lowputc(ch);
+  return ch;
 }
 #endif
 

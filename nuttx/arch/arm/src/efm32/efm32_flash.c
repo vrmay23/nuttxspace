@@ -1,10 +1,7 @@
 /****************************************************************************
  * arch/arm/src/efm32/efm32_flash.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2014 Silicon Laboratories, Inc.
- * SPDX-FileCopyrightText: 2015 Pierre-Noel Bouteville.
- * SPDX-FileContributor: Pierre-Noel Bouteville <pnb990@gmail.com>
+ *  Copyright 2014 Silicon Laboratories, Inc. http://www.silabs.com
  *
  * Permission is granted to anyone to use this software for any purpose,
  * including commercial applications, and to alter it and redistribute it
@@ -18,14 +15,17 @@
  *
  * DISCLAIMER OF WARRANTY/LIMITATION OF REMEDIES: Silicon Laboratories, Inc.
  * has no obligation to support this Software. Silicon Laboratories, Inc. is
- * providing the Software "AS IS", with no express or implied warranties of
- * any kind, including, but not limited to, any implied warranties of
- * merchantability or fitness for any particular purpose or warranties
- * against infringement of any proprietary rights of a third party.
+ * providing the Software "AS IS", with no express or implied warranties of any
+ * kind, including, but not limited to, any implied warranties of
+ * merchantability or fitness for any particular purpose or warranties against
+ * infringement of any proprietary rights of a third party.
  *
  * Silicon Laboratories, Inc. will not be liable for any consequential,
  * incidental, or special damages, or any other relief, or for any claim by
  * any third party, arising from your use of this Software.
+ *
+ *   Copyright (C) 2015 Pierre-Noel Bouteville. All rights reserved.
+ *   Author: Pierre-Noel Bouteville <pnb990@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -56,21 +56,20 @@
  *
  ****************************************************************************/
 
-/* Provides standard flash access functions, to be used by the flash mtd
- * driver. The interface is defined in the include/nuttx/progmem.h
+/* Provides standard flash access functions, to be used by the  flash mtd driver.
+ * The interface is defined in the include/nuttx/progmem.h
  *
  * Requirements during write/erase operations on FLASH:
  *  - HSI must be ON.
  *  - Low Power Modes are not permitted during write/erase
  */
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
-#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
@@ -78,7 +77,9 @@
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "hardware/efm32_msc.h"
 #include "hardware/efm32_devinfo.h"
 
@@ -88,11 +89,11 @@
 
 /* Only for the EFM32 family for now */
 
-#if defined(CONFIG_ARCH_CHIP_EFM32) && defined(CONFIG_EFM32_FLASHPROG)
+#if (defined(CONFIG_ARCH_CHIP_EFM32) && defined(CONFIG_EFM32_FLASHPROG))
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef CONFIG_ARCH_RAMFUNCS
 #   error "Flashing function should executed in ram"
@@ -114,12 +115,10 @@
 #   define EFM32_USERDATA_PAGESIZE (EFM32_USERDATA_SIZE/EFM32_USERDATA_NPAGES)
 #endif
 
-#define EFM32_FLASH_ERASEDVAL (0xffu)
-
 /* brief:
  *    The timeout used while waiting for the flash to become ready after
- *    a write. This number indicates the number of iterations to perform
- *    before issuing a timeout.
+ *    a write. This number indicates the number of iterations to perform before
+ *    issuing a timeout.
  * note:
  *    This timeout is set very large (in the order of 100x longer than
  *    necessary). This is to avoid any corner cases.
@@ -127,9 +126,9 @@
 
 #define MSC_PROGRAM_TIMEOUT    10000000ul
 
-/****************************************************************************
+/************************************************************************************
  * Private Functions
- ****************************************************************************/
+ ************************************************************************************/
 
 void efm32_flash_unlock(void)
 {
@@ -209,7 +208,6 @@ void efm32_flash_unlock(void)
  *   -EBUSY     - Busy timeout.
  *   -EINVAL    - Operation tried to access a non-flash area.
  *   -EACCES    - Operation tried to access a locked area of the flash.
- *
  ****************************************************************************/
 
 int __ramfunc__ msc_load_verify_address(uint32_t *address)
@@ -240,6 +238,7 @@ int __ramfunc__ msc_load_verify_address(uint32_t *address)
   status = getreg32(EFM32_MSC_STATUS);
   if (status & (MSC_STATUS_INVADDR | MSC_STATUS_LOCKED))
     {
+
       /* Check for invalid address */
 
       if (status & MSC_STATUS_INVADDR)
@@ -264,8 +263,8 @@ int __ramfunc__ msc_load_verify_address(uint32_t *address)
  * Description:
  *   Perform data phase of FLASH write cycle.
  *
- *   This function performs the data phase of a Flash write operation by
- *   loading the given number of 32-bit words to the WDATA register.
+ *   This function performs the data phase of a Flash write operation by loading
+ *   the given number of 32-bit words to the WDATA register.
  *
  * note:
  *   This function MUST be executed from RAM. Failure to execute this portion
@@ -295,14 +294,12 @@ int __ramfunc__ msc_load_write_data(uint32_t *data, uint32_t num_words,
 
 #if defined(_MSC_WRITECTRL_LPWRITE_MASK) && defined(_MSC_WRITECTRL_WDOUBLE_MASK)
 
-  /* If LPWRITE (Low Power Write) is NOT enabled,
-   * set WDOUBLE (Write Double word)
-   */
+  /* If LPWRITE (Low Power Write) is NOT enabled, set WDOUBLE (Write Double word) */
 
   if (!(getreg32(EFM32_MSC_WRITECTRL) & MSC_WRITECTRL_LPWRITE))
     {
-      /* If the number of words to be written are odd, we need to align by
-       * writing a single word first, before setting the WDOUBLE bit.
+      /* If the number of words to be written are odd, we need to align by writing
+       * a single word first, before setting the WDOUBLE bit.
        */
 
       if (num_words & 0x1)
@@ -325,22 +322,20 @@ int __ramfunc__ msc_load_write_data(uint32_t *data, uint32_t num_words,
 
           /* Clear double word option, in order to write one single word. */
 
-          bitband_set_peripheral(EFM32_MSC_WRITECTRL,
-                                 _MSC_WRITECTRL_WDOUBLE_SHIFT, 0);
+          bitband_set_peripheral(EFM32_MSC_WRITECTRL, _MSC_WRITECTRL_WDOUBLE_SHIFT, 0);
 
           /* Write first data word. */
 
           putreg32(*data++, EFM32_MSC_WDATA);
           putreg32(MSC_WRITECMD_WRITEONCE, EFM32_MSC_WRITECMD);
 
-          /* Wait for the operation to finish. It may be required to change
-           * the WDOUBLE config after the initial write. It should not be
-           * changed while BUSY.
+          /* Wait for the operation to finish. It may be required to change the
+           * WDOUBLE config after the initial write. It should not be changed
+           * while BUSY.
            */
 
           timeout = MSC_PROGRAM_TIMEOUT;
-          while ((getreg32(EFM32_MSC_STATUS) & MSC_STATUS_BUSY) &&
-                 (timeout != 0))
+          while ((getreg32(EFM32_MSC_STATUS) & MSC_STATUS_BUSY) && (timeout != 0))
             {
               timeout--;
             }
@@ -354,16 +349,15 @@ int __ramfunc__ msc_load_write_data(uint32_t *data, uint32_t num_words,
 
           /* Subtract this initial odd word for the write loop below */
 
-          num_words--;
+          num_words --;
           ret = 0;
         }
 
-      /* Now we can set the double word option in order to write two words
-       * per data phase.
+      /* Now we can set the double word option in order to write two words per
+       * data phase.
        */
 
-      bitband_set_peripheral(EFM32_MSC_WRITECTRL,
-                             _MSC_WRITECTRL_WDOUBLE_SHIFT, 1);
+      bitband_set_peripheral(EFM32_MSC_WRITECTRL, _MSC_WRITECTRL_WDOUBLE_SHIFT, 1);
       words_per_data_phase = 2;
     }
   else
@@ -380,6 +374,7 @@ int __ramfunc__ msc_load_write_data(uint32_t *data, uint32_t num_words,
 
       if (write_strategy_safe)
         {
+
           /* Requires a system core clock at 1MHz or higher */
 
           DEBUGASSERT(BOARD_SYSTEM_FREQUENCY >= 1000000);
@@ -391,8 +386,7 @@ int __ramfunc__ msc_load_write_data(uint32_t *data, uint32_t num_words,
               word_index++;
               if (words_per_data_phase == 2)
                 {
-                  while (!(getreg32(EFM32_MSC_STATUS) &
-                           MSC_STATUS_WDATAREADY))
+                  while (!(getreg32(EFM32_MSC_STATUS) & MSC_STATUS_WDATAREADY))
                     {
                     }
 
@@ -434,7 +428,7 @@ int __ramfunc__ msc_load_write_data(uint32_t *data, uint32_t num_words,
 
           /* Gecko does not have auto-increment of ADDR. */
 
-          DEBUGPANIC();
+          DEBUGASSERT(0);
 #else
 
           /* Requires a system core clock at 14MHz or higher */
@@ -445,6 +439,7 @@ int __ramfunc__ msc_load_write_data(uint32_t *data, uint32_t num_words,
 
           while (word_index < num_words)
             {
+
               /* Wait for the MSC to be ready for the next word. */
 
               while (!(getreg32(EFM32_MSC_STATUS) & MSC_STATUS_WDATAREADY))
@@ -453,13 +448,13 @@ int __ramfunc__ msc_load_write_data(uint32_t *data, uint32_t num_words,
 
                   /* If the write to MSC->WDATA below missed the 30us timeout
                    * and the following MSC_WRITECMD_WRITETRIG command arrived
-                   * while MSC_STATUS_BUSY is 1, then the
-                   * MSC_WRITECMD_WRITETRIG could be ignored by the MSC.
-                   * In this case, MSC_STATUS_WORDTIMEOUT is set to 1 and
-                   * MSC_STATUS_BUSY is 0. A new trigger is therefore needed
-                   * here to complete write of data in MSC->WDATA.
-                   * If WDATAREADY became high since entry into this loop,
-                   * exit and continue to the next WDATA write.
+                   * while MSC_STATUS_BUSY is 1, then the MSC_WRITECMD_WRITETRIG
+                   * could be ignored by the MSC. In this case,
+                   * MSC_STATUS_WORDTIMEOUT is set to 1 and MSC_STATUS_BUSY is
+                   * 0. A new trigger is therefore needed here to complete write
+                   * of data in MSC->WDATA. If WDATAREADY became high since
+                   * entry into this loop, exit and continue to the next WDATA
+                   * write.
                    */
 
                   regval = getreg32(EFM32_MSC_STATUS);
@@ -505,8 +500,7 @@ int __ramfunc__ msc_load_write_data(uint32_t *data, uint32_t num_words,
 
   /* Clear double word option, which should not be left on when returning. */
 
-  bitband_set_peripheral(EFM32_MSC_WRITECTRL,
-                         _MSC_WRITECTRL_WDOUBLE_SHIFT, 0);
+  bitband_set_peripheral(EFM32_MSC_WRITECTRL, _MSC_WRITECTRL_WDOUBLE_SHIFT, 0);
 
 #endif
 
@@ -517,8 +511,7 @@ void efm32_flash_lock(void)
 {
   /* Disable writing to the flash */
 
-  bitband_set_peripheral(EFM32_MSC_WRITECTRL,
-                         _MSC_WRITECTRL_WREN_SHIFT, 0);
+  bitband_set_peripheral(EFM32_MSC_WRITECTRL, _MSC_WRITECTRL_WREN_SHIFT, 0);
 
   /* Unlock the EFM32_MSC */
 
@@ -534,7 +527,7 @@ uint32_t efm32_get_flash_size(void)
   regval = (regval & _DEVINFO_MEMINFO_SIZE_FLASH_MASK) \
            >> _DEVINFO_MEMINFO_SIZE_FLASH_SHIFT;
 
-  return regval * 1024;
+  return regval*1024;
 }
 #endif
 
@@ -551,7 +544,7 @@ uint32_t efm32_get_flash_page_size(void)
       return 512;
     }
 
-  return 1 << (regval + 10);
+  return 1 << (regval+10);
 }
 #endif
 
@@ -559,13 +552,13 @@ uint32_t efm32_get_flash_page_size(void)
 #define EFM32_FLASH_NPAGES efm32_get_flash_page_nbr()
 uint32_t efm32_get_flash_page_nbr(void)
 {
-  return (EFM32_FLASH_SIZE / EFM32_FLASH_PAGESIZE);
+  return (EFM32_FLASH_SIZE/EFM32_FLASH_PAGESIZE);
 }
 #endif
 
-/****************************************************************************
+/************************************************************************************
  * Public Functions
- ****************************************************************************/
+ ************************************************************************************/
 
 size_t up_progmem_pagesize(size_t page)
 {
@@ -593,7 +586,7 @@ ssize_t up_progmem_getpage(size_t addr)
 {
 #if (EFM32_FLASH_BASE != 0)
   if ((addr >= (EFM32_FLASH_BASE)) && \
-       (addr <  (EFM32_FLASH_BASE + EFM32_FLASH_SIZE)))
+       (addr <  (EFM32_FLASH_BASE+EFM32_FLASH_SIZE)))
     {
       addr -= EFM32_FLASH_BASE;
 
@@ -608,7 +601,7 @@ ssize_t up_progmem_getpage(size_t addr)
 #endif
 
   if ((addr >= (EFM32_USERDATA_BASE)) && \
-       (addr <  (EFM32_USERDATA_BASE + EFM32_USERDATA_SIZE)))
+       (addr <  (EFM32_USERDATA_BASE+EFM32_USERDATA_SIZE)))
     {
       addr -= EFM32_USERDATA_BASE;
 
@@ -637,7 +630,7 @@ size_t up_progmem_getaddress(size_t page)
 
 size_t up_progmem_neraseblocks(void)
 {
-  return EFM32_FLASH_NPAGES + EFM32_USERDATA_NPAGES;
+  return EFM32_FLASH_NPAGES+EFM32_USERDATA_NPAGES;
 }
 
 bool up_progmem_isuniform(void)
@@ -652,7 +645,7 @@ ssize_t __ramfunc__ up_progmem_eraseblock(size_t block)
   uint32_t regval;
   irqstate_t flags;
 
-  if (block >= (EFM32_FLASH_NPAGES + EFM32_USERDATA_NPAGES))
+  if (block >= (EFM32_FLASH_NPAGES+EFM32_USERDATA_NPAGES))
     {
       return -EFAULT;
     }
@@ -663,8 +656,7 @@ ssize_t __ramfunc__ up_progmem_eraseblock(size_t block)
 
   /* enable writing to the flash */
 
-  bitband_set_peripheral(EFM32_MSC_WRITECTRL,
-                         _MSC_WRITECTRL_WREN_SHIFT, 1);
+  bitband_set_peripheral(EFM32_MSC_WRITECTRL, _MSC_WRITECTRL_WREN_SHIFT, 1);
 
   /* Load address */
 
@@ -696,8 +688,7 @@ ssize_t __ramfunc__ up_progmem_eraseblock(size_t block)
       /* Wait for the erase to complete */
 
       timeout = MSC_PROGRAM_TIMEOUT;
-      while ((getreg32(EFM32_MSC_STATUS) & MSC_STATUS_BUSY) &&
-             (timeout != 0))
+      while ((getreg32(EFM32_MSC_STATUS) & MSC_STATUS_BUSY) && (timeout != 0))
         {
           timeout--;
         }
@@ -710,8 +701,7 @@ ssize_t __ramfunc__ up_progmem_eraseblock(size_t block)
 
   /* Disable writing to the MSC */
 
-  bitband_set_peripheral(EFM32_MSC_WRITECTRL,
-                         _MSC_WRITECTRL_WREN_SHIFT, 0);
+  bitband_set_peripheral(EFM32_MSC_WRITECTRL, _MSC_WRITECTRL_WREN_SHIFT, 0);
 
   if (ret == 0)
     {
@@ -741,28 +731,27 @@ ssize_t up_progmem_ispageerased(size_t page)
   size_t count;
   size_t bwritten = 0;
 
-  if (page >= (EFM32_FLASH_NPAGES + EFM32_USERDATA_NPAGES))
+  if (page >= (EFM32_FLASH_NPAGES+EFM32_USERDATA_NPAGES))
     {
       return -EFAULT;
     }
 
   /* Verify */
 
-  for (addr = up_progmem_getaddress(page),
-       count = up_progmem_pagesize(page);
+  for (addr = up_progmem_getaddress(page), count = up_progmem_pagesize(page);
        count; count--, addr++)
     {
-      if (getreg8(addr) != EFM32_FLASH_ERASEDVAL)
+      if (getreg8(addr) != 0xff)
         {
           bwritten++;
         }
     }
 
   return bwritten;
+
 }
 
-ssize_t __ramfunc__ up_progmem_write(size_t addr,
-                                     const void *buf, size_t size)
+ssize_t __ramfunc__ up_progmem_write(size_t addr, const void *buf, size_t size)
 {
   int       ret = 0;
   int       word_count;
@@ -790,22 +779,18 @@ ssize_t __ramfunc__ up_progmem_write(size_t addr,
 
   /* enable writing to the flash */
 
-  bitband_set_peripheral(EFM32_MSC_WRITECTRL,
-                         _MSC_WRITECTRL_WREN_SHIFT, 1);
+  bitband_set_peripheral(EFM32_MSC_WRITECTRL, _MSC_WRITECTRL_WREN_SHIFT, 1);
 
   /* Convert bytes to words */
 
   num_words = num_bytes >> 2;
 
-  /* The following loop splits the data into chunks corresponding to flash
-   * pages. The address is loaded only once per page, because the hardware
-   * automatically increments the address internally for each data load
-   * inside a page.
+  /* The following loop splits the data into chunks corresponding to flash pages.
+   * The address is loaded only once per page, because the hardware automatically
+   * increments the address internally for each data load inside a page.
    */
 
-  for (word_count = 0, p_data = (uint32_t *)buf;
-       word_count < num_words;
-      )
+  for (word_count = 0, p_data = (uint32_t *)buf; word_count < num_words; )
     {
       int page_bytes;
       ssize_t page_idx;
@@ -813,7 +798,7 @@ ssize_t __ramfunc__ up_progmem_write(size_t addr,
 
       /* Compute the number of words to write to the current page. */
 
-      page_idx = up_progmem_getpage((size_t)address + (word_count << 2));
+      page_idx = up_progmem_getpage((size_t)address+(word_count << 2));
       if (page_idx < 0)
         {
           ret = -EINVAL;
@@ -828,7 +813,7 @@ ssize_t __ramfunc__ up_progmem_write(size_t addr,
         }
 
       page_words = (page_bytes - (((uint32_t) (address + word_count)) & \
-                   (page_bytes - 1))) / sizeof(uint32_t);
+                    (page_bytes-1))) / sizeof(uint32_t);
 
       if (page_words > num_words - word_count)
         {
@@ -837,8 +822,7 @@ ssize_t __ramfunc__ up_progmem_write(size_t addr,
 
       flags = enter_critical_section();
 
-      /* First we load address.
-       * The address is auto-incremented within a page.
+      /* First we load address. The address is auto-incremented within a page.
        * Therefore the address phase is only needed once for each page.
        */
 
@@ -870,8 +854,7 @@ ssize_t __ramfunc__ up_progmem_write(size_t addr,
 
   /* Turn off double word write cycle support. */
 
-  bitband_set_peripheral(EFM32_MSC_WRITECTRL,
-                         _MSC_WRITECTRL_WDOUBLE_SHIFT, 0);
+  bitband_set_peripheral(EFM32_MSC_WRITECTRL, _MSC_WRITECTRL_WDOUBLE_SHIFT, 0);
 
 #endif
 
@@ -881,11 +864,6 @@ ssize_t __ramfunc__ up_progmem_write(size_t addr,
     }
 
   return word_count;
-}
-
-uint8_t up_progmem_erasestate(void)
-{
-  return EFM32_FLASH_ERASEDVAL;
 }
 
 #endif /* defined(CONFIG_ARCH_CHIP_EFM32)  */

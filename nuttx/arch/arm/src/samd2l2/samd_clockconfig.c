@@ -1,36 +1,48 @@
 /****************************************************************************
  * arch/arm/src/samd2l2/samd_clockconfig.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2015, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
- *
- ****************************************************************************/
-
-/* References:
+ * References:
  *   1. "Atmel SAM D20J / SAM D20G / SAM D20E ARM-Based Microcontroller
- *      Datasheet", 42129J-SAM-12/2013
+ *      Datasheet", 42129J–SAM–12/2013
  *   2. "Atmel SAM D21E / SAM D21G / SAM D21J SMART ARM-Based Microcontroller
- *      Datasheet", Atmel-42181E-SAM-D21_Datasheet-02/2015
+ *      Datasheet", Atmel-42181E–SAM-D21_Datasheet–02/2015
  *   3. Atmel sample code for the SAMD20.  This code has an ASF license
  *      with is compatible with the NuttX BSD license, but includes the
  *      provision that this code not be used in non-Atmel products.  That
  *      sample code was used only as a reference so I believe that only the
  *      NuttX BSD license applies.
- */
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -42,7 +54,8 @@
 #include <stdbool.h>
 #include <assert.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "hardware/samd_pm.h"
 #include "hardware/samd_sysctrl.h"
 #include "hardware/samd_gclk.h"
@@ -68,7 +81,6 @@
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
 /* This structure describes the configuration of every enabled GCLK */
 
 #ifdef BOARD_GCLK_ENABLE
@@ -85,8 +97,7 @@ static const struct sam_gclkconfig_s g_gclkconfig[] =
     .output     = true,
 #endif
     .prescaler  = BOARD_GCLK0_PRESCALER,
-    .clksrc     = (uint8_t)(BOARD_GCLK0_CLOCK_SOURCE >>
-                            GCLK_GENCTRL_SRC_SHIFT),
+    .clksrc     = (uint8_t)(BOARD_GCLK0_CLOCK_SOURCE >> GCLK_GENCTRL_SRC_SHIFT),
   }
 
   /* GCLK generator 1 */
@@ -96,14 +107,13 @@ static const struct sam_gclkconfig_s g_gclkconfig[] =
   {
     .gclk       = 1,
 #ifdef BOARD_GCLK1_RUN_IN_STANDBY
-    .runstandby = true,
+    .runstandby = true;
 #endif
 #ifdef BOARD_GCLK1_OUTPUT_ENABLE
-    .output     = true,
+    .output     = true;
 #endif
     .prescaler  = BOARD_GCLK1_PRESCALER,
-    .clksrc     = (uint8_t)(BOARD_GCLK1_CLOCK_SOURCE >>
-                            GCLK_GENCTRL_SRC_SHIFT),
+    .clksrc     = (uint8_t)(BOARD_GCLK1_CLOCK_SOURCE >> GCLK_GENCTRL_SRC_SHIFT),
   }
 #endif
 
@@ -114,14 +124,13 @@ static const struct sam_gclkconfig_s g_gclkconfig[] =
   {
     .gclk       = 2,
 #ifdef BOARD_GCLK2_RUN_IN_STANDBY
-    .runstandby = true,
+    .runstandby = true;
 #endif
 #ifdef BOARD_GCLK2_OUTPUT_ENABLE
-    .output     = true,
+    .output     = true;
 #endif
     .prescaler  = BOARD_GCLK2_PRESCALER,
-    .clksrc     = (uint8_t)(BOARD_GCLK2_CLOCK_SOURCE >>
-                            GCLK_GENCTRL_SRC_SHIFT),
+    .clksrc     = (uint8_t)(BOARD_GCLK2_CLOCK_SOURCE >> GCLK_GENCTRL_SRC_SHIFT),
   }
 #endif
 
@@ -132,14 +141,13 @@ static const struct sam_gclkconfig_s g_gclkconfig[] =
   {
     .gclk       = 3,
 #ifdef BOARD_GCLK3_RUN_IN_STANDBY
-    .runstandby = true,
+    .runstandby = true;
 #endif
 #ifdef BOARD_GCLK3_OUTPUT_ENABLE
-    .output     = true,
+    .output     = true;
 #endif
     .prescaler  = BOARD_GCLK3_PRESCALER,
-    .clksrc     = (uint8_t)(BOARD_GCLK3_CLOCK_SOURCE >>
-                            GCLK_GENCTRL_SRC_SHIFT),
+    .clksrc     = (uint8_t)(BOARD_GCLK3_CLOCK_SOURCE >> GCLK_GENCTRL_SRC_SHIFT),
   }
 #endif
 
@@ -150,14 +158,13 @@ static const struct sam_gclkconfig_s g_gclkconfig[] =
   {
     .gclk       = 4,
 #ifdef BOARD_GCLK4_RUN_IN_STANDBY
-    .runstandby = true,
+    .runstandby = true;
 #endif
 #ifdef BOARD_GCLK4_OUTPUT_ENABLE
-    .output     = true,
+    .output     = true;
 #endif
     .prescaler  = BOARD_GCLK4_PRESCALER,
-    .clksrc     = (uint8_t)(BOARD_GCLK4_CLOCK_SOURCE >>
-                            GCLK_GENCTRL_SRC_SHIFT),
+    .clksrc     = (uint8_t)(BOARD_GCLK4_CLOCK_SOURCE >> GCLK_GENCTRL_SRC_SHIFT),
   }
 #endif
 
@@ -168,14 +175,13 @@ static const struct sam_gclkconfig_s g_gclkconfig[] =
   {
     .gclk       = 5,
 #ifdef BOARD_GCLK5_RUN_IN_STANDBY
-    .runstandby = true,
+    .runstandby = true;
 #endif
 #ifdef BOARD_GCLK5_OUTPUT_ENABLE
-    .output     = true,
+    .output     = true;
 #endif
     .prescaler  = BOARD_GCLK5_PRESCALER,
-    .clksrc     = (uint8_t)(BOARD_GCLK5_CLOCK_SOURCE >>
-                            GCLK_GENCTRL_SRC_SHIFT),
+    .clksrc     = (uint8_t)(BOARD_GCLK5_CLOCK_SOURCE >> GCLK_GENCTRL_SRC_SHIFT),
   }
 #endif
 
@@ -186,14 +192,13 @@ static const struct sam_gclkconfig_s g_gclkconfig[] =
   {
     .gclk       = 6,
 #ifdef BOARD_GCLK6_RUN_IN_STANDBY
-    .runstandby = true,
+    .runstandby = true;
 #endif
 #ifdef BOARD_GCLK6_OUTPUT_ENABLE
-    .output     = true,
+    .output     = true;
 #endif
     .prescaler  = BOARD_GCLK6_PRESCALER,
-    .clksrc     = (uint8_t)(BOARD_GCLK6_CLOCK_SOURCE >>
-                            GCLK_GENCTRL_SRC_SHIFT),
+    .clksrc     = (uint8_t)(BOARD_GCLK6_CLOCK_SOURCE >> GCLK_GENCTRL_SRC_SHIFT),
   }
 #endif
 
@@ -204,14 +209,13 @@ static const struct sam_gclkconfig_s g_gclkconfig[] =
   {
     .gclk       = 7,
 #ifdef BOARD_GCLK7_RUN_IN_STANDBY
-    .runstandby = true,
+    .runstandby = true;
 #endif
 #ifdef BOARD_GCLK7_OUTPUT_ENABLE
-    .output     = true,
+    .output     = true;
 #endif
     .prescaler  = BOARD_GCLK7_PRESCALER,
-    .clksrc     = (uint8_t)(BOARD_GCLK7_CLOCK_SOURCE >>
-                            GCLK_GENCTRL_SRC_SHIFT),
+    .clksrc     = (uint8_t)(BOARD_GCLK7_CLOCK_SOURCE >> GCLK_GENCTRL_SRC_SHIFT),
   }
 #endif
 
@@ -222,14 +226,13 @@ static const struct sam_gclkconfig_s g_gclkconfig[] =
   {
     .gclk       = 8,
 #ifdef BOARD_GCLK8_RUN_IN_STANDBY
-    .runstandby = true,
+    .runstandby = true;
 #endif
 #ifdef BOARD_GCLK8_OUTPUT_ENABLE
-    .output     = true,
+    .output     = true;
 #endif
     .prescaler  = BOARD_GCLK8_PRESCALER,
-    .clksrc     = (uint8_t)(BOARD_GCLK8_CLOCK_SOURCE >>
-                            GCLK_GENCTRL_SRC_SHIFT),
+    .clksrc     = (uint8_t)(BOARD_GCLK8_CLOCK_SOURCE >> GCLK_GENCTRL_SRC_SHIFT),
   }
 #endif
 };
@@ -449,8 +452,7 @@ static inline void sam_osc32k_config(void)
   /* Recover OSC32K calibration data from OTP "fuse" memory */
 
   regval  = getreg32(SYSCTRL_FUSES_OSC32KCAL_ADDR);
-  calib   = (regval & SYSCTRL_FUSES_OSC32KCAL_MASK) >>
-             SYSCTRL_FUSES_OSC32KCAL_SHIFT;
+  calib   = (regval & SYSCTRL_FUSES_OSC32KCAL_MASK) >> SYSCTRL_FUSES_OSC32KCAL_SHIFT;
 
   /* Configure OSC32K */
 
@@ -607,8 +609,7 @@ static inline void sam_dpll_config(void)
 
   if (BOARD_DPLL_REFCLK == SYSCTRL_DPLLCTRLB_REFCLK_GCLKDPLL)
     {
-      putreg16(GCLK_CLKCTRL_ID_DPLL | GCLK_CLKCTRL_GEN(2) |
-               GCLK_CLKCTRL_CLKEN, SAM_GCLK_CLKCTRL);
+      putreg16(GCLK_CLKCTRL_ID_DPLL | GCLK_CLKCTRL_GEN(2) | GCLK_CLKCTRL_CLKEN, SAM_GCLK_CLKCTRL);
     }
 
   putreg32(ratio, SAM_SYSCTRL_DPLLRATIO);
@@ -885,15 +886,15 @@ static inline void sam_config_gclks(void)
  *   Setup PM main clock dividers to generate CPU, AHB, and APB clocks.
  *   Depends on:
  *
- *  BOARD_CPU_DIVIDER    - See PM_CPUSEL_CPUDIV_* definitions
- *  BOARD_CPU_FREQUENCY  - In Hz
- *  BOARD_CPU_FAILDECT   - Boolean (defined / not defined)
- *  BOARD_APBA_DIVIDER   - See M_APBASEL_APBADIV_* definitions
- *  BOARD_APBA_FREQUENCY - In Hz
- *  BOARD_APBB_DIVIDER   - See M_APBBSEL_APBBDIV_* definitions
- *  BOARD_APBB_FREQUENCY - In Hz
- *  BOARD_APBC_DIVIDER   - See M_APBCSEL_APBCDIV_* definitions
- *  BOARD_APBC_FREQUENCY - In Hz
+ *  BOARD_CPU_DIVIDER   - See PM_CPUSEL_CPUDIV_* definitions
+ *  BOARD_CPU_FRQUENCY  - In Hz
+ *  BOARD_CPU_FAILDECT  - Boolean (defined / not defined)
+ *  BOARD_APBA_DIVIDER  - See M_APBASEL_APBADIV_* definitions
+ *  BOARD_APBA_FRQUENCY - In Hz
+ *  BOARD_APBB_DIVIDER  - See M_APBBSEL_APBBDIV_* definitions
+ *  BOARD_APBB_FRQUENCY - In Hz
+ *  BOARD_APBC_DIVIDER  - See M_APBCSEL_APBCDIV_* definitions
+ *  BOARD_APBC_FRQUENCY - In Hz
  *
  * Input Parameters:
  *   None
@@ -909,9 +910,7 @@ static inline void sam_dividers(void)
   uint8_t regval;
 #endif
 
-  /* Set the CPU divider using the divider value from the board.h header
-   * file
-   */
+  /* Set the CPU divider using the divider value from the board.h header file */
 
   putreg8(BOARD_CPU_DIVIDER, SAM_PM_CPUSEL);
 

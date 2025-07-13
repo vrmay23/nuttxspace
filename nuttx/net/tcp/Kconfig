@@ -14,7 +14,7 @@ config NET_TCP
 
 config NET_TCP_NO_STACK
 	bool "Disable TCP/IP Stack"
-	default NET_USRSOCK_TCP if NET_USRSOCK
+	default n
 	select NET_TCP
 	---help---
 		Build without TCP/IP stack even if TCP networking support enabled.
@@ -50,70 +50,21 @@ config NET_TCPURGDATA
 		compiled in. Urgent data (out-of-band data) is a rarely used TCP feature
 		that is very seldom would be required.
 
-config NET_TCP_CHECKSUMS
-	bool "TCP checksums"
-	default y
-	---help---
-		Enable/disable TCP checksum support.
-
-config NET_TCP_PREALLOC_CONNS
-	int "Preallocated TCP/IP connections"
+config NET_TCP_CONNS
+	int "Number of TCP/IP connections"
 	default 8
 	---help---
-		Number of TCP/IP connections (all tasks).
-
-		This number of connections will be pre-allocated during system boot.
-		If dynamic connections allocation is enabled, more connections may
-		be allocated at a later time, as the system needs them. Else this
-		will be the maximum number of connections available to the system
-		at all times.
-
-		Set to 0 to disable (and rely only on dynamic allocations).
-
-config NET_TCP_ALLOC_CONNS
-	int "Dynamic TCP/IP connections allocation"
-	default 0
-	---help---
-		Dynamic memory allocations for TCP/IP.
-
-		When set to 0 all dynamic allocations are disabled.
-
-		When set to 1 a new connection will be allocated every time,
-		and it will be free'd when no longer needed.
-
-		Setting this to 2 or more will allocate the connections in
-		batches (with batch size equal to this config). When a
-		connection is no longer needed, it will be returned to the
-		free connections pool, and it will never be deallocated!
-
-config NET_TCP_MAX_CONNS
-	int "Maximum number of TCP/IP connections"
-	default 0
-	depends on NET_TCP_ALLOC_CONNS > 0
-	---help---
-		If dynamic connections allocation is selected (NET_TCP_ALLOC_CONNS > 0)
-		this will limit the number of connections that can be allocated.
-
-		This is useful in case the system is under very heavy load (or
-		under attack), ensuring that the heap will not be exhausted.
+		Maximum number of TCP/IP connections (all tasks)
 
 config NET_TCP_NPOLLWAITERS
 	int "Number of TCP poll waiters"
-	default 2
+	default 1
 
 config NET_TCP_RTO
 	int "RTO of TCP/IP connections"
 	default 3
 	---help---
 		RTO of TCP/IP connections (all tasks)
-
-config NET_TCP_MAXRTX
-	int "Maximum retransmitted number of TCP/IP data packet"
-	default 8
-
-config NET_TCP_MAXSYNRTX
-	int "Maximum retransmitted number of TCP/IP SYN packet"
-	default 5
 
 config NET_TCP_WAIT_TIMEOUT
 	int "TIME_WAIT Length of TCP/IP connections"
@@ -127,102 +78,6 @@ config NET_MAX_LISTENPORTS
 	default 20
 	---help---
 		Maximum number of listening TCP/IP ports (all tasks).  Default: 20
-
-config NET_TCP_FAST_RETRANSMIT
-	bool "Enable the Fast Retransmit algorithm"
-	default y
-	---help---
-		RFC2001:
-		3.  Fast Retransmit
-			Modifications to the congestion avoidance algorithm were proposed in
-			1990 [3].  Before describing the change, realize that TCP may
-			generate an immediate acknowledgment (a duplicate ACK) when an out-
-			of-order segment is received (Section 4.2.2.21 of [1], with a note
-			that one reason for doing so was for the experimental fast-
-			retransmit algorithm).  This duplicate ACK should not be delayed.
-			The purpose of this duplicate ACK is to let the other end know that a
-			segment was received out of order, and to tell it what sequence
-			number is expected.
-
-			Since TCP does not know whether a duplicate ACK is caused by a lost
-			segment or just a reordering of segments, it waits for a small number
-			of duplicate ACKs to be received.  It is assumed that if there is
-			just a reordering of the segments, there will be only one or two
-			duplicate ACKs before the reordered segment is processed, which will
-			then generate a new ACK.  If three or more duplicate ACKs are
-			received in a row, it is a strong indication that a segment has been
-			lost.  TCP then performs a retransmission of what appears to be the
-			missing segment, without waiting for a retransmission timer to
-			expire.
-
-config NET_TCP_CC_NEWRENO
-	bool "Enable the NewReno Congestion Control algorithm"
-	default n
-	select NET_TCP_FAST_RETRANSMIT
-	---help---
-		RFC5681:
-			The TCP Congestion Control defines four congestion control algorithms,
-			slow start, congestion avoidance, fast retransmit, and fast recovery.
-
-config NET_TCP_ISN_RFC6528
-	bool "Use Initial Sequence Number Algorithm from RFC 6528"
-	default n
-	depends on CRYPTO
-	---help---
-		Initial Sequence Number Generation Algorithm from RFC 6528:
-			ISN = M + F(localip, localport, remoteip, remoteport, secretkey)
-
-			M is the 4 microsecond timer, and F() is a pseudorandom
-			function (PRF) which is MD5 (suggested by RFC 6528).
-
-config NET_TCP_WINDOW_SCALE
-	bool "Enable TCP/IP Window Scale Option"
-	default n
-	---help---
-		RFC1323:
-		2. TCP WINDOW SCALE OPTION
-			The window scale extension expands the definition of the TCP
-			window to 32 bits and then uses a scale factor to carry this 32-
-			bit value in the 16-bit Window field of the TCP header (SEG.WND in
-			RFC-793).
-
-if NET_TCP_WINDOW_SCALE
-
-config NET_TCP_WINDOW_SCALE_FACTOR
-	int "TCP/IP Window Scale Factor"
-	default 0
-	---help---
-		This is the default value for window scale factor.
-
-endif # NET_TCP_WINDOW_SCALE
-
-config NET_TCP_OUT_OF_ORDER
-	bool "Enable TCP/IP Out Of Order segments"
-	default n
-	---help---
-		TCP will queue segments that arrive out of order.
-
-if NET_TCP_OUT_OF_ORDER
-
-config NET_TCP_OUT_OF_ORDER_BUFSIZE
-	int "TCP/IP Out Of Order buffer size"
-	default 16384
-	---help---
-		This is the default value for out-of-order buffer size.
-
-endif # NET_TCP_OUT_OF_ORDER
-
-config NET_TCP_SELECTIVE_ACK
-	bool "Enable TCP/IP Selective Acknowledgment Options"
-	default n
-	select NET_TCP_OUT_OF_ORDER
-	---help---
-		Enable RFC2018(TCP Selective Acknowledgment Options):
-			Selective Acknowledgment (SACK) is a strategy which corrects this
-			behavior in the face of multiple dropped segments.  With selective
-			acknowledgments, the data receiver can inform the sender about all
-			segments that have arrived successfully, so the sender need
-			retransmit only the segments that have actually been lost.
 
 config NET_TCP_NOTIFIER
 	bool "Support TCP notifications"
@@ -259,20 +114,6 @@ config NET_TCP_NWRBCHAINS
 		choice for this value would be the same as the maximum number of
 		TCP connections.
 
-config NET_TCP_ALLOC_WRBCHAINS
-	int "Dynamic I/O buffer chain heads allocation"
-	default 1
-	---help---
-		When set to 0 all dynamic allocations are disabled
-
-		When set to 1 a new I/O buffer chain head will be allocated every
-		time, and it will be free'd when no longer needed.
-
-		Setting this to 2 or more will allocate the I/O buffer chain heads
-		in batches (with batch size equal to this config). When a I/O buffer
-		chain head is no longer needed, it will be returned to the free
-		I/O buffer chain heads pool, and it will never be deallocated!
-
 config NET_TCP_WRBUFFER_DEBUG
 	bool "Force write buffer debug"
 	default n
@@ -299,7 +140,7 @@ endif # NET_TCP_WRITE_BUFFERS
 
 config NET_TCPBACKLOG
 	bool "TCP/IP backlog support"
-	default y
+	default n
 	---help---
 		Incoming connections pend in a backlog until accept() is called.
 		The size of the backlog is selected when listen() is called.
@@ -314,6 +155,34 @@ config NET_TCPBACKLOG_CONNS
 
 endif # NET_TCPBACKLOG
 
+config NET_TCP_SPLIT
+	bool "Enable packet splitting"
+	default n
+	depends on !NET_TCP_WRITE_BUFFERS
+	---help---
+		send() will not return until the transfer has been ACKed by the
+		recipient.  But under RFC 1122, the host need not ACK each packet
+		immediately; the host may wait for 500 MS before ACKing.  This
+		combination can cause very slow performance with small transfers are
+		made to an RFC 1122 client.  However, the RFC 1122 must ACK at least
+		every second (odd) packet.
+
+		This option enables logic to trick the RFC 1122 host be exploiting
+		this last RFC 1122 requirement:  If an odd number of packets were to
+		be sent, then send() will split the last even packet to guarantee
+		that an even number of packets will be sent and the RFC 1122 host
+		will ACK the final packet immediately.
+
+if NET_TCP_SPLIT
+
+config NET_TCP_SPLIT_SIZE
+	int "Split size threshold"
+	default 40
+	---help---
+		Packets of this size or smaller than this will not be split.
+
+endif # NET_TCP_SPLIT
+
 config NET_SENDFILE
 	bool "Optimized network sendfile()"
 	default n
@@ -322,43 +191,4 @@ config NET_SENDFILE
 		files out a TCP connection.
 
 endif # NET_TCP && !NET_TCP_NO_STACK
-
-if NET_STATISTICS
-
-config NET_TCP_DEBUG_DROP_RECV
-	bool "TCP/IP debug feature to drop receive packet"
-	default n
-	---help---
-		This is the debug feature to drop TCP/IP received packet
-
-if NET_TCP_DEBUG_DROP_RECV
-
-config NET_TCP_DEBUG_DROP_RECV_PROBABILITY
-	int "TCP/IP drop probability of received packet"
-	range 50 10000
-	default 50
-	---help---
-		This is the drop probability of received packet, Default: 1/50
-
-endif # NET_TCP_DEBUG_DROP_RECV
-
-config NET_TCP_DEBUG_DROP_SEND
-	bool "TCP/IP debug feature to drop send packet"
-	default n
-	---help---
-		This is the debug feature to drop TCP/IP send packet
-
-if NET_TCP_DEBUG_DROP_SEND
-
-config NET_TCP_DEBUG_DROP_SEND_PROBABILITY
-	int "TCP/IP drop probability of send packet"
-	range 50 10000
-	default 50
-	---help---
-		This is the drop probability of send packet, Default: 1/50
-
-endif # NET_TCP_DEBUG_DROP_SEND
-
-endif # NET_STATISTICS
-
 endmenu # TCP/IP Networking

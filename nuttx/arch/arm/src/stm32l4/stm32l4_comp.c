@@ -1,9 +1,11 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_comp.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2016 Motorola Mobility LLC. All rights reserved.
+ *   Copyright (c) 2017 Gregory Nutt. All rights reserved.
+ *
+ * Based on COMP driver from the Motorola MDK:
+ *
+ *   Copyright (c) 2016 Motorola Mobility, LLC. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,7 +41,6 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <assert.h>
 #include <debug.h>
 #include <string.h>
 
@@ -49,7 +50,7 @@
 #include "stm32l4_comp.h"
 #include "stm32l4_exti.h"
 #include "stm32l4_gpio.h"
-#include "arm_internal.h"
+#include "up_arch.h"
 
 #include <errno.h>
 
@@ -66,22 +67,22 @@
 
 /* COMP Register access */
 
-static inline void modify_csr(const struct stm32l4_comp_config_s *cfg,
+static inline void modify_csr(FAR const struct stm32l4_comp_config_s *cfg,
                               uint32_t clearbits, uint32_t setbits);
 static inline uint32_t get_csr(const struct stm32l4_comp_config_s *cfg);
-static void stm32l4_compenable(struct stm32l4_comp_config_s *cfg,
+static void stm32l4_compenable(FAR struct stm32l4_comp_config_s *cfg,
                                bool en);
-static int stm32l4_compconfig(const struct comp_dev_s *dev);
+static int stm32l4_compconfig(FAR const struct comp_dev_s *dev);
 
 /* COMP Driver Methods */
 
-static void comp_shutdown(struct comp_dev_s *dev);
-static int comp_setup(struct comp_dev_s *dev);
-static int comp_read(struct comp_dev_s *dev);
-static int comp_ioctl(struct comp_dev_s *dev, int cmd,
+static void comp_shutdown(FAR struct comp_dev_s *dev);
+static int comp_setup(FAR struct comp_dev_s *dev);
+static int comp_read(FAR struct comp_dev_s *dev);
+static int comp_ioctl(FAR struct comp_dev_s *dev, int cmd,
                       unsigned long arg);
-static int comp_bind(struct comp_dev_s *dev,
-                     const struct comp_callback_s *callback);
+static int comp_bind(FAR struct comp_dev_s *dev,
+                     FAR const struct comp_callback_s *callback);
 
 /****************************************************************************
  * Private Data
@@ -148,7 +149,7 @@ static struct comp_dev_s g_comp2dev =
  * Name: modify_csr
  ****************************************************************************/
 
-static inline void modify_csr(const struct stm32l4_comp_config_s *cfg,
+static inline void modify_csr(FAR const struct stm32l4_comp_config_s *cfg,
                               uint32_t clearbits, uint32_t setbits)
 {
   modifyreg32(cfg->csr, clearbits, setbits);
@@ -178,7 +179,7 @@ static inline uint32_t get_csr(const struct stm32l4_comp_config_s *cfg)
  *
  ****************************************************************************/
 
-static int comp_setup(struct comp_dev_s *dev)
+static int comp_setup(FAR struct comp_dev_s *dev)
 {
   int ret;
 
@@ -210,9 +211,9 @@ static int comp_setup(struct comp_dev_s *dev)
  *
  ****************************************************************************/
 
-static void comp_shutdown(struct comp_dev_s *dev)
+static void comp_shutdown(FAR struct comp_dev_s *dev)
 {
-  struct stm32l4_comp_config_s *cfg;
+  FAR struct stm32l4_comp_config_s *cfg;
 
   cfg = dev->ad_priv;
   stm32l4_compenable(cfg, false);
@@ -233,9 +234,9 @@ static void comp_shutdown(struct comp_dev_s *dev)
  *
  ****************************************************************************/
 
-static int comp_read(struct comp_dev_s *dev)
+static int comp_read(FAR struct comp_dev_s *dev)
 {
-  struct stm32l4_comp_config_s *cfg;
+  FAR struct stm32l4_comp_config_s *cfg;
   uint32_t regval;
 
   cfg = dev->ad_priv;
@@ -260,7 +261,7 @@ static int comp_read(struct comp_dev_s *dev)
  *
  ****************************************************************************/
 
-static int comp_ioctl(struct comp_dev_s *dev, int cmd, unsigned long arg)
+static int comp_ioctl(FAR struct comp_dev_s *dev, int cmd, unsigned long arg)
 {
 #warning "Missing logic"
   return -ENOTTY;
@@ -280,11 +281,11 @@ static int comp_ioctl(struct comp_dev_s *dev, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int comp_bind(struct comp_dev_s *dev,
-                     const struct comp_callback_s *callback)
+static int comp_bind(FAR struct comp_dev_s *dev,
+                     FAR const struct comp_callback_s *callback)
 {
-  struct stm32l4_comp_config_s *priv =
-    (struct stm32l4_comp_config_s *)dev->ad_priv;
+  FAR struct stm32l4_comp_config_s *priv =
+    (FAR struct stm32l4_comp_config_s *)dev->ad_priv;
 
   DEBUGASSERT(priv != NULL);
   priv->interrupt.cb = callback;
@@ -307,8 +308,7 @@ static int comp_bind(struct comp_dev_s *dev,
  *
  ****************************************************************************/
 
-static void stm32l4_compenable(struct stm32l4_comp_config_s *cfg,
-                               bool en)
+static void stm32l4_compenable(FAR struct stm32l4_comp_config_s *cfg, bool en)
 {
   uint32_t clearbits = en ? 0 : COMP_CSR_EN;
   uint32_t setbits = en ? COMP_CSR_EN : 0;
@@ -316,9 +316,9 @@ static void stm32l4_compenable(struct stm32l4_comp_config_s *cfg,
   modify_csr(cfg, clearbits, setbits);
 }
 
-static int stm32l4_exti_comp_isr(int irq, void *context, void *arg)
+static int stm32l4_exti_comp_isr(int irq, void *context, FAR void *arg)
 {
-  struct comp_dev_s *dev = (struct comp_dev_s *)arg;
+  FAR struct comp_dev_s *dev = (FAR struct comp_dev_s *)arg;
   struct stm32l4_comp_config_s *cfg = dev->ad_priv;
 
   DEBUGASSERT(cfg->interrupt.cb &&
@@ -345,9 +345,9 @@ static int stm32l4_exti_comp_isr(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-static int stm32l4_compconfig(const struct comp_dev_s *dev)
+static int stm32l4_compconfig(FAR const struct comp_dev_s *dev)
 {
-  struct stm32l4_comp_config_s *cfg;
+  FAR struct stm32l4_comp_config_s *cfg;
   uint32_t regval = 0;
   uint32_t mask = 0;
   uint32_t clearbits;
@@ -578,11 +578,11 @@ static int stm32l4_compconfig(const struct comp_dev_s *dev)
  *
  ****************************************************************************/
 
-struct comp_dev_s *
+FAR struct comp_dev_s *
   stm32l4_compinitialize(int intf,
-                         const struct stm32l4_comp_config_s *cfg)
+                         FAR const struct stm32l4_comp_config_s *cfg)
 {
-  struct comp_dev_s *dev;
+  FAR struct comp_dev_s *dev;
 
   switch (intf)
     {

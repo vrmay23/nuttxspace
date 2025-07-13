@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/sensors/zerocross.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -41,7 +54,7 @@
 #include <nuttx/arch.h>
 #include <nuttx/signal.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/sensors/zerocross.h>
 
 #include <nuttx/irq.h>
@@ -49,7 +62,7 @@
 #ifdef CONFIG_SENSORS_ZEROCROSS
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
 /* This structure describes the state of the upper half driver */
@@ -57,7 +70,7 @@
 struct zc_upperhalf_s
 {
   FAR struct zc_lowerhalf_s *lower;    /* lower-half state */
-  mutex_t                    lock;     /* Supports mutual exclusion */
+  sem_t                      exclsem;  /* Supports mutual exclusion */
 
   /* The following is a singly linked list of open references to the
    * zero cross device.
@@ -66,9 +79,7 @@ struct zc_upperhalf_s
   FAR struct zc_open_s *zu_open;
 };
 
-/* This structure describes the state of one open zero cross driver
- * instance
- */
+/* This structure describes the state of one open zero cross driver instance */
 
 struct zc_open_s
 {
@@ -115,6 +126,10 @@ static const struct file_operations g_zcops =
   zc_write,  /* write */
   NULL,      /* seek */
   zc_ioctl,  /* ioctl */
+  NULL       /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , 0        /* unlink */
+#endif
 };
 
 volatile int sample = 0;
@@ -202,13 +217,14 @@ static int zc_open(FAR struct file *filep)
   FAR struct zc_open_s            *opriv;
   int ret;
 
+  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv = inode->i_private;
+  priv = (FAR struct zc_upperhalf_s *)inode->i_private;
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nxsem_wait(&priv->exclsem);
   if (ret < 0)
     {
       snerr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -217,12 +233,12 @@ static int zc_open(FAR struct file *filep)
 
   /* Allocate a new open structure */
 
-  opriv = kmm_zalloc(sizeof(struct zc_open_s));
+  opriv = (FAR struct zc_open_s *)kmm_zalloc(sizeof(struct zc_open_s));
   if (!opriv)
     {
       snerr("ERROR: Failed to allocate open structure\n");
       ret = -ENOMEM;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* Attach the open structure to the device */
@@ -235,8 +251,8 @@ static int zc_open(FAR struct file *filep)
   filep->f_priv = (FAR void *)opriv;
   ret = OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_sem:
+  nxsem_post(&priv->exclsem);
   return ret;
 }
 
@@ -259,11 +275,11 @@ static int zc_close(FAR struct file *filep)
   bool closing;
   int ret;
 
-  DEBUGASSERT(filep->f_priv);
+  DEBUGASSERT(filep && filep->f_priv && filep->f_inode);
   opriv = filep->f_priv;
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  priv  = (FAR struct zc_upperhalf_s *)inode->i_private;
 
   /* Handle an improbable race conditions with the following atomic test
    * and set.
@@ -289,7 +305,7 @@ static int zc_close(FAR struct file *filep)
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nxsem_wait(&priv->exclsem);
   if (ret < 0)
     {
       snerr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -307,7 +323,7 @@ static int zc_close(FAR struct file *filep)
     {
       snerr("ERROR: Failed to find open entry\n");
       ret = -ENOENT;
-      goto errout_with_lock;
+      goto errout_with_exclsem;
     }
 
   /* Remove the structure from the device */
@@ -334,8 +350,8 @@ static int zc_close(FAR struct file *filep)
   zerocross_enable(priv);
   ret = OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_exclsem:
+  nxsem_post(&priv->exclsem);
   return ret;
 }
 
@@ -343,7 +359,7 @@ errout_with_lock:
  * Name: zc_read
  *
  * Description:
- *   A dummy read method.  This is provided only to satisfy the VFS layer.
+ *   A dummy read method.  This is provided only to satsify the VFS layer.
  *
  ****************************************************************************/
 
@@ -359,7 +375,7 @@ static ssize_t zc_read(FAR struct file *filep, FAR char *buffer,
  * Name: zc_write
  *
  * Description:
- *   A dummy write method.  This is provided only to satisfy the VFS layer.
+ *   A dummy write method.  This is provided only to satsify the VFS layer.
  *
  ****************************************************************************/
 
@@ -387,15 +403,15 @@ static int zc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   int                        ret;
 
   sninfo("cmd: %d arg: %ld\n", cmd, arg);
-  DEBUGASSERT(filep->f_priv);
+  DEBUGASSERT(filep && filep->f_priv && filep->f_inode);
   opriv = filep->f_priv;
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv = inode->i_private;
+  priv = (FAR struct zc_upperhalf_s *)inode->i_private;
 
   /* Get exclusive access to the device structures */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nxsem_wait(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -425,7 +441,7 @@ static int zc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
               /* Save the notification events */
 
               opriv->do_event = *event;
-              opriv->do_pid   = nxsched_getpid();
+              opriv->do_pid   = getpid();
 
               /* Enable/disable interrupt handling */
 
@@ -443,7 +459,7 @@ static int zc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->exclsem);
   return ret;
 }
 
@@ -498,7 +514,7 @@ int zc_register(FAR const char *devname, FAR struct zc_lowerhalf_s *lower)
   /* Initialize the new zero cross driver instance */
 
   priv->lower = lower;
-  nxmutex_init(&priv->lock);
+  nxsem_init(&priv->exclsem, 0, 1);
 
   /* And register the zero cross driver */
 
@@ -506,7 +522,7 @@ int zc_register(FAR const char *devname, FAR struct zc_lowerhalf_s *lower)
   if (ret < 0)
     {
       snerr("ERROR: register_driver failed: %d\n", ret);
-      nxmutex_destroy(&priv->lock);
+      nxsem_destroy(&priv->exclsem);
       kmm_free(priv);
     }
 

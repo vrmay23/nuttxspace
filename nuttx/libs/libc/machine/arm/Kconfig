@@ -3,38 +3,26 @@
 # see the file kconfig-language.txt in the NuttX tools repository.
 #
 
-if ARCH_ARM7TDMI || ARCH_ARM920T || ARCH_ARM926EJS || \
-   ARCH_ARM1136J || ARCH_ARM1156T2 || ARCH_ARM1176JZ
-source "libs/libc/machine/arm/arm/Kconfig"
+if ARCH_ARM7TDMI || ARCH_ARM920T || ARCH_ARM926EJS
+source libs/libc/machine/arm/arm/Kconfig
 endif
 
-if ARCH_ARMV7A
-source "libs/libc/machine/arm/armv7-a/Kconfig"
+if ARCH_CORTEXA5 || ARCH_CORTEXA8 || ARCH_CORTEXA9
+source libs/libc/machine/arm/armv7-a/Kconfig
 endif
 
-if ARCH_ARMV7R
-source "libs/libc/machine/arm/armv7-r/Kconfig"
+if ARCH_CORTEXR4 || ARCH_CORTEXR5 || ARCH_CORTEXR7
+source libs/libc/machine/arm/armv7-r/Kconfig
 endif
 
-if ARCH_ARMV6M
-source "libs/libc/machine/arm/armv6-m/Kconfig"
+if ARCH_CORTEXM0
+source libs/libc/machine/arm/armv6-m/Kconfig
 endif
 
-if ARCH_ARMV7M
-source "libs/libc/machine/arm/armv7-m/Kconfig"
+if ARCH_CORTEXM3 || ARCH_CORTEXM4 || ARCH_CORTEXM7
+source libs/libc/machine/arm/armv7-m/Kconfig
 endif
 
-if ARCH_ARMV8M
-source "libs/libc/machine/arm/armv8-m/Kconfig"
+if ARCH_CORTEXM33
+source libs/libc/machine/arm/armv8/Kconfig
 endif
-
-if ARCH_ARMV8R
-source "libs/libc/machine/arm/armv8-r/Kconfig"
-endif
-
-config LIBC_ARCH_CRC32
-	bool "Enable optimized crc32 for ARM"
-	default n
-	depends on ARCH_HAVE_CRC32
-	---help---
-		Enable optimized arm neon specific crc32 library function

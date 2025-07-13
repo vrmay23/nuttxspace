@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/include/cxd56xx/audio.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -44,7 +57,7 @@
 #include <stdbool.h>
 
 /****************************************************************************
- * Pre-processor Prototypes
+ * Pre-processor Definitions
  ****************************************************************************/
 
 /* Mic channel max. */
@@ -234,14 +247,6 @@ enum cxd56_audio_dma_path_e
 
   CXD56_AUDIO_DMA_PATH_MIC_TO_MEM = 0,
 
-  /* I2S0 to memory */
-
-  CXD56_AUDIO_DMA_PATH_I2S0_TO_MEM,
-
-  /* I2S1 to memory */
-
-  CXD56_AUDIO_DMA_PATH_I2S1_TO_MEM,
-
   /* Memory to BUS I/F1 */
 
   CXD56_AUDIO_DMA_PATH_MEM_TO_BUSIF1,
@@ -304,19 +309,11 @@ enum cxd56_audio_dma_e
 
   CXD56_AUDIO_DMAC_MIC = 0,
 
-  /* I2S1 Input */
-
-  CXD56_AUDIO_DMAC_I2S0_UP,
-
-  /* I2S1 Output */
+  /* I2S_OUT */
 
   CXD56_AUDIO_DMAC_I2S0_DOWN,
 
-  /* I2S2 Input */
-
-  CXD56_AUDIO_DMAC_I2S1_UP,
-
-  /* I2S2 Output */
+  /* I2S2_OUT */
 
   CXD56_AUDIO_DMAC_I2S1_DOWN
 };
@@ -557,7 +554,7 @@ CXD56_AUDIO_ECODE cxd56_audio_poweroff_dnc(void);
  */
 
 CXD56_AUDIO_ECODE cxd56_audio_en_dnc(cxd56_audio_dnc_id_t id,
-                                     cxd56_audio_dnc_bin_t *bin);
+                                     FAR cxd56_audio_dnc_bin_t *bin);
 
 /* Disable DNC
  *
@@ -575,7 +572,7 @@ CXD56_AUDIO_ECODE cxd56_audio_dis_dnc(cxd56_audio_dnc_id_t id);
  * CXD56_AUDIO_ECODE return code
  */
 
-CXD56_AUDIO_ECODE cxd56_audio_en_deq(cxd56_audio_deq_coef_t *coef);
+CXD56_AUDIO_ECODE cxd56_audio_en_deq(FAR cxd56_audio_deq_coef_t *coef);
 
 /* Disable DEQ
  *
@@ -710,7 +707,7 @@ CXD56_AUDIO_ECODE cxd56_audio_stop_beep(void);
  * CXD56_AUDIO_ECODE return code
  */
 
-CXD56_AUDIO_ECODE cxd56_audio_set_micgain(cxd56_audio_mic_gain_t *gain);
+CXD56_AUDIO_ECODE cxd56_audio_set_micgain(FAR cxd56_audio_mic_gain_t *gain);
 
 /* Set DEQ table
  *
@@ -721,7 +718,7 @@ CXD56_AUDIO_ECODE cxd56_audio_set_micgain(cxd56_audio_mic_gain_t *gain);
  */
 
 CXD56_AUDIO_ECODE cxd56_audio_set_deq(bool en,
-                                      cxd56_audio_deq_coef_t *deq);
+                                      FAR cxd56_audio_deq_coef_t *deq);
 
 /* Get dma handle
  *
@@ -732,7 +729,7 @@ CXD56_AUDIO_ECODE cxd56_audio_set_deq(bool en,
  */
 
 CXD56_AUDIO_ECODE cxd56_audio_get_dmahandle(cxd56_audio_dma_path_t path,
-                                            cxd56_audio_dma_t *handle);
+                                            FAR cxd56_audio_dma_t *handle);
 
 /* Free dma handle
  *
@@ -741,7 +738,7 @@ CXD56_AUDIO_ECODE cxd56_audio_get_dmahandle(cxd56_audio_dma_path_t path,
  * CXD56_AUDIO_ECODE return code
  */
 
-CXD56_AUDIO_ECODE cxd56_audio_free_dmahandle(cxd56_audio_dma_t handle);
+CXD56_AUDIO_ECODE cxd56_audio_free_dmahandle(FAR cxd56_audio_dma_t handle);
 
 /* Set internal data path
  *
@@ -765,7 +762,7 @@ CXD56_AUDIO_ECODE cxd56_audio_set_datapath(cxd56_audio_signal_t sig,
 
 CXD56_AUDIO_ECODE cxd56_audio_init_dma(cxd56_audio_dma_t handle,
                                        cxd56_audio_samp_fmt_t fmt,
-                                       uint8_t *ch_num);
+                                       FAR uint8_t *ch_num);
 
 /* Initialize dma transfer function
  *
@@ -776,7 +773,7 @@ CXD56_AUDIO_ECODE cxd56_audio_init_dma(cxd56_audio_dma_t handle,
  */
 
 CXD56_AUDIO_ECODE cxd56_audio_set_dmacb(cxd56_audio_dma_t handle,
-                                        cxd56_audio_dma_cb_t cb);
+                                        FAR cxd56_audio_dma_cb_t cb);
 
 /* Enable dma interrupt
  *

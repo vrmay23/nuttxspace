@@ -1,8 +1,6 @@
 /****************************************************************************
  * fs/driver/fs_registermtddriver.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -33,7 +31,6 @@
 #include <nuttx/mtd/mtd.h>
 
 #include "inode/inode.h"
-#include "vfs/vfs.h"
 
 #if defined(CONFIG_MTD) && !defined(CONFIG_DISABLE_MOUNTPOINT)
 
@@ -50,7 +47,7 @@
  * Input Parameters:
  *   path - The path to the inode to create
  *   mtd  - The MTD driver structure
- *   mode - inode privileges
+ *   mode - inode privileges (not used)
  *   priv - Private, user data that will be associated with the inode.
  *
  * Returned Value:
@@ -76,8 +73,13 @@ int register_mtddriver(FAR const char *path, FAR struct mtd_dev_s *mtd,
    * valid data.
    */
 
-  inode_lock();
-  ret = inode_reserve(path, mode, &node);
+  ret = inode_semtake();
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = inode_reserve(path, &node);
   if (ret >= 0)
     {
       /* We have it, now populate it with block driver specific information.
@@ -87,15 +89,14 @@ int register_mtddriver(FAR const char *path, FAR struct mtd_dev_s *mtd,
       INODE_SET_MTD(node);
 
       node->u.i_mtd   = mtd;
-      node->i_private = priv;
-      inode_unlock();
-#ifdef CONFIG_FS_NOTIFY
-      notify_create(path);
+#ifdef CONFIG_FILE_MODE
+      node->i_mode    = mode;
 #endif
-      return OK;
+      node->i_private = priv;
+      ret             = OK;
     }
 
-  inode_unlock();
+  inode_semgive();
   return ret;
 }
 

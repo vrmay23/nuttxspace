@@ -1,22 +1,36 @@
 /****************************************************************************
  * boards/arm/str71x/olimex-strp711/src/str71_spi.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2010, 2012, 2016-2017 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -35,12 +49,14 @@
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 #include "str71x.h"
 
@@ -370,7 +386,7 @@ struct str71x_spidev_s
   bool             initialized; /* Initialize port only once! */
   uint32_t         spibase;     /* BSPIn base address */
   uint16_t         csbit;       /* BSPIn SS bit int GPIO0 */
-  mutex_t          lock;        /* Supports mutually exclusive access */
+  sem_t            exclsem;     /* Supports mutually exclusive access */
 };
 
 /****************************************************************************
@@ -379,29 +395,29 @@ struct str71x_spidev_s
 
 /* Helpers */
 
-static inline uint16_t spi_getreg(struct str71x_spidev_s *priv,
+static inline uint16_t spi_getreg(FAR struct str71x_spidev_s *priv,
                                   uint8_t offset);
-static inline void   spi_putreg(struct str71x_spidev_s *priv,
+static inline void   spi_putreg(FAR struct str71x_spidev_s *priv,
                                 uint8_t offset, uint16_t value);
-static inline void spi_drain(struct str71x_spidev_s *priv);
+static inline void spi_drain(FAR struct str71x_spidev_s *priv);
 
 /* SPI methods */
 
-static int    spi_lock(struct spi_dev_s *dev, bool lock);
-static void   spi_select(struct spi_dev_s *dev, uint32_t devid,
+static int    spi_lock(FAR struct spi_dev_s *dev, bool lock);
+static void   spi_select(FAR struct spi_dev_s *dev, uint32_t devid,
                          bool selected);
-static uint32_t spi_setfrequency(struct spi_dev_s *dev,
-                                 uint32_t frequency);
-static uint8_t  spi_status(struct spi_dev_s *dev, uint32_t devid);
+static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
+                         uint32_t frequency);
+static uint8_t  spi_status(FAR struct spi_dev_s *dev, uint32_t devid);
 #ifdef CONFIG_SPI_CMDDATA
-static int    spi_cmddata(struct spi_dev_s *dev, uint32_t devid,
+static int    spi_cmddata(FAR struct spi_dev_s *dev, uint32_t devid,
                           bool cmd);
 #endif
-static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd);
-static void   spi_sndblock(struct spi_dev_s *dev,
-                           const void *buffer, size_t buflen);
-static void   spi_recvblock(struct spi_dev_s *dev,
-                            void *buffer, size_t buflen);
+static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd);
+static void   spi_sndblock(FAR struct spi_dev_s *dev,
+                           FAR const void *buffer, size_t buflen);
+static void   spi_recvblock(FAR struct spi_dev_s *dev,
+                            FAR void *buffer, size_t buflen);
 
 /****************************************************************************
  * Private Data
@@ -431,7 +447,7 @@ static struct str71x_spidev_s g_spidev0 =
   },
   .spibase = STR71X_BSPI0_BASE,
   .csbit   = ENC_GPIO0_CS,
-  .lock = NXMUTEX_INITIALIZER
+  .exclsem = SEM_INITIALIZER(1)
 };
 #endif
 
@@ -444,7 +460,7 @@ static struct str71x_spidev_s g_spidev1 =
   },
   .spibase = STR71X_BSPI1_BASE,
   .csbit   = MMCSD_GPIO0_CS,
-  .lock = NXMUTEX_INITIALIZER
+  .exclsem = SEM_INITIALIZER(1)
 };
 #endif
 
@@ -471,7 +487,7 @@ static struct str71x_spidev_s g_spidev1 =
  *
  ****************************************************************************/
 
-static inline uint16_t spi_getreg(struct str71x_spidev_s *priv,
+static inline uint16_t spi_getreg(FAR struct str71x_spidev_s *priv,
                                   uint8_t offset)
 {
   return getreg16(priv->spibase + offset);
@@ -493,7 +509,7 @@ static inline uint16_t spi_getreg(struct str71x_spidev_s *priv,
  *
  ****************************************************************************/
 
-static inline void spi_putreg(struct str71x_spidev_s *priv,
+static inline void spi_putreg(FAR struct str71x_spidev_s *priv,
                               uint8_t offset, uint16_t value)
 {
   putreg16(value, priv->spibase + offset);
@@ -513,7 +529,7 @@ static inline void spi_putreg(struct str71x_spidev_s *priv,
  *
  ****************************************************************************/
 
-static inline void spi_drain(struct str71x_spidev_s *priv)
+static inline void spi_drain(FAR struct str71x_spidev_s *priv)
 {
 #if CONFIG_STR714X_BSPI0_TXFIFO_DEPTH > 1
   /* Wait while the TX FIFO is full */
@@ -575,18 +591,18 @@ static inline void spi_drain(struct str71x_spidev_s *priv)
  *
  ****************************************************************************/
 
-static int spi_lock(struct spi_dev_s *dev, bool lock)
+static int spi_lock(FAR struct spi_dev_s *dev, bool lock)
 {
-  struct str71x_spidev_s *priv = (struct str71x_spidev_s *)dev;
+  FAR struct str71x_spidev_s *priv = (FAR struct str71x_spidev_s *)dev;
   int ret;
 
   if (lock)
     {
-      ret = nxmutex_lock(&priv->lock);
+      ret = nxsem_wait_uninterruptible(&priv->exclsem);
     }
   else
     {
-      ret = nxmutex_unlock(&priv->lock);
+      ret = nxsem_post(&priv->exclsem);
     }
 
   return ret;
@@ -610,10 +626,10 @@ static int spi_lock(struct spi_dev_s *dev, bool lock)
  *
  ****************************************************************************/
 
-static void spi_select(struct spi_dev_s *dev, uint32_t devid,
+static void spi_select(FAR struct spi_dev_s *dev, uint32_t devid,
                        bool selected)
 {
-  struct str71x_spidev_s *priv = (struct str71x_spidev_s *)dev;
+  FAR struct str71x_spidev_s *priv = (FAR struct str71x_spidev_s *)dev;
   uint16_t reg16;
 
   DEBUGASSERT(priv && priv->spibase);
@@ -654,10 +670,10 @@ static void spi_select(struct spi_dev_s *dev, uint32_t devid,
  *
  ****************************************************************************/
 
-static uint32_t spi_setfrequency(struct spi_dev_s *dev,
+static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
                                  uint32_t frequency)
 {
-  struct str71x_spidev_s *priv = (struct str71x_spidev_s *)dev;
+  FAR struct str71x_spidev_s *priv = (FAR struct str71x_spidev_s *)dev;
   uint32_t divisor;
   uint32_t cr1;
 
@@ -717,7 +733,7 @@ static uint32_t spi_setfrequency(struct spi_dev_s *dev,
  *
  ****************************************************************************/
 
-static uint8_t spi_status(struct spi_dev_s *dev, uint32_t devid)
+static uint8_t spi_status(FAR struct spi_dev_s *dev, uint32_t devid)
 {
   uint8_t ret = 0;
   uint16_t reg16 = getreg16(STR71X_GPIO1_PD);
@@ -760,7 +776,7 @@ static uint8_t spi_status(struct spi_dev_s *dev, uint32_t devid)
  ****************************************************************************/
 
 #ifdef CONFIG_SPI_CMDDATA
-static int spi_cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd)
+static int spi_cmddata(FAR struct spi_dev_s *dev, uint32_t devid, bool cmd)
 {
 #  error "spi_cmddata not implemented"
   return -ENOSYS;
@@ -783,9 +799,9 @@ static int spi_cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd)
  *
  ****************************************************************************/
 
-static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd)
+static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd)
 {
-  struct str71x_spidev_s *priv = (struct str71x_spidev_s *)dev;
+  FAR struct str71x_spidev_s *priv = (FAR struct str71x_spidev_s *)dev;
 
   DEBUGASSERT(priv && priv->spibase);
 
@@ -838,11 +854,11 @@ static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd)
  *
  ****************************************************************************/
 
-static void spi_sndblock(struct spi_dev_s *dev,
-                         const void *buffer, size_t buflen)
+static void spi_sndblock(FAR struct spi_dev_s *dev,
+                         FAR const void *buffer, size_t buflen)
 {
-  struct str71x_spidev_s *priv = (struct str71x_spidev_s *)dev;
-  const uint8_t *ptr = (const uint8_t *)buffer;
+  FAR struct str71x_spidev_s *priv = (FAR struct str71x_spidev_s *)dev;
+  FAR const uint8_t *ptr = (FAR const uint8_t *)buffer;
   uint16_t csr2;
 
   DEBUGASSERT(priv && priv->spibase);
@@ -914,11 +930,11 @@ static void spi_sndblock(struct spi_dev_s *dev,
  *
  ****************************************************************************/
 
-static void spi_recvblock(struct spi_dev_s *dev, void *buffer,
+static void spi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
                           size_t buflen)
 {
-  struct str71x_spidev_s *priv = (struct str71x_spidev_s *)dev;
-  uint8_t *ptr = (uint8_t *)buffer;
+  FAR struct str71x_spidev_s *priv = (FAR struct str71x_spidev_s *)dev;
+  FAR uint8_t *ptr = (FAR uint8_t *)buffer;
   uint32_t fifobytes = 0;
 
   DEBUGASSERT(priv && priv->spibase);
@@ -973,9 +989,9 @@ static void spi_recvblock(struct spi_dev_s *dev, void *buffer,
  *
  ****************************************************************************/
 
-struct spi_dev_s *str71_spibus_initialize(int port)
+FAR struct spi_dev_s *str71_spibus_initialize(int port)
 {
-  struct spi_dev_s *ret;
+  FAR struct spi_dev_s *ret;
 #if defined(CONFIG_STR71X_BSPI0) || defined(CONFIG_STR71X_BSPI1)
   uint16_t reg16;
 #endif

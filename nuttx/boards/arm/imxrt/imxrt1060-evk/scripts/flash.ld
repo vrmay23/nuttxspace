@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/imxrt/imxrt1060-evk/scripts/flash.ld
- *
- * SPDX-License-Identifier: Apache-2.0
+ * boards/arm/imxrt/imxrt1060-evk/scripts/flash-ocram.ld
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -77,8 +75,7 @@ SECTIONS
     .init_section :
     {
         _sinit = ABSOLUTE(.);
-        KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*)))
-        KEEP(*(.init_array EXCLUDE_FILE(*crtbegin.o *crtbegin?.o *crtend.o *crtend?.o) .ctors))
+        *(.init_array .init_array.*)
         _einit = ABSOLUTE(.);
     } > flash
 

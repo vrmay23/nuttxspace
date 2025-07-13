@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/graphics/pdcurs34/nuttx/pdcdisp.c
+ * apps/graphics/nuttx/pdcdisp.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,9 +38,7 @@
  ****************************************************************************/
 
 #include <sys/ioctl.h>
-#include <assert.h>
 #include <errno.h>
-#include <unistd.h>
 
 #ifdef CONFIG_SYSTEM_TERMCURSES
 #include <system/termcurses.h>
@@ -59,7 +70,7 @@
 
 #ifdef CONFIG_PDCURSES_CHTYPE_LONG
 
-#  define A(x) ((chtype)x | A_ALTCHARSET)
+# define A(x) ((chtype)x | A_ALTCHARSET)
 
 chtype acs_map[128] =
 {
@@ -497,26 +508,26 @@ static inline void  PDC_copy_glyph(FAR struct pdc_fbstate_s *fbstate,
  *
  ****************************************************************************/
 
-#ifdef CONFIG_FB_UPDATE
+#ifdef CONFIG_LCD_UPDATE
 static void PDC_update(FAR struct pdc_fbstate_s *fbstate, int row, int col,
                        int nchars)
 {
-  struct fb_area_s area;
+  struct nxgl_rect_s rect;
   int ret;
 
   if (nchars > 0)
     {
       /* Setup the bounding rectangle */
 
-      area.x = PDC_pixel_x(fbstate, col);
-      area.y = PDC_pixel_y(fbstate, row);
-      area.w = nchars * fbstate->fwidth;
-      area.h = fbstate->fheight;
+      rect.pt1.x = PDC_pixel_x(fbstate, col);
+      rect.pt1.y = PDC_pixel_y(fbstate, row);
+      rect.pt2.x = rect.pt1.x + nchars * fbstate->fwidth - 1;
+      rect.pt2.y = rect.pt1.y + fbstate->fheight - 1;
 
       /* Then perform the update via IOCTL */
 
       ret = ioctl(fbstate->fbfd, FBIO_UPDATE,
-                  (unsigned long)((uintptr_t)&area));
+                  (unsigned long)((uintptr_t)&rect));
       if (ret < 0)
         {
           PDC_LOG(("ERROR:  ioctl(FBIO_UPDATE) failed: %d\n", errno));
@@ -558,20 +569,20 @@ static void PDC_putc(FAR struct pdc_fbstate_s *fbstate, int row, int col,
       return;
     }
 
-  /* Get the foreground and background colors of the character */
+ /* Get the foreground and background colors of the character */
 
-  PDC_pair_content(PAIR_NUMBER(ch), &fg, &bg);
+ PDC_pair_content(PAIR_NUMBER(ch), &fg, &bg);
 
-  /* Handle the A_REVERSE attribute. */
+ /* Handle the A_REVERSE attribute. */
 
-  if ((ch & A_REVERSE) != 0)
-    {
-      /* Swap the foreground and background colors if reversed */
+ if ((ch & A_REVERSE) != 0)
+   {
+     /* Swap the foreground and background colors if reversed */
 
-      short tmp = fg;
-      fg = bg;
-      bg = tmp;
-    }
+     short tmp = fg;
+     fg = bg;
+     bg = tmp;
+   }
 
 #ifdef CONFIG_PDCURSES_CHTYPE_LONG
   /* Translate characters 0-127 via acs_map[], if they're flagged with
@@ -657,9 +668,9 @@ static void PDC_putc(FAR struct pdc_fbstate_s *fbstate, int row, int col,
  ****************************************************************************/
 
 #ifdef CONFIG_SYSTEM_TERMCURSES
-static void PDC_gotoyx_term(FAR SCREEN *s, int row, int col)
+static void PDC_gotoyx_term(FAR SCREEN *sp, int row, int col)
 {
-  FAR struct pdc_termscreen_s *termscreen = (FAR struct pdc_termscreen_s *)s;
+  FAR struct pdc_termscreen_s *termscreen = (FAR struct pdc_termscreen_s *)sp;
   FAR struct pdc_termstate_s *termstate;
 
   termstate = &termscreen->termstate;
@@ -730,16 +741,16 @@ static void PDC_set_char_attrib_term(FAR struct pdc_termscreen_s *termscreen,
 
   PDC_pair_content(PAIR_NUMBER(ch), &fg, &bg);
 
-  /* Handle the A_REVERSE attribute. */
+ /* Handle the A_REVERSE attribute. */
 
-  if ((ch & A_REVERSE) != 0)
-    {
-      /* Swap the foreground and background colors if reversed */
+ if ((ch & A_REVERSE) != 0)
+   {
+     /* Swap the foreground and background colors if reversed */
 
-      short tmp = fg;
-      fg = bg;
-      bg = tmp;
-    }
+     short tmp = fg;
+     fg = bg;
+     bg = tmp;
+   }
 
   /* Set the color */
 
@@ -798,6 +809,7 @@ static void PDC_set_char_attrib_term(FAR struct pdc_termscreen_s *termscreen,
       termstate->bg_green = termstate->rgbcolor[bg].green;
       termstate->bg_blue  = termstate->rgbcolor[bg].blue;
     }
+
 }
 #endif   /* CONFIG_SYSTEM_TERMCURSES */
 
@@ -807,17 +819,17 @@ static void PDC_set_char_attrib_term(FAR struct pdc_termscreen_s *termscreen,
  * Description:
  *   The core output routine.  It takes len chtype entities from srcp (a
  *   pointer into curscr) and renders them to the physical screen at line
- *   lineno, column x. It must also translate characters 0-127 via acs_map[],
+ *   lineno, column x.  It must also translate characters 0-127 via acs_map[],
  *   if they're flagged with A_ALTCHARSET in the attribute portion of the
  *   chtype.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_SYSTEM_TERMCURSES
-static void PDC_transform_line_term(FAR SCREEN *s, int lineno, int x,
+static void PDC_transform_line_term(FAR SCREEN *sp, int lineno, int x,
                                     int len, FAR const chtype *srcp)
 {
-  FAR struct pdc_termscreen_s *termscreen = (FAR struct pdc_termscreen_s *)s;
+  FAR struct pdc_termscreen_s *termscreen = (FAR struct pdc_termscreen_s *)sp;
   FAR struct pdc_termstate_s *termstate = &termscreen->termstate;
   int   c;
   int   i;
@@ -826,11 +838,11 @@ static void PDC_transform_line_term(FAR SCREEN *s, int lineno, int x,
 
   /* Move to the specified line / col */
 
-  PDC_gotoyx_term(s, lineno, x);
+  PDC_gotoyx_term(sp, lineno, x);
 
   /* Loop through all characters to be displayed */
 
-  for (c = 0; c < len; )
+  for (c = 0; c < len;)
     {
       /* Get the foreground and background colors of the character */
 
@@ -838,10 +850,10 @@ static void PDC_transform_line_term(FAR SCREEN *s, int lineno, int x,
 
       /* Write next character(s) */
 
-      ch = *srcp & 0x7f;
+      ch = *srcp & 0x7F;
       buffer[0] = ch;
 
-      for (i = 1; i < sizeof(buffer) && c + i < len; i++)
+      for (i = 1; i < sizeof(buffer) && c+i < len; i++)
         {
           /* Break if the attributes change */
 
@@ -850,7 +862,7 @@ static void PDC_transform_line_term(FAR SCREEN *s, int lineno, int x,
               break;
             }
 
-          ch = *(srcp + i) & 0x7f;
+          ch = *(srcp + i) & 0x7F;
           buffer[i] = ch;
         }
 
@@ -938,7 +950,7 @@ void PDC_gotoyx(int row, int col)
  * Description:
  *   The core output routine.  It takes len chtype entities from srcp (a
  *   pointer into curscr) and renders them to the physical screen at line
- *   lineno, column x. It must also translate characters 0-127 via acs_map[],
+ *   lineno, column x.  It must also translate characters 0-127 via acs_map[],
  *   if they're flagged with A_ALTCHARSET in the attribute portion of the
  *   chtype.
  *
@@ -1007,8 +1019,8 @@ void PDC_clear_screen(FAR struct pdc_fbstate_s *fbstate)
   int row;
   int col;
 
-#ifdef CONFIG_FB_UPDATE
-  struct fb_area_s area;
+#ifdef CONFIG_LCD_UPDATE
+  struct nxgl_rect_s rect;
   int ret;
 #endif
 
@@ -1045,27 +1057,26 @@ void PDC_clear_screen(FAR struct pdc_fbstate_s *fbstate)
        row < fbstate->yres;
        row++, line += fbstate->stride)
     {
-      for (col = 0, dest = (FAR pdc_color_t *)line;
+       for (col = 0, dest = (FAR pdc_color_t *)line;
             col < width;
             col++)
-        {
-          *dest++ = bgcolor;
-        }
+         {
+           *dest++ = bgcolor;
+         }
     }
 
-#ifdef CONFIG_FB_UPDATE
+#ifdef CONFIG_LCD_UPDATE
   /* Update the entire display */
-
   /* Setup the bounding rectangle */
 
-  area.x = 0;
-  area.y = 0;
-  area.w = fbstate->xres;
-  area.h = fbstate->yres;
+  rect.pt1.x = 0;
+  rect.pt1.y = 0;
+  rect.pt2.x = fbstate->xres - 1;
+  rect.pt2.y = fbstate->yres - 1;
 
   /* Then perform the update via IOCTL */
 
-  ret = ioctl(fbstate->fbfd, FBIO_UPDATE, (unsigned long)((uintptr_t)&area));
+  ret = ioctl(fbstate->fbfd, FBIO_UPDATE, (unsigned long)((uintptr_t)&rect));
   if (ret < 0)
     {
       PDC_LOG(("ERROR:  ioctl(FBIO_UPDATE) failed: %d\n", errno));

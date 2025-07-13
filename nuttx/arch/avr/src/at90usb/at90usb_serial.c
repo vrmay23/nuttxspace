@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/avr/src/at90usb/at90usb_serial.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011-2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -42,7 +55,8 @@
 
 #include <arch/board/board.h>
 
-#include "avr_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
 #include "at90usb.h"
 
 /****************************************************************************
@@ -127,7 +141,7 @@ static uart_dev_t g_usart1port =
   {
     .size   = CONFIG_USART1_TXBUFSIZE,
     .buffer = g_usart1txbuffer,
-  },
+   },
   .ops      = &g_uart1_ops,
 };
 
@@ -205,15 +219,14 @@ static void usart1_shutdown(struct uart_dev_s *dev)
  * Name: usart1_attach
  *
  * Description:
- *   Configure the USART to operation in interrupt driven mode.  This method
- *   is called when the serial port is opened.  Normally, this is just after
- *   the the setup() method is called, however, the serial console may
- *   operate in a non-interrupt driven mode during the boot phase.
+ *   Configure the USART to operation in interrupt driven mode.  This method is
+ *   called when the serial port is opened.  Normally, this is just after the
+ *   the setup() method is called, however, the serial console may operate in
+ *   a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless
- *   the hardware supports multiple levels of interrupt enabling).  The RX
- *   and TX interrupts are not enabled until the txint() and rxint() methods
- *   are called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless the
+ *   hardware supports multiple levels of interrupt enabling).  The RX and TX
+ *   interrupts are not enabled until the txint() and rxint() methods are called.
  *
  ****************************************************************************/
 
@@ -226,16 +239,14 @@ static int usart1_attach(struct uart_dev_s *dev)
    * TX:  USART Transmit Complete.  Set when the entire frame in the Transmit
    *      Shift Register has been shifted out and there are no new data
    *      currently present in the transmit buffer.
-   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is
-   *      ready to receive new data: The buffer is empty, and therefore ready
-   *      to be written.
+   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is ready
+   *      to receive new data: The buffer is empty, and therefore ready to be
+   *      written.
    */
 
   irq_attach(AT90USB_IRQ_U1RX, usart1_rxinterrupt, NULL);
   irq_attach(AT90USB_IRQ_U1DRE, usart1_txinterrupt, NULL);
-
-  /* irq_attach(AT90USB_IRQ_U1TX, usart1_txinterrupt, NULL); */
-
+//(void)irq_attach(AT90USB_IRQ_U1TX, usart1_txinterrupt, NULL);
   return OK;
 }
 
@@ -244,8 +255,8 @@ static int usart1_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach USART interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The
- *   exception is the serial console which is never shutdown.
+ *   closed normally just before the shutdown method is called.  The exception
+ *   is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -259,8 +270,7 @@ static void usart1_detach(struct uart_dev_s *dev)
 
   irq_detach(AT90USB_IRQ_U1RX);
   irq_detach(AT90USB_IRQ_U1DRE);
-
-  /* irq_detach(AT90USB_IRQ_U1TX); */
+//(void)irq_detach(AT90USB_IRQ_U1TX);
 }
 
 /****************************************************************************
@@ -268,7 +278,7 @@ static void usart1_detach(struct uart_dev_s *dev)
  *
  * Description:
  *   This is the USART RX interrupt handler.  It will be invoked when an
- *   RX interrupt received.  It will call uart_recvchars to perform the RX
+ *   RX interrupt received.  It will call uart_receivechar to perform the RX
  *   data transfers.
  *
  ****************************************************************************/
@@ -358,9 +368,7 @@ static int usart1_ioctl(struct file *filep, int cmd, unsigned long arg)
 
 static int usart1_receive(struct uart_dev_s *dev, FAR unsigned int *status)
 {
-  /* Return status information
-   * (error bits will be cleared after reading UDR1)
-   */
+  /* Return status information (error bits will be cleared after reading UDR1) */
 
   if (status)
     {
@@ -443,9 +451,9 @@ static void usart1_txint(struct uart_dev_s *dev, bool enable)
    * TX:  USART Transmit Complete.  Set when the entire frame in the Transmit
    *      Shift Register has been shifted out and there are no new data
    *      currently present in the transmit buffer.
-   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is
-   *      ready to receive new data: The buffer is empty, and therefore ready
-   *      to be written.
+   * DRE: USART Data Register Empty.  Indicates if the transmit buffer is ready
+   *      to receive new data: The buffer is empty, and therefore ready to be
+   *      written.
    */
 
   flags = enter_critical_section();
@@ -455,8 +463,7 @@ static void usart1_txint(struct uart_dev_s *dev, bool enable)
 
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
       UCSR1B |= (1 << UDRIE1);
-
-      /* UCSR1B |= (1 << TXCIE1); */
+//    UCSR1B |= (1 << TXCIE1);
 
       /* Fake a TX interrupt here by just calling uart_xmitchars() with
        * interrupts disabled (note this may recurse).
@@ -509,16 +516,16 @@ static bool usart1_txempty(struct uart_dev_s *dev)
 #ifdef USE_EARLYSERIALINIT
 
 /****************************************************************************
- * Name: avr_earlyserialinit
+ * Name: up_earlyserialinit
  *
  * Description:
  *   Performs the low level USART initialization early in debug so that the
- *   serial console will be available during boot up.  This must be called
- *   before avr_serialinit.
+ *   serial console will be available during bootup.  This must be called
+ *   before up_serialinit.
  *
  ****************************************************************************/
 
-void avr_earlyserialinit(void)
+void up_earlyserialinit(void)
 {
   /* Disable all USARTS */
 
@@ -534,15 +541,15 @@ void avr_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: avr_serialinit
+ * Name: up_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
- *   that avr_earlyserialinit was called previously.
+ *   that up_earlyserialinit was called previously.
  *
  ****************************************************************************/
 
-void avr_serialinit(void)
+void up_serialinit(void)
 {
   /* Register the console */
 
@@ -563,15 +570,26 @@ void avr_serialinit(void)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   uint8_t imr;
 
   usart1_disableusartint(&imr);
-  avr_lowputc(ch);
+
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
   usart1_restoreusartint(imr);
 #endif
+  return ch;
 }
 
 #else /* USE_SERIALDRIVER */
@@ -584,11 +602,21 @@ void up_putc(int ch)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
-  avr_lowputc(ch);
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
 #endif
+  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */

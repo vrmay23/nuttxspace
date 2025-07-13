@@ -1,8 +1,6 @@
 /****************************************************************************
  * net/igmp/igmp_poll.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- *
  *   Copyright (C) 2010, 2018-2019 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -21,21 +19,21 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of CITEL Technologies Ltd nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
+ * 3. Neither the name of CITEL Technologies Ltd nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY CITEL TECHNOLOGIES AND CONTRIBUTORS ``AS IS''
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL CITEL TECHNOLOGIES OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * ARE DISCLAIMED.  IN NO EVENT SHALL CITEL TECHNOLOGIES OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -47,8 +45,6 @@
 
 #include <assert.h>
 #include <debug.h>
-#include <inttypes.h>
-#include <stdint.h>
 
 #include <nuttx/semaphore.h>
 #include <nuttx/net/netconfig.h>
@@ -68,6 +64,8 @@
 /* Buffer layout */
 
 #define RASIZE      (4)
+#define IPv4BUF     ((FAR struct igmp_iphdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev)])
+#define IGMPBUF(hl) ((FAR struct igmp_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev) + (hl)])
 
 /****************************************************************************
  * Private Functions
@@ -90,7 +88,7 @@
 static inline void igmp_sched_send(FAR struct net_driver_s *dev,
                                    FAR struct igmp_group_s *group)
 {
-  FAR const in_addr_t *dest;
+  in_addr_t *dest;
 
   /* REVISIT:  This should be deferred to a work queue */
 
@@ -101,16 +99,16 @@ static inline void igmp_sched_send(FAR struct net_driver_s *dev,
   if (group->msgid == IGMPv2_MEMBERSHIP_REPORT)
     {
       dest = &group->grpaddr;
-      ninfo("Send IGMPv2_MEMBERSHIP_REPORT, dest=%08" PRIx32 " flags=%02x\n",
-             (uint32_t)*dest, group->flags);
+      ninfo("Send IGMPv2_MEMBERSHIP_REPORT, dest=%08x flags=%02x\n",
+             *dest, group->flags);
       SET_LASTREPORT(group->flags); /* Remember we were the last to report */
     }
   else
     {
       DEBUGASSERT(group->msgid == IGMP_LEAVE_GROUP);
       dest = &g_ipv4_allrouters;
-      ninfo("Send IGMP_LEAVE_GROUP, dest=%08" PRIx32 " flags=%02x\n",
-             (uint32_t)*dest, group->flags);
+      ninfo("Send IGMP_LEAVE_GROUP, dest=%08x flags=%02x\n",
+             *dest, group->flags);
     }
 
   /* Send the message */
@@ -153,11 +151,15 @@ static inline void igmp_sched_send(FAR struct net_driver_s *dev,
 void igmp_poll(FAR struct net_driver_s *dev)
 {
   FAR struct igmp_group_s *group;
+  uint16_t iphdrlen;
 
   /* Setup the poll operation */
 
-  dev->d_len    = 0;
-  dev->d_sndlen = 0;
+  iphdrlen          = IPv4_HDRLEN + RASIZE;
+
+  dev->d_appdata = &dev->d_buf[NET_LL_HDRLEN(dev) + iphdrlen + IGMP_HDRLEN];
+  dev->d_len     = 0;
+  dev->d_sndlen  = 0;
 
   /* Check each member of the group */
 

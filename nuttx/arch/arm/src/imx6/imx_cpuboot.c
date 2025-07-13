@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/imx6/imx_cpuboot.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,19 +43,25 @@
 #include <assert.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/sched.h>
-#include <arch/barriers.h>
 #include <arch/irq.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "hardware/imx_src.h"
 #include "sctlr.h"
 #include "smp.h"
 #include "scu.h"
+#include "fpu.h"
 #include "gic.h"
-#include "mmu.h"
 
 #ifdef CONFIG_SMP
+
+/****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+typedef CODE void (*cpu_start_t)(void);
 
 /****************************************************************************
  * Private Data
@@ -92,7 +111,7 @@ static const uintptr_t g_cpu_gpr[CONFIG_SMP_NCPUS] =
 #endif
 };
 
-static const start_t g_cpu_boot[CONFIG_SMP_NCPUS] =
+static const cpu_start_t g_cpu_boot[CONFIG_SMP_NCPUS] =
 {
   0,
 #if CONFIG_SMP_NCPUS > 1
@@ -112,7 +131,7 @@ static const start_t g_cpu_boot[CONFIG_SMP_NCPUS] =
 
 /* Symbols defined via the linker script */
 
-extern uint8_t _vector_start[]; /* Beginning of vector block */
+extern uint32_t _vector_start; /* Beginning of vector block */
 
 /****************************************************************************
  * Public Functions
@@ -197,21 +216,13 @@ void imx_cpu_disable(void)
 
 void imx_cpu_enable(void)
 {
-  start_t bootaddr;
+  cpu_start_t bootaddr;
   uintptr_t regaddr;
   uint32_t regval;
   int cpu;
 
   for (cpu = 1; cpu < CONFIG_SMP_NCPUS; cpu++)
     {
-#ifdef CONFIG_ARCH_ADDRENV
-      /* Copy cpu0 page table to each cpu. */
-
-      memcpy((uint32_t *)(PGTABLE_BASE_VADDR + PGTABLE_SIZE * cpu),
-             (uint32_t *)PGTABLE_BASE_VADDR, PGTABLE_SIZE);
-      UP_DSB();
-#endif
-
       /* Set the start up address */
 
       regaddr  = g_cpu_gpr[cpu];
@@ -231,16 +242,16 @@ void imx_cpu_enable(void)
  *
  * Description:
  *   Continues the C-level initialization started by the assembly language
- *   __cpu[n]_start function.  At a minimum, this function needs to
- *   initialize interrupt handling and, perhaps, wait on WFI for
- *   arm_cpu_start() to issue an SGI.
+ *   __cpu[n]_start function.  At a minimum, this function needs to initialize
+ *   interrupt handling and, perhaps, wait on WFI for arm_cpu_start() to
+ *   issue an SGI.
  *
  *   This function must be provided by the each ARMv7-A MCU and implement
  *   MCU-specific initialization logic.
  *
  * Input Parameters:
  *   cpu - The CPU index.  This is the same value that would be obtained by
- *      calling this_cpu();
+ *      calling up_cpu_index();
  *
  * Returned Value:
  *   Does not return.
@@ -253,9 +264,11 @@ void arm_cpu_boot(int cpu)
 
   arm_enable_smp(cpu);
 
+#ifdef CONFIG_ARCH_FPU
   /* Initialize the FPU */
 
   arm_fpuconfig();
+#endif
 
   /* Initialize the Generic Interrupt Controller (GIC) for CPUn (n != 0) */
 
@@ -278,8 +291,8 @@ void arm_cpu_boot(int cpu)
 
   /* Set the VBAR register to the address of the vector table */
 
-  DEBUGASSERT((((uintptr_t)_vector_start) & ~VBAR_MASK) == 0);
-  cp15_wrvbar((uint32_t)_vector_start);
+  DEBUGASSERT((((uintptr_t)&_vector_start) & ~VBAR_MASK) == 0);
+  cp15_wrvbar((uint32_t)&_vector_start);
 #endif /* CONFIG_ARCH_LOWVECTORS */
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS

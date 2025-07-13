@@ -1,22 +1,44 @@
 /****************************************************************************
  * include/nuttx/net/mld.h
+ * Multicast Listener Discovery (MLD) Definitions
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   RFC2710
+ *   RFC3810 (version 2)
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Includes some definitions that a compatible with the LGPL GNU C Library
+ * header file of the same name.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,8 +51,8 @@
 
 #include <nuttx/config.h>
 #include <stdint.h>
+#include <queue.h>
 
-#include <nuttx/queue.h>
 #include <nuttx/wdog.h>
 #include <nuttx/net/ip.h>
 #include <nuttx/net/icmpv6.h>
@@ -200,8 +222,8 @@
  *                        Address Compatibility Mode for a specific multicast
  *                        address.  When an MLDv1 report is received for that
  *                        multicast address, routers set their Older Version
- *                        Host Present Timer to the Older Version Host
- *                        Present Timeout.
+ *                        Host Present Timer to the Older Version Host Present
+ *                        Timeout.
  */
 
 #define MLD_ROBUSTNESS         (2)
@@ -225,8 +247,7 @@
  ****************************************************************************/
 
 /* Multicast Listener Queries are sent by multicast routers in Querier State
- * to query the multicast listening state of neighboring interfaces
- * (RFC 3810).
+ * to query the multicast listening state of neighboring interfaces (RFC 3810).
  *
  * There are three variants of the Query message:
  *
@@ -294,7 +315,6 @@ struct mld_mcast_listen_report_v1_s
 };
 
 /* Version 2 Multicast Listener Report (RFC 3810). */
-
 /* This is the form of the address record used in the listener report */
 
 struct mld_mcast_addrec_v2_s
@@ -363,8 +383,8 @@ struct mld_mcast_listen_done_s
 struct mld_netdev_s
 {
   sq_queue_t grplist;                /* MLD group list */
-  struct wdog_s gendog;              /* General query timer */
-  struct wdog_s v1dog;               /* MLDv1 compatibility timer */
+  WDOG_ID gendog;                    /* General query timer */
+  WDOG_ID v1dog;                     /* MLDv1 compatibility timer */
   uint8_t flags;                     /* See MLD_ flags definitions */
 };
 
@@ -392,9 +412,9 @@ struct mld_stats_s
   net_stats_t done_received;         /* DONE packets received */
 };
 
-#  define MLD_STATINCR(p) ((p)++)
+# define MLD_STATINCR(p) ((p)++)
 #else
-#  define MLD_STATINCR(p)
+# define MLD_STATINCR(p)
 #endif
 
 /****************************************************************************

@@ -1,8 +1,6 @@
 /****************************************************************************
  * drivers/loop/losetup.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,6 +26,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 
@@ -38,19 +37,19 @@
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/loop.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
+#define loop_semgive(d) nxsem_post(&(d)->sem)  /* To match loop_semtake */
 #define MAX_OPENCNT     (255)                  /* Limit of uint8_t */
 
 /****************************************************************************
@@ -59,7 +58,7 @@
 
 struct loop_struct_s
 {
-  mutex_t      lock;         /* For safe read-modify-write operations */
+  sem_t        sem;          /* For safe read-modify-write operations */
   uint32_t     nsectors;     /* Number of sectors on device */
   off_t        offset;       /* Offset (in bytes) to the first sector */
   uint16_t     sectsize;     /* The size of one sector */
@@ -72,13 +71,14 @@ struct loop_struct_s
  * Private Function Prototypes
  ****************************************************************************/
 
+static int     loop_semtake(FAR struct loop_struct_s *dev);
 static int     loop_open(FAR struct inode *inode);
 static int     loop_close(FAR struct inode *inode);
 static ssize_t loop_read(FAR struct inode *inode, FAR unsigned char *buffer,
-                       blkcnt_t start_sector, unsigned int nsectors);
+                       size_t start_sector, unsigned int nsectors);
 static ssize_t loop_write(FAR struct inode *inode,
                           FAR const unsigned char *buffer,
-                          blkcnt_t start_sector, unsigned int nsectors);
+                          size_t start_sector, unsigned int nsectors);
 static int     loop_geometry(FAR struct inode *inode,
                              FAR struct geometry *geometry);
 
@@ -93,11 +93,24 @@ static const struct block_operations g_bops =
   loop_read,     /* read */
   loop_write,    /* write */
   loop_geometry, /* geometry */
+  NULL           /* ioctl */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL         /* unlink */
+#endif
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: loop_semtake
+ ****************************************************************************/
+
+static int loop_semtake(FAR struct loop_struct_s *dev)
+{
+  return nxsem_wait(&dev->sem);
+}
 
 /****************************************************************************
  * Name: loop_open
@@ -111,12 +124,12 @@ static int loop_open(FAR struct inode *inode)
   FAR struct loop_struct_s *dev;
   int ret;
 
-  DEBUGASSERT(inode->i_private);
-  dev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  dev = (FAR struct loop_struct_s *)inode->i_private;
 
   /* Make sure we have exclusive access to the state structure */
 
-  ret = nxmutex_lock(&dev->lock);
+  ret = loop_semtake(dev);
   if (ret == OK)
     {
       if (dev->opencnt == MAX_OPENCNT)
@@ -130,7 +143,7 @@ static int loop_open(FAR struct inode *inode)
           dev->opencnt++;
         }
 
-      nxmutex_unlock(&dev->lock);
+      loop_semgive(dev);
     }
 
   return ret;
@@ -148,12 +161,12 @@ static int loop_close(FAR struct inode *inode)
   FAR struct loop_struct_s *dev;
   int ret;
 
-  DEBUGASSERT(inode->i_private);
-  dev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  dev = (FAR struct loop_struct_s *)inode->i_private;
 
   /* Make sure we have exclusive access to the state structure */
 
-  ret = nxmutex_lock(&dev->lock);
+  ret = loop_semtake(dev);
   if (ret == OK)
     {
       if (dev->opencnt == 0)
@@ -167,7 +180,7 @@ static int loop_close(FAR struct inode *inode)
           dev->opencnt--;
         }
 
-      nxmutex_unlock(&dev->lock);
+      loop_semgive(dev);
     }
 
   return ret;
@@ -181,15 +194,15 @@ static int loop_close(FAR struct inode *inode)
  ****************************************************************************/
 
 static ssize_t loop_read(FAR struct inode *inode, FAR unsigned char *buffer,
-                         blkcnt_t start_sector, unsigned int nsectors)
+                         size_t start_sector, unsigned int nsectors)
 {
   FAR struct loop_struct_s *dev;
   ssize_t nbytesread;
   off_t offset;
   off_t ret;
 
-  DEBUGASSERT(inode->i_private);
-  dev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  dev = (FAR struct loop_struct_s *)inode->i_private;
 
   if (start_sector + nsectors > dev->nsectors)
     {
@@ -215,7 +228,7 @@ static ssize_t loop_read(FAR struct inode *inode, FAR unsigned char *buffer,
                              nsectors * dev->sectsize);
       if (nbytesread < 0 && nbytesread != -EINTR)
         {
-          ferr("ERROR: Read failed: %zd\n", nbytesread);
+          ferr("ERROR: Read failed: %d\n", nbytesread);
           return (int)nbytesread;
         }
     }
@@ -235,15 +248,15 @@ static ssize_t loop_read(FAR struct inode *inode, FAR unsigned char *buffer,
 
 static ssize_t loop_write(FAR struct inode *inode,
                           FAR const unsigned char *buffer,
-                          blkcnt_t start_sector, unsigned int nsectors)
+                          size_t start_sector, unsigned int nsectors)
 {
   FAR struct loop_struct_s *dev;
   ssize_t nbyteswritten;
   off_t offset;
   off_t ret;
 
-  DEBUGASSERT(inode->i_private);
-  dev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  dev = (FAR struct loop_struct_s *)inode->i_private;
 
   /* Calculate the offset to write the sectors and seek to the position */
 
@@ -262,7 +275,7 @@ static ssize_t loop_write(FAR struct inode *inode,
                                  nsectors * dev->sectsize);
       if (nbyteswritten < 0 && nbyteswritten != -EINTR)
         {
-          ferr("ERROR: file_write failed: %zd\n", nbyteswritten);
+          ferr("ERROR: nx_write failed: %d\n", nbyteswritten);
           return nbyteswritten;
         }
     }
@@ -285,12 +298,10 @@ static int loop_geometry(FAR struct inode *inode,
 {
   FAR struct loop_struct_s *dev;
 
+  DEBUGASSERT(inode);
   if (geometry)
     {
-      dev = inode->i_private;
-
-      memset(geometry, 0, sizeof(*geometry));
-
+      dev = (FAR struct loop_struct_s *)inode->i_private;
       geometry->geo_available     = true;
       geometry->geo_mediachanged  = false;
       geometry->geo_writeenabled  = dev->writeenabled;
@@ -333,11 +344,11 @@ int losetup(FAR const char *devname, FAR const char *filename,
 
   /* Get the size of the file */
 
-  ret = nx_stat(filename, &sb, 1);
+  ret = stat(filename, &sb);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to stat %s: %d\n", filename, ret);
-      return ret;
+      ferr("ERROR: Failed to stat %s: %d\n", filename, get_errno());
+      return -get_errno();
     }
 
   /* Check if the file system is big enough for one block */
@@ -359,7 +370,7 @@ int losetup(FAR const char *devname, FAR const char *filename,
 
   /* Initialize the loop device structure. */
 
-  nxmutex_init(&dev->lock);
+  nxsem_init(&dev->sem, 0, 1);
   dev->nsectors  = (sb.st_size - offset) / sectsize;
   dev->sectsize  = sectsize;
   dev->offset    = offset;
@@ -373,7 +384,7 @@ int losetup(FAR const char *devname, FAR const char *filename,
   ret = -ENOSYS;
   if (!readonly)
     {
-      ret = file_open(&dev->devfile, filename, O_RDWR | O_CLOEXEC);
+      ret = file_open(&dev->devfile, filename, O_RDWR);
     }
 
   if (ret >= 0)
@@ -384,7 +395,7 @@ int losetup(FAR const char *devname, FAR const char *filename,
     {
       /* If that fails, then try to open the device read-only */
 
-      ret = file_open(&dev->devfile, filename, O_RDONLY | O_CLOEXEC);
+      ret = file_open(&dev->devfile, filename, O_RDONLY);
       if (ret < 0)
         {
           ferr("ERROR: Failed to open %s: %d\n", filename, ret);
@@ -407,7 +418,6 @@ errout_with_file:
   file_close(&dev->devfile);
 
 errout_with_dev:
-  nxmutex_destroy(&dev->lock);
   kmm_free(dev);
   return ret;
 }
@@ -448,7 +458,7 @@ int loteardown(FAR const char *devname)
 
   /* Inode private data is a reference to the loop device structure */
 
-  dev = inode->i_private;
+  dev = (FAR struct loop_struct_s *)inode->i_private;
   close_blockdriver(inode);
 
   DEBUGASSERT(dev != NULL);
@@ -471,7 +481,6 @@ int loteardown(FAR const char *devname)
       file_close(&dev->devfile);
     }
 
-  nxmutex_destroy(&dev->lock);
   kmm_free(dev);
   return ret;
 }

@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/input/button_lower.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,21 +42,22 @@
 #include <sys/types.h>
 #include <assert.h>
 #include <debug.h>
-#include <inttypes.h>
 
 #include <nuttx/board.h>
 #include <nuttx/input/buttons.h>
 
 #include <nuttx/irq.h>
 
-#if CONFIG_INPUT_BUTTONS_LOWER
+#undef __KERNEL__
+#include <arch/board/board.h>
+
+#if CONFIG_BUTTONS_LOWER
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static btn_buttonset_t
-btn_supported(FAR const struct btn_lowerhalf_s *lower);
+static btn_buttonset_t btn_supported(FAR const struct btn_lowerhalf_s *lower);
 static btn_buttonset_t btn_buttons(FAR const struct btn_lowerhalf_s *lower);
 static void btn_enable(FAR const struct btn_lowerhalf_s *lower,
                        btn_buttonset_t press, btn_buttonset_t release,
@@ -56,16 +70,13 @@ static int btn_interrupt(int irq, FAR void *context, FAR void *arg);
  * Private Data
  ****************************************************************************/
 
-static uint32_t g_btnnum;
-
 /* This is the button button lower half driver interface */
 
 static const struct btn_lowerhalf_s g_btnlower =
 {
-  btn_supported,        /* bl_supported */
-  btn_buttons,          /* bl_buttons */
-  btn_enable,           /* bl_enable */
-  NULL                  /* bl_write */
+  .bl_supported  = btn_supported,
+  .bl_buttons    = btn_buttons,
+  .bl_enable     = btn_enable,
 };
 
 /* Current interrupt handler and argument */
@@ -87,8 +98,8 @@ static FAR void *g_btnarg;
 
 static btn_buttonset_t btn_supported(FAR const struct btn_lowerhalf_s *lower)
 {
-  iinfo("NUM_BUTTONS: %02" PRIx32 "\n", g_btnnum);
-  return (btn_buttonset_t)((1 << g_btnnum) - 1);
+  iinfo("NUM_BUTTONS: %02x\n", NUM_BUTTONS);
+  return (btn_buttonset_t)((1 << NUM_BUTTONS) - 1);
 }
 
 /****************************************************************************
@@ -120,14 +131,14 @@ static void btn_enable(FAR const struct btn_lowerhalf_s *lower,
   btn_buttonset_t mask;
   btn_buttonset_t either = press | release;
   irqstate_t flags;
-  uint32_t id;
+  int id;
 
   /* Start with all interrupts disabled */
 
   flags = enter_critical_section();
   btn_disable();
 
-  iinfo("press: %02" PRIx32 " release: %02" PRIx32 " handler: %p arg: %p\n",
+  iinfo("press: %02x release: %02x handler: %p arg: %p\n",
         press, release, handler, arg);
 
   /* If no events are indicated or if no handler is provided, then this
@@ -143,7 +154,7 @@ static void btn_enable(FAR const struct btn_lowerhalf_s *lower,
 
       /* Attach and enable each button interrupt */
 
-      for (id = 0; id < g_btnnum; id++)
+      for (id = 0; id < NUM_BUTTONS; id++)
         {
           mask = (1 << id);
           if ((either & mask) != 0)
@@ -167,12 +178,12 @@ static void btn_enable(FAR const struct btn_lowerhalf_s *lower,
 static void btn_disable(void)
 {
   irqstate_t flags;
-  uint32_t id;
+  int id;
 
   /* Disable each button interrupt */
 
   flags = enter_critical_section();
-  for (id = 0; id < g_btnnum; id++)
+  for (id = 0; id < NUM_BUTTONS; id++)
     {
       board_button_irq(id, NULL, NULL);
     }
@@ -219,8 +230,8 @@ static int btn_interrupt(int irq, FAR void *context, FAR void *arg)
 
 int btn_lower_initialize(FAR const char *devname)
 {
-  g_btnnum = board_button_initialize();
+  board_button_initialize();
   return btn_register(devname, &g_btnlower);
 }
 
-#endif /* CONFIG_INPUT_BUTTONS_LOWER */
+#endif /* CONFIG_BUTTONS_LOWER */

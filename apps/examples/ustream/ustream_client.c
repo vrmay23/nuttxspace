@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/ustream/ustream_client.c
+ * examples/ustream/ustream_client.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name Gregory Nutt nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -61,8 +74,8 @@ int main(int argc, FAR char *argv[])
 
   /* Allocate buffers */
 
-  outbuf = (FAR char *)malloc(SENDSIZE);
-  inbuf  = (FAR char *)malloc(SENDSIZE);
+  outbuf = (char*)malloc(SENDSIZE);
+  inbuf  = (char*)malloc(SENDSIZE);
   if (!outbuf || !inbuf)
     {
       printf("client: failed to allocate buffers\n");
@@ -80,19 +93,19 @@ int main(int argc, FAR char *argv[])
 
   /* Connect the socket to the server */
 
-  addrlen = sizeof(CONFIG_EXAMPLES_USTREAM_ADDR);
-  if (addrlen > UNIX_PATH_MAX)
+  addrlen = strlen(CONFIG_EXAMPLES_USTREAM_ADDR);
+  if (addrlen > UNIX_PATH_MAX - 1)
     {
-      addrlen = UNIX_PATH_MAX;
+      addrlen = UNIX_PATH_MAX - 1;
     }
 
   myaddr.sun_family = AF_LOCAL;
-  strlcpy(myaddr.sun_path, CONFIG_EXAMPLES_USTREAM_ADDR, addrlen);
+  strncpy(myaddr.sun_path, CONFIG_EXAMPLES_USTREAM_ADDR, addrlen);
   myaddr.sun_path[addrlen] = '\0';
 
   printf("client: Connecting to %s...\n", CONFIG_EXAMPLES_USTREAM_ADDR);
   addrlen += sizeof(sa_family_t) + 1;
-  ret = connect(sockfd, (struct sockaddr *)&myaddr, addrlen);
+  ret = connect( sockfd, (struct sockaddr *)&myaddr, addrlen);
   if (ret < 0)
     {
       printf("client: connect failure: %d\n", errno);
@@ -149,8 +162,7 @@ int main(int argc, FAR char *argv[])
     }
   else if (nbytessent != SENDSIZE)
     {
-      printf("client: Bad send length: %d Expected: %d\n",
-             nbytessent, SENDSIZE);
+      printf("client: Bad send length: %d Expected: %d\n", nbytessent, SENDSIZE);
       goto errout_with_socket;
     }
 
@@ -181,8 +193,7 @@ int main(int argc, FAR char *argv[])
 #endif
 
       printf("client: Receiving...\n");
-      nbytesrecvd = recv(sockfd, &inbuf[totalbytesrecvd],
-                         SENDSIZE - totalbytesrecvd, 0);
+      nbytesrecvd = recv(sockfd, &inbuf[totalbytesrecvd], SENDSIZE - totalbytesrecvd, 0);
 
       if (nbytesrecvd < 0)
         {
@@ -202,8 +213,7 @@ int main(int argc, FAR char *argv[])
 
   if (totalbytesrecvd != SENDSIZE)
     {
-      printf("client: Bad recv length: %d Expected: %d\n",
-             totalbytesrecvd, SENDSIZE);
+      printf("client: Bad recv length: %d Expected: %d\n", totalbytesrecvd, SENDSIZE);
       goto errout_with_socket;
     }
   else if (memcmp(inbuf, outbuf, SENDSIZE) != 0)

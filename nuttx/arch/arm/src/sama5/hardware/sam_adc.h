@@ -1,44 +1,56 @@
-/****************************************************************************
+/****************************************************************************************
  * arch/arm/src/sama5/hardware/sam_adc.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ****************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_SAMA5_HARDWARE_SAM_ADC_H
 #define __ARCH_ARM_SRC_SAMA5_HARDWARE_SAM_ADC_H
 
-/****************************************************************************
+/****************************************************************************************
  * Included Files
- ****************************************************************************/
+ ****************************************************************************************/
 
 #include <nuttx/config.h>
 
 #include "chip.h"
 #include "hardware/sam_memorymap.h"
 
-/****************************************************************************
+/****************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ****************************************************************************************/
+/* General definitions ******************************************************************/
 
-/* General definitions ******************************************************/
-
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
+#if defined(ATSAMA5D3)
 #  define SAM_ADC_NCHANNELS          12     /* 12 ADC Channels */
 #elif defined(ATSAMA5D4)
 #  define SAM_ADC_NCHANNELS          5      /* 5 ADC Channels */
@@ -47,7 +59,7 @@
 #define SAM_ADC_MAXPERCLK          66000000 /* Maximum peripheral clock frequency */
 #define SAM_ADC_CLOCKMAX           20000000 /* Maximum ADC Clock Frequency (Hz) */
 
-/* ADC register offsets *****************************************************/
+/* ADC register offsets ****************************************************************/
 
 #define SAM_ADC_CR_OFFSET          0x0000 /* Control Register */
 #define SAM_ADC_MR_OFFSET          0x0004 /* Mode Register */
@@ -69,9 +81,8 @@
 
 #ifdef ATSAMA5D3
 #  define SAM_ADC_CGR_OFFSET       0x0048 /* Channel Gain Register */
+#  define SAM_ADC_COR_OFFSET       0x004c /* Channel Offset Register */
 #endif
-
-#define SAM_ADC_COR_OFFSET         0x004c /* Channel Offset Register */
 
 #define SAM_ADC_CDR_OFFSET(n)      (0x0050+((n)<<2))
 #define SAM_ADC_CDR0_OFFSET        0x0050 /* Channel Data Register 0 */
@@ -80,7 +91,7 @@
 #define SAM_ADC_CDR3_OFFSET        0x005c /* Channel Data Register 3 */
 #define SAM_ADC_CDR4_OFFSET        0x0060 /* Channel Data Register 4 */
 
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
+#ifdef ATSAMA5D3
 #  define SAM_ADC_CDR5_OFFSET      0x0064 /* Channel Data Register 5 */
 #  define SAM_ADC_CDR6_OFFSET      0x0068 /* Channel Data Register 6 */
 #  define SAM_ADC_CDR7_OFFSET      0x006c /* Channel Data Register 7 */
@@ -102,7 +113,7 @@
 #define SAM_ADC_WPSR_OFFSET        0x00e8 /* Write Protect Status Register */
                                           /* 0x00ec-fc Reserved */
 
-/* ADC register addresses ***************************************************/
+/* ADC register addresses **************************************************************/
 
 #define SAM_ADC_CR                 (SAM_TSADC_VBASE+SAM_ADC_CR_OFFSET)
 #define SAM_ADC_MR                 (SAM_TSADC_VBASE+SAM_ADC_MR_OFFSET)
@@ -122,9 +133,6 @@
 
 #ifdef ATSAMA5D3
 #  define SAM_ADC_CGR              (SAM_TSADC_VBASE+SAM_ADC_CGR_OFFSET)
-#endif
-
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
 #  define SAM_ADC_COR              (SAM_TSADC_VBASE+SAM_ADC_COR_OFFSET)
 #endif
 
@@ -135,7 +143,7 @@
 #define SAM_ADC_CDR3               (SAM_TSADC_VBASE+SAM_ADC_CDR3_OFFSET)
 #define SAM_ADC_CDR4               (SAM_TSADC_VBASE+SAM_ADC_CDR4_OFFSET)
 
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
+#ifdef ATSAMA5D3
 #  define SAM_ADC_CDR5             (SAM_TSADC_VBASE+SAM_ADC_CDR5_OFFSET)
 #  define SAM_ADC_CDR6             (SAM_TSADC_VBASE+SAM_ADC_CDR6_OFFSET)
 #  define SAM_ADC_CDR7             (SAM_TSADC_VBASE+SAM_ADC_CDR7_OFFSET)
@@ -154,7 +162,7 @@
 #define SAM_ADC_WPMR               (SAM_TSADC_VBASE+SAM_ADC_WPMR_OFFSET)
 #define SAM_ADC_WPSR               (SAM_TSADC_VBASE+SAM_ADC_WPSR_OFFSET)
 
-/* ADC register bit definitions *********************************************/
+/* ADC register bit definitions ********************************************************/
 
 /* Control Register and ADC Control Register common bit-field definitions */
 
@@ -176,8 +184,6 @@
 #  define ADC_MR_TRGSEL_TIOA2      (3 << ADC_MR_TRGSEL_SHIFT) /* TIOA2 */
 #  define ADC_MR_TRGSEL_PWM0       (4 << ADC_MR_TRGSEL_SHIFT) /* PWM Event Line 0 */
 #  define ADC_MR_TRGSEL_PWM1       (5 << ADC_MR_TRGSEL_SHIFT) /* PWM Event Line 1 */
-#  define ADC_MR_TRGSEL_TIOA3      (6 << ADC_MR_TRGSEL_SHIFT) /* TIOA3 */
-#  define ADC_MR_TRGSEL_RTC        (7 << ADC_MR_TRGSEL_SHIFT) /* RTC Out */
 
 #ifdef ATSAMA5D4
 #  define ADC_MR_LOWRES            (1 << 4)  /* Bit 4:  LOWRES: Resolution */
@@ -194,13 +200,13 @@
 #  define ADC_MR_PRESCAL(n)        ((uint32_t)(n) << ADC_MR_PRESCAL_SHIFT)
 #define ADC_MR_STARTUP_SHIFT       (16)      /* Bits 16-19: Start Up Time */
 #define ADC_MR_STARTUP_MASK        (15 << ADC_MR_STARTUP_SHIFT)
-#  define ADC_MR_STARTUP_0         (0 << ADC_MR_STARTUP_SHIFT)  /* 0 periods of ADCClock   */
-#  define ADC_MR_STARTUP_8         (1 << ADC_MR_STARTUP_SHIFT)  /* 8 periods of ADCClock   */
-#  define ADC_MR_STARTUP_16        (2 << ADC_MR_STARTUP_SHIFT)  /* 16 periods of ADCClock  */
-#  define ADC_MR_STARTUP_24        (3 << ADC_MR_STARTUP_SHIFT)  /* 24 periods of ADCClock  */
-#  define ADC_MR_STARTUP_64        (4 << ADC_MR_STARTUP_SHIFT)  /* 64 periods of ADCClock  */
-#  define ADC_MR_STARTUP_80        (5 << ADC_MR_STARTUP_SHIFT)  /* 80 periods of ADCClock  */
-#  define ADC_MR_STARTUP_96        (6 << ADC_MR_STARTUP_SHIFT)  /* 96 periods of ADCClock  */
+#  define ADC_MR_STARTUP_0         (0 << ADC_MR_STARTUP_SHIFT)  /* 0 periods of ADCClock */
+#  define ADC_MR_STARTUP_8         (1 << ADC_MR_STARTUP_SHIFT)  /* 8 periods of ADCClock */
+#  define ADC_MR_STARTUP_16        (2 << ADC_MR_STARTUP_SHIFT)  /* 16 periods of ADCClock */
+#  define ADC_MR_STARTUP_24        (3 << ADC_MR_STARTUP_SHIFT)  /* 24 periods of ADCClock */
+#  define ADC_MR_STARTUP_64        (4 << ADC_MR_STARTUP_SHIFT)  /* 64 periods of ADCClock */
+#  define ADC_MR_STARTUP_80        (5 << ADC_MR_STARTUP_SHIFT)  /* 80 periods of ADCClock */
+#  define ADC_MR_STARTUP_96        (6 << ADC_MR_STARTUP_SHIFT)  /* 96 periods of ADCClock */
 #  define ADC_MR_STARTUP_112       (7 << ADC_MR_STARTUP_SHIFT)  /* 112 periods of ADCClock */
 #  define ADC_MR_STARTUP_512       (8 << ADC_MR_STARTUP_SHIFT)  /* 512 periods of ADCClock */
 #  define ADC_MR_STARTUP_576       (9 << ADC_MR_STARTUP_SHIFT)  /* 576 periods of ADCClock */
@@ -212,22 +218,12 @@
 #  define ADC_MR_STARTUP_960       (15 << ADC_MR_STARTUP_SHIFT) /* 960 periods of ADCClock */
 
 #ifdef ATSAMA5D3
-#  define ADC_MR_SETTLING_SHIFT    (20)      /* Bits 20-21: Analog Settling Time           */
+#  define ADC_MR_SETTLING_SHIFT    (20)      /* Bits 20-21: Analog Settling Time */
 #  define ADC_MR_SETTLING_MASK     (15 << ADC_MR_SETTLING_SHIFT)
-#    define ADC_MR_SETTLING_3      (0 << ADC_MR_SETTLING_SHIFT) /* 3 periods of ADCClock   */
-#    define ADC_MR_SETTLING_5      (1 << ADC_MR_SETTLING_SHIFT) /* 5 periods of ADCClock   */
-#    define ADC_MR_SETTLING_9      (2 << ADC_MR_SETTLING_SHIFT) /* 9 periods of ADCClock   */
-#    define ADC_MR_SETTLING_17     (3 << ADC_MR_SETTLING_SHIFT) /* 17 periods of ADCClock  */
-#else
-#  define ADC_MR_SETTLING_SHIFT    (20)      /* Not present in SAMA5D2 or SAMA5D4          */
-#  define ADC_MR_SETTLING_MASK     (0)
-#    define ADC_MR_SETTLING_3      (0 << ADC_MR_SETTLING_SHIFT) /* n/a periods of ADCClock */
-#    define ADC_MR_SETTLING_5      (0 << ADC_MR_SETTLING_SHIFT) /* n/a periods of ADCClock */
-#    define ADC_MR_SETTLING_9      (0 << ADC_MR_SETTLING_SHIFT) /* n/a periods of ADCClock */
-#    define ADC_MR_SETTLING_17     (0 << ADC_MR_SETTLING_SHIFT) /* n/a periods of ADCClock */
-#endif
-
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
+#    define ADC_MR_SETTLING_3      (0 << ADC_MR_SETTLING_SHIFT) /* 3 periods of ADCClock */
+#    define ADC_MR_SETTLING_5      (1 << ADC_MR_SETTLING_SHIFT) /* 5 periods of ADCClock */
+#    define ADC_MR_SETTLING_9      (2 << ADC_MR_SETTLING_SHIFT) /* 9 periods of ADCClock */
+#    define ADC_MR_SETTLING_17     (3 << ADC_MR_SETTLING_SHIFT) /* 17 periods of ADCClock */
 #  define ADC_MR_ANACH             (1 << 23) /* Bit 23: Analog Change */
 #endif
 
@@ -235,7 +231,7 @@
 #define ADC_MR_TRACKTIM_MASK       (15 << ADC_MR_TRACKTIM_SHIFT)
 #  define ADC_MR_TRACKTIM(n)       ((uint32_t)(n) << ADC_MR_TRACKTIM_SHIFT)
 
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
+#ifdef ATSAMA5D3
 #  define ADC_MR_TRANSFER_SHIFT    (28)      /* Bits 28-29: Transfer Period */
 #  define ADC_MR_TRANSFER_MASK     (3 << ADC_MR_TRANSFER_SHIFT)
 #    define ADC_MR_TRANSFER        (2 << ADC_MR_TRANSFER_SHIFT) /* Must be 2 */
@@ -276,7 +272,7 @@
 #    define ADC_SEQR1_USCH8(v)     ((uint32_t)(v) << ADC_SEQR1_USCH8_SHIFT)
 #endif
 
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
+#ifdef ATSAMA5D3
 /* Channel Sequence Register 2 */
 
 #  define ADC_SEQR2_USCH_SHIFT(n)  (((n)-9) << 2) /* n=9..11 */
@@ -294,8 +290,8 @@
 #endif
 
 /* Channel Enable Register, Channel Disable Register, Channel
- * Status Register, ADC Channel Enable Register, ADC Channel Disable
- * Register, and ADC Channel Status Register common bit-field definitions
+ * Status Register, ADC Channel Enable Register, ADC Channel Disable Register,
+ * and ADC Channel Status Register common bit-field definitions
  */
 
 #define ADC_CH(n)                  (1 << (n))
@@ -306,7 +302,7 @@
 #define ADC_CH4                    (1 << 4)  /* Bit 4:  Channel 4 Enable */
 #define ADC_CH5                    (1 << 5)  /* Bit 5:  Channel 5 Enable */
 
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
+#ifdef ATSAMA5D3
 #  define ADC_CH6                  (1 << 6)  /* Bit 6:  Channel 6 Enable */
 #  define ADC_CH7                  (1 << 7)  /* Bit 7:  Channel 7 Enable */
 #  define ADC_CH8                  (1 << 8)  /* Bit 8:  Channel 8 Enable */
@@ -318,7 +314,7 @@
 #define TSD_4WIRE_ALL              (0x0000000f)
 #define TSD_5WIRE_ALL              (0x0000001f)
 
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
+#if defined(ATSAMA5D3)
 #  define ADC_CHALL                (0x00000fff)
 #elif defined(ATSAMA5D4)
 #  define ADC_CHALL                (0x0000001f)
@@ -344,7 +340,7 @@
 #define ADC_INT_EOC3               (1 << 3)  /* Bit 3:  End of Conversion 3 */
 #define ADC_INT_EOC4               (1 << 4)  /* Bit 4:  End of Conversion 4 */
 
-#if defined(ATSAMA5D3) || defined(ATSAMA5D2)
+#if defined(ATSAMA5D3)
 #  define ADC_INT_EOC5             (1 << 5)  /* Bit 5:  End of Conversion 5 */
 #  define ADC_INT_EOC6             (1 << 6)  /* Bit 6:  End of Conversion 6 */
 #  define ADC_INT_EOC7             (1 << 7)  /* Bit 7:  End of Conversion 7 */
@@ -372,11 +368,7 @@
 #define ADC_INT_NOPEN              (1 << 30) /* Bit 30: No Pen Contact Interrupt */
 #define ADC_SR_PENS                (1 << 31) /* Bit 31: Pen detect Status (SR only) */
 
-#if defined(ATSAMA5D3)
-#  define ADC_INT_ALL              (0xe7f00fff)
-#elif defined(ATSAMA5D2)
-#  define ADC_INT_ALL              (0x67780fff)
-#endif
+#define ADC_INT_ALL                (0xe7f00fff)
 
 /* Overrun Status Register */
 
@@ -405,7 +397,6 @@
 #  define ADC_EMR_CMPMODE_HIGH     (1 << ADC_EMR_CMPMODE_SHIFT) /* Event when higher than high window threshold */
 #  define ADC_EMR_CMPMODE_IN       (2 << ADC_EMR_CMPMODE_SHIFT) /* Event when in comparison window */
 #  define ADC_EMR_CMPMODE_OUT      (3 << ADC_EMR_CMPMODE_SHIFT) /* Event when out of comparison window */
-
 #define ADC_EMR_CMPSEL_SHIFT       (4)       /* Bit 4-7: Comparison Selected Channel */
 #define ADC_EMR_CMPSEL_MASK        (15 << ADC_EMR_CMPSEL_SHIFT)
 #  define ADC_EMR_CMPSEL(n)        ((uint32_t)(n) << ADC_EMR_CMPSEL_SHIFT)
@@ -420,7 +411,6 @@
 #    define ADC_EMR_OSR_NOAVG      (0 << ADC_EMR_OSR_SHIFT) /* No averaging */
 #    define ADC_EMR_OSR_OSR4       (1 << ADC_EMR_OSR_SHIFT) /* 1-bit averaging. ADC sample rate / 4 */
 #    define ADC_EMR_OSR_OSR16      (2 << ADC_EMR_OSR_SHIFT) /* 2-bit averaging. ADC sample rate / 16 */
-
 #  define ADC_EMR_ASTE             (1 << 10) /* Bit 10: Averaging on Single Trigger Event */
 #endif
 
@@ -505,12 +495,7 @@
 /* Channel Data Register */
 
 #define ADC_CDR_DATA_SHIFT         (0)       /* Bits 0-11: Converted Data */
-
-#if defined(ATSAMA5D2)
-#  define ADC_CDR_DATA_MASK        (0x3fff << ADC_CDR_DATA_SHIFT)
-#else
-#  define ADC_CDR_DATA_MASK        (0xfff << ADC_CDR_DATA_SHIFT)
-#endif
+#define ADC_CDR_DATA_MASK          (0xfff << ADC_CDR_DATA_SHIFT)
 
 /* Compare Window Register */
 
@@ -527,12 +512,6 @@
 #define ADC_ACR_PENDETSENS_MASK    (3 << ADC_ACR_PENDETSENS_SHIFT)
 #  define ADC_ACR_PENDETSENS(n)    ((uint32_t)(n) << ADC_ACR_PENDETSENS_SHIFT)
 
-#if defined(ATSAMA5D2)
-#  define ADC_ACR_IBTL_SHIFT       (8) /* Bits 8-9: ADC Bias Current Control */
-#  define ADC_ACR_IBCTL_MASK       (3 << ADC_ACR_IBTL_SHIFT)
-#  define ADC_ACR_IBCTL(n)         ((uint32_t)(n) << ADC_ACR_IBTL_SHIFT)
-#endif
-
 /* Touchscreen Mode Register */
 
 #define ADC_TSMR_TSMODE_SHIFT      (0)       /* Bit 0-1: Touchscreen Mode */
@@ -541,14 +520,12 @@
 #  define ADC_TSMR_TSMODE_4WIRENPM (1 << ADC_TSMR_TSMODE_SHIFT) /* 4-wire TS w/o pressure measurement */
 #  define ADC_TSMR_TSMODE_4WIRE    (2 << ADC_TSMR_TSMODE_SHIFT) /* 4-wire TS w/ pressure measurement */
 #  define ADC_TSMR_TSMODE_5WIRE    (3 << ADC_TSMR_TSMODE_SHIFT) /* 5-wire Touchscreen */
-
 #define ADC_TSMR_TSAV_SHIFT        (4)       /* Bit 4-5: Touchscreen Average */
 #define ADC_TSMR_TSAV_MASK         (3 << ADC_TSMR_TSAV_SHIFT)
 #  define ADC_TSMR_TSAV_NOFILTER   (0 << ADC_TSMR_TSAV_SHIFT) /* No Filtering */
 #  define ADC_TSMR_TSAV_2CONV      (1 << ADC_TSMR_TSAV_SHIFT) /* Average 2 ADC conversions */
 #  define ADC_TSMR_TSAV_4CONV      (2 << ADC_TSMR_TSAV_SHIFT) /* Average 4 ADC conversions */
 #  define ADC_TSMR_TSAV_8CONV      (3 << ADC_TSMR_TSAV_SHIFT) /* Averages 8 ADC conversions */
-
 #define ADC_TSMR_TSFREQ_SHIFT      (8)       /* Bit 8-11: Touchscreen Frequency */
 #define ADC_TSMR_TSFREQ_MASK       (15 << ADC_TSMR_TSFREQ_SHIFT)
 #  define ADC_TSMR_TSFREQ_DIV1     (0 << ADC_TSMR_TSFREQ_SHIFT) /* TS freq = trigger freq */
@@ -556,7 +533,6 @@
 #  define ADC_TSMR_TSFREQ_DIV4     (2 << ADC_TSMR_TSFREQ_SHIFT) /* TS freq = trigger freq / 4 */
 #  define ADC_TSMR_TSFREQ_DIV8     (3 << ADC_TSMR_TSFREQ_SHIFT) /* TS freq = trigger freq / 8 */
 #  define ADC_TSMR_TSFREQ(n)       ((uint32_t)(n) << ADC_TSMR_TSFREQ_SHIFT)
-
 #define ADC_TSMR_TSSCTIM_SHIFT     (16)      /* Bit 16-19: Touchscreen Switches Closure Time */
 #define ADC_TSMR_TSSCTIM_MASK      (15 << ADC_TSMR_TSSCTIM_SHIFT)
 #  define ADC_TSMR_TSSCTIM(n)      ((uint32_t)(n) << ADC_TSMR_TSSCTIM_SHIFT)
@@ -598,7 +574,6 @@
 #  define ADC_TRGR_TRGMOD_PEN      (4 << ADC_TRGR_TRGMOD_SHIFT) /* Pen Detect Trigger */
 #  define ADC_TRGR_TRGMOD_PERIOD   (5 << ADC_TRGR_TRGMOD_SHIFT) /* Periodic Trigger */
 #  define ADC_TRGR_TRGMOD_CONT     (6 << ADC_TRGR_TRGMOD_SHIFT) /* Continuous Mode */
-
 #define ADC_TRGR_TRGPER_SHIFT      (16)      /* Bit 16-31: Trigger Period */
 #define ADC_TRGR_TRGPER_MASK       (0xffff << ADC_TRGR_TRGPER_SHIFT)
 #  define ADC_TRGR_TRGPER(n)       ((uint32_t)(n) << ADC_TRGR_TRGPER_SHIFT)
@@ -616,16 +591,16 @@
 #define ADC_WPSR_WPVSRC_SHIFT      (8)       /* Bits 8-23: Write Protect Violation Source */
 #define ADC_WPSR_WPVSRC_MASK       (0xffff << ADC_WPSR_WPVSRC_SHIFT)
 
-/****************************************************************************
+/****************************************************************************************
  * Public Types
- ****************************************************************************/
+ ****************************************************************************************/
 
-/****************************************************************************
+/****************************************************************************************
  * Public Data
- ****************************************************************************/
+ ****************************************************************************************/
 
-/****************************************************************************
- * Public Functions Prototypes
- ****************************************************************************/
+/****************************************************************************************
+ * Public Functions
+ ****************************************************************************************/
 
 #endif /* __ARCH_ARM_SRC_SAMA5_HARDWARE_SAM_ADC_H */

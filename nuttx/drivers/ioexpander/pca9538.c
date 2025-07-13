@@ -1,8 +1,6 @@
 /****************************************************************************
  * drivers/ioexpander/pca9538.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -69,9 +67,9 @@ static int pca9538_readbuf(FAR struct ioexpander_dev_s *dev, uint8_t pin,
              FAR bool *value);
 #ifdef CONFIG_IOEXPANDER_MULTIPIN
 static int pca9538_multiwritepin(FAR struct ioexpander_dev_s *dev,
-             FAR const uint8_t *pins, FAR const bool *values, int count);
+             FAR uint8_t *pins, FAR bool *values, int count);
 static int pca9538_multireadpin(FAR struct ioexpander_dev_s *dev,
-             FAR const uint8_t *pins, FAR bool *values, int count);
+             FAR uint8_t *pins, FAR bool *values, int count);
 static int pca9538_multireadbuf(FAR struct ioexpander_dev_s *dev,
              FAR uint8_t *pins, FAR bool *values, int count);
 #endif
@@ -122,6 +120,21 @@ static const struct ioexpander_ops_s g_pca9538_ops =
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: pca9538_lock
+ *
+ * Description:
+ *   Get exclusive access to the PCA9538
+ *
+ ****************************************************************************/
+
+static int pca9538_lock(FAR struct pca9538_dev_s *pca)
+{
+  return nxsem_wait_uninterruptible(&pca->exclsem);
+}
+
+#define pca9538_unlock(p) nxsem_post(&(p)->exclsem)
 
 /****************************************************************************
  * Name: pca9538_write
@@ -184,7 +197,7 @@ static inline int pca9538_writeread(FAR struct pca9538_dev_s *pca,
  ****************************************************************************/
 
 static int pca9538_setbit(FAR struct pca9538_dev_s *pca, uint8_t addr,
-                          uint8_t pin, bool bitval)
+                          uint8_t pin, int bitval)
 {
   uint8_t buf[2];
   int ret;
@@ -296,15 +309,9 @@ static int pca9538_direction(FAR struct ioexpander_dev_s *dev, uint8_t pin,
   FAR struct pca9538_dev_s *pca = (FAR struct pca9538_dev_s *)dev;
   int ret;
 
-  if (direction != IOEXPANDER_DIRECTION_IN &&
-      direction != IOEXPANDER_DIRECTION_OUT)
-    {
-      return -EINVAL;
-    }
-
   /* Get exclusive access to the PCA555 */
 
-  ret = nxmutex_lock(&pca->lock);
+  ret = pca9538_lock(pca);
   if (ret < 0)
     {
       return ret;
@@ -312,7 +319,7 @@ static int pca9538_direction(FAR struct ioexpander_dev_s *dev, uint8_t pin,
 
   ret = pca9538_setbit(pca, PCA9538_REG_CONFIG, pin,
                        (direction == IOEXPANDER_DIRECTION_IN));
-  nxmutex_unlock(&pca->lock);
+  pca9538_unlock(pca);
   return ret;
 }
 
@@ -336,24 +343,25 @@ static int pca9538_direction(FAR struct ioexpander_dev_s *dev, uint8_t pin,
  ****************************************************************************/
 
 static int pca9538_option(FAR struct ioexpander_dev_s *dev, uint8_t pin,
-                          int opt, FAR void *value)
+                          int opt, FAR void *val)
 {
   FAR struct pca9538_dev_s *pca = (FAR struct pca9538_dev_s *)dev;
   int ret = -EINVAL;
 
   if (opt == IOEXPANDER_OPTION_INVERT)
     {
+      int ival = (int)((intptr_t)val);
+
       /* Get exclusive access to the PCA555 */
 
-      ret = nxmutex_lock(&pca->lock);
+      ret = pca9538_lock(pca);
       if (ret < 0)
         {
           return ret;
         }
 
-      ret = pca9538_setbit(pca, PCA9538_REG_POLINV, pin,
-                           ((uintptr_t)value == IOEXPANDER_VAL_INVERT));
-      nxmutex_unlock(&pca->lock);
+      ret = pca9538_setbit(pca, PCA9538_REG_POLINV, pin, ival);
+      pca9538_unlock(pca);
     }
 
   return ret;
@@ -384,14 +392,14 @@ static int pca9538_writepin(FAR struct ioexpander_dev_s *dev, uint8_t pin,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = nxmutex_lock(&pca->lock);
+  ret = pca9538_lock(pca);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = pca9538_setbit(pca, PCA9538_REG_OUTPUT, pin, value);
-  nxmutex_unlock(&pca->lock);
+  pca9538_unlock(pca);
   return ret;
 }
 
@@ -422,14 +430,14 @@ static int pca9538_readpin(FAR struct ioexpander_dev_s *dev, uint8_t pin,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = nxmutex_lock(&pca->lock);
+  ret = pca9538_lock(pca);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = pca9538_getbit(pca, PCA9538_REG_INPUT, pin, value);
-  nxmutex_unlock(&pca->lock);
+  pca9538_unlock(pca);
   return ret;
 }
 
@@ -458,14 +466,14 @@ static int pca9538_readbuf(FAR struct ioexpander_dev_s *dev, uint8_t pin,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = nxmutex_lock(&pca->lock);
+  ret = pca9538_lock(pca);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = pca9538_getbit(pca, PCA9538_REG_OUTPUT, pin, value);
-  nxmutex_unlock(&pca->lock);
+  pca9538_unlock(pca);
   return ret;
 }
 
@@ -537,8 +545,8 @@ static int pca9538_getmultibits(FAR struct pca9538_dev_s *pca, uint8_t addr,
  ****************************************************************************/
 
 static int pca9538_multiwritepin(FAR struct ioexpander_dev_s *dev,
-                                 FAR const uint8_t *pins,
-                                 FAR const bool *values, int count)
+                                 FAR uint8_t *pins, FAR bool *values,
+                                 int count)
 {
   FAR struct pca9538_dev_s *pca = (FAR struct pca9538_dev_s *)dev;
   uint8_t addr = PCA9538_REG_OUTPUT;
@@ -550,7 +558,7 @@ static int pca9538_multiwritepin(FAR struct ioexpander_dev_s *dev,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = nxmutex_lock(&pca->lock);
+  ret = pca9538_lock(pca);
   if (ret < 0)
     {
       return ret;
@@ -565,7 +573,7 @@ static int pca9538_multiwritepin(FAR struct ioexpander_dev_s *dev,
   ret = pca9538_writeread(pca, &addr, 1, &buf[1], 2);
   if (ret < 0)
     {
-      nxmutex_unlock(&pca->lock);
+      pca9538_unlock(pca);
       return ret;
     }
 #else
@@ -583,7 +591,7 @@ static int pca9538_multiwritepin(FAR struct ioexpander_dev_s *dev,
       pin = pins[i];
       if (pin >= PCA9538_GPIO_NPINS)
         {
-          nxmutex_unlock(&pca->lock);
+          pca9538_unlock(pca);
           return -ENXIO;
         }
 
@@ -608,7 +616,7 @@ static int pca9538_multiwritepin(FAR struct ioexpander_dev_s *dev,
 #endif
   ret = pca9538_write(pca, buf, 3);
 
-  nxmutex_unlock(&pca->lock);
+  pca9538_unlock(pca);
   return ret;
 }
 
@@ -630,15 +638,15 @@ static int pca9538_multiwritepin(FAR struct ioexpander_dev_s *dev,
  ****************************************************************************/
 
 static int pca9538_multireadpin(FAR struct ioexpander_dev_s *dev,
-                                FAR const uint8_t *pins,
-                                FAR bool *values, int count)
+                                FAR uint8_t *pins, FAR bool *values,
+                                int count)
 {
   FAR struct pca9538_dev_s *pca = (FAR struct pca9538_dev_s *)dev;
   int ret;
 
   /* Get exclusive access to the PCA555 */
 
-  ret = nxmutex_lock(&pca->lock);
+  ret = pca9538_lock(pca);
   if (ret < 0)
     {
       return ret;
@@ -646,7 +654,7 @@ static int pca9538_multireadpin(FAR struct ioexpander_dev_s *dev,
 
   ret = pca9538_getmultibits(pca, PCA9538_REG_INPUT,
                              pins, values, count);
-  nxmutex_unlock(&pca->lock);
+  pca9538_unlock(pca);
   return ret;
 }
 
@@ -676,7 +684,7 @@ static int pca9538_multireadbuf(FAR struct ioexpander_dev_s *dev,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = nxmutex_lock(&pca->lock);
+  ret = pca9538_lock(pca);
   if (ret < 0)
     {
       return ret;
@@ -684,7 +692,7 @@ static int pca9538_multireadbuf(FAR struct ioexpander_dev_s *dev,
 
   ret = pca9538_getmultibits(pca, PCA9538_REG_OUTPUT,
                              pins, values, count);
-  nxmutex_unlock(&pca->lock);
+  pca9538_unlock(pca);
   return ret;
 }
 
@@ -722,7 +730,7 @@ static FAR void *pca9538_attach(FAR struct ioexpander_dev_s *dev,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = nxmutex_lock(&pca->lock);
+  ret = pca9538_lock(pca);
   if (ret < 0)
     {
       return ret;
@@ -748,7 +756,7 @@ static FAR void *pca9538_attach(FAR struct ioexpander_dev_s *dev,
 
   /* Add this callback to the table */
 
-  nxmutex_unlock(&pca->lock);
+  pca9538_unlock(pca);
   return handle;
 }
 
@@ -910,7 +918,8 @@ FAR struct ioexpander_dev_s *pca9538_initialize
 #ifdef CONFIG_PCA9538_MULTIPLE
   /* Allocate the device state structure */
 
-  pcadev = kmm_zalloc(sizeof(struct pca9538_dev_s));
+  pcadev = (FAR struct pca9538_dev_s *)kmm_zalloc
+                                            (sizeof(struct pca9538_dev_s));
   if (!pcadev)
     {
       return NULL;
@@ -943,7 +952,7 @@ FAR struct ioexpander_dev_s *pca9538_initialize
   pcadev->config->enable(pcadev->config, TRUE);
 #endif
 
-  nxmutex_init(&pcadev->lock);
+  nxsem_init(&pcadev->exclsem, 0, 1);
   return &pcadev->dev;
 }
 

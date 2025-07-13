@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/s32k1xx/s32k1xx_lowputc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author:  Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,6 +44,8 @@
 #include <assert.h>
 #include <errno.h>
 
+#include "up_arch.h"
+
 #include "hardware/s32k1xx_pinmux.h"
 #include "hardware/s32k1xx_lpuart.h"
 
@@ -38,7 +53,8 @@
 #include "s32k1xx_pin.h"
 #include "s32k1xx_lowputc.h"
 #include "s32k1xx_periphclocks.h"
-#include "arm_internal.h"
+
+#include "up_internal.h"
 
 #include <arch/board/board.h> /* Include last:  has dependencies */
 
@@ -180,7 +196,7 @@ void s32k1xx_lowsetup(void)
 
 #ifdef HAVE_LPUART_DEVICE
 int s32k1xx_lpuart_configure(uint32_t base,
-                             const struct uart_config_s *config)
+                             FAR const struct uart_config_s *config)
 {
   enum clock_names_e clkname;
   uint32_t lpuart_freq = 0;
@@ -268,11 +284,9 @@ int s32k1xx_lpuart_configure(uint32_t base,
 
       /* Select the better value between srb and (sbr + 1) */
 
-      if (temp_diff >
-          (config->baud - (lpuart_freq / (temp_osr * (temp_sbr + 1)))))
+      if (temp_diff > (config->baud - (lpuart_freq / (temp_osr * (temp_sbr + 1)))))
         {
-          temp_diff = config->baud -
-                      (lpuart_freq / (temp_osr * (temp_sbr + 1)));
+          temp_diff = config->baud - (lpuart_freq / (temp_osr * (temp_sbr + 1)));
           temp_sbr++;
         }
 
@@ -387,7 +401,7 @@ int s32k1xx_lpuart_configure(uint32_t base,
  *
  ****************************************************************************/
 
-#if defined(HAVE_LPUART_CONSOLE) && defined(CONFIG_DEBUG_FEATURES)
+#if defined(HAVE_LPUART_DEVICE) && defined(CONFIG_DEBUG_FEATURES)
 void s32k1xx_lowputc(int ch)
 {
   while ((getreg32(S32K1XX_CONSOLE_BASE + S32K1XX_LPUART_STAT_OFFSET) &
@@ -395,16 +409,13 @@ void s32k1xx_lowputc(int ch)
     {
     }
 
-  /* If the character to output is a newline,
-   * then prepend a carriage return.
-   */
+  /* If the character to output is a newline, then pre-pend a carriage return */
 
   if (ch == '\n')
     {
       /* Send the carriage return by writing it into the UART_TXD register. */
 
-      putreg32((uint32_t)'\r',
-                S32K1XX_CONSOLE_BASE + S32K1XX_LPUART_DATA_OFFSET);
+      putreg32((uint32_t)'\r', S32K1XX_CONSOLE_BASE + S32K1XX_LPUART_DATA_OFFSET);
 
       /* Wait for the transmit register to be emptied. When the TXFE bit is
        * non-zero, the TX Buffer FIFO is empty.

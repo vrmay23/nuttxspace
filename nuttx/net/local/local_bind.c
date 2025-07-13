@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/local/local_bind.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,6 +38,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#if defined(CONFIG_NET) && defined(CONFIG_NET_LOCAL)
 
 #include <sys/socket.h>
 #include <string.h>
@@ -39,7 +53,7 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: psock_local_bind
+ * Name: local_bind
  *
  * Description:
  *   This function implements the low-level parts of the standard local
@@ -50,56 +64,57 @@
 int psock_local_bind(FAR struct socket *psock,
                      FAR const struct sockaddr *addr, socklen_t addrlen)
 {
-  FAR struct local_conn_s *conn = psock->s_conn;
+  FAR struct local_conn_s *conn;
   FAR const struct sockaddr_un *unaddr =
     (FAR const struct sockaddr_un *)addr;
-  int index;
+  int namelen;
 
-  DEBUGASSERT(unaddr->sun_family == AF_LOCAL);
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL &&
+              unaddr != NULL && unaddr->sun_family == AF_LOCAL &&
+              addrlen >= sizeof(sa_family_t));
 
-  if (addrlen <= sizeof(sa_family_t) + 1)
-    {
-      return -EINVAL;
-    }
-
-  conn = psock->s_conn;
-
-  /* Check if local address is already in use */
-
-  net_lock();
-  if (local_findconn(conn, unaddr) != NULL)
-    {
-      net_unlock();
-      return -EADDRINUSE;
-    }
-
-  net_unlock();
+  conn = (FAR struct local_conn_s *)psock->s_conn;
 
   /* Save the address family */
 
-  conn->lc_instance_id = -1;
+  conn->lc_proto = psock->s_type;
 
   /* Now determine the type of the Unix domain socket by comparing the size
    * of the address description.
    */
 
-  if (unaddr->sun_path[0] == '\0')
+  if (addrlen == sizeof(sa_family_t))
     {
-      /* Zero-length sun_path... This is an abstract Unix domain socket */
+      /* No sun_path... This is an un-named Unix domain socket */
 
-      conn->lc_type = LOCAL_TYPE_ABSTRACT;
-      index = 1;
+      conn->lc_type = LOCAL_TYPE_UNNAMED;
     }
   else
     {
-      /* This is an normal, pathname Unix domain socket */
+      namelen = strnlen(unaddr->sun_path, UNIX_PATH_MAX - 1);
+      if (namelen <= 0)
+        {
+          /* Zero-length sun_path... This is an abstract Unix domain socket */
 
-      conn->lc_type = LOCAL_TYPE_PATHNAME;
-      index = 0;
+          conn->lc_type    = LOCAL_TYPE_ABSTRACT;
+          conn->lc_path[0] = '\0';
+        }
+      else
+        {
+          /* This is an normal, pathname Unix domain socket */
+
+          conn->lc_type = LOCAL_TYPE_PATHNAME;
+
+          /* Copy the path into the connection structure */
+
+          strncpy(conn->lc_path, unaddr->sun_path, UNIX_PATH_MAX - 1);
+          conn->lc_path[UNIX_PATH_MAX - 1] = '\0';
+          conn->lc_instance_id = -1;
+        }
     }
-
-  strlcpy(conn->lc_path, &unaddr->sun_path[index], sizeof(conn->lc_path));
 
   conn->lc_state = LOCAL_STATE_BOUND;
   return OK;
 }
+
+#endif /* CONFIG_NET && CONFIG_NET_LOCAL */

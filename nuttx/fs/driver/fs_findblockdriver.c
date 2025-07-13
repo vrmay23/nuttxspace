@@ -1,8 +1,6 @@
 /****************************************************************************
  * fs/driver/fs_findblockdriver.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -90,22 +88,13 @@ int find_blockdriver(FAR const char *pathname, int mountflags,
   /* Get the search results */
 
   inode = desc.node;
+  DEBUGASSERT(inode != NULL);
 
   /* Verify that the inode is a block driver. */
 
   if (!INODE_IS_BLOCK(inode))
     {
-#ifdef CONFIG_MTD
-      if (INODE_IS_MTD(inode))
-        {
-          finfo("%s is a MTD\n", pathname);
-        }
-      else
-#endif
-        {
-          ferr("ERROR: %s is not a block driver\n", pathname);
-        }
-
+      ferr("ERROR: %s is not a block driver\n", pathname);
       ret = -ENOTBLK;
       goto errout_with_inode;
     }

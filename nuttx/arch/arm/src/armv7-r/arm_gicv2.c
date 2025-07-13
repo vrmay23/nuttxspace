@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/armv7-r/arm_gicv2.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,16 +38,18 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/arch.h>
 
 #include <sys/types.h>
+#include <stdint.h>
 #include <stdint.h>
 #include <assert.h>
 #include <errno.h>
 
-#include <nuttx/arch.h>
 #include <arch/irq.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
 #include "gic.h"
 
 #ifdef CONFIG_ARMV7R_HAVE_GICv2
@@ -43,57 +58,36 @@
  * Public Functions
  ****************************************************************************/
 
-#if defined(CONFIG_ARCH_TRUSTZONE_SECURE) || defined(CONFIG_ARCH_HIPRI_INTERRUPT)
 /****************************************************************************
- * Name: up_set_secure_irq
+ * Name: arm_gic_nlines
  *
  * Description:
- *   Secure an IRQ
+ *   Return the number of interrupt lines supported by this GIC
+ *   implementation (include both PPIs (32) and SPIs).
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   The number of interrupt lines.
  *
  ****************************************************************************/
 
-void up_secure_irq(int irq, bool secure)
+static inline unsigned int arm_gic_nlines(void)
 {
-  unsigned int val;
+  uint32_t regval;
+  uint32_t field;
 
-  if (secure)
-    {
-      val = getreg32(GIC_ICDISR(irq)) & (~GIC_ICDISR_INT(irq));  /* group 0 */
-    }
-  else
-    {
-      val = getreg32(GIC_ICDISR(irq)) | GIC_ICDISR_INT(irq);     /* group 1 */
-    }
+  /* Get the number of interrupt lines. */
 
-  putreg32(val, GIC_ICDISR(irq));
+  regval = getreg32(GIC_ICDICTR);
+  field = (regval & GIC_ICDICTR_ITLINES_MASK) >> GIC_ICDICTR_ITLINES_SHIFT;
+  return (field + 1) << 5;
 }
 
 /****************************************************************************
- * Name: up_secure_irq_all
- *
- * Description:
- *   Secure all IRQ
- *
+ * Public Functions
  ****************************************************************************/
-
-void up_secure_irq_all(bool secure)
-{
-  unsigned int nlines = arm_gic_nlines();
-  unsigned int irq;
-
-  for (irq = 0; irq < nlines; irq += 32)
-    {
-      if (secure)
-        {
-          putreg32(0x00000000, GIC_ICDISR(irq));   /* group 0 */
-        }
-      else
-        {
-          putreg32(0xffffffff, GIC_ICDISR(irq));   /* group 1 */
-        }
-    }
-}
-#endif
 
 /****************************************************************************
  * Name: arm_gic0_initialize
@@ -116,57 +110,51 @@ void arm_gic0_initialize(void)
   unsigned int nlines = arm_gic_nlines();
   unsigned int irq;
 
-  arm_gic_dump("Entry arm_gic0_initialize", true, 0);
-
   /* Initialize SPIs.  The following should be done only by CPU0. */
 
   /* A processor in Secure State sets:
    *
-   * 1. Which interrupts are non-secure (ICDISR).  All set to zero (group
-   *    0).
-   * 2. Trigger mode of the SPI (ICDICFR). All fields set to 0b01->Level
-   *    sensitive, 1-N model.
-   * 3. Interrupt Clear-Enable (ICDICER)
-   * 3. Priority of the SPI using the priority set register (ICDIPR).
+   * 1. Which interrupts are non-secure (ICDISR).
+   *    REVISIT: Which bit state corresponds to secure?
+   * 2. Trigger mode of the SPI (ICDICFR). All fields set to 11->Edge
+   *    sensitive.
+   * 3. Innterrupt Clear-Enable (ICDICER)
+   * 4. Priority of the SPI using the priority set register (ICDIPR).
    *    Priority values are 8-bit unsigned binary. A GIC supports a
    *    minimum of 16 and a maximum of 256 priority levels. Here all
    *    are set to the middle priority 128 (0x80).
-   * 4. Target that receives the SPI interrupt (ICDIPTR).  Set all to
+   * 5. Target that receives the SPI interrupt (ICDIPTR).  Set all to
    *    CPU0.
    */
+
+  /* Enable GIC distributor */
+
+  putreg32(0x3, GIC_ICDDCR);
 
   /* Registers with 1-bit per interrupt */
 
   for (irq = GIC_IRQ_SPI; irq < nlines; irq += 32)
     {
-      putreg32(0x00000000, GIC_ICDISR(irq));   /* SPIs group 0 */
-      putreg32(0xffffffff, GIC_ICDICER(irq));  /* SPIs disabled */
-    }
-
-  /* Registers with 2-bits per interrupt */
-
-  for (irq = GIC_IRQ_SPI; irq < nlines; irq += 16)
-    {
-      putreg32(0x55555555, GIC_ICDICFR(irq));  /* SPIs level sensitive */
+      putreg32(0x00000000, GIC_ICDISR(irq));         /* SPIs secure */
+      putreg32(0x55555555, GIC_ICDICFR(irq));        /* SPIs level triggered */
+      putreg32(0x55555555, GIC_ICDICFR((irq + 16))); /* SPIs level triggered */
+      putreg32(0xffffffff, GIC_ICDICER(irq));        /* SPIs disabled */
     }
 
   /* Registers with 8-bits per interrupt */
 
   for (irq = GIC_IRQ_SPI; irq < nlines; irq += 4)
     {
-      putreg32(0x80808080, GIC_ICDIPR(irq));   /* SPI priority */
-      putreg32(0x01010101, GIC_ICDIPTR(irq));  /* SPI on CPU0 */
+      putreg32(0x80808080, GIC_ICDIPR(irq));        /* SPI priority */
+      putreg32(0x01010101, GIC_ICDIPTR(irq));       /* SPI on CPU0 */
     }
 
 #ifdef CONFIG_SMP
-  /* Attach SGI interrupt handlers. This attaches the handler to all CPUs. */
+  /* Attach SGI interrupt handlers */
 
-  DEBUGVERIFY(irq_attach(GIC_SMP_CPUSTART, arm_start_handler, NULL));
-  DEBUGVERIFY(irq_attach(GIC_SMP_SCHED, arm_smp_sched_handler, NULL));
-  DEBUGVERIFY(irq_attach(GIC_SMP_CALL, nxsched_smp_call_handler, NULL));
+  DEBUGVERIFY(irq_attach(GIC_IRQ_SGI1, arm_start_handler, NULL));
+  DEBUGVERIFY(irq_attach(GIC_IRQ_SGI2, arm_pause_handler, NULL));
 #endif
-
-  arm_gic_dump("Exit arm_gic0_initialize", true, 0);
 }
 
 /****************************************************************************
@@ -186,9 +174,6 @@ void arm_gic0_initialize(void)
 void arm_gic_initialize(void)
 {
   uint32_t iccicr;
-  uint32_t icddcr;
-
-  arm_gic_dump("Entry arm_gic_initialize", true, 0);
 
   /* Initialize PPIs.  The following steps need to be done by all CPUs */
 
@@ -199,27 +184,17 @@ void arm_gic_initialize(void)
 
   /* Registers with 1-bit per interrupt */
 
-#ifdef CONFIG_ARCH_TRUSTZONE_SECURE
-  /* per-CPU inerrupts config:
-   * ID0-ID7(SGI)  for Non-secure interrupts
-   * ID8-ID15(SGI)  for Secure interrupts.
-   * All PPI config as secure interrupts.
-   */
-
-  putreg32(0x000000ff, GIC_ICDISR(0));
-#else
-  putreg32(0x00000000, GIC_ICDISR(0));      /* SGIs and PPIs secure */
-#endif
-  putreg32(0xfe000000, GIC_ICDICER(0));     /* PPIs disabled */
+  putreg32(0x00000000, GIC_ICDISR(0));  /* SGIs and PPIs secure */
+  putreg32(0xf8000000, GIC_ICDICER(0)); /* PPIs disabled */
 
   /* Registers with 8-bits per interrupt */
 
-  putreg32(0x80808080, GIC_ICDIPR(0));      /* SGI[3:0] priority */
-  putreg32(0x80808080, GIC_ICDIPR(4));      /* SGI[4:7] priority */
-  putreg32(0x80808080, GIC_ICDIPR(8));      /* SGI[8:11] priority */
-  putreg32(0x80808080, GIC_ICDIPR(12));     /* SGI[12:15] priority */
-  putreg32(0x80808000, GIC_ICDIPR(24));     /* PPI[0] priority */
-  putreg32(0x80808080, GIC_ICDIPR(28));     /* PPI[1:4] priority */
+  putreg32(0x80808080, GIC_ICDIPR(0));  /* SGI[3:0] priority */
+  putreg32(0x80808080, GIC_ICDIPR(4));	/* SGI[4:7] priority */
+  putreg32(0x80808080, GIC_ICDIPR(8));	/* SGI[8:11] priority */
+  putreg32(0x80808080, GIC_ICDIPR(12));	/* SGI[12:15] priority */
+  putreg32(0x80000000, GIC_ICDIPR(24));	/* PPI[0] priority */
+  putreg32(0x80808080, GIC_ICDIPR(28));	/* PPI[1:4] priority */
 
   /* Set the binary point register.
    *
@@ -227,9 +202,9 @@ void arm_gic_initialize(void)
    * field; the value n (n=0-6) specifies that bits (n+1) through bit 7 are
    * used in the comparison for interrupt pre-emption.  A GIC supports a
    * minimum of 16 and a maximum of 256 priority levels so not all binary
-   * point settings may be meaningul. The special value n=7
-   * (GIC_ICCBPR_NOPREMPT) disables pre-emption.  We disable all pre-emption
-   * here to prevent nesting of interrupt handling.
+   * point settings may be meaningul. The special value n=7 (GIC_ICCBPR_NOPREMPT)
+   * disables pre-emption.  We disable all pre-emption here to prevent nesting
+   * of interrupt handling.
    */
 
   putreg32(GIC_ICCBPR_NOPREMPT, GIC_ICCBPR);
@@ -240,26 +215,34 @@ void arm_gic_initialize(void)
 
   /* Configure the  CPU Interface Control Register */
 
-  iccicr  = getreg32(GIC_ICCICR);
+  iccicr = getreg32(GIC_ICCICR);
 
-#if defined(CONFIG_ARCH_TRUSTZONE_SECURE)
+#if defined(CONFIG_ARCH_TRUSTZONE_SECURE) || defined(CONFIG_ARCH_TRUSTZONE_BOTH)
   /* Clear secure state ICCICR bits to be configured below */
 
-  iccicr &= ~(GIC_ICCICRS_FIQEN | GIC_ICCICRS_ACKTCTL | GIC_ICCICRS_CBPR |
-              GIC_ICCICRS_EOIMODES | GIC_ICCICRS_EOIMODENS |
-              GIC_ICCICRS_ENABLEGRP0 | GIC_ICCICRS_ENABLEGRP1 |
-              GIC_ICCICRS_FIQBYPDISGRP0 | GIC_ICCICRS_IRQBYPDISGRP0 |
-              GIC_ICCICRS_FIQBYPDISGRP1 | GIC_ICCICRS_IRQBYPDISGRP1);
+  iccicr &= ~(GIC_ICCICRS_FIQEN         |
+              GIC_ICCICRS_ACKTCTL       |
+              GIC_ICCICRS_CBPR          |
+              GIC_ICCICRS_EOIMODES      |
+              GIC_ICCICRS_EOIMODENS     |
+              GIC_ICCICRS_ENABLEGRP0    |
+              GIC_ICCICRS_ENABLEGRP1    |
+              GIC_ICCICRS_FIQBYPDISGRP0 |
+              GIC_ICCICRS_IRQBYPDISGRP0 |
+              GIC_ICCICRS_FIQBYPDISGRP1 |
+              GIC_ICCICRS_IRQBYPDISGRP1);
 
-#else
+#elif defined(CONFIG_ARCH_TRUSTZONE_NONSECURE)
   /* Clear non-secure state ICCICR bits to be configured below */
 
-  iccicr &= ~(GIC_ICCICRU_EOIMODENS | GIC_ICCICRU_ENABLEGRP1 |
-              GIC_ICCICRU_FIQBYPDISGRP1 | GIC_ICCICRU_IRQBYPDISGRP1);
+  iccicr &= ~(GIC_ICCICRS_EOIMODENS     |
+              GIC_ICCICRU_ENABLEGRP1    |
+              GIC_ICCICRU_FIQBYPDISGRP1 |
+              GIC_ICCICRU_IRQBYPDISGRP1);
 
 #endif
 
-#if defined(CONFIG_ARCH_TRUSTZONE_SECURE)
+#if defined(CONFIG_ARCH_TRUSTZONE_SECURE) || defined(CONFIG_ARCH_TRUSTZONE_BOTH)
   /* Set FIQn=1 if secure interrupts are to signal using nfiq_c.
    *
    * NOTE:  Only for processors that operate in secure state.
@@ -267,64 +250,118 @@ void arm_gic_initialize(void)
    */
 
   iccicr |= GIC_ICCICRS_FIQEN;
+#endif
 
+#if defined(ONFIG_ARCH_TRUSTZONE_BOTH)
   /* Program the AckCtl bit to select the required interrupt acknowledge
    * behavior.
    *
    * NOTE: Only for processors that operate in both secure and non-secure
    * state.
+   * REVISIT: I don't yet fully understand this setting.
    */
 
-  iccicr |= GIC_ICCICRS_ACKTCTL;
+  /* iccicr |= GIC_ICCICRS_ACKTCTL; */
+
+  /* Program the SBPR bit to select the required binary pointer behavior.
+   *
+   * NOTE: Only for processors that operate in both secure and non-secure
+   * state.
+   * REVISIT: I don't yet fully understand this setting.
+   */
+
+  /* iccicr |= GIC_ICCICRS_CBPR; */
+
 #endif
 
-#ifdef CONFIG_ARMV7R_GIC_EOIMODE
-#  if defined(CONFIG_ARCH_TRUSTZONE_SECURE)
+#if defined(CONFIG_ARCH_TRUSTZONE_SECURE) || defined(CONFIG_ARCH_TRUSTZONE_BOTH)
   /* Set EnableS=1 to enable CPU interface to signal secure interrupts.
    *
    * NOTE:  Only for processors that operate in secure state.
    */
 
   iccicr |= GIC_ICCICRS_EOIMODES;
-#  else
+#endif
+
+#if defined(CONFIG_ARCH_TRUSTZONE_NONSECURE)
+  /* Set EnableNS=1 to enable the CPU to signal non-secure interrupts.
+   *
+   * NOTE:  Only for processors that operate in non-secure state.
+   */
+
+  iccicr |= GIC_ICCICRS_EOIMODENS;
+
+#elif defined(CONFIG_ARCH_TRUSTZONE_BOTH)
   /* Set EnableNS=1 to enable the CPU to signal non-secure interrupts.
    *
    * NOTE:  Only for processors that operate in non-secure state.
    */
 
   iccicr |= GIC_ICCICRU_EOIMODENS;
-#  endif
 #endif
 
-#if defined(CONFIG_ARCH_TRUSTZONE_SECURE)
+#ifdef CONFIG_ARCH_TRUSTZONE_BOTH
+  /* If the processor operates in both security states and SBPR=0, then it
+   * must switch to the other security state and repeat the programming of
+   * the binary point register so that the binary point will be programmed
+   * for interrupts in both security states.
+   */
+
+#warning Missing logic
+#endif
+
+#if !defined(CONFIG_ARCH_HAVE_TRUSTZONE)
+  /* Enable the distributor by setting the the Enable bit in the enable
+   * register (no security extensions).
+   */
+
+  iccicr |= GIC_ICCICR_ENABLE;
+
+#elif defined(CONFIG_ARCH_TRUSTZONE_SECURE)
   /* Enable the Group 0 interrupts, FIQEn and disable Group 0/1
    * bypass.
    */
 
-  iccicr |= (GIC_ICCICRS_ENABLEGRP0 | GIC_ICCICRS_ENABLEGRP1 |
-             GIC_ICCICRS_FIQBYPDISGRP0 | GIC_ICCICRS_IRQBYPDISGRP0 |
-             GIC_ICCICRS_FIQBYPDISGRP1 | GIC_ICCICRS_IRQBYPDISGRP1);
-  icddcr  = (GIC_ICDDCR_ENABLEGRP0 | GIC_ICDDCR_ENABLEGRP1);
+  iccicr |= (GIC_ICCICRS_ENABLEGRP0    |
+             GIC_ICCICRS_FIQBYPDISGRP0 |
+             GIC_ICCICRS_IRQBYPDISGRP0 |
+             GIC_ICCICRS_FIQBYPDISGRP1 |
+             GIC_ICCICRS_IRQBYPDISGRP1);
 
-#else
+#elif defined(CONFIG_ARCH_TRUSTZONE_BOTH)
+  /* Enable the Group 0/1 interrupts, FIQEn and disable Group 0/1
+   * bypass.
+   */
+
+  iccicr |= (GIC_ICCICRS_ENABLEGRP0    |
+             GIC_ICCICRS_ENABLEGRP1    |
+             GIC_ICCICRS_FIQBYPDISGRP0 |
+             GIC_ICCICRS_IRQBYPDISGRP0 |
+             GIC_ICCICRS_FIQBYPDISGRP1 |
+             GIC_ICCICRS_IRQBYPDISGRP1);
+
+#else              /* defined(CONFIG_ARCH_TRUSTZONE_NONSECURE) */
   /* Enable the Group 1 interrupts and disable Group 1 bypass. */
 
-  iccicr |= (GIC_ICCICRU_ENABLEGRP1 | GIC_ICCICRU_FIQBYPDISGRP1 |
+  iccicr |= (GIC_ICCICRU_ENABLEGRP1    |
+             GIC_ICCICRU_FIQBYPDISGRP1 |
              GIC_ICCICRU_IRQBYPDISGRP1);
-  icddcr  = GIC_ICDDCR_ENABLE;
 
 #endif
 
-  /* Write the final ICCICR value to enable the GIC. */
+  /* Write the final ICCICR value */
 
-  putreg32(iccicr, GIC_ICCICR);
+  putreg32(GIC_ICCICR_ENABLE, GIC_ICCICR);
 
-  /* Write the ICDDCR value to enable the forwarding of interrupt by the
-   * distributor.
+#ifdef CONFIG_ARCH_TRUSTZONE_BOTH
+  /* A processor in the secure state must then switch to the non-secure
+   * a repeat setting of the enable bit in the enable register.  This
+   * enables distributor to respond to interrupt in both security states.
+   * REVISIT: Initial implementation operates only in secure state.
    */
 
-  putreg32(icddcr, GIC_ICDDCR);
-  arm_gic_dump("Exit arm_gic_initialize", true, 0);
+#warning Missing logic
+#endif
 }
 
 /****************************************************************************
@@ -337,7 +374,7 @@ void arm_gic_initialize(void)
  *   the irq number of the interrupt and then to call arm_doirq to dispatch
  *   the interrupt.
  *
- *  Input Parameters:
+ *  Input parameters:
  *   regs - A pointer to the register save area on the stack.
  *
  ****************************************************************************/
@@ -350,17 +387,13 @@ uint32_t *arm_decodeirq(uint32_t *regs)
   /* Read the interrupt acknowledge register and get the interrupt ID */
 
   regval = getreg32(GIC_ICCIAR);
-  irq    = (regval & GIC_ICCIAR_INTID_MASK) >> GIC_ICCIAR_INTID_SHIFT;
-
-#ifdef CONFIG_ARMV7R_GIC_EOIMODE
-  putreg32(regval, GIC_ICCEOIR);
-#endif
+  irq = (regval & GIC_ICCIAR_INTID_MASK) >> GIC_ICCIAR_INTID_SHIFT;
 
   /* Ignore spurions IRQs.  ICCIAR will report 1023 if there is no pending
    * interrupt.
    */
 
-  DEBUGASSERT(irq < NR_IRQS || irq >= 1022);
+  DEBUGASSERT(irq < NR_IRQS || irq == 1023);
   if (irq < NR_IRQS)
     {
       /* Dispatch the interrupt */
@@ -370,63 +403,7 @@ uint32_t *arm_decodeirq(uint32_t *regs)
 
   /* Write to the end-of-interrupt register */
 
-#ifdef CONFIG_ARMV7R_GIC_EOIMODE
-  putreg32(regval, GIC_ICCDIR);
-#else
   putreg32(regval, GIC_ICCEOIR);
-#endif
-  return regs;
-}
-
-/****************************************************************************
- * Name: arm_decodefiq
- *
- * Description:
- *   This function is called from the FIQ vector handler in arm_vectors.S.
- *   At this point, the interrupt has been taken and the registers have
- *   been saved on the stack.  This function simply needs to determine the
- *   the irq number of the interrupt and then to call arm_doirq to dispatch
- *   the interrupt.
- *
- *  Input Parameters:
- *   regs - A pointer to the register save area on the stack.
- *
- ****************************************************************************/
-
-uint32_t *arm_decodefiq(uint32_t *regs)
-{
-  uint32_t regval;
-  int irq;
-
-  /* Read the interrupt acknowledge register and get the interrupt ID */
-
-  regval = getreg32(GIC_ICCIAR);
-  irq    = (regval & GIC_ICCIAR_INTID_MASK) >> GIC_ICCIAR_INTID_SHIFT;
-
-#ifdef CONFIG_ARMV7R_GIC_EOIMODE
-  putreg32(regval, GIC_ICCEOIR);
-#endif
-
-  /* Ignore spurions IRQs.  ICCIAR will report 1023 if there is no pending
-   * interrupt.
-   */
-
-  DEBUGASSERT(irq < NR_IRQS || irq >= 1022);
-
-  if (irq < NR_IRQS)
-    {
-      /* Dispatch the interrupt */
-
-      regs = arm_doirq(irq, regs);
-    }
-
-  /* Write to the end-of-interrupt register */
-
-#ifdef CONFIG_ARMV7R_GIC_EOIMODE
-  putreg32(regval, GIC_ICCDIR);
-#else
-  putreg32(regval, GIC_ICCEOIR);
-#endif
   return regs;
 }
 
@@ -441,8 +418,8 @@ uint32_t *arm_decodefiq(uint32_t *regs)
  *
  *   This function implements enabling of the device specified by 'irq'
  *   at the interrupt controller level if supported by the architecture
- *   (up_irq_restore() supports the global level, the device level is
- *   hardware specific).
+ *   (up_irq_restore() supports the global level, the device level is hardware
+ *   specific).
  *
  *   Since this API is not supported on all architectures, it should be
  *   avoided in common implementations where possible.
@@ -466,8 +443,6 @@ void up_enable_irq(int irq)
 
       regaddr = GIC_ICDISER(irq);
       putreg32(GIC_ICDISER_INT(irq), regaddr);
-
-      arm_gic_dump("Exit up_enable_irq", false, irq);
     }
 }
 
@@ -502,8 +477,6 @@ void up_disable_irq(int irq)
 
       regaddr = GIC_ICDICER(irq);
       putreg32(GIC_ICDICER_INT(irq), regaddr);
-
-      arm_gic_dump("Exit up_disable_irq", false, irq);
     }
 }
 
@@ -534,12 +507,11 @@ int up_prioritize_irq(int irq, int priority)
        */
 
       regaddr = GIC_ICDIPR(irq);
-      regval  = getreg32(regaddr);
+      regval = getreg32(regaddr);
       regval &= ~GIC_ICDIPR_ID_MASK(irq);
       regval |= GIC_ICDIPR_ID(irq, priority);
       putreg32(regval, regaddr);
 
-      arm_gic_dump("Exit up_prioritize_irq", false, irq);
       return OK;
     }
 
@@ -547,34 +519,7 @@ int up_prioritize_irq(int irq, int priority)
 }
 
 /****************************************************************************
- * Name: up_affinity_irq
- *
- * Description:
- *   Set an IRQ affinity by software.
- *
- ****************************************************************************/
-
-void up_affinity_irq(int irq, cpu_set_t cpuset)
-{
-  if (irq >= GIC_IRQ_SPI && irq < NR_IRQS)
-    {
-      uintptr_t regaddr;
-      uint32_t regval;
-
-      /* Write the new cpuset to the corresponding field in the in the
-       * distributor Interrupt Processor Target Register (GIC_ICDIPTR).
-       */
-
-      regaddr = GIC_ICDIPTR(irq);
-      regval  = getreg32(regaddr);
-      regval &= ~GIC_ICDIPTR_ID_MASK(irq);
-      regval |= GIC_ICDIPTR_ID(irq, cpuset);
-      putreg32(regval, regaddr);
-    }
-}
-
-/****************************************************************************
- * Name: up_trigger_irq
+ * Name: arm_cpu_sgi
  *
  * Description:
  *   Perform a Software Generated Interrupt (SGI).  If CONFIG_SMP is
@@ -585,79 +530,30 @@ void up_affinity_irq(int irq, cpu_set_t cpuset)
  *   only to the current CPU.
  *
  * Input Parameters
- *   irq    - The SGI interrupt ID (0-15)
+ *   sgi    - The SGI interrupt ID (0-15)
  *   cpuset - The set of CPUs to receive the SGI
  *
- ****************************************************************************/
-
-void up_trigger_irq(int irq, cpu_set_t cpuset)
-{
-  if (irq >= 0 && irq <= GIC_IRQ_SGI15)
-    {
-      arm_cpu_sgi(irq, cpuset);
-    }
-  else if (irq >= 0 && irq < NR_IRQS)
-    {
-      uintptr_t regaddr;
-
-      /* Write '1' to the corresponding bit in the distributor Interrupt
-       * Set-Pending (ICDISPR)
-       */
-
-      regaddr = GIC_ICDISPR(irq);
-      putreg32(GIC_ICDISPR_INT(irq), regaddr);
-    }
-}
-
-/****************************************************************************
- * Name: arm_gic_irq_trigger
- *
- * Description:
- *   Set the trigger type for the specified IRQ source and the current CPU.
- *
- *   Since this API is not supported on all architectures, it should be
- *   avoided in common implementations where possible.
- *
- * Input Parameters:
- *   irq - The interrupt request to modify.
- *   edge - False: Active HIGH level sensitive, True: Rising edge sensitive
- *
  * Returned Value:
- *   Zero (OK) on success; a negated errno value is returned on any failure.
+ *   OK is always returned at present.
  *
  ****************************************************************************/
 
-int arm_gic_irq_trigger(int irq, bool edge)
+int arm_cpu_sgi(int sgi, unsigned int cpuset)
 {
-  uintptr_t regaddr;
   uint32_t regval;
-  uint32_t intcfg;
 
-  if (irq > GIC_IRQ_SGI15 && irq < NR_IRQS)
-    {
-      /* Get the address of the Interrupt Configuration Register for this
-       * irq.
-       */
+#ifdef CONFIG_SMP
+  regval = GIC_ICDSGIR_INTID(sgi)        |
+           GIC_ICDSGIR_CPUTARGET(cpuset) |
+           GIC_ICDSGIR_TGTFILTER_LIST;
+#else
+  regval = GIC_ICDSGIR_INTID(sgi)   |
+           GIC_ICDSGIR_CPUTARGET(0) |
+           GIC_ICDSGIR_TGTFILTER_THIS;
+#endif
 
-      regaddr = GIC_ICDICFR(irq);
-
-      /* Get the new Interrupt configuration bit setting */
-
-      intcfg = (edge ? (INT_ICDICFR_EDGE | INT_ICDICFR_1N) : INT_ICDICFR_1N);
-
-      /* Write the correct interrupt trigger to the Interrupt Configuration
-       * Register.
-       */
-
-      regval  = getreg32(regaddr);
-      regval &= ~GIC_ICDICFR_ID_MASK(irq);
-      regval |= GIC_ICDICFR_ID(irq, intcfg);
-      putreg32(regval, regaddr);
-
-      return OK;
-    }
-
-  return -EINVAL;
+  putreg32(regval, GIC_ICDSGIR);
+  return OK;
 }
 
-#endif /* CONFIG_ARMV7R_HAVE_GICv2 */
+#endif							/* CONFIG_ARMV7R_HAVE_GICv2 */

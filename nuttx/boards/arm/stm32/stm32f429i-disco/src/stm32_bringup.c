@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/stm32/stm32f429i-disco/src/stm32_bringup.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2015-2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,20 +39,20 @@
 
 #include <nuttx/config.h>
 
+#include <sys/mount.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <debug.h>
+#include <syslog.h>
 #include <errno.h>
 
 #include <nuttx/board.h>
-#include <nuttx/fs/fs.h>
 #include <nuttx/kmalloc.h>
 
 #ifdef CONFIG_STM32_SPI4
 #  include <nuttx/mmcsd.h>
 #endif
 
-#if defined(CONFIG_MTD_SST25XX) || defined(CONFIG_MTD_PROGMEM)
+#ifdef CONFIG_MTD_SST25XX
 #  include <nuttx/mtd/mtd.h>
 #endif
 
@@ -68,14 +81,6 @@
 #include "stm32.h"
 #include "stm32f429i-disco.h"
 
-#ifdef CONFIG_INPUT_BUTTONS_LOWER
-#  include <nuttx/input/buttons.h>
-#endif
-
-#ifdef CONFIG_SENSORS_L3GD20
-#include "stm32_l3gd20.h"
-#endif
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -89,7 +94,7 @@
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_LIB_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -97,47 +102,31 @@
 int stm32_bringup(void)
 {
 #if defined(CONFIG_STM32_SPI4)
-  struct spi_dev_s *spi;
+  FAR struct spi_dev_s *spi;
 #endif
 #if defined(CONFIG_MTD)
-  struct mtd_dev_s *mtd;
-#if defined (CONFIG_MTD_SST25XX)
-  struct mtd_geometry_s geo;
-#endif
+  FAR struct mtd_dev_s *mtd;
+  FAR struct mtd_geometry_s geo;
 #endif
 #if defined(CONFIG_MTD_PARTITION_NAMES)
-  const char *partname = CONFIG_STM32F429I_DISCO_FLASH_PART_NAMES;
+  FAR const char *partname = CONFIG_STM32F429I_DISCO_FLASH_PART_NAMES;
 #endif
   int ret;
 
 #ifdef HAVE_PROC
   /* mount the proc filesystem */
 
-  ret = nx_mount(NULL, CONFIG_NSH_PROC_MOUNTPOINT, "procfs", 0, NULL);
+  ret = mount(NULL, CONFIG_NSH_PROC_MOUNTPOINT, "procfs", 0, NULL);
   if (ret < 0)
     {
       syslog(LOG_ERR,
-             "ERROR: Failed to mount the PROC filesystem: %d\n", ret);
+             "ERROR: Failed to mount the PROC filesystem: %d (%d)\n",
+             ret, errno);
       return ret;
     }
 #endif
 
   /* Configure SPI-based devices */
-
-#if defined(CONFIG_MTD) && defined(CONFIG_MTD_PROGMEM)
-  mtd = progmem_initialize();
-  if (mtd == NULL)
-    {
-      syslog(LOG_ERR, "ERROR: progmem_initialize\n");
-    }
-
-  ret = register_mtddriver("/dev/flash", mtd, 0, mtd);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: register_mtddriver() failed: %d\n", ret);
-    }
-
-#endif
 
 #ifdef CONFIG_STM32_SPI4
   /* Get the SPI port */
@@ -164,18 +153,15 @@ int stm32_bringup(void)
   mtd = sst25xx_initialize(spi);
   if (!mtd)
     {
-      syslog(LOG_ERR, "ERROR: Failed to bind SPI port 4 to the SPI FLASH"
-                      " driver\n");
+      syslog(LOG_ERR, "ERROR: Failed to bind SPI port 4 to the SPI FLASH driver\n");
     }
   else
     {
-      syslog(LOG_INFO, "Successfully bound SPI port 4 to the SPI FLASH"
-                       " driver\n");
+      syslog(LOG_INFO, "Successfully bound SPI port 4 to the SPI FLASH driver\n");
 
       /* Get the geometry of the FLASH device */
 
-      ret = mtd->ioctl(mtd, MTDIOC_GEOMETRY,
-                       (unsigned long)((uintptr_t)&geo));
+      ret = mtd->ioctl(mtd, MTDIOC_GEOMETRY, (unsigned long)((uintptr_t)&geo));
       if (ret < 0)
         {
           ferr("ERROR: mtd->ioctl failed: %d\n", ret);
@@ -183,125 +169,122 @@ int stm32_bringup(void)
         }
 
 #ifdef CONFIG_STM32F429I_DISCO_FLASH_PART
-        {
-          int partno;
-          int partsize;
-          int partoffset;
-          int partszbytes;
-          int erasesize;
-          const char *partstring = CONFIG_STM32F429I_DISCO_FLASH_PART_LIST;
-          const char *ptr;
-          struct mtd_dev_s *mtd_part;
-          char  partref[16];
+      {
+        int partno;
+        int partsize;
+        int partoffset;
+        int partszbytes;
+        int erasesize;
+        const char *partstring = CONFIG_STM32F429I_DISCO_FLASH_PART_LIST;
+        const char *ptr;
+        FAR struct mtd_dev_s *mtd_part;
+        char  partref[4];
 
-          /* Now create a partition on the FLASH device */
+        /* Now create a partition on the FLASH device */
 
-          partno = 0;
-          ptr = partstring;
-          partoffset = 0;
+        partno = 0;
+        ptr = partstring;
+        partoffset = 0;
 
-          /* Get the Flash erase size */
+        /* Get the Flash erase size */
 
-          erasesize = geo.erasesize;
+        erasesize = geo.erasesize;
 
-          while (*ptr != '\0')
-            {
-              /* Get the partition size */
+        while (*ptr != '\0')
+          {
+            /* Get the partition size */
 
-              partsize = atoi(ptr);
-              partszbytes = (partsize << 10); /* partsize is defined in KB */
+            partsize = atoi(ptr);
+            partszbytes = (partsize << 10); /* partsize is defined in KB */
 
-              /* Check if partition size is bigger then erase block */
+            /* Check if partition size is bigger then erase block */
 
-              if (partszbytes < erasesize)
-                {
-                  ferr("ERROR: Partition size is lesser than erasesize!\n");
-                  return -1;
-                }
+            if (partszbytes < erasesize)
+              {
+                ferr("ERROR: Partition size is lesser than erasesize!\n");
+                return -1;
+              }
 
-              /* Check if partition size is multiple of erase block */
+            /* Check if partition size is multiple of erase block */
 
-              if ((partszbytes % erasesize) != 0)
-                {
-                  ferr("ERROR: Partition size is not multiple of"
-                       " erasesize!\n");
-                  return -1;
-                }
+            if ((partszbytes % erasesize) != 0)
+              {
+                ferr("ERROR: Partition size is not multiple of erasesize!\n");
+                return -1;
+              }
 
-              mtd_part    = mtd_partition(mtd, partoffset,
-                                          partszbytes / erasesize);
-              partoffset += partszbytes / erasesize;
+            mtd_part    = mtd_partition(mtd, partoffset, partszbytes / erasesize);
+            partoffset += partszbytes / erasesize;
 
 #ifdef CONFIG_STM32F429I_DISCO_FLASH_CONFIG_PART
-              /* Test if this is the config partition */
+            /* Test if this is the config partition */
 
-              if (CONFIG_STM32F429I_DISCO_FLASH_CONFIG_PART_NUMBER == partno)
-                {
-                  /* Register the partition as the config device */
+            if (CONFIG_STM32F429I_DISCO_FLASH_CONFIG_PART_NUMBER == partno)
+              {
+                /* Register the partition as the config device */
 
-                  mtdconfig_register(mtd_part);
-                }
-              else
+                mtdconfig_register(mtd_part);
+              }
+            else
 #endif
-                {
-                  /* Now initialize a SMART Flash block device and bind it
-                   * to the MTD device.
-                   */
+              {
+                /* Now initialize a SMART Flash block device and bind it
+                 * to the MTD device.
+                 */
 
 #if defined(CONFIG_MTD_SMART) && defined(CONFIG_FS_SMARTFS)
-                  snprintf(partref, sizeof(partref), "p%d", partno);
-                  smart_initialize(CONFIG_STM32F429I_DISCO_FLASH_MINOR,
-                                   mtd_part, partref);
+                sprintf(partref, "p%d", partno);
+                smart_initialize(CONFIG_STM32F429I_DISCO_FLASH_MINOR, mtd_part, partref);
 #endif
-                }
+              }
 
 #if defined(CONFIG_MTD_PARTITION_NAMES)
-              /* Set the partition name */
+            /* Set the partition name */
 
-              if (mtd_part == NULL)
-                {
-                  ferr("ERROR: failed to create partition %s\n", partname);
-                  return -1;
-                }
+            if (mtd_part == NULL)
+              {
+                ferr("ERROR: failed to create partition %s\n", partname);
+                return -1;
+              }
 
-              mtd_setpartitionname(mtd_part, partname);
+            mtd_setpartitionname(mtd_part, partname);
 
-              /* Now skip to next name.  We don't need to split the string
-               * here because the MTD partition logic will only display names
-               * up to the comma, thus allowing us to use a single static
-               * name in the code.
-               */
+            /* Now skip to next name.  We don't need to split the string here
+             * because the MTD partition logic will only display names up to
+             * the comma, thus allowing us to use a single static name
+             * in the code.
+             */
 
-              while (*partname != ',' && *partname != '\0')
-                {
-                  /* Skip to next ',' */
+            while (*partname != ',' && *partname != '\0')
+              {
+                /* Skip to next ',' */
 
-                  partname++;
-                }
+                partname++;
+              }
 
-              if (*partname == ',')
-                {
-                  partname++;
-                }
+            if (*partname == ',')
+              {
+                partname++;
+              }
 #endif
 
-              /* Update the pointer to point to the next size in the list */
+            /* Update the pointer to point to the next size in the list */
 
-              while ((*ptr >= '0') && (*ptr <= '9'))
-                {
-                  ptr++;
-                }
+            while ((*ptr >= '0') && (*ptr <= '9'))
+              {
+                ptr++;
+              }
 
-              if (*ptr == ',')
-                {
-                  ptr++;
-                }
+            if (*ptr == ',')
+              {
+                ptr++;
+              }
 
-              /* Increment the part number */
+            /* Increment the part number */
 
-              partno++;
-            }
-        }
+            partno++;
+          }
+      }
 #else /* CONFIG_STM32F429I_DISCO_FLASH_PART */
 
       /* Configure the device with no partition support */
@@ -327,27 +310,23 @@ int stm32_bringup(void)
 #if defined(CONFIG_RAMMTD) && defined(CONFIG_STM32F429I_DISCO_RAMMTD)
   /* Create a RAM MTD device if configured */
 
-    {
-      uint8_t *start =
-          kmm_malloc(CONFIG_STM32F429I_DISCO_RAMMTD_SIZE * 1024);
-      mtd = rammtd_initialize(start,
-                              CONFIG_STM32F429I_DISCO_RAMMTD_SIZE * 1024);
-      mtd->ioctl(mtd, MTDIOC_BULKERASE, 0);
+  {
+    uint8_t *start = (uint8_t *) kmm_malloc(CONFIG_STM32F429I_DISCO_RAMMTD_SIZE * 1024);
+    mtd = rammtd_initialize(start, CONFIG_STM32F429I_DISCO_RAMMTD_SIZE * 1024);
+    mtd->ioctl(mtd, MTDIOC_BULKERASE, 0);
 
-      /* Now initialize a SMART Flash block device and bind it to the MTD
-       * device
-       */
+    /* Now initialize a SMART Flash block device and bind it to the MTD device */
 
 #if defined(CONFIG_MTD_SMART) && defined(CONFIG_FS_SMARTFS)
-      smart_initialize(CONFIG_STM32F429I_DISCO_RAMMTD_MINOR, mtd, NULL);
+    smart_initialize(CONFIG_STM32F429I_DISCO_RAMMTD_MINOR, mtd, NULL);
 #endif
-    }
+  }
 
 #endif /* CONFIG_RAMMTD && CONFIG_STM32F429I_DISCO_RAMMTD */
 
 #ifdef HAVE_USBHOST
-  /* Initialize USB host operation.  stm32_usbhost_initialize() starts a
-   * thread will monitor for USB connection and disconnection events.
+  /* Initialize USB host operation.  stm32_usbhost_initialize() starts a thread
+   * will monitor for USB connection and disconnection events.
    */
 
   ret = stm32_usbhost_initialize();
@@ -368,16 +347,6 @@ int stm32_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_INPUT_BUTTONS_LOWER
-  /* Register the BUTTON driver */
-
-  ret = btn_lower_initialize("/dev/buttons");
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: btn_lower_initialize() failed: %d\n", ret);
-    }
-#endif /* CONFIG_INPUT_BUTTONS_LOWER */
-
 #ifdef CONFIG_INPUT_STMPE811
   /* Initialize the touchscreen */
 
@@ -389,13 +358,13 @@ int stm32_bringup(void)
 #endif
 
 #ifdef CONFIG_SENSORS_L3GD20
-  ret = board_l3gd20_initialize(0, 5);
+  ret = stm32_l3gd20initialize("/dev/gyr0");
   if (ret != OK)
     {
-      syslog(LOG_ERR, "ERROR: Failed to initialize l3gd20 sensor:"
-             " %d\n", ret);
+      syslog(LOG_ERR, "ERROR: Failed to initialize l3gd20 sensor: %d\n", ret);
     }
 #endif
+
 
 #ifdef CONFIG_PWM
   /* Initialize PWM and register the PWM device. */
@@ -414,16 +383,6 @@ int stm32_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: stm32_adc_setup() failed: %d\n", ret);
-    }
-#endif
-
-#ifdef CONFIG_STM32_CAN_CHARDRIVER
-  /* Initialize CAN and register the CAN driver. */
-
-  ret = stm32_can_setup();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: stm32_can_setup failed: %d\n", ret);
     }
 #endif
 

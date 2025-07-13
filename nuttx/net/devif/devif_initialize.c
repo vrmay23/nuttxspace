@@ -1,8 +1,6 @@
 /****************************************************************************
  * net/devif/devif_initialize.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- *
  *   Copyright (C) 2007-2011, 2014, 2017 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -58,10 +56,16 @@
  * Public Data
  ****************************************************************************/
 
-/* IP/TCP/UDP/ICMP/CAN statistics for all network interfaces */
+/* IP/TCP/UDP/ICMP statistics for all network interfaces */
 
 #ifdef CONFIG_NET_STATISTICS
 struct net_stats_s g_netstats;
+#endif
+
+#ifdef CONFIG_NET_IPv4_REASSEMBLY
+/* Reassembly timer (units: deci-seconds) */
+
+uint8_t g_reassembly_timer;
 #endif
 
 /****************************************************************************
@@ -88,5 +92,8 @@ struct net_stats_s g_netstats;
 
 void devif_initialize(void)
 {
+  /* Initialize callback support */
+
+  devif_callback_init();
 }
 #endif /* CONFIG_NET */

@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/arm/src/tiva/common/tiva_irq.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009, 2011, 2013-2014, 2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +41,6 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
-#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -37,7 +50,9 @@
 
 #include "nvic.h"
 #include "ram_vectors.h"
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "chip.h"
 #include "tiva_gpio.h"
 
@@ -61,6 +76,28 @@
 #define NVIC_CLRENA_OFFSET (NVIC_IRQ0_31_CLEAR - NVIC_IRQ0_31_ENABLE)
 
 /****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+/* g_current_regs[] holds a references to the current interrupt level
+ * register storage structure.  If is non-NULL only during interrupt
+ * processing.  Access to g_current_regs[] must be through the macro
+ * CURRENT_REGS for portability.
+ */
+
+volatile uint32_t *g_current_regs[1];
+
+/* This is the address of the  exception vector table (determined by the
+ * linker script).
+ */
+
+extern uint32_t _vectors[];
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+/****************************************************************************
  * Private Functions
  ****************************************************************************/
 
@@ -82,35 +119,26 @@ static void tiva_dumpnvic(const char *msg, int irq)
   irqinfo("  INTCTRL:    %08x VECTAB: %08x\n",
           getreg32(NVIC_INTCTRL), getreg32(NVIC_VECTAB));
 #if 0
-  irqinfo("  SYSH ENABLE MEMFAULT: %08x BUSFAULT: %08x USGFAULT: %08x "
-          "SYSTICK: %08x\n",
-          getreg32(NVIC_SYSHCON_MEMFAULTENA),
-          getreg32(NVIC_SYSHCON_BUSFAULTENA),
-          getreg32(NVIC_SYSHCON_USGFAULTENA),
-          getreg32(NVIC_SYSTICK_CTRL_ENABLE));
+  irqinfo("  SYSH ENABLE MEMFAULT: %08x BUSFAULT: %08x USGFAULT: %08x SYSTICK: %08x\n",
+          getreg32(NVIC_SYSHCON_MEMFAULTENA), getreg32(NVIC_SYSHCON_BUSFAULTENA),
+          getreg32(NVIC_SYSHCON_USGFAULTENA), getreg32(NVIC_SYSTICK_CTRL_ENABLE));
 #endif
 
 #if TIVA_IRQ_NEXTINT < 64
   irqinfo("  IRQ ENABLE: %08x %08x\n",
-          getreg32(NVIC_IRQ0_31_ENABLE),
-          getreg32(NVIC_IRQ32_63_ENABLE));
+          getreg32(NVIC_IRQ0_31_ENABLE), getreg32(NVIC_IRQ32_63_ENABLE));
 #elif TIVA_IRQ_NEXTINT < 96
   irqinfo("  IRQ ENABLE: %08x %08x %08x\n",
-          getreg32(NVIC_IRQ0_31_ENABLE),
-          getreg32(NVIC_IRQ32_63_ENABLE),
+          getreg32(NVIC_IRQ0_31_ENABLE), getreg32(NVIC_IRQ32_63_ENABLE),
           getreg32(NVIC_IRQ64_95_ENABLE));
 #elif TIVA_IRQ_NEXTINT < 128
   irqinfo("  IRQ ENABLE: %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ0_31_ENABLE),
-          getreg32(NVIC_IRQ32_63_ENABLE),
-          getreg32(NVIC_IRQ64_95_ENABLE),
-          getreg32(NVIC_IRQ96_127_ENABLE));
+          getreg32(NVIC_IRQ0_31_ENABLE), getreg32(NVIC_IRQ32_63_ENABLE),
+          getreg32(NVIC_IRQ64_95_ENABLE), getreg32(NVIC_IRQ96_127_ENABLE));
 #elif TIVA_IRQ_NEXTINT < 160
   irqinfo("  IRQ ENABLE: %08x %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ0_31_ENABLE),
-          getreg32(NVIC_IRQ32_63_ENABLE),
-          getreg32(NVIC_IRQ64_95_ENABLE),
-          getreg32(NVIC_IRQ96_127_ENABLE),
+          getreg32(NVIC_IRQ0_31_ENABLE), getreg32(NVIC_IRQ32_63_ENABLE),
+          getreg32(NVIC_IRQ64_95_ENABLE), getreg32(NVIC_IRQ96_127_ENABLE),
           getreg32(NVIC_IRQ128_159_ENABLE));
 #endif
 #if TIVA_IRQ_NEXTINT > 159
@@ -118,72 +146,51 @@ static void tiva_dumpnvic(const char *msg, int irq)
 #endif
 
   irqinfo("  SYSH_PRIO:  %08x %08x %08x\n",
-          getreg32(NVIC_SYSH4_7_PRIORITY),
-          getreg32(NVIC_SYSH8_11_PRIORITY),
+          getreg32(NVIC_SYSH4_7_PRIORITY), getreg32(NVIC_SYSH8_11_PRIORITY),
           getreg32(NVIC_SYSH12_15_PRIORITY));
   irqinfo("  IRQ PRIO:   %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ0_3_PRIORITY),
-          getreg32(NVIC_IRQ4_7_PRIORITY),
-          getreg32(NVIC_IRQ8_11_PRIORITY),
-          getreg32(NVIC_IRQ12_15_PRIORITY));
+          getreg32(NVIC_IRQ0_3_PRIORITY), getreg32(NVIC_IRQ4_7_PRIORITY),
+          getreg32(NVIC_IRQ8_11_PRIORITY), getreg32(NVIC_IRQ12_15_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ16_19_PRIORITY),
-          getreg32(NVIC_IRQ20_23_PRIORITY),
-          getreg32(NVIC_IRQ24_27_PRIORITY),
-          getreg32(NVIC_IRQ28_31_PRIORITY));
+          getreg32(NVIC_IRQ16_19_PRIORITY), getreg32(NVIC_IRQ20_23_PRIORITY),
+          getreg32(NVIC_IRQ24_27_PRIORITY), getreg32(NVIC_IRQ28_31_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ32_35_PRIORITY),
-          getreg32(NVIC_IRQ36_39_PRIORITY),
-          getreg32(NVIC_IRQ40_43_PRIORITY),
-          getreg32(NVIC_IRQ44_47_PRIORITY));
+          getreg32(NVIC_IRQ32_35_PRIORITY), getreg32(NVIC_IRQ36_39_PRIORITY),
+          getreg32(NVIC_IRQ40_43_PRIORITY), getreg32(NVIC_IRQ44_47_PRIORITY));
 #if TIVA_IRQ_NEXTINT > 47
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ48_51_PRIORITY),
-          getreg32(NVIC_IRQ52_55_PRIORITY),
-          getreg32(NVIC_IRQ56_59_PRIORITY),
-          getreg32(NVIC_IRQ60_63_PRIORITY));
+          getreg32(NVIC_IRQ48_51_PRIORITY), getreg32(NVIC_IRQ52_55_PRIORITY),
+          getreg32(NVIC_IRQ56_59_PRIORITY), getreg32(NVIC_IRQ60_63_PRIORITY));
 #endif
 #if TIVA_IRQ_NEXTINT > 63
   irqinfo("              %08x %08x %08x %08x\n",
-        getreg32(NVIC_IRQ64_67_PRIORITY),
-        getreg32(NVIC_IRQ68_71_PRIORITY),
-        getreg32(NVIC_IRQ72_75_PRIORITY),
-        getreg32(NVIC_IRQ76_79_PRIORITY));
+        getreg32(NVIC_IRQ64_67_PRIORITY), getreg32(NVIC_IRQ68_71_PRIORITY),
+        getreg32(NVIC_IRQ72_75_PRIORITY), getreg32(NVIC_IRQ76_79_PRIORITY));
 #endif
 #if TIVA_IRQ_NEXTINT > 79
   irqinfo("              %08x %08x %08x %08x\n",
-        getreg32(NVIC_IRQ80_83_PRIORITY),
-        getreg32(NVIC_IRQ84_87_PRIORITY),
-        getreg32(NVIC_IRQ88_91_PRIORITY),
-        getreg32(NVIC_IRQ92_95_PRIORITY));
+        getreg32(NVIC_IRQ80_83_PRIORITY), getreg32(NVIC_IRQ84_87_PRIORITY),
+        getreg32(NVIC_IRQ88_91_PRIORITY), getreg32(NVIC_IRQ92_95_PRIORITY));
 #endif
 #if TIVA_IRQ_NEXTINT > 95
   irqinfo("              %08x %08x %08x %08x\n",
-        getreg32(NVIC_IRQ96_99_PRIORITY),
-        getreg32(NVIC_IRQ100_103_PRIORITY),
-        getreg32(NVIC_IRQ104_107_PRIORITY),
-        getreg32(NVIC_IRQ108_111_PRIORITY));
+        getreg32(NVIC_IRQ96_99_PRIORITY), getreg32(NVIC_IRQ100_103_PRIORITY),
+        getreg32(NVIC_IRQ104_107_PRIORITY), getreg32(NVIC_IRQ108_111_PRIORITY));
 #endif
 #if TIVA_IRQ_NEXTINT > 111
   irqinfo("              %08x %08x %08x %08x\n",
-        getreg32(NVIC_IRQ112_115_PRIORITY),
-        getreg32(NVIC_IRQ116_119_PRIORITY),
-        getreg32(NVIC_IRQ120_123_PRIORITY),
-        getreg32(NVIC_IRQ124_127_PRIORITY));
+        getreg32(NVIC_IRQ112_115_PRIORITY), getreg32(NVIC_IRQ116_119_PRIORITY),
+        getreg32(NVIC_IRQ120_123_PRIORITY), getreg32(NVIC_IRQ124_127_PRIORITY));
 #endif
 #if TIVA_IRQ_NEXTINT > 127
   irqinfo("              %08x %08x %08x %08x\n",
-        getreg32(NVIC_IRQ128_131_PRIORITY),
-        getreg32(NVIC_IRQ132_135_PRIORITY),
-        getreg32(NVIC_IRQ136_139_PRIORITY),
-        getreg32(NVIC_IRQ140_143_PRIORITY));
+        getreg32(NVIC_IRQ128_131_PRIORITY), getreg32(NVIC_IRQ132_135_PRIORITY),
+        getreg32(NVIC_IRQ136_139_PRIORITY), getreg32(NVIC_IRQ140_143_PRIORITY));
 #endif
 #if TIVA_IRQ_NEXTINT > 143
   irqinfo("              %08x %08x %08x %08x\n",
-        getreg32(NVIC_IRQ144_147_PRIORITY),
-        getreg32(NVIC_IRQ148_151_PRIORITY),
-        getreg32(NVIC_IRQ152_155_PRIORITY),
-        getreg32(NVIC_IRQ156_159_PRIORITY));
+        getreg32(NVIC_IRQ144_147_PRIORITY), getreg32(NVIC_IRQ148_151_PRIORITY),
+        getreg32(NVIC_IRQ152_155_PRIORITY), getreg32(NVIC_IRQ156_159_PRIORITY));
 #endif
 #if TIVA_IRQ_NEXTINT > 159
 #  warning Missing output
@@ -195,7 +202,8 @@ static void tiva_dumpnvic(const char *msg, int irq)
 #endif
 
 /****************************************************************************
- * Name: tiva_nmi, tiva_pendsv, tiva_pendsv, tiva_reserved
+ * Name: tiva_nmi, tiva_busfault, tiva_usagefault, tiva_pendsv,
+ *       tiva_dbgmonitor, tiva_pendsv, tiva_reserved
  *
  * Description:
  *   Handlers for various exceptions.  None are handled and all are fatal
@@ -205,7 +213,7 @@ static void tiva_dumpnvic(const char *msg, int irq)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_FEATURES
-static int tiva_nmi(int irq, void *context, void *arg)
+static int tiva_nmi(int irq, FAR void *context, FAR void *arg)
 {
   up_irq_save();
   _err("PANIC!!! NMI received\n");
@@ -213,7 +221,23 @@ static int tiva_nmi(int irq, void *context, void *arg)
   return 0;
 }
 
-static int tiva_pendsv(int irq, void *context, void *arg)
+static int tiva_busfault(int irq, FAR void *context, FAR void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Bus fault received\n");
+  PANIC();
+  return 0;
+}
+
+static int tiva_usagefault(int irq, FAR void *context, FAR void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Usage fault received\n");
+  PANIC();
+  return 0;
+}
+
+static int tiva_pendsv(int irq, FAR void *context, FAR void *arg)
 {
   up_irq_save();
   _err("PANIC!!! PendSV received\n");
@@ -221,7 +245,15 @@ static int tiva_pendsv(int irq, void *context, void *arg)
   return 0;
 }
 
-static int tiva_reserved(int irq, void *context, void *arg)
+static int tiva_dbgmonitor(int irq, FAR void *context, FAR void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Debug Monitor received\n");
+  PANIC();
+  return 0;
+}
+
+static int tiva_reserved(int irq, FAR void *context, FAR void *arg)
 {
   up_irq_save();
   _err("PANIC!!! Reserved interrupt\n");
@@ -239,6 +271,7 @@ static int tiva_reserved(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
+#ifdef CONFIG_ARMV7M_USEBASEPRI
 static inline void tiva_prioritize_syscall(int priority)
 {
   uint32_t regval;
@@ -250,6 +283,7 @@ static inline void tiva_prioritize_syscall(int priority)
   regval |= (priority << NVIC_SYSH_PRIORITY_PR11_SHIFT);
   putreg32(regval, NVIC_SYSH8_11_PRIORITY);
 }
+#endif
 
 /****************************************************************************
  * Name: tiva_irqinfo
@@ -396,7 +430,7 @@ void up_irqinitialize(void)
    * vector table that requires special initialization.
    */
 
-  arm_ramvec_initialize();
+  up_ramvec_initialize();
 #endif
 
 #ifdef CONFIG_TIVA_RAMVBAR
@@ -422,6 +456,10 @@ void up_irqinitialize(void)
       putreg32(DEFPRIORITY32, regaddr);
     }
 
+  /* currents_regs is non-NULL only while processing an interrupt */
+
+  CURRENT_REGS = NULL;
+
   /* Initialize support for GPIO interrupts if included in this build */
 
 #ifdef CONFIG_TIVA_GPIO_IRQS
@@ -439,23 +477,24 @@ void up_irqinitialize(void)
    * under certain conditions.
    */
 
-  irq_attach(TIVA_IRQ_SVCALL, arm_svcall, NULL);
-  irq_attach(TIVA_IRQ_HARDFAULT, arm_hardfault, NULL);
+  irq_attach(TIVA_IRQ_SVCALL, up_svcall, NULL);
+  irq_attach(TIVA_IRQ_HARDFAULT, up_hardfault, NULL);
 
   /* Set the priority of the SVCall interrupt */
 
 #ifdef CONFIG_ARCH_IRQPRIO
   /* up_prioritize_irq(TIVA_IRQ_PENDSV, NVIC_SYSH_PRIORITY_MIN); */
 #endif
-
+#ifdef CONFIG_ARMV7M_USEBASEPRI
   tiva_prioritize_syscall(NVIC_SYSH_SVCALL_PRIORITY);
+#endif
 
   /* If the MPU is enabled, then attach and enable the Memory Management
    * Fault handler.
    */
 
 #ifdef CONFIG_ARM_MPU
-  irq_attach(TIVA_IRQ_MEMFAULT, arm_memfault, NULL);
+  irq_attach(TIVA_IRQ_MEMFAULT, up_memfault, NULL);
   up_enable_irq(TIVA_IRQ_MEMFAULT);
 #endif
 
@@ -464,13 +503,12 @@ void up_irqinitialize(void)
 #ifdef CONFIG_DEBUG_FEATURES
   irq_attach(TIVA_IRQ_NMI, tiva_nmi, NULL);
 #ifndef CONFIG_ARM_MPU
-  irq_attach(TIVA_IRQ_MEMFAULT, arm_memfault, NULL);
+  irq_attach(TIVA_IRQ_MEMFAULT, up_memfault, NULL);
 #endif
-  irq_attach(TIVA_IRQ_BUSFAULT, arm_busfault, NULL);
-  irq_attach(TIVA_IRQ_USAGEFAULT, arm_usagefault, NULL);
+  irq_attach(TIVA_IRQ_BUSFAULT, tiva_busfault, NULL);
+  irq_attach(TIVA_IRQ_USAGEFAULT, tiva_usagefault, NULL);
   irq_attach(TIVA_IRQ_PENDSV, tiva_pendsv, NULL);
-  arm_enable_dbgmonitor();
-  irq_attach(TIVA_IRQ_DBGMONITOR, arm_dbgmonitor, NULL);
+  irq_attach(TIVA_IRQ_DBGMONITOR, tiva_dbgmonitor, NULL);
   irq_attach(TIVA_IRQ_RESERVED, tiva_reserved, NULL);
 #endif
 
@@ -559,14 +597,14 @@ void up_enable_irq(int irq)
 }
 
 /****************************************************************************
- * Name: arm_ack_irq
+ * Name: up_ack_irq
  *
  * Description:
  *   Acknowledge the IRQ
  *
  ****************************************************************************/
 
-void arm_ack_irq(int irq)
+void up_ack_irq(int irq)
 {
 }
 

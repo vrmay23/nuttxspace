@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/sama5/sama5d2-xult/src/sam_at25.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  boards/arm/sama5/sama5d2-xult/src/sam_at25.c
  *
  *  Licensed to the Apache Software Foundation (ASF) under one or more
  *  contributor license agreements.  See the NOTICE file distributed with
@@ -26,6 +24,8 @@
 
 #include <nuttx/config.h>
 
+#include <sys/mount.h>
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <errno.h>
@@ -33,7 +33,6 @@
 
 #include <nuttx/spi/spi.h>
 #include <nuttx/mtd/mtd.h>
-#include <nuttx/fs/fs.h>
 #include <nuttx/fs/nxffs.h>
 
 #include "sam_spi.h"
@@ -59,8 +58,8 @@
 
 int sam_at25_automount(int minor)
 {
-  struct spi_dev_s *spi;
-  struct mtd_dev_s *mtd;
+  FAR struct spi_dev_s *spi;
+  FAR struct mtd_dev_s *mtd;
   static bool initialized = false;
   int ret;
 
@@ -82,13 +81,13 @@ int sam_at25_automount(int minor)
       mtd = at25_initialize(spi);
       if (!mtd)
         {
-          ferr("ERROR: Failed to bind SPI port %d to AT25 FLASH driver\n");
+          ferr("ERROR: Failed to bind SPI port %d to the AT25 FLASH driver\n");
           return -ENODEV;
         }
 
 #if defined(CONFIG_SAMA5D3XPLAINED_AT25_FTL)
 
-      /* And use the FTL layer to wrap the MTD driver as a block driver */
+      /* And finally, use the FTL layer to wrap the MTD driver as a block driver */
 
       ret = ftl_initialize(AT25_MINOR, mtd);
       if (ret < 0)
@@ -110,10 +109,10 @@ int sam_at25_automount(int minor)
 
       /* Mount the file system at /mnt/at25 */
 
-      ret = nx_mount(NULL, "/mnt/at25", "nxffs", 0, NULL);
+      ret = mount(NULL, "/mnt/at25", "nxffs", 0, NULL);
       if (ret < 0)
         {
-          ferr("ERROR: Failed to mount the NXFFS volume: %d\n", ret);
+          ferr("ERROR: Failed to mount the NXFFS volume: %d\n", errno);
           return ret;
         }
 #endif

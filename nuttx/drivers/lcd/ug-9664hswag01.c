@@ -1,36 +1,46 @@
-/****************************************************************************
+/**************************************************************************************
  * drivers/lcd/ug-9664hswag01.c
+ * Driver for the Univision UG-9664HSWAG01 Display with the Solomon Systech SSD1305 LCD
+ * controller.
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Reference: "Product Specification, OEL Display Module, UG-9664HSWAG01", Univision
+ *            Technology Inc., SAS1-6020-B, January 3, 2008.
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- ****************************************************************************/
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ **************************************************************************************/
 
-/* Driver for the Univision UG-9664HSWAG01 Display with the Solomon Systech
- * SSD1305 LCD controller.
- *
- * Reference:
- *   "Product Specification, OEL Display Module, UG-9664HSWAG01", Univision
- *    Technology Inc., SAS1-6020-B, January 3, 2008.
- */
-
-/****************************************************************************
+/**************************************************************************************
  * Included Files
- ****************************************************************************/
+ **************************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -38,7 +48,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -49,12 +58,11 @@
 
 #include "ssd1305.h"
 
-/****************************************************************************
+/**************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ **************************************************************************************/
 
-/* Configuration ************************************************************/
-
+/* Configuration **********************************************************************/
 /* UG-9664HSWAG01 Configuration Settings:
  *
  * CONFIG_UG9664HSWAG01_SPIMODE - Controls the SPI mode
@@ -68,8 +76,7 @@
  *
  * Required LCD driver settings:
  * CONFIG_LCD_UG9664HSWAG01 - Enable UG-9664HSWAG01 support
- * CONFIG_LCD_MAXCONTRAST should be 255, but any value >0 and <=255
- * will be accepted.
+ * CONFIG_LCD_MAXCONTRAST should be 255, but any value >0 and <=255 will be accepted.
  * CONFIG_LCD_MAXPOWER should be 2:  0=off, 1=dim, 2=normal
  *
  * Required SPI driver settings:
@@ -78,8 +85,8 @@
 
 /* Verify that all configuration requirements have been met */
 
-/* The UG-9664HSWAG01 spec says that is supports SPI mode 0,0 only.
- * However, sometimes you need to tinker with these things.
+/* The UG-9664HSWAG01 spec says that is supports SPI mode 0,0 only.  However, sometimes
+ * you need to tinker with these things.
  */
 
 #ifndef CONFIG_UG9664HSWAG01_SPIMODE
@@ -92,8 +99,8 @@
 #  define CONFIG_UG9664HSWAG01_FREQUENCY 3500000
 #endif
 
-/* CONFIG_UG9664HSWAG01_NINTERFACES determines the number of physical
- * interfaces that will be supported.
+/* CONFIG_UG9664HSWAG01_NINTERFACES determines the number of physical interfaces
+ * that will be supported.
  */
 
 #ifndef CONFIG_UG9664HSWAG01_NINTERFACES
@@ -148,8 +155,7 @@
 #  error "CONFIG_SPI_CMDDATA must be defined in your NuttX configuration"
 #endif
 
-/* Color Properties *********************************************************/
-
+/* Color Properties *******************************************************************/
 /* The SSD1305 display controller can handle a resolution of 132x64. The OLED
  * on the base board is 96x64.
  */
@@ -199,9 +205,9 @@
 #define LS_BIT          (1 << 0)
 #define MS_BIT          (1 << 7)
 
-/****************************************************************************
- * Private Types
- ****************************************************************************/
+/**************************************************************************************
+ * Private Type Definition
+ **************************************************************************************/
 
 /* This structure describes the state of this driver */
 
@@ -217,17 +223,17 @@ struct ug_dev_s
   uint8_t contrast;
   uint8_t powered;
 
-  /* The SSD1305 does not support reading from the display memory in SPI
-   * mode.Since there is 1 BPP and access is byte-by-byte, it is
-   * necessary to keep a shadow copy of the framebuffer memory.
+  /* The SSD1305 does not support reading from the display memory in SPI mode.
+   * Since there is 1 BPP and access is byte-by-byte, it is necessary to keep
+   * a shadow copy of the framebuffer memory.
    */
 
   uint8_t fb[UG_FBSIZE];
 };
 
-/****************************************************************************
+/**************************************************************************************
  * Private Function Protototypes
- ****************************************************************************/
+ **************************************************************************************/
 
 /* SPI helpers */
 
@@ -236,21 +242,16 @@ static void ug_deselect(FAR struct spi_dev_s *spi);
 
 /* LCD Data Transfer Methods */
 
-static int ug_putrun(FAR struct lcd_dev_s *dev,
-                     fb_coord_t row, fb_coord_t col,
-                     FAR const uint8_t *buffer,
+static int ug_putrun(fb_coord_t row, fb_coord_t col, FAR const uint8_t *buffer,
                      size_t npixels);
-static int ug_getrun(FAR struct lcd_dev_s *dev,
-                     fb_coord_t row, fb_coord_t col,
-                     FAR uint8_t *buffer,
+static int ug_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
                      size_t npixels);
 
 /* LCD Configuration */
 
 static int ug_getvideoinfo(FAR struct lcd_dev_s *dev,
                            FAR struct fb_videoinfo_s *vinfo);
-static int ug_getplaneinfo(FAR struct lcd_dev_s *dev,
-                           unsigned int planeno,
+static int ug_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
                            FAR struct lcd_planeinfo_s *pinfo);
 
 /* LCD RGB Mapping */
@@ -276,9 +277,9 @@ static int ug_setcontrast(struct lcd_dev_s *dev, unsigned int contrast);
 
 static inline void up_clear(FAR struct ug_dev_s  *priv);
 
-/****************************************************************************
+/**************************************************************************************
  * Private Data
- ****************************************************************************/
+ **************************************************************************************/
 
 /* This is working memory allocated by the LCD driver for each LCD device
  * and for each color plane.  This memory will hold one raster line of data.
@@ -291,7 +292,7 @@ static inline void up_clear(FAR struct ug_dev_s  *priv);
  * if there are multiple LCD devices, they must each have unique run buffers.
  */
 
-static uint8_t g_runbuffer[UG_XSTRIDE + 1];
+static uint8_t g_runbuffer[UG_XSTRIDE+1];
 
 /* This structure describes the overall LCD video controller */
 
@@ -325,7 +326,6 @@ static struct ug_dev_s g_ugdev =
     .getplaneinfo = ug_getplaneinfo,
 
     /* LCD RGB Mapping -- Not supported */
-
     /* Cursor Controls -- Not supported */
 
     /* LCD Specific Controls */
@@ -337,17 +337,18 @@ static struct ug_dev_s g_ugdev =
   },
 };
 
-/****************************************************************************
+/**************************************************************************************
  * Private Functions
- ****************************************************************************/
+ **************************************************************************************/
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_powerstring
  *
  * Description:
  *   Convert the power setting to a string.
  *
- ****************************************************************************/
+ **************************************************************************************/
+
 
 static inline FAR const char *ug_powerstring(uint8_t power)
 {
@@ -369,7 +370,7 @@ static inline FAR const char *ug_powerstring(uint8_t power)
     }
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name: ug_select
  *
  * Description:
@@ -383,12 +384,12 @@ static inline FAR const char *ug_powerstring(uint8_t power)
  *
  * Assumptions:
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 static void ug_select(FAR struct spi_dev_s *spi)
 {
-  /* Select UG-9664HSWAG01 chip (locking the SPI bus in case there are
-   * multiple devices competing for the SPI bus
+  /* Select UG-9664HSWAG01 chip (locking the SPI bus in case there are multiple
+   * devices competing for the SPI bus
    */
 
   SPI_LOCK(spi, true);
@@ -406,7 +407,7 @@ static void ug_select(FAR struct spi_dev_s *spi)
 #endif
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name: ug_deselect
  *
  * Description:
@@ -420,7 +421,7 @@ static void ug_select(FAR struct spi_dev_s *spi)
  *
  * Assumptions:
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 static void ug_deselect(FAR struct spi_dev_s *spi)
 {
@@ -430,27 +431,26 @@ static void ug_deselect(FAR struct spi_dev_s *spi)
   SPI_LOCK(spi, false);
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_putrun
  *
  * Description:
  *   This method can be used to write a partial raster line to the LCD:
  *
- *   dev     - The lcd device
  *   row     - Starting row to write to (range: 0 <= row < yres)
  *   col     - Starting column to write to (range: 0 <= col <= xres-npixels)
  *   buffer  - The buffer containing the run to be written to the LCD
  *   npixels - The number of pixels to write to the LCD
  *             (range: 0 < npixels <= xres-col)
  *
- ****************************************************************************/
+ **************************************************************************************/
 
-static int ug_putrun(FAR struct lcd_dev_s *dev,
-                     fb_coord_t row, fb_coord_t col,
-                     FAR const uint8_t *buffer,
-                     size_t npixels)
+static int ug_putrun(fb_coord_t row, fb_coord_t col, FAR const uint8_t *buffer,
+                       size_t npixels)
 {
-  FAR struct ug_dev_s *priv = (FAR struct ug_dev_s *)dev;
+  /* Because of this line of code, we will only be able to support a single UG device */
+
+  FAR struct ug_dev_s *priv = &g_ugdev;
   FAR uint8_t *fbptr;
   FAR uint8_t *ptr;
   uint8_t devcol;
@@ -484,7 +484,7 @@ static int ug_putrun(FAR struct lcd_dev_s *dev,
    */
 
 #ifdef UG_LCD_REVERSEY
-  row = (UG_YRES - 1) - row;
+  row = (UG_YRES-1) - row;
 #endif
 
   /* If the column is switched then the start of the run is the mirror of
@@ -501,7 +501,7 @@ static int ug_putrun(FAR struct lcd_dev_s *dev,
    */
 
 #ifdef UG_LCD_REVERSEX
-  col  = (UG_XRES - 1) - col;
+  col  = (UG_XRES-1) - col;
   col -= (pixlen - 1);
 #endif
 
@@ -612,7 +612,7 @@ static int ug_putrun(FAR struct lcd_dev_s *dev,
 
   /* Set the starting position for the run */
 
-  SPI_SEND(priv->spi, SSD1305_SETPAGESTART + page);       /* Set the page start */
+  SPI_SEND(priv->spi, SSD1305_SETPAGESTART+page);         /* Set the page start */
   SPI_SEND(priv->spi, SSD1305_SETCOLL + (devcol & 0x0f)); /* Set the low column */
   SPI_SEND(priv->spi, SSD1305_SETCOLH + (devcol >> 4));   /* Set the high column */
 
@@ -630,27 +630,26 @@ static int ug_putrun(FAR struct lcd_dev_s *dev,
   return OK;
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_getrun
  *
  * Description:
  *   This method can be used to read a partial raster line from the LCD.
  *
- *  dev     - The lcd device
  *  row     - Starting row to read from (range: 0 <= row < yres)
  *  col     - Starting column to read read (range: 0 <= col <= xres-npixels)
  *  buffer  - The buffer in which to return the run read from the LCD
  *  npixels - The number of pixels to read from the LCD
  *            (range: 0 < npixels <= xres-col)
  *
- ****************************************************************************/
+ **************************************************************************************/
 
-static int ug_getrun(FAR struct lcd_dev_s *dev,
-                     fb_coord_t row, fb_coord_t col,
-                     FAR uint8_t *buffer,
+static int ug_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
                      size_t npixels)
 {
-  FAR struct ug_dev_s *priv = (FAR struct ug_dev_s *)dev;
+  /* Because of this line of code, we will only be able to support a single UG device */
+
+  FAR struct ug_dev_s *priv = &g_ugdev;
   FAR uint8_t *fbptr;
   uint8_t page;
   uint8_t fbmask;
@@ -682,7 +681,7 @@ static int ug_getrun(FAR struct lcd_dev_s *dev,
    */
 
 #ifdef UG_LCD_REVERSEY
-  row = (UG_YRES - 1) - row;
+  row = (UG_YRES-1) - row;
 #endif
 
   /* If the column is switched then the start of the run is the mirror of
@@ -699,11 +698,10 @@ static int ug_getrun(FAR struct lcd_dev_s *dev,
    */
 
 #ifdef UG_LCD_REVERSEX
-  col  = (UG_XRES - 1) - col;
+  col  = (UG_XRES-1) - col;
 #endif
 
   /* Then transfer the display data from the shadow frame buffer memory */
-
   /* Get the page number.  The range of 64 lines is divided up into eight
    * pages of 8 lines each.
    */
@@ -790,32 +788,31 @@ static int ug_getrun(FAR struct lcd_dev_s *dev,
   return OK;
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_getvideoinfo
  *
  * Description:
  *   Get information about the LCD video controller configuration.
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 static int ug_getvideoinfo(FAR struct lcd_dev_s *dev,
                               FAR struct fb_videoinfo_s *vinfo)
 {
   DEBUGASSERT(dev && vinfo);
   ginfo("fmt: %d xres: %d yres: %d nplanes: %d\n",
-         g_videoinfo.fmt, g_videoinfo.xres,
-         g_videoinfo.yres, g_videoinfo.nplanes);
+         g_videoinfo.fmt, g_videoinfo.xres, g_videoinfo.yres, g_videoinfo.nplanes);
   memcpy(vinfo, &g_videoinfo, sizeof(struct fb_videoinfo_s));
   return OK;
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_getplaneinfo
  *
  * Description:
  *   Get information about the configuration of each LCD color plane.
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 static int ug_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
                               FAR struct lcd_planeinfo_s *pinfo)
@@ -823,19 +820,17 @@ static int ug_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
   DEBUGASSERT(dev && pinfo && planeno == 0);
   ginfo("planeno: %d bpp: %d\n", planeno, g_planeinfo.bpp);
   memcpy(pinfo, &g_planeinfo, sizeof(struct lcd_planeinfo_s));
-  pinfo->dev = dev;
   return OK;
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_getpower
  *
  * Description:
- *   Get the LCD panel power status
- *  (0: full off - CONFIG_LCD_MAXPOWER: full on).
- *   On backlit LCDs, this setting may correspond to the backlight setting.
+ *   Get the LCD panel power status (0: full off - CONFIG_LCD_MAXPOWER: full on). On
+ *   backlit LCDs, this setting may correspond to the backlight setting.
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 static int ug_getpower(struct lcd_dev_s *dev)
 {
@@ -845,15 +840,14 @@ static int ug_getpower(struct lcd_dev_s *dev)
   return priv->powered;
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_setpower
  *
  * Description:
- *   Enable/disable LCD panel power
- *  (0: full off - CONFIG_LCD_MAXPOWER: full on).
- *   On backlit LCDs, this setting may correspond to the backlight setting.
+ *   Enable/disable LCD panel power (0: full off - CONFIG_LCD_MAXPOWER: full on). On
+ *   backlit LCDs, this setting may correspond to the backlight setting.
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 static int ug_setpower(struct lcd_dev_s *dev, int power)
 {
@@ -890,7 +884,6 @@ static int ug_setpower(struct lcd_dev_s *dev, int power)
           SPI_SEND(priv->spi, SSD1305_DISPON);    /* Display on, normal mode */
           power = UG_POWER_ON;
         }
-
       SPI_SEND(priv->spi, SSD1305_DISPRAM);       /* Resume to RAM content display */
 
       /* Restore power to the device */
@@ -898,19 +891,18 @@ static int ug_setpower(struct lcd_dev_s *dev, int power)
       ug_power(0, true);
       priv->powered = power;
     }
-
   ug_deselect(priv->spi);
 
   return OK;
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_getcontrast
  *
  * Description:
  *   Get the current contrast setting (0-CONFIG_LCD_MAXCONTRAST).
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 static int ug_getcontrast(struct lcd_dev_s *dev)
 {
@@ -919,13 +911,13 @@ static int ug_getcontrast(struct lcd_dev_s *dev)
   return (int)priv->contrast;
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_setcontrast
  *
  * Description:
  *   Set LCD panel contrast (0-CONFIG_LCD_MAXCONTRAST).
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 static int ug_setcontrast(struct lcd_dev_s *dev, unsigned int contrast)
 {
@@ -959,13 +951,13 @@ static int ug_setcontrast(struct lcd_dev_s *dev, unsigned int contrast)
   return OK;
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  up_clear
  *
  * Description:
  *   Clear the display.
  *
- ****************************************************************************/
+ **************************************************************************************/
 
 static inline void up_clear(FAR struct ug_dev_s  *priv)
 {
@@ -991,7 +983,7 @@ static inline void up_clear(FAR struct ug_dev_s  *priv)
 
       /* Set the starting position for the run */
 
-      SPI_SEND(priv->spi, SSD1305_SETPAGESTART + i);
+      SPI_SEND(priv->spi, SSD1305_SETPAGESTART+i);
       SPI_SEND(priv->spi, SSD1305_SETCOLL + (UG_XOFFSET & 0x0f));
       SPI_SEND(priv->spi, SSD1305_SETCOLH + (UG_XOFFSET >> 4));
 
@@ -999,9 +991,9 @@ static inline void up_clear(FAR struct ug_dev_s  *priv)
 
       SPI_CMDDATA(spi, SPIDEV_DISPLAY(0), false);
 
-      /* Then transfer all 96 columns of data */
+       /* Then transfer all 96 columns of data */
 
-      SPI_SNDBLOCK(priv->spi, &priv->fb[page * UG_XRES], UG_XRES);
+       SPI_SNDBLOCK(priv->spi, &priv->fb[page * UG_XRES], UG_XRES);
     }
 
   /* Unlock and de-select the device */
@@ -1009,11 +1001,11 @@ static inline void up_clear(FAR struct ug_dev_s  *priv)
   ug_deselect(spi);
 }
 
-/****************************************************************************
+/**************************************************************************************
  * Public Functions
- ****************************************************************************/
+ **************************************************************************************/
 
-/****************************************************************************
+/**************************************************************************************
  * Name:  ug_initialize
  *
  * Description:
@@ -1024,19 +1016,17 @@ static inline void up_clear(FAR struct ug_dev_s  *priv)
  * Input Parameters:
  *
  *   spi - A reference to the SPI driver instance.
- *   devno - A value in the range of 0 through
- *     CONFIG_UG9664HSWAG01_NINTERFACES-1.
+ *   devno - A value in the range of 0 through CONFIG_UG9664HSWAG01_NINTERFACES-1.
  *     This allows support for multiple OLED devices.
  *
  * Returned Value:
  *
- *   On success, this function returns a reference to the LCD object for
- *   the specified OLED.  NULL is returned on any failure.
+ *   On success, this function returns a reference to the LCD object for the specified
+ *   OLED.  NULL is returned on any failure.
  *
- ****************************************************************************/
+ **************************************************************************************/
 
-FAR struct lcd_dev_s *ug_initialize(FAR struct spi_dev_s *spi,
-                                    unsigned int devno)
+FAR struct lcd_dev_s *ug_initialize(FAR struct spi_dev_s *spi, unsigned int devno)
 {
   /* Configure and enable LCD */
 
@@ -1065,7 +1055,7 @@ FAR struct lcd_dev_s *ug_initialize(FAR struct spi_dev_s *spi,
 
   SPI_SEND(spi, SSD1305_SETCOLL + 2);       /* Set low column address */
   SPI_SEND(spi, SSD1305_SETCOLH + 2);       /* Set high column address */
-  SPI_SEND(spi, SSD1305_SETSTARTLINE + 0);  /* Display start set */
+  SPI_SEND(spi, SSD1305_SETSTARTLINE+0);    /* Display start set */
   SPI_SEND(spi, SSD1305_SCROLL_STOP);       /* Stop horizontal scroll */
   SPI_SEND(spi, SSD1305_SETCONTRAST);       /* Set contrast control register */
   SPI_SEND(spi, 0x32);                      /* Data 1: Set 1 of 256 contrast steps */
@@ -1073,9 +1063,7 @@ FAR struct lcd_dev_s *ug_initialize(FAR struct spi_dev_s *spi,
   SPI_SEND(spi, 0x80);                      /* Data 1: Set 1 of 256 contrast steps */
   SPI_SEND(spi, SSD1305_MAPCOL131);         /* Set segment re-map */
   SPI_SEND(spi, SSD1305_DISPNORMAL);        /* Set normal display */
-
-  /* (void)SPI_SEND(spi, SSD1305_DISPINVERTED); */     /* Set inverse display */
-
+//(void)SPI_SEND(spi, SSD1305_DISPINVERTED);      /* Set inverse display */
   SPI_SEND(spi, SSD1305_SETMUX);            /* Set multiplex ratio */
   SPI_SEND(spi, 0x3f);                      /* Data 1: MUX ratio -1: 15-63 */
   SPI_SEND(spi, SSD1305_SETOFFSET);         /* Set display offset */
@@ -1094,7 +1082,7 @@ FAR struct lcd_dev_s *ug_initialize(FAR struct spi_dev_s *spi,
   SPI_SEND(spi, SSD1305_SETCOMCONFIG);      /* Set COM configuration */
   SPI_SEND(spi, SSD1305_COMCONFIG_ALT);     /* Data 1, Bit 4: 1=Alternative COM pin configuration */
   SPI_SEND(spi, SSD1305_SETVCOMHDESEL);     /* Set VCOMH deselect level */
-  SPI_SEND(spi, SSD1305_VCOMH_X7P7);        /* Data 1: ~0.77 x Vcc  */
+  SPI_SEND(spi, SSD1305_VCOMH_x7p7);        /* Data 1: ~0.77 x Vcc  */
   SPI_SEND(spi, SSD1305_SETLUT);            /* Set look up table for area color */
   SPI_SEND(spi, 0x3f);                      /* Data 1: Pulse width: 31-63 */
   SPI_SEND(spi, 0x3f);                      /* Data 2: Color A: 31-63 */

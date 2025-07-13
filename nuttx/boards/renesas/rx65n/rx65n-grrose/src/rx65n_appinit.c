@@ -1,8 +1,6 @@
 /****************************************************************************
  * boards/renesas/rx65n/rx65n-grrose/src/rx65n_appinit.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -30,9 +28,8 @@
 #include <stdint.h>
 
 #include <nuttx/board.h>
-#include "rx65n_grrose.h"
 
-#ifdef CONFIG_BOARDCTL
+#ifdef CONFIG_LIB_BOARDCTL
 
 /****************************************************************************
  * Public Functions
@@ -46,11 +43,11 @@
  *   called directly from application code, but only indirectly via the
  *   (non-standard) boardctl() interface using the command BOARDIOC_INIT.
  *
- *   CONFIG_BOARDCTL=y :
+ *   CONFIG_LIB_BOARDCTL=y :
  *     Called from the NSH library
  *
  *   CONFIG_BOARD_LATE_INITIALIZE=y, CONFIG_NSH_LIBRARY=y, &&
- *   CONFIG_BOARDCTL=n :
+ *   CONFIG_LIB_BOARDCTL=n :
  *     Called from board_late_initialize().
  *
  * Input Parameters:
@@ -58,7 +55,7 @@
  *         implementation without modification.  The argument has no
  *         meaning to NuttX; the meaning of the argument is a contract
  *         between the board-specific initialization logic and the
- *         matching application logic.  The value could be such things as a
+ *         matching application logic.  The value cold be such things as a
  *         mode enumeration value, a set of DIP switch switch settings, a
  *         pointer to configuration data read from a file or serial FLASH,
  *         or whatever you would like to do with it.  Every implementation
@@ -81,4 +78,4 @@ int board_app_initialize(uintptr_t arg)
 #endif
 }
 
-#endif /* CONFIG_BOARDCTL */
+#endif /* CONFIG_LIB_BOARDCTL */

@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/canutils/libobd2/obd_waitresponse.c
+ * canutils/libobd2/obd_waitresponse.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Alan Carvalho de Assis. All rights reserved.
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,8 +46,6 @@
 #include <string.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <unistd.h>
-
 #include <nuttx/can/can.h>
 
 #include "canutils/obd.h"
@@ -52,8 +63,8 @@
  *   Wait for a message from ECUs with requested PID that was sent using
  *   obd_send_request().
  *
- *   It will return an error case it doesn't receive the msg after the
- *   elapsed "timeout" time.
+ *   It will return an error case it doesn't receive the msg after the elapsed
+ *   "timeout" time.
  *
  ****************************************************************************/
 
@@ -94,10 +105,10 @@ int obd_wait_response(FAR struct obd_dev_s *dev, uint8_t opmode, uint8_t pid,
           return -EAGAIN;
         }
 
-#ifdef CONFIG_DEBUG_INFO
+      #ifdef CONFIG_DEBUG_INFO
         printf("  ID: %4u DLC: %u\n",
                dev->can_rxmsg.cm_hdr.ch_id, dev->can_rxmsg.cm_hdr.ch_dlc);
-#endif
+      #endif
 
       msgdlc = dev->can_rxmsg.cm_hdr.ch_dlc;
 
@@ -113,10 +124,10 @@ int obd_wait_response(FAR struct obd_dev_s *dev, uint8_t opmode, uint8_t pid,
 
       /* Check if we received a Response Message */
 
-      if ((extended &&
-           dev->can_rxmsg.cm_hdr.ch_id == OBD_PID_EXT_RESPONSE) ||
+      if ((extended && dev->can_rxmsg.cm_hdr.ch_id == OBD_PID_EXT_RESPONSE) || \
           (!extended && dev->can_rxmsg.cm_hdr.ch_id == OBD_PID_STD_RESPONSE))
         {
+
           /* Check if the Response if for the PID we are interested! */
 
           if (dev->can_rxmsg.cm_data[1] == (opmode + OBD_RESP_BASE) && \

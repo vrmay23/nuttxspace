@@ -1,22 +1,35 @@
 /****************************************************************************
- * sched/group/group_continue.c
+ *  sched/group/group_continue.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -59,29 +72,17 @@
 
 static int group_continue_handler(pid_t pid, FAR void *arg)
 {
-  FAR struct tcb_s *tcb = this_task();
   FAR struct tcb_s *rtcb;
 
   /* Resume all threads */
 
-  rtcb = nxsched_get_tcb(pid);
+  rtcb = sched_gettcb(pid);
   if (rtcb != NULL)
     {
-      /* Remove the task from waiting list */
-
-      nxsched_remove_blocked(rtcb);
-
-      /* Add the task to ready-to-run task list and
-       * perform the context switch if one is needed
-       */
-
-      if (nxsched_add_readytorun(rtcb))
-        {
-          up_switch_context(rtcb, tcb);
-        }
+      sched_continue(rtcb);
     }
 
-  /* Always return zero.  We need to visit each member of the group */
+  /* Always return zero.  We need to visit each member of the group*/
 
   return OK;
 }
@@ -96,7 +97,6 @@ static int group_continue_handler(pid_t pid, FAR void *arg)
  * Description:
  *   Resume all members of the task group.  This is SIGCONT default signal
  *   action logic.
- *   Note: this function should used within critical_section
  *
  * Input Parameters:
  *   tcb - TCB of the task to be retained.
@@ -108,12 +108,15 @@ static int group_continue_handler(pid_t pid, FAR void *arg)
 
 int group_continue(FAR struct tcb_s *tcb)
 {
-  irqstate_t flags;
   int ret;
 
-  flags = enter_critical_section();
+  /* Lock the scheduler so that there this thread will not lose priority
+   * until all of its children are suspended.
+   */
+
+  sched_lock();
   ret = group_foreachchild(tcb->group, group_continue_handler, NULL);
-  leave_critical_section(flags);
+  sched_unlock();
   return ret;
 }
 

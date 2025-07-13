@@ -1,9 +1,8 @@
 /****************************************************************************
  * libs/libc/stdlib/lib_div.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Stavros Polymenis. All rights reserved.
- * SPDX-FileContributor: Author: Stavros Polymenis <sp@orbitalfox.com>
+ *   Copyright (C) 2015 Stavros Polymenis. All rights reserved.
+ *   Author: Stavros Polymenis <sp@orbitalfox.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -63,7 +62,7 @@
  *   denom - Denominator of the division
  *
  * Returned Value:
- *   The result of the division represented as values of type div_t
+ *   The result of the devision represent as values of type div_t
  *
  ****************************************************************************/
 

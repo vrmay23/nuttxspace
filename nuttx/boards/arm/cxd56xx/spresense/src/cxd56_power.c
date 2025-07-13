@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/cxd56xx/spresense/src/cxd56_power.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,11 +47,10 @@
 #include <debug.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
-#include <nuttx/signal.h>
+#include <nuttx/semaphore.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
 
 #include <arch/chip/pm.h>
 #include <arch/board/board.h>
@@ -49,8 +61,6 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define BOARD_GPO_MAX_PIN_NUM 7
-
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -59,15 +69,13 @@
  * Private Data
  ****************************************************************************/
 
-static mutex_t g_ltlock = NXMUTEX_INITIALIZER;
+static sem_t g_ltsem = SEM_INITIALIZER(1);
 static bool g_used_lna = false;
 static bool g_used_tcxo = true;
 #ifdef CONFIG_BOARDCTL_RESET
 static struct pm_cpu_freqlock_s g_hv_lock =
-  PM_CPUFREQLOCK_INIT(PM_CPUFREQLOCK_TAG('B', 'P', 0),
-                      PM_CPUFREQLOCK_FLAG_HV);
+  PM_CPUFREQLOCK_INIT(PM_CPUFREQLOCK_TAG('B','P',0), PM_CPUFREQLOCK_FLAG_HV);
 #endif
-static uint8_t g_reset_gpo_targets = 0xff;
 
 /****************************************************************************
  * Public Data
@@ -134,47 +142,30 @@ int board_pmic_write(uint8_t addr, void *buf, uint32_t size)
 int board_power_setup(int status)
 {
 #ifdef CONFIG_BOARD_USB_DISABLE_IN_DEEP_SLEEPING
-  int      ret;
-  uint8_t  val = 0;
-#endif
+  uint8_t val;
   uint32_t bootcause;
+
+  /* Enable USB after wakeup from deep sleeping */
 
   bootcause = up_pm_get_bootcause();
 
   switch (bootcause)
     {
-      case PM_BOOT_POR_NORMAL:
-      case PM_BOOT_POR_DEADBATT:
-      case PM_BOOT_WDT_REBOOT:
-      case PM_BOOT_WDT_RESET:
-
-        /* Power off GPO switches (except for GPO0) in power-on-reset
-         * and watchdog reset.
-         */
-
-        board_power_control(PMIC_GPO(1) | PMIC_GPO(2) | PMIC_GPO(3) |
-                            PMIC_GPO(4) | PMIC_GPO(5) | PMIC_GPO(6) |
-                            PMIC_GPO(7), false);
-        break;
-#ifdef CONFIG_BOARD_USB_DISABLE_IN_DEEP_SLEEPING
       case PM_BOOT_DEEP_WKUPL:
       case PM_BOOT_DEEP_WKUPS:
       case PM_BOOT_DEEP_RTC:
       case PM_BOOT_DEEP_OTHERS:
-
-        /* Enable USB after wakeup from deep sleeping */
-
-        ret = cxd56_pmic_read(PMIC_REG_CNT_USB2, &val, sizeof(val));
-        if ((ret == 0) && (val & PMIC_SET_CHGOFF))
+        cxd56_pmic_read(PMIC_REG_CNT_USB2, &val, sizeof(val));
+        if (val & PMIC_SET_CHGOFF)
           {
             val &= ~PMIC_SET_CHGOFF;
             cxd56_pmic_write(PMIC_REG_CNT_USB2, &val, sizeof(val));
           }
         break;
-#endif
       default:
         break;
     }
+#endif
 
   /* Disable unused DDC/LDO permanently */
 
@@ -184,13 +175,14 @@ int board_power_setup(int status)
 
   board_power_control(POWER_AUDIO_DVDD, false);
 
+  /* Power off all of GPO switches (except for GPO0) in boot-up stage */
+
+  board_power_control(PMIC_GPO(1) | PMIC_GPO(2) | PMIC_GPO(3) | PMIC_GPO(4) |
+                      PMIC_GPO(5) | PMIC_GPO(6) | PMIC_GPO(7), false);
+
   /* Set GPO0 to Hi-Z */
 
   cxd56_pmic_set_gpo_hiz(PMIC_GET_CH(PMIC_GPO(0)));
-
-  /* Initialize reset GPO targets (reset all) */
-
-  g_reset_gpo_targets = 0xff;
 
   return 0;
 }
@@ -221,9 +213,6 @@ int board_power_control(int target, bool en)
       pfunc = cxd56_pmic_set_ddc_ldo;
       break;
 #endif /* CONFIG_CXD56_PMIC */
-    case CHIP_TYPE_GPIO:
-      board_gpio_write(PMIC_GET_CH(target), en ? 1 : 0);
-      break;
     default:
       break;
     }
@@ -231,60 +220,6 @@ int board_power_control(int target, bool en)
   if (pfunc)
     {
       ret = pfunc(PMIC_GET_CH(target), en);
-
-      /* If RTC clock is unstable, delay 1 tick for PMIC GPO setting. */
-
-      if (!g_rtc_enabled && (PMIC_GET_TYPE(target) == PMIC_TYPE_GPO))
-        {
-          nxsig_usleep(1);
-        }
-    }
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: board_power_control_tristate
- *
- * Description:
- *   Power on/off/HiZ the device on the board.
- *   (HiZ is available only for PMIC_TYPE_GPO.)
- *
- * Input Parameter:
- *   target : PMIC channel
- *   value : 1 (ON), 0 (OFF), -1(HiZ)
- *
- * Returned Value:
- *   0 on success, else a negative error code
- *
- ****************************************************************************/
-
-int board_power_control_tristate(int target, int value)
-{
-  int ret = 0;
-  bool en;
-
-  if ((PMIC_GET_TYPE(target) == PMIC_TYPE_GPO) && (value < 0))
-    {
-      /* set HiZ to PMIC GPO channel */
-
-      ret = cxd56_pmic_set_gpo_hiz(PMIC_GET_CH(target));
-
-      /* If RTC clock is unstable, delay 1 tick for PMIC setting. */
-
-      if (!g_rtc_enabled)
-        {
-          nxsig_usleep(1);
-        }
-    }
-  else if (PMIC_GET_TYPE(target) == CHIP_TYPE_GPIO)
-    {
-      board_gpio_write(PMIC_GET_CH(target), value);
-    }
-  else
-    {
-      en = value ? true : false;
-      ret = board_power_control(target, en);
     }
 
   return ret;
@@ -302,7 +237,6 @@ bool board_power_monitor(int target)
 {
   bool ret = false;
   bool (*pfunc)(uint8_t chset) = NULL;
-  int  status;
 
   switch (PMIC_GET_TYPE(target))
     {
@@ -317,10 +251,6 @@ bool board_power_monitor(int target)
       pfunc = cxd56_pmic_get_ddc_ldo;
       break;
 #endif /* CONFIG_CXD56_PMIC */
-    case CHIP_TYPE_GPIO:
-      status = board_gpio_read(PMIC_GET_CH(target));
-      ret = (status == 1);
-      break;
     default:
       break;
     }
@@ -328,38 +258,6 @@ bool board_power_monitor(int target)
   if (pfunc)
     {
       ret = pfunc(PMIC_GET_CH(target));
-    }
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: board_power_monitor_tristate
- *
- * Description:
- *   Get status of Power on/off/HiZ the device on the board.
- *
- * Input Parameter:
- *   target : PMIC channel
- *
- * Returned Value:
- *   1 (ON), 0 (OFF), -1(HiZ)
- *
- ****************************************************************************/
-
-int board_power_monitor_tristate(int target)
-{
-  int ret = 0;
-  bool en;
-
-  if (PMIC_GET_TYPE(target) == PMIC_TYPE_GPO)
-    {
-      ret = cxd56_pmic_get_gpo_hiz(PMIC_GET_CH(target));
-    }
-  else
-    {
-      en = board_power_monitor(target);
-      ret = en ? 1 : 0;
     }
 
   return ret;
@@ -397,7 +295,6 @@ int board_flash_power_control(bool en)
 
       board_power_control(POWER_FLASH, false);
     }
-
   return ret;
 }
 
@@ -428,7 +325,7 @@ int board_xtal_power_control(bool en)
 
   /* Get exclusive access to the lna / tcxo power control */
 
-  nxmutex_lock(&g_ltlock);
+  nxsem_wait(&g_ltsem);
 
   if (en)
     {
@@ -454,7 +351,8 @@ int board_xtal_power_control(bool en)
       g_used_tcxo = false;
     }
 
-  nxmutex_unlock(&g_ltlock);
+  nxsem_post(&g_ltsem);
+
   return ret;
 }
 
@@ -485,7 +383,7 @@ int board_lna_power_control(bool en)
 
   /* Get exclusive access to the lna / tcxo power control */
 
-  nxmutex_lock(&g_ltlock);
+  nxsem_wait(&g_ltsem);
 
   if (en)
     {
@@ -511,7 +409,8 @@ int board_lna_power_control(bool en)
       g_used_lna = false;
     }
 
-  nxmutex_unlock(&g_ltlock);
+  nxsem_post(&g_ltsem);
+
   return ret;
 }
 
@@ -540,16 +439,11 @@ int board_lna_power_control(bool en)
 #ifdef CONFIG_BOARDCTL_RESET
 int board_reset(int status)
 {
-  board_power_control(PMIC_TYPE_GPO | g_reset_gpo_targets, false);
+  /* Restore the original state for bootup after power cycle  */
 
-  /* Restore the original state for boot up after power cycle  */
-
-  if (!up_interrupt_context())
-    {
-      board_xtal_power_control(true);
-      board_flash_power_control(true);
-      up_pm_acquire_freqlock(&g_hv_lock);
-    }
+  board_xtal_power_control(true);
+  board_flash_power_control(true);
+  up_pm_acquire_freqlock(&g_hv_lock);
 
   /* System reboot */
 
@@ -586,7 +480,11 @@ int board_power_off(int status)
   enum pm_sleepmode_e mode;
   uint8_t val;
 
-  board_power_control(PMIC_TYPE_GPO | g_reset_gpo_targets, false);
+  /* Power off explicitly because GPOs are kept during deep sleeping */
+
+  board_power_control(PMIC_GPO(0) | PMIC_GPO(1) | PMIC_GPO(2) | PMIC_GPO(3) |
+                      PMIC_GPO(4) | PMIC_GPO(5) | PMIC_GPO(6) | PMIC_GPO(7),
+                      false);
 
   /* Set DDC_ANA output to HiZ before sleeping for power saving */
 
@@ -624,43 +522,3 @@ int board_power_off(int status)
   return 0;
 }
 #endif
-
-/****************************************************************************
- * Name: board_set_reset_gpo
- *
- * Description:
- *   Set gpo to off when power off the board.
- *
- ****************************************************************************/
-
-int board_set_reset_gpo(int target)
-{
-  if ((PMIC_GET_TYPE(target) & PMIC_TYPE_GPO) == 0)
-    {
-      return -1;
-    }
-
-  g_reset_gpo_targets |= PMIC_GET_CH(target);
-
-  return 0;
-}
-
-/****************************************************************************
- * Name: board_unset_reset_gpo
- *
- * Description:
- *   Keep gpo status when power off the board.
- *
- ****************************************************************************/
-
-int board_unset_reset_gpo(int target)
-{
-  if ((PMIC_GET_TYPE(target) & PMIC_TYPE_GPO) == 0)
-    {
-      return -1;
-    }
-
-  g_reset_gpo_targets &= ~PMIC_GET_CH(target);
-
-  return 0;
-}

@@ -1,10 +1,14 @@
 /****************************************************************************
  * arch/arm/src/tiva/cc13xx/cc13x2_cc26x2_v1_rom.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2015-2017, Texas Instruments Incorporated
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This is a port of TI's setup_rom.c file which has a fully compatible BSD
+ * license:
+ *
+ *    Copyright (c) 2015-2017, Texas Instruments Incorporated
+ *    All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,7 +45,8 @@
 
 #include <stdint.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "hardware/tiva_adi2_refsys.h"
 #include "hardware/tiva_adi3_refsys.h"
 #include "hardware/tiva_adi4_aux.h"
@@ -86,7 +91,7 @@ void rom_setup_stepvaddrtrimto(uint32_t tocode)
           putreg32(pmctl_regsetctrl & ~AON_PMCTL_RESETCTL_VDDR_LOSS_EN,
                   TIVA_AON_PMCTL_RESETCTL);
 
-          /* Wait for VDDR_LOSS_EN setting to propagate */
+           /* Wait for VDDR_LOSS_EN setting to propagate */
 
           getreg32(TIVA_AON_RTC_SYNC);
         }
@@ -130,7 +135,7 @@ void rom_setup_stepvaddrtrimto(uint32_t tocode)
 
           putreg32(pmctl_regsetctrl, TIVA_AON_PMCTL_RESETCTL);
 
-          /* And finally wait for VDDR_LOSS_EN setting to propagate */
+           /* And finally wait for VDDR_LOSS_EN setting to propagate */
 
           getreg32(TIVA_AON_RTC_SYNC);
         }
@@ -155,8 +160,8 @@ void rom_setup_coldreset_from_shutdown_cfg1(uint32_t ccfg_modeconf)
     {
       /* Set VDDS_BOD trim - using masked write {MASK8:DATA8} - TRIM_VDDS_BOD
        * is bits[7:3] of ADI3..REFSYSCTL1 - Needs a positive transition on
-       * BOD_BG_TRIM_EN (bit[7] of REFSYSCTL3) to latch new VDDS BOD.
-       * Set to 0 first to guarantee a positive transition.
+       * BOD_BG_TRIM_EN (bit[7] of REFSYSCTL3) to latch new VDDS BOD. Set to 0
+       * first to guarantee a positive transition.
        */
 
       putreg8(ADI3_REFSYS_REFSYSCTL3_BOD_BG_TRIM_EN,
@@ -214,8 +219,8 @@ void rom_setup_coldreset_from_shutdown_cfg1(uint32_t ccfg_modeconf)
       setbits |= AON_PMCTL_PWRCTL_DCDC_EN;
     }
 
-  /* Set the ACTIVE source based upon CCFG:MODE_CONF:DCDC_ACTIVE
-   * Note: Inverse polarity
+  /* Set the ACTIVE source based upon CCFG:MODE_CONF:DCDC_ACTIVE Note: Inverse
+   * polarity
    */
 
   if ((ccfg_modeconf & CCFG_MODE_CONF_DCDC_ACTIVE) != 0)

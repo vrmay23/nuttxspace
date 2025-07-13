@@ -1,22 +1,42 @@
 /****************************************************************************
  * apps/nshlib/nsh_builtin.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Originally by:
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright (C) 2011 Uros Platise. All rights reserved.
+ *   Author: Uros Platise <uros.platise@isotel.eu>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * With subsequent updates, modifications, and general maintenance by:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ *   Copyright (C) 2011-2013, 2019 Gregory Nutt.  All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,8 +53,6 @@
 
 #include <stdbool.h>
 #include <errno.h>
-#include <sched.h>
-#include <signal.h>
 #include <string.h>
 
 #include <nuttx/lib/builtin.h>
@@ -71,13 +89,8 @@
  ****************************************************************************/
 
 int nsh_builtin(FAR struct nsh_vtbl_s *vtbl, FAR const char *cmd,
-                FAR char **argv,
-                FAR const struct nsh_param_s *param)
+                FAR char **argv, FAR const char *redirfile, int oflags)
 {
-#if !defined(CONFIG_NSH_DISABLEBG) && defined(CONFIG_SCHED_CHILD_STATUS)
-  struct sigaction act;
-  struct sigaction old;
-#endif
   int ret = OK;
 
   /* Lock the scheduler in an attempt to prevent the application from
@@ -86,31 +99,17 @@ int nsh_builtin(FAR struct nsh_vtbl_s *vtbl, FAR const char *cmd,
 
   sched_lock();
 
-#if !defined(CONFIG_NSH_DISABLEBG) && defined(CONFIG_SCHED_CHILD_STATUS)
-  /* Ignore the child status if run the application on background. */
-
-  if (vtbl->np.np_bg == true)
-    {
-      act.sa_handler = SIG_DFL;
-      act.sa_flags = SA_NOCLDWAIT;
-      sigemptyset(&act.sa_mask);
-
-      sigaction(SIGCHLD, &act, &old);
-    }
-
-#endif /* CONFIG_NSH_DISABLEBG */
-
   /* Try to find and execute the command within the list of builtin
    * applications.
    */
 
-  ret = exec_builtin(cmd, argv, param);
+  ret = exec_builtin(cmd, (FAR char * const *)argv, redirfile, oflags);
   if (ret >= 0)
     {
       /* The application was successfully started with pre-emption disabled.
        * In the simplest cases, the application will not have run because the
-       * the scheduler is locked.  But in the case where I/O was redirected,
-       * a proxy task ran and broke our lock.  As result, the application may
+       * the scheduler is locked.  But in the case where I/O was redirected, a
+       * proxy task ran and broke our lock.  As result, the application may
        * have aso ran if its priority was higher than than the priority of
        * this thread.
        *
@@ -123,7 +122,6 @@ int nsh_builtin(FAR struct nsh_vtbl_s *vtbl, FAR const char *cmd,
        *     foreground
        */
 
-       vtbl->np.np_lastpid = ret;
 #ifdef CONFIG_SCHED_WAITPID
 
       /* CONFIG_SCHED_WAITPID is selected, so we may run the command in
@@ -136,14 +134,13 @@ int nsh_builtin(FAR struct nsh_vtbl_s *vtbl, FAR const char *cmd,
 #  endif /* CONFIG_NSH_DISABLEBG */
         {
           int rc = 0;
-          int tc = 0;
 
-          if (vtbl->isctty)
-            {
-              /* Setup up to receive SIGINT if control-C entered. */
+          /* Setup up to receive SIGINT if control-C entered.  The return
+           * value is ignored because this console device may not support
+           * SIGINT.
+           */
 
-              tc = nsh_ioctl(vtbl, TIOCSCTTY, ret);
-            }
+          ioctl(stdout->fs_fd, TIOCSCTTY, ret);
 
           /* Wait for the application to exit.  We did lock the scheduler
            * above, but that does not guarantee that the application did not
@@ -152,10 +149,10 @@ int nsh_builtin(FAR struct nsh_vtbl_s *vtbl, FAR const char *cmd,
            * and if the application has not yet run, it will now be able to
            * do so.
            *
-           * Also, if CONFIG_SCHED_HAVE_PARENT is defined waitpid() might
-           * fail even if task is still active:  If the I/O was re-directed
-           * by a proxy task, then the ask is a child of the proxy, and not
-           * this task. waitpid() fails with ECHILD in either case.
+           * Also, if CONFIG_SCHED_HAVE_PARENT is defined waitpid() might fail
+           * even if task is still active:  If the I/O was re-directed by a
+           * proxy task, then the ask is a child of the proxy, and not this
+           * task.  waitpid() fails with ECHILD in either case.
            *
            * NOTE: WUNTRACED does nothing in the default case, but in the
            * case the where CONFIG_SIG_SIGSTOP_ACTION=y, the built-in app
@@ -167,13 +164,12 @@ int nsh_builtin(FAR struct nsh_vtbl_s *vtbl, FAR const char *cmd,
           if (ret < 0)
             {
               /* If the child thread does not exist, waitpid() will return
-               * the error ECHLD.  Since we know that the task was
-               * successfully started, this must be one of the cases
-               * described above; we have to assume that the task already
-               * exit'ed. In this case, we have no idea if the application
-               * ran successfully or not (because NuttX does not retain exit
-               * status of child tasks). Let's assume that is did run
-               * successfully.
+               * the error ECHLD.  Since we know that the task was successfully
+               * started, this must be one of the cases described above; we
+               * have to assume that the task already exit'ed.  In this case,
+               * we have no idea if the application ran successfully or not
+               * (because NuttX does not retain exit status of child tasks).
+               * Let's assume that is did run successfully.
                */
 
               int errcode = errno;
@@ -193,22 +189,19 @@ int nsh_builtin(FAR struct nsh_vtbl_s *vtbl, FAR const char *cmd,
           else
             {
               /* We can't return the exact status (nsh has nowhere to put it)
-               * so just pass back zero/nonzero in a fashion that doesn't
-               * look like an error.
+               * so just pass back zero/nonzero in a fashion that doesn't look
+               * like an error.
                */
 
               ret = (rc == 0) ? OK : 1;
 
-              /* TODO:  Set the environment variable '?' to a string
-               * corresponding to WEXITSTATUS(rc) so that $? will expand to
-               * the exit status of the most recently executed task.
-               */
+             /* TODO:  Set the environment variable '?' to a string corresponding
+              * to WEXITSTATUS(rc) so that $? will expand to the exit status of
+              * the most recently executed task.
+              */
             }
 
-          if (vtbl->isctty && tc == 0)
-            {
-              nsh_ioctl(vtbl, TIOCNOTTY, 0);
-            }
+          ioctl(stdout->fs_fd, TIOCSCTTY, -1);
         }
 #  ifndef CONFIG_NSH_DISABLEBG
       else
@@ -219,32 +212,20 @@ int nsh_builtin(FAR struct nsh_vtbl_s *vtbl, FAR const char *cmd,
        *
        * - CONFIG_SCHED_WAITPID is not selected meaning that all commands
        *   have to be run in background, or
-       * - CONFIG_SCHED_WAITPID and CONFIG_NSH_DISABLEBG are both selected,
-       *   but the user requested to run the command in background.
+       * - CONFIG_SCHED_WAITPID and CONFIG_NSH_DISABLEBG are both selected, but the
+       *   user requested to run the command in background.
        *
        * NOTE that the case of a) CONFIG_SCHED_WAITPID is not selected and
-       * b) CONFIG_NSH_DISABLEBG selected cannot be supported.  In that
-       * event, all commands will have to run in background.  The waitpid()
-       * API must be available to support running the command in foreground.
+       * b) CONFIG_NSH_DISABLEBG selected cannot be supported.  In that event, all
+       * commands will have to run in background.  The waitpid() API must be
+       * available to support running the command in foreground.
        */
 
 #if !defined(CONFIG_SCHED_WAITPID) || !defined(CONFIG_NSH_DISABLEBG)
         {
-#if !defined(CONFIG_NSH_DISABLEBG) && defined(CONFIG_SCHED_CHILD_STATUS)
-
-          /* Restore the old actions */
-
-#  ifndef CONFIG_SCHED_WAITPID
-          if (vtbl->np.np_bg == true)
-#  endif
-            {
-              sigaction(SIGCHLD, &old, NULL);
-            }
-
-#  endif
-          struct sched_param sched;
-          sched_getparam(ret, &sched);
-          nsh_output(vtbl, "%s [%d:%d]\n", cmd, ret, sched.sched_priority);
+          struct sched_param param;
+          sched_getparam(ret, &param);
+          nsh_output(vtbl, "%s [%d:%d]\n", cmd, ret, param.sched_priority);
 
           /* Backgrounded commands always 'succeed' as long as we can start
            * them.

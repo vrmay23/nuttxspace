@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/am335x/am335x_boot.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Petro Karashchenko. All rights reserved.
+ *   Author: Petro Karashchenko <petro.karashchenko@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,7 @@
 #include <debug.h>
 
 #include <nuttx/cache.h>
-#ifdef CONFIG_LEGACY_PAGING
+#ifdef CONFIG_PAGING
 #  include <nuttx/page.h>
 #endif
 
@@ -40,7 +53,10 @@
 #include "chip.h"
 #include "arm.h"
 #include "mmu.h"
-#include "arm_internal.h"
+#include "fpu.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "am335x_clockconfig.h"
 #include "am335x_wdog.h"
 #include "am335x_lowputc.h"
@@ -66,7 +82,7 @@
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_FEATURES
-#  define showprogress(c) arm_lowputc(c)
+#  define showprogress(c) up_lowputc(c)
 #else
 #  define showprogress(c)
 #endif
@@ -93,8 +109,8 @@
 
 /* Symbols defined via the linker script */
 
-extern uint8_t _vector_start[]; /* Beginning of vector block */
-extern uint8_t _vector_end[];   /* End+1 of vector block */
+extern uint32_t _vector_start; /* Beginning of vector block */
+extern uint32_t _vector_end;   /* End+1 of vector block */
 
 #define SAMA5_LCDC_FBNSECTIONS \
   ((CONFIG_SAMA5_LCDC_FB_SIZE + 0x000fffff) >> 20)
@@ -200,14 +216,12 @@ static inline void am335x_remap(void)
  ****************************************************************************/
 
 #if !defined(CONFIG_ARCH_ROMPGTABLE) && defined(CONFIG_ARCH_LOWVECTORS) && \
-     defined(CONFIG_LEGACY_PAGING)
+     defined(CONFIG_PAGING)
 static void am335x_vectorpermissions(uint32_t mmuflags)
 {
-  /* The PTE for the beginning of OCMC0 RAM is at the base of the L2 page
-   * table
-   */
+  /* The PTE for the beginning of OCMC0 RAM is at the base of the L2 page table */
 
-  uintptr_t pte = mmu_l2_getentry(PG_L2_VECT_VADDR, 0);
+  uint32_t pte = mmu_l2_getentry(PG_L2_VECT_VADDR, 0);
 
   /* Mask out the old MMU flags from the page table entry.
    *
@@ -239,7 +253,13 @@ static void am335x_vectorpermissions(uint32_t mmuflags)
 
 static inline size_t am335x_vectorsize(void)
 {
-  return _vector_end - _vector_start;
+  uintptr_t src;
+  uintptr_t end;
+
+  src = (uintptr_t)&_vector_start;
+  end = (uintptr_t)&_vector_end;
+
+  return (size_t)(end - src);
 }
 
 /****************************************************************************
@@ -260,7 +280,7 @@ static void am335x_vectormapping(void)
 {
   uint32_t vector_paddr = AM335X_VECTOR_PADDR & PTE_SMALL_PADDR_MASK;
   uint32_t vector_vaddr = AM335X_VECTOR_VADDR & PTE_SMALL_PADDR_MASK;
-  uint32_t vector_size  = _vector_end - _vector_start;
+  uint32_t vector_size  = (uint32_t)&_vector_end - (uint32_t)&_vector_start;
   uint32_t end_paddr    = AM335X_VECTOR_PADDR + vector_size;
 
   /* REVISIT:  Cannot really assert in this context */
@@ -274,7 +294,7 @@ static void am335x_vectormapping(void)
 
   while (vector_paddr < end_paddr)
     {
-      mmu_l2_setentry(VECTOR_L2_VBASE, vector_paddr, vector_vaddr,
+      mmu_l2_setentry(VECTOR_L2_VBASE,  vector_paddr, vector_vaddr,
                       MMU_L2_VECTORFLAGS);
       vector_paddr += 4096;
       vector_vaddr += 4096;
@@ -298,8 +318,8 @@ static void am335x_vectormapping(void)
  * Description:
  *   Copy the interrupt block to its final destination.  Vectors are already
  *   positioned at the beginning of the text region and only need to be
- *   copied in the case where we are using high vectors or where the
- *   beginning of the text region cannot be remapped to address zero.
+ *   copied in the case where we are using high vectors or where the beginning
+ *   of the text region cannot be remapped to address zero.
  *
  ****************************************************************************/
 
@@ -309,7 +329,7 @@ static void am335x_copyvectorblock(void)
   uint32_t *end;
   uint32_t *dest;
 
-#ifdef CONFIG_LEGACY_PAGING
+#ifdef CONFIG_PAGING
   /* If we are using re-mapped vectors in an area that has been marked
    * read only, then temporarily mark the mapping write-able (non-buffered).
    */
@@ -317,26 +337,25 @@ static void am335x_copyvectorblock(void)
   am335x_vectorpermissions(MMU_L2_VECTRWFLAGS);
 #endif
 
-  /* Copy the vectors into OCMC0 RAM at the address that will be mapped to
-   * the vector  address:
+  /* Copy the vectors into OCMC0 RAM at the address that will be mapped to the vector
+   * address:
    *
-   *   AM335X_VECTOR_PADDR - Unmapped, physical address of vector table in
-   *                         OCMC0 RAM
+   *   AM335X_VECTOR_PADDR - Unmapped, physical address of vector table in OCMC0 RAM
    *   AM335X_VECTOR_VSRAM - Virtual address of vector table in OCMC0 RAM
    *   AM335X_VECTOR_VADDR - Virtual address of vector table (0x00000000 or
    *                         0xffff0000)
    */
 
-  src  = (uint32_t *)_vector_start;
-  end  = (uint32_t *)_vector_end;
-  dest = (uint32_t *)AM335X_VECTOR_VSRAM;
+  src  = (uint32_t *)&_vector_start;
+  end  = (uint32_t *)&_vector_end;
+  dest = (uint32_t *)(AM335X_VECTOR_VSRAM);
 
   while (src < end)
     {
       *dest++ = *src++;
     }
 
-#if !defined(CONFIG_ARCH_LOWVECTORS) && defined(CONFIG_LEGACY_PAGING)
+#if !defined(CONFIG_ARCH_LOWVECTORS) && defined(CONFIG_PAGING)
   /* Make the vectors read-only, cache-able again */
 
   am335x_vectorpermissions(MMU_L2_VECTORFLAGS);
@@ -373,14 +392,14 @@ static void am335x_copyvectorblock(void)
 void arm_boot(void)
 {
 #ifndef CONFIG_ARCH_ROMPGTABLE
-  /* __start provided the basic MMU mappings for OCMC0 RAM.  Now provide
-   * mappings for all IO regions (Including the vector region).
+  /* __start provided the basic MMU mappings for OCMC0 RAM.  Now provide mappings
+   * for all IO regions (Including the vector region).
    */
 
   am335x_setupmappings();
 
-  /* Provide a special mapping for the OCMC0 RAM interrupt vector positioned
-   * in high memory.
+  /* Provide a special mapping for the OCMC0 RAM interrupt vector positioned in
+   * high memory.
    */
 
   am335x_vectormapping();
@@ -397,9 +416,11 @@ void arm_boot(void)
 
   am335x_clockconfig();
 
+#ifdef CONFIG_ARCH_FPU
   /* Initialize the FPU */
 
   arm_fpuconfig();
+#endif
 
   /* Disable CPU Watchdog */
 
@@ -425,10 +446,10 @@ void arm_boot(void)
 #endif
 
 #ifdef CONFIG_BOOT_SDRAM_DATA
-  /* This setting is inappropriate for the AM335x because the code is
-   * *always* executing from SDRAM.  If CONFIG_BOOT_SDRAM_DATA happens
-   * to be set, let's try to do the right thing and initialize the
-   * .data and .bss sections.
+  /* This setting is inappropriate for the AM335x because the code is *always*
+   * executing from SDRAM.  If CONFIG_BOOT_SDRAM_DATA happens to be set,
+   * let's try to do the right thing and initialize the .data and .bss
+   * sections.
    */
 
   arm_data_initialize();
@@ -443,7 +464,7 @@ void arm_boot(void)
    * driver.
    */
 
-  arm_earlyserialinit();
+  up_earlyserialinit();
 #endif
 
   /* Perform board-specific initialization,  This must include:

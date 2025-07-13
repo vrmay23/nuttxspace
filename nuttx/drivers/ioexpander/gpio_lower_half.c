@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/ioexpander/gpio_lower_half.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
 
 #include <sys/types.h>
 #include <assert.h>
-#include <debug.h>
 #include <errno.h>
 
 #include <nuttx/kmalloc.h>
@@ -73,8 +85,7 @@ static int gplh_handler(FAR struct ioexpander_dev_s *ioe,
 static int gplh_read(FAR struct gpio_dev_s *gpio, FAR bool *value);
 static int gplh_write(FAR struct gpio_dev_s *gpio, bool value);
 #ifdef CONFIG_IOEXPANDER_INT_ENABLE
-static int gplh_attach(FAR struct gpio_dev_s *gpio,
-                       pin_interrupt_t callback);
+static int gplh_attach(FAR struct gpio_dev_s *gpio, pin_interrupt_t callback);
 static int gplh_enable(FAR struct gpio_dev_s *gpio, bool enable);
 #endif
 static int gplh_setpintype(FAR struct gpio_dev_s *gpio,
@@ -100,48 +111,19 @@ static const struct gpio_operations_s g_gplh_ops =
   gplh_setpintype,
 };
 
-/* Identifies the type of the GPIO pin */
+/* REVISIT:  The following violates the NuttX coding standard requirement
+ * for C89 compatibility.
+ */
 
-static const uint32_t g_gplh_inttype[GPIO_NPINTYPES] =
+static const uint32_t g_gplh_inttype[] =
 {
-  IOEXPANDER_VAL_DISABLE,         /* GPIO_INPUT_PIN */
-  IOEXPANDER_VAL_DISABLE,         /* GPIO_INPUT_PIN_PULLUP */
-  IOEXPANDER_VAL_DISABLE,         /* GPIO_INPUT_PIN_PULLDOWN */
-  IOEXPANDER_VAL_DISABLE,         /* GPIO_OUTPUT_PIN */
-  IOEXPANDER_VAL_DISABLE,         /* GPIO_OUTPUT_PIN_OPENDRAIN */
-  CONFIG_GPIO_LOWER_HALF_INTTYPE, /* GPIO_INTERRUPT_PIN */
-  IOEXPANDER_VAL_HIGH,            /* GPIO_INTERRUPT_HIGH_PIN */
-  IOEXPANDER_VAL_LOW,             /* GPIO_INTERRUPT_LOW_PIN */
-  IOEXPANDER_VAL_RISING,          /* GPIO_INTERRUPT_RISING_PIN */
-  IOEXPANDER_VAL_FALLING,         /* GPIO_INTERRUPT_FALLING_PIN */
-  IOEXPANDER_VAL_BOTH,            /* GPIO_INTERRUPT_BOTH_PIN */
-  CONFIG_GPIO_LOWER_HALF_INTTYPE, /* GPIO_INTERRUPT_PIN_WAKEUP */
-  IOEXPANDER_VAL_HIGH,            /* GPIO_INTERRUPT_HIGH_PIN_WAKEUP */
-  IOEXPANDER_VAL_LOW,             /* GPIO_INTERRUPT_LOW_PIN_WAKEUP */
-  IOEXPANDER_VAL_RISING,          /* GPIO_INTERRUPT_RISING_PIN_WAKEUP */
-  IOEXPANDER_VAL_FALLING,         /* GPIO_INTERRUPT_FALLING_PIN_WAKEUP */
-  IOEXPANDER_VAL_BOTH,            /* GPIO_INTERRUPT_BOTH_PIN_WAKEUP */
-};
-
-static const uint32_t g_gplh_wakeuptype[GPIO_NPINTYPES] =
-{
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_INPUT_PIN */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_INPUT_PIN_PULLUP */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_INPUT_PIN_PULLDOWN */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_OUTPUT_PIN */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_OUTPUT_PIN_OPENDRAIN */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_INTERRUPT_PIN */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_INTERRUPT_HIGH_PIN */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_INTERRUPT_LOW_PIN */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_INTERRUPT_RISING_PIN */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_INTERRUPT_FALLING_PIN */
-  IOEXPANDER_WAKEUP_DISABLE,         /* GPIO_INTERRUPT_BOTH_PIN */
-  IOEXPANDER_WAKEUP_ENABLE,          /* GPIO_INTERRUPT_PIN_WAKEUP */
-  IOEXPANDER_WAKEUP_ENABLE,          /* GPIO_INTERRUPT_HIGH_PIN_WAKEUP */
-  IOEXPANDER_WAKEUP_ENABLE,          /* GPIO_INTERRUPT_LOW_PIN_WAKEUP */
-  IOEXPANDER_WAKEUP_ENABLE,          /* GPIO_INTERRUPT_RISING_PIN_WAKEUP */
-  IOEXPANDER_WAKEUP_ENABLE,          /* GPIO_INTERRUPT_FALLING_PIN_WAKEUP */
-  IOEXPANDER_WAKEUP_ENABLE,          /* GPIO_INTERRUPT_BOTH_PIN_WAKEUP */
+  [GPIO_INPUT_PIN]              = IOEXPANDER_VAL_DISABLE,
+  [GPIO_INTERRUPT_PIN]          = CONFIG_GPIO_LOWER_HALF_INTTYPE,
+  [GPIO_INTERRUPT_HIGH_PIN]     = IOEXPANDER_VAL_HIGH,
+  [GPIO_INTERRUPT_LOW_PIN]      = IOEXPANDER_VAL_LOW,
+  [GPIO_INTERRUPT_RISING_PIN]   = IOEXPANDER_VAL_RISING,
+  [GPIO_INTERRUPT_FALLING_PIN]  = IOEXPANDER_VAL_FALLING,
+  [GPIO_INTERRUPT_BOTH_PIN]     = IOEXPANDER_VAL_BOTH,
 };
 
 /****************************************************************************
@@ -328,7 +310,7 @@ static int gplh_enable(FAR struct gpio_dev_s *gpio, bool enable)
           ret = IOEP_DETACH(priv->ioe, priv->handle);
           if (ret < 0)
             {
-              gpioerr("ERROR: pin%u: IOEP_DETACH() failed %d\n",
+              gpioerr("ERROR: pin%u: IOEP_DETACH() failed\n",
                       priv->pin, ret);
             }
 
@@ -350,8 +332,7 @@ static int gplh_enable(FAR struct gpio_dev_s *gpio, bool enable)
  *
  ****************************************************************************/
 
-static int gplh_setpintype(FAR struct gpio_dev_s *gpio,
-                           enum gpio_pintype_e pintype)
+static int gplh_setpintype(FAR struct gpio_dev_s *gpio, enum gpio_pintype_e pintype)
 {
   FAR struct gplh_dev_s *priv = (FAR struct gplh_dev_s *)gpio;
   FAR struct ioexpander_dev_s *ioe = priv->ioe;
@@ -365,30 +346,11 @@ static int gplh_setpintype(FAR struct gpio_dev_s *gpio,
     {
       IOEXP_SETDIRECTION(ioe, pin, IOEXPANDER_DIRECTION_OUT);
     }
-  else if (pintype == GPIO_OUTPUT_PIN_OPENDRAIN)
-    {
-      IOEXP_SETDIRECTION(ioe, pin, IOEXPANDER_DIRECTION_OUT_OPENDRAIN);
-    }
   else
     {
-      if (pintype == GPIO_INPUT_PIN)
-        {
-          IOEXP_SETDIRECTION(ioe, pin, IOEXPANDER_DIRECTION_IN);
-        }
-      else if (pintype == GPIO_INPUT_PIN_PULLUP)
-        {
-          IOEXP_SETDIRECTION(ioe, pin, IOEXPANDER_DIRECTION_IN_PULLUP);
-        }
-      else
-        {
-          IOEXP_SETDIRECTION(ioe, pin, IOEXPANDER_DIRECTION_IN_PULLDOWN);
-        }
-
+      IOEXP_SETDIRECTION(ioe, pin, IOEXPANDER_DIRECTION_IN);
       IOEXP_SETOPTION(ioe, pin, IOEXPANDER_OPTION_INTCFG,
-                      (FAR void *)(uintptr_t)g_gplh_inttype[pintype]);
-
-      IOEXP_SETOPTION(ioe, pin, IOEXPANDER_OPTION_WAKEUPCFG,
-                      (FAR void *)(uintptr_t)g_gplh_wakeuptype[pintype]);
+                      (FAR void *)g_gplh_inttype[pintype]);
     }
 
   gpio->gp_pintype = pintype;
@@ -396,18 +358,30 @@ static int gplh_setpintype(FAR struct gpio_dev_s *gpio,
 }
 
 /****************************************************************************
- * Name: gpio_lower_half_internal
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: gpio_lower_half
  *
  * Description:
- *   Internal handler for gpio_lower_half and gpio_lower_half_byname
- *   functions. Initializes gplh_dev_s structure and sets pin type.
+ *   Create a GPIO pin device driver instance for an I/O expander pin.
+ *   The I/O expander pin must have already been configured by the caller
+ *   for the particular pintype.
+ *
+ * Input Parameters:
+ *   ioe     - An instance of the I/O expander interface
+ *   pin     - The I/O expander pin number for the driver
+ *   pintype - See enum gpio_pintype_e
+ *   minor   - The minor device number to use when registering the device
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static FAR struct gplh_dev_s *
-gpio_lower_half_internal(FAR struct ioexpander_dev_s *ioe,
-                         unsigned int pin,
-                         enum gpio_pintype_e pintype)
+int gpio_lower_half(FAR struct ioexpander_dev_s *ioe, unsigned int pin,
+                    enum gpio_pintype_e pintype, int minor)
 {
   FAR struct gplh_dev_s *priv;
   FAR struct gpio_dev_s *gpio;
@@ -426,11 +400,11 @@ gpio_lower_half_internal(FAR struct ioexpander_dev_s *ioe,
 
   /* Allocate an new instance of the GPIO lower half driver */
 
-  priv = kmm_zalloc(sizeof(struct gplh_dev_s));
+  priv = (FAR struct gplh_dev_s *)kmm_zalloc(sizeof(struct gplh_dev_s));
   if (priv == NULL)
     {
-      gpioerr("ERROR: Failed to allocate driver state %d\n", -ENOMEM);
-      return NULL;
+      gpioerr("ERROR: Failed to allocate driver state\n");
+      return -ENOMEM;
     }
 
   /* Initialize the non-zero elements of the newly allocated instance */
@@ -447,104 +421,8 @@ gpio_lower_half_internal(FAR struct ioexpander_dev_s *ioe,
     {
       gpioerr("ERROR: gplh_setpintype() failed: %d\n", ret);
       kmm_free(priv);
-      return NULL;
+      return ret;
     }
-
-  return priv;
-}
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: gpio_lower_half_byname
- *
- * Description:
- *   Create a GPIO pin device driver instance for an I/O expander pin.
- *   The I/O expander pin must have already been configured by the caller
- *   for the particular pintype.
- *
- * Input Parameters:
- *   ioe     - An instance of the I/O expander interface
- *   pin     - The I/O expander pin number for the driver
- *   pintype - See enum gpio_pintype_e
- *   name    - gpio device name
- *
- * Returned Value:
- *   Zero (OK) on success; a negated errno value on failure.
- *
- ****************************************************************************/
-
-int gpio_lower_half_byname(FAR struct ioexpander_dev_s *ioe,
-                           unsigned int pin, enum gpio_pintype_e pintype,
-                           FAR char *name)
-{
-  FAR struct gplh_dev_s *priv;
-  FAR struct gpio_dev_s *gpio;
-  int ret;
-
-  DEBUGASSERT(name != NULL);
-
-  /* Initialize gplh_dev_s structure and set pin type */
-
-  priv = gpio_lower_half_internal(ioe, pin, pintype);
-  if (priv == NULL)
-    {
-      return -ENOMEM;
-    }
-
-  gpio         = &priv->gpio;
-  gpio->gp_ops = &g_gplh_ops;
-
-  /* Register GPIO device by name */
-
-  ret = gpio_pin_register_byname(gpio, name);
-  if (ret < 0)
-    {
-      gpioerr("ERROR: gpio_pin_register_byname() failed: %d\n", ret);
-      kmm_free(priv);
-    }
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: gpio_lower_half
- *
- * Description:
- *   Create a GPIO pin device driver instance for an I/O expander pin.
- *   The I/O expander pin must have already been configured by the caller
- *   for the particular pintype.
- *
- * Input Parameters:
- *   ioe     - An instance of the I/O expander interface
- *   pin     - The I/O expander pin number for the driver
- *   pintype - See enum gpio_pintype_e
- *   minor   - The minor device number to use when registering the device,
- *
- * Returned Value:
- *   Zero (OK) on success; a negated errno value on failure.
- *
- ****************************************************************************/
-
-int gpio_lower_half(FAR struct ioexpander_dev_s *ioe, unsigned int pin,
-                    enum gpio_pintype_e pintype, int minor)
-{
-  FAR struct gplh_dev_s *priv;
-  FAR struct gpio_dev_s *gpio;
-  int ret;
-
-  /* Initialize gplh_dev_s structure and set pin type */
-
-  priv = gpio_lower_half_internal(ioe, pin, pintype);
-  if (priv == NULL)
-    {
-      return -ENOMEM;
-    }
-
-  gpio         = &priv->gpio;
-  gpio->gp_ops = &g_gplh_ops;
 
   /* Register the GPIO driver */
 

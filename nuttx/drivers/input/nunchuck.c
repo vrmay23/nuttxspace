@@ -1,29 +1,42 @@
 /****************************************************************************
  * drivers/input/nunchuck.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2017 Alan Carvalho de Assis. All rights reserved.
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
 /* This file provides a driver for a Nintendo Wii Nunchuck joystick device.
  * The nunchuck joystick provides X/Y positional data as integer values.
- * The analog positional data may also be accompanied by discrete button
- * data.
+ * The analog positional data may also be accompanied by discrete button data.
  *
  * The nunchuck joystick driver exports a standard character driver
  * interface. By convention, the nunchuck joystick is registered as an input
@@ -40,12 +53,10 @@
 #include <stdbool.h>
 #include <string.h>
 #include <poll.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
 #include <nuttx/random.h>
 #include <nuttx/fs/fs.h>
@@ -64,7 +75,7 @@ struct nunchuck_dev_s
 {
   FAR struct i2c_master_s *i2c_dev; /* I2C interface connected to Nunchuck */
   nunchuck_buttonset_t nck_sample;  /* Last sampled button states */
-  mutex_t nck_lock;                 /* Supports exclusive access to the device */
+  sem_t nck_exclsem;                /* Supports exclusive access to the device */
 
   /* The following is a singly linked list of open references to the
    * joystick device.
@@ -90,21 +101,24 @@ struct nunchuck_open_s
  * Private Function Prototypes
  ****************************************************************************/
 
+/* Semaphore helpers */
+
+static inline int nunchuck_takesem(sem_t *sem);
+#define nunchuck_givesem(s) nxsem_post(s);
+
 /* Character driver methods */
 
 static int     nunchuck_open(FAR struct file *filep);
 static int     nunchuck_close(FAR struct file *filep);
 static ssize_t nunchuck_read(FAR struct file *filep, FAR char *buffer,
-                             size_t buflen);
+                         size_t buflen);
 static int     nunchuck_ioctl(FAR struct file *filep, int cmd,
-                              unsigned long arg);
-
+                          unsigned long arg);
 /* I2C Helpers */
-
 static int     nunchuck_i2c_read(FAR struct nunchuck_dev_s *priv,
-                                 FAR uint8_t *regval, int len);
+                 FAR uint8_t *regval, int len);
 static int     nunchuck_i2c_write(FAR struct nunchuck_dev_s *priv,
-                                  uint8_t const *data, int len);
+                 uint8_t const *data, int len);
 static int     nunchuck_sample(FAR struct nunchuck_dev_s *priv,
                                FAR struct nunchuck_sample_s *buffer);
 
@@ -112,7 +126,7 @@ static int     nunchuck_sample(FAR struct nunchuck_dev_s *priv,
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations g_nunchuck_fops =
+static const struct file_operations nunchuck_fops =
 {
   nunchuck_open,  /* open */
   nunchuck_close, /* close */
@@ -120,6 +134,10 @@ static const struct file_operations g_nunchuck_fops =
   NULL,           /* write */
   NULL,           /* seek */
   nunchuck_ioctl, /* ioctl */
+  NULL            /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL          /* unlink */
+#endif
 };
 
 /****************************************************************************
@@ -186,7 +204,7 @@ static int nunchuck_sample(FAR struct nunchuck_dev_s *priv,
 {
   uint8_t cmd[2];
   uint8_t data[6];
-  static bool initialized;
+  static bool initialized = false;
 
   if (!initialized)
     {
@@ -198,7 +216,7 @@ static int nunchuck_sample(FAR struct nunchuck_dev_s *priv,
 
       /* Delay 20ms */
 
-      nxsig_usleep(20 * 1000);
+      nxsig_usleep(20*1000);
 
       initialized = true;
     }
@@ -257,13 +275,21 @@ static int nunchuck_sample(FAR struct nunchuck_dev_s *priv,
   buffer->acc_x       = (uint16_t) data[2];
   buffer->acc_y       = (uint16_t) data[3];
   buffer->acc_z       = (uint16_t) data[4];
-  buffer->nck_buttons = (uint8_t) ((data[5] + 1) & 0x03);
+  buffer->nck_buttons = (uint8_t)  ((data[5]+1) & 0x03);
 
   iinfo("X: %03d | Y: %03d | AX: %03d AY: %03d AZ: %03d | B: %d\n",
-        data[0], data[1], data[2], data[3],
-        data[4], ((data[5] + 1) & 0x03));
+        data[0], data[1], data[2], data[3], data[4], ((data[5]+1) & 0x03));
 
   return OK;
+}
+
+/****************************************************************************
+ * Name: nunchuck_takesem
+ ****************************************************************************/
+
+static inline int nunchuck_takesem(sem_t *sem)
+{
+  return nxsem_wait(sem);
 }
 
 /****************************************************************************
@@ -277,28 +303,28 @@ static int nunchuck_open(FAR struct file *filep)
   FAR struct nunchuck_open_s *opriv;
   int ret;
 
+  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv = inode->i_private;
+  priv = (FAR struct nunchuck_dev_s *)inode->i_private;
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nunchuck_takesem(&priv->nck_exclsem);
   if (ret < 0)
     {
-      ierr("ERROR: nxmutex_lock failed: %d\n", ret);
+      ierr("ERROR: nunchuck_takesem failed: %d\n", ret);
       return ret;
     }
 
   /* Allocate a new open structure */
 
-  opriv = (FAR struct nunchuck_open_s *)
-               kmm_zalloc(sizeof(struct nunchuck_open_s));
+  opriv = (FAR struct nunchuck_open_s *)kmm_zalloc(sizeof(struct nunchuck_open_s));
   if (!opriv)
     {
       ierr("ERROR: Failed to allocate open structure\n");
       ret = -ENOMEM;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* Attach the open structure to the device */
@@ -311,8 +337,8 @@ static int nunchuck_open(FAR struct file *filep)
   filep->f_priv = (FAR void *)opriv;
   ret = OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_sem:
+  nunchuck_givesem(&priv->nck_exclsem);
   return ret;
 }
 
@@ -331,11 +357,11 @@ static int nunchuck_close(FAR struct file *filep)
   bool closing;
   int ret;
 
-  DEBUGASSERT(filep->f_priv);
+  DEBUGASSERT(filep && filep->f_priv && filep->f_inode);
   opriv = filep->f_priv;
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  priv  = (FAR struct nunchuck_dev_s *)inode->i_private;
 
   /* Handle an improbable race conditions with the following atomic test
    * and set.
@@ -361,10 +387,10 @@ static int nunchuck_close(FAR struct file *filep)
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nunchuck_takesem(&priv->nck_exclsem);
   if (ret < 0)
     {
-      ierr("ERROR: nxmutex_lock failed: %d\n", ret);
+      ierr("ERROR: nunchuck_takesem failed: %d\n", ret);
       return ret;
     }
 
@@ -379,7 +405,7 @@ static int nunchuck_close(FAR struct file *filep)
     {
       ierr("ERROR: Failed to find open entry\n");
       ret = -ENOENT;
-      goto errout_with_lock;
+      goto errout_with_exclsem;
     }
 
   /* Remove the structure from the device */
@@ -399,8 +425,8 @@ static int nunchuck_close(FAR struct file *filep)
 
   ret = OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_exclsem:
+  nunchuck_givesem(&priv->nck_exclsem);
   return ret;
 }
 
@@ -415,9 +441,10 @@ static ssize_t nunchuck_read(FAR struct file *filep, FAR char *buffer,
   FAR struct nunchuck_dev_s *priv;
   int ret;
 
+  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  priv  = (FAR struct nunchuck_dev_s *)inode->i_private;
 
   /* Make sure that the buffer is sufficiently large to hold at least one
    * complete sample.
@@ -433,10 +460,10 @@ static ssize_t nunchuck_read(FAR struct file *filep, FAR char *buffer,
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nunchuck_takesem(&priv->nck_exclsem);
   if (ret < 0)
     {
-      ierr("ERROR: nxmutex_lock failed: %d\n", ret);
+      ierr("ERROR: nunchuck_takesem failed: %d\n", ret);
       return ret;
     }
 
@@ -448,7 +475,7 @@ static ssize_t nunchuck_read(FAR struct file *filep, FAR char *buffer,
       ret = sizeof(struct nunchuck_sample_s);
     }
 
-  nxmutex_unlock(&priv->lock);
+  nunchuck_givesem(&priv->nck_exclsem);
   return (ssize_t)ret;
 }
 
@@ -462,17 +489,17 @@ static int nunchuck_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct nunchuck_dev_s *priv;
   int ret;
 
-  DEBUGASSERT(filep->f_priv);
+  DEBUGASSERT(filep && filep->f_priv && filep->f_inode);
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  priv  = (FAR struct nunchuck_dev_s *)inode->i_private;
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = nunchuck_takesem(&priv->nck_exclsem);
   if (ret < 0)
     {
-      ierr("ERROR: nxmutex_lock failed: %d\n", ret);
+      ierr("ERROR: nunchuck_takesem failed: %d\n", ret);
       return ret;
     }
 
@@ -482,12 +509,11 @@ static int nunchuck_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   switch (cmd)
     {
     /* Command:     NUNCHUCKIOC_SUPPORTED
-     * Description: Report the set of button events supported by the
-     *              hardware;
-     * Argument:    A pointer to writeable integer value in which to
-     *              return the set of supported buttons.
-     * Return:      Zero (OK) on success.  Minus one will be returned
-     *              on failure with the errno value set appropriately.
+     * Description: Report the set of button events supported by the hardware;
+     * Argument:    A pointer to writeable integer value in which to return the
+     *              set of supported buttons.
+     * Return:      Zero (OK) on success.  Minus one will be returned on failure
+     *              with the errno value set appropriately.
      */
 
     case NUNCHUCKIOC_SUPPORTED:
@@ -508,7 +534,7 @@ static int nunchuck_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       break;
     }
 
-  nxmutex_unlock(&priv->lock);
+  nunchuck_givesem(&priv->nck_exclsem);
   return ret;
 }
 
@@ -560,11 +586,11 @@ int nunchuck_register(FAR const char *devname, FAR struct i2c_master_s *i2c)
 
   /* Initialize the new nunchuck driver instance */
 
-  nxmutex_init(&priv->nck_lock);
+  nxsem_init(&priv->nck_exclsem, 0, 1);
 
   /* And register the nunchuck driver */
 
-  ret = register_driver(devname, &g_nunchuck_fops, 0666, priv);
+  ret = register_driver(devname, &nunchuck_fops, 0666, priv);
   if (ret < 0)
     {
       ierr("ERROR: register_driver failed: %d\n", ret);
@@ -574,7 +600,7 @@ int nunchuck_register(FAR const char *devname, FAR struct i2c_master_s *i2c)
   return OK;
 
 errout_with_priv:
-  nxmutex_destroy(&priv->nck_lock);
+  nxsem_destroy(&priv->nck_exclsem);
   kmm_free(priv);
   return ret;
 }

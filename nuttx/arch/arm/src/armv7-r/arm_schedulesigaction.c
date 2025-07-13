@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/armv7-r/arm_schedulesigaction.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -35,7 +48,8 @@
 
 #include "arm.h"
 #include "sched/sched.h"
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
 
 /****************************************************************************
  * Public Functions
@@ -72,61 +86,111 @@
  *       currently executing task -- just call the signal
  *       handler now.
  *
- * Assumptions:
- *   Called from critical section
- *
  ****************************************************************************/
 
-void up_schedule_sigaction(struct tcb_s *tcb)
+void up_schedule_sigaction(struct tcb_s *tcb, sig_deliver_t sigdeliver)
 {
-  sinfo("tcb=%p, rtcb=%p current_regs=%p\n", tcb, this_task(),
-        this_task()->xcp.regs);
+  irqstate_t flags;
 
-  /* First, handle some special cases when the signal is
-   * being delivered to the currently executing task.
-   */
+  sinfo("tcb=0x%p sigdeliver=0x%p\n", tcb, sigdeliver);
 
-  if (tcb == this_task() && !up_interrupt_context())
+  /* Make sure that interrupts are disabled */
+
+  flags = enter_critical_section();
+
+  /* Refuse to handle nested signal actions */
+
+  if (!tcb->xcp.sigdeliver)
     {
-      /* In this case just deliver the signal now.
-       * REVISIT:  Signal handler will run in a critical section!
+      /* First, handle some special cases when the signal is being delivered
+       * to the currently executing task.
        */
 
-      (tcb->sigdeliver)(tcb);
-      tcb->sigdeliver = NULL;
-    }
-  else
-    {
-      /* Save the return lr and cpsr and one scratch register.  These
-       * will be restored by the signal trampoline after the signals
-       * have been delivered.
-       */
+      sinfo("rtcb=0x%p CURRENT_REGS=0x%p\n", this_task(), CURRENT_REGS);
 
-      /* Save the current register context location */
+      if (tcb == this_task())
+        {
+          /* CASE 1:  We are not in an interrupt handler and a task is
+           * signalling itself for some reason.
+           */
 
-      tcb->xcp.saved_regs      = tcb->xcp.regs;
+          if (!CURRENT_REGS)
+            {
+              /* In this case just deliver the signal now. */
 
-      /* Duplicate the register context.  These will be
-       * restored by the signal trampoline after the signal has been
-       * delivered.
-       */
+              sigdeliver(tcb);
+            }
 
-      tcb->xcp.regs            = (void *)
-                                 ((uint32_t)tcb->xcp.regs -
-                                            XCPTCONTEXT_SIZE);
-      memcpy(tcb->xcp.regs, tcb->xcp.saved_regs, XCPTCONTEXT_SIZE);
+          /* CASE 2:  We are in an interrupt handler AND the interrupted
+           * task is the same as the one that must receive the signal, then
+           * we will have to modify the return state as well as the state
+           * in the TCB.
+           *
+           * Hmmm... there looks like a latent bug here: The following logic
+           * would fail in the strange case where we are in an interrupt
+           * handler, the thread is signalling itself, but a context switch
+           * to another task has occurred so that CURRENT_REGS does not
+           * refer to the thread of this_task()!
+           */
 
-      tcb->xcp.regs[REG_SP]    = (uint32_t)tcb->xcp.regs +
-                                           XCPTCONTEXT_SIZE;
+          else
+            {
+              /* Save the return lr and cpsr and one scratch register
+               * These will be restored by the signal trampoline after
+               * the signals have been delivered.
+               */
 
-      /* Then set up to vector to the trampoline with interrupts
-       * disabled
-       */
+              tcb->xcp.sigdeliver       = sigdeliver;
+              tcb->xcp.saved_pc         = CURRENT_REGS[REG_PC];
+              tcb->xcp.saved_cpsr       = CURRENT_REGS[REG_CPSR];
 
-      tcb->xcp.regs[REG_PC]    = (uint32_t)arm_sigdeliver;
-      tcb->xcp.regs[REG_CPSR]  = (PSR_MODE_SYS | PSR_I_BIT | PSR_F_BIT);
-#ifdef CONFIG_ARM_THUMB
-      tcb->xcp.regs[REG_CPSR] |= PSR_T_BIT;
+              /* Then set up to vector to the trampoline with interrupts
+               * disabled
+               */
+
+              CURRENT_REGS[REG_PC]      = (uint32_t)up_sigdeliver;
+              CURRENT_REGS[REG_CPSR]    = (PSR_MODE_SVC | PSR_I_BIT | PSR_F_BIT);
+
+#ifdef CONFIG_ENDIAN_BIG
+              CURRENT_REGS[REG_CPSR]    |= PSR_E_BIT;
 #endif
+
+              /* And make sure that the saved context in the TCB is the same
+               * as the interrupt return context.
+               */
+
+              up_savestate(tcb->xcp.regs);
+            }
+        }
+
+      /* Otherwise, we are (1) signaling a task is not running from an
+       * interrupt handler or (2) we are not in an interrupt handler and the
+       * running task is signalling some non-running task.
+       */
+
+      else
+        {
+          /* Save the return lr and cpsr and one scratch register.  These
+           * will be restored by the signal trampoline after the signals
+           * have been delivered.
+           */
+
+          tcb->xcp.sigdeliver       = sigdeliver;
+          tcb->xcp.saved_pc         = tcb->xcp.regs[REG_PC];
+          tcb->xcp.saved_cpsr       = tcb->xcp.regs[REG_CPSR];
+
+          /* Then set up to vector to the trampoline with interrupts
+           * disabled
+           */
+
+          tcb->xcp.regs[REG_PC]      = (uint32_t)up_sigdeliver;
+          tcb->xcp.regs[REG_CPSR]    = (PSR_MODE_SVC | PSR_I_BIT | PSR_F_BIT);
+
+#ifdef CONFIG_ENDIAN_BIG
+          tcb->xcp.regs[REG_CPSR]    |= PSR_E_BIT;
+#endif
+        }
     }
+
+  leave_critical_section(flags);
 }

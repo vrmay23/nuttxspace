@@ -1,12 +1,15 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/tiva/common/tiva_qencoder.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016 Young Mu. All rights reserved.
- * SPDX-FileCopyrightText: 2012 Gregory Nutt. All rights reserved.
- * SPDX-FileContributor: Young Mu <young.mu@aliyun.com>
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: Diego Sanchez <dsanchez@nx-engineering.com>
+ *   Copyright (C) 2016 Young Mu. All rights reserved.
+ *   Author: Young Mu <young.mu@aliyun.com>
+ *
+ * The basic structure of this driver derives in spirit (if nothing more)
+ * from the NuttX STM32 QEI driver which has:
+ *
+ *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Diego Sanchez <dsanchez@nx-engineering.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,11 +38,11 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <stdio.h>
 #include <string.h>
@@ -47,7 +50,7 @@
 
 #include <nuttx/sensors/qencoder.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "tiva_gpio.h"
 #include "tiva_qencoder.h"
 #include "tiva_enablepwr.h"
@@ -59,9 +62,10 @@
 
 #include <arch/board/board.h>
 
-/****************************************************************************
+
+/************************************************************************************
  * Private Types
- ****************************************************************************/
+ ************************************************************************************/
 
 struct tiva_qe_s
 {
@@ -74,43 +78,40 @@ struct tiva_qe_s
   uint32_t maxpos;
 };
 
-/****************************************************************************
+/************************************************************************************
  * Private Function Prototypes
- ****************************************************************************/
+ ************************************************************************************/
 
 static inline void tiva_qe_putreg(struct tiva_qe_s *qe, unsigned int offset,
                                   uint32_t regval);
 static inline uint32_t tiva_qe_getreg(struct tiva_qe_s *qe,
                                       unsigned int offset);
 
-static int tiva_qe_setup(struct qe_lowerhalf_s *lower);
-static int tiva_qe_shutdown(struct qe_lowerhalf_s *lower);
-static int tiva_qe_position(struct qe_lowerhalf_s *lower,
-                            int32_t *pos);
-static int tiva_qe_reset(struct qe_lowerhalf_s *lower);
-static int tiva_qe_ioctl(struct qe_lowerhalf_s *lower, int cmd,
+static int tiva_qe_setup(FAR struct qe_lowerhalf_s *lower);
+static int tiva_qe_shutdown(FAR struct qe_lowerhalf_s *lower);
+static int tiva_qe_position(FAR struct qe_lowerhalf_s *lower,
+                            FAR int32_t *pos);
+static int tiva_qe_reset(FAR struct qe_lowerhalf_s *lower);
+static int tiva_qe_ioctl(FAR struct qe_lowerhalf_s *lower, int cmd,
                          unsigned long arg);
 
 static int tiva_qe_direction(struct tiva_qe_s *qe, unsigned long *dir);
 static int tiva_qe_velocity(struct tiva_qe_s *qe, unsigned long *vel);
 static int tiva_qe_resetatppr(struct tiva_qe_s *qe, unsigned long ppr);
-static int tiva_qe_resetatmaxpos(struct tiva_qe_s *qe,
-                                 unsigned long offs);
-static int tiva_qe_resetatindex(struct tiva_qe_s *qe);
+static int tiva_qe_resetatmaxpos(FAR struct tiva_qe_s *qe, unsigned long offs);
+static int tiva_qe_resetatindex(FAR struct tiva_qe_s *qe);
 
-/****************************************************************************
+/************************************************************************************
  * Private Data
- ****************************************************************************/
+ ************************************************************************************/
 
 static const struct qe_ops_s g_qe_ops =
 {
-  .setup     = tiva_qe_setup,
-  .shutdown  = tiva_qe_shutdown,
-  .position  = tiva_qe_position,
-  .setposmax = NULL,            /* not supported yet */
-  .reset     = tiva_qe_reset,
-  .setindex  = NULL,            /* not supported yet */
-  .ioctl     = tiva_qe_ioctl,
+  .setup    = tiva_qe_setup,
+  .shutdown = tiva_qe_shutdown,
+  .position = tiva_qe_position,
+  .reset    = tiva_qe_reset,
+  .ioctl    = tiva_qe_ioctl,
 };
 
 #ifdef CONFIG_TIVA_QEI0
@@ -139,32 +140,31 @@ static struct tiva_qe_s g_qe1 =
 };
 #endif
 
-/****************************************************************************
+/************************************************************************************
  * Private Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Name: tiva_qe_getreg
  *
  * Description:
  *   Get a 32-bit register value by offset
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-static inline uint32_t tiva_qe_getreg(struct tiva_qe_s *qe,
-                                      unsigned int offset)
+static inline uint32_t tiva_qe_getreg(struct tiva_qe_s *qe, unsigned int offset)
 {
   uintptr_t regaddr = qe->base + offset;
   return getreg32(regaddr);
 }
 
-/****************************************************************************
+/************************************************************************************
  * Name: tiva_qe_putreg
  *
  * Description:
  *  Put a 32-bit register value by offset
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 static inline void tiva_qe_putreg(struct tiva_qe_s *qe, unsigned int offset,
                                   uint32_t regval)
@@ -190,10 +190,10 @@ static inline void tiva_qe_putreg(struct tiva_qe_s *qe, unsigned int offset,
  *
  ****************************************************************************/
 
-static int tiva_qe_setup(struct qe_lowerhalf_s *lower)
+static int tiva_qe_setup(FAR struct qe_lowerhalf_s *lower)
 {
   uint32_t ctlreg = 0;
-  struct tiva_qe_s *qe = (struct tiva_qe_s *)lower;
+  FAR struct tiva_qe_s *qe = (FAR struct tiva_qe_s *)lower;
   int ret;
 
   sninfo("setup QEI %d\n", qe->id);
@@ -290,8 +290,8 @@ static int tiva_qe_setup(struct qe_lowerhalf_s *lower)
  *
  * Description:
  *   This method is called when the driver is closed.  The lower half driver
- *   stop data collection, free any resources, disable the timer hardware,
- *   and put the system into the lowest possible power usage state.
+ *   stop data collection, free any resources, disable the timer hardware, and
+ *   put the system into the lowest possible power usage state
  *
  * Input Parameters:
  *   lower - A reference to the lower half QEI driver state structure
@@ -301,9 +301,9 @@ static int tiva_qe_setup(struct qe_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int tiva_qe_shutdown(struct qe_lowerhalf_s *lower)
+static int tiva_qe_shutdown(FAR struct qe_lowerhalf_s *lower)
 {
-  struct tiva_qe_s *qe = (struct tiva_qe_s *)lower;
+  FAR struct tiva_qe_s *qe = (FAR struct tiva_qe_s *)lower;
 
   sninfo("shutdown QEI %d\n", qe->id);
 
@@ -328,9 +328,9 @@ static int tiva_qe_shutdown(struct qe_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int tiva_qe_reset(struct qe_lowerhalf_s *lower)
+static int tiva_qe_reset(FAR struct qe_lowerhalf_s *lower)
 {
-  struct tiva_qe_s *qe = (struct tiva_qe_s *)lower;
+  FAR struct tiva_qe_s *qe = (FAR struct tiva_qe_s *)lower;
 
   sninfo("reset QEI %d\n", qe->id);
 
@@ -343,7 +343,7 @@ static int tiva_qe_reset(struct qe_lowerhalf_s *lower)
  * Name: tiva_qe_position
  *
  * Description:
- *   Return the position measured by QEI.
+ *   Return the position mesaured by QEI.
  *
  * Input Parameters:
  *   lower - A reference to the lower half QEI driver state structure
@@ -354,10 +354,9 @@ static int tiva_qe_reset(struct qe_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int tiva_qe_position(struct qe_lowerhalf_s *lower,
-                            int32_t *pos)
+static int tiva_qe_position(FAR struct qe_lowerhalf_s *lower, FAR int32_t *pos)
 {
-  struct tiva_qe_s *qe = (struct tiva_qe_s *)lower;
+  FAR struct tiva_qe_s *qe = (FAR struct tiva_qe_s *)lower;
 
   sninfo("get position of QEI %d\n", qe->id);
 
@@ -382,10 +381,10 @@ static int tiva_qe_position(struct qe_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static int tiva_qe_ioctl(struct qe_lowerhalf_s *lower, int cmd,
+static int tiva_qe_ioctl(FAR struct qe_lowerhalf_s *lower, int cmd,
                          unsigned long arg)
 {
-  struct tiva_qe_s *qe = (struct tiva_qe_s *)lower;
+  FAR struct tiva_qe_s *qe = (FAR struct tiva_qe_s *)lower;
 
   sninfo("ioctl QEI %d\n", qe->id);
 
@@ -423,7 +422,7 @@ static int tiva_qe_ioctl(struct qe_lowerhalf_s *lower, int cmd,
  * Name: tiva_qe_direction
  *
  * Description:
- *   Return the direction measured by QEI.
+ *   Return the direction mesaured by QEI.
  *
  * Input Parameters:
  *   qe - A reference to the TIVA QEI structure
@@ -434,7 +433,7 @@ static int tiva_qe_ioctl(struct qe_lowerhalf_s *lower, int cmd,
  *
  ****************************************************************************/
 
-static int tiva_qe_direction(struct tiva_qe_s *qe, unsigned long *dir)
+static int tiva_qe_direction(FAR struct tiva_qe_s *qe, unsigned long *dir)
 {
   sninfo("get direction of QEI %d\n", qe->id);
 
@@ -454,7 +453,7 @@ static int tiva_qe_direction(struct tiva_qe_s *qe, unsigned long *dir)
  * Name: tiva_qe_direction
  *
  * Description:
- *   Return the velocity (A/B pulses per second) measured by QEI.
+ *   Return the velocity (A/B pulses per second) mesaured by QEI.
  *
  * Input Parameters:
  *   qe - A reference to the TIVA QEI structure
@@ -464,7 +463,7 @@ static int tiva_qe_direction(struct tiva_qe_s *qe, unsigned long *dir)
  *
  ****************************************************************************/
 
-static int tiva_qe_velocity(struct tiva_qe_s *qe, unsigned long *vel)
+static int tiva_qe_velocity(FAR struct tiva_qe_s *qe, unsigned long *vel)
 {
   sninfo("get direction of QEI %d\n", qe->id);
 
@@ -491,7 +490,7 @@ static int tiva_qe_velocity(struct tiva_qe_s *qe, unsigned long *vel)
  *
  ****************************************************************************/
 
-static int tiva_qe_resetatppr(struct tiva_qe_s *qe, unsigned long ppr)
+static int tiva_qe_resetatppr(FAR struct tiva_qe_s *qe, unsigned long ppr)
 {
   /* maxpos is 4 times of ppr since we set capture mode as PHA_AND_PHB */
 
@@ -514,17 +513,16 @@ static int tiva_qe_resetatppr(struct tiva_qe_s *qe, unsigned long ppr)
  *
  ****************************************************************************/
 
-static int tiva_qe_resetatmaxpos(struct tiva_qe_s *qe,
-                                 unsigned long maxpos)
+static int tiva_qe_resetatmaxpos(FAR struct tiva_qe_s *qe, unsigned long maxpos)
 {
   sninfo("set maxpos reset mode and maxpos value of QEI %d\n", qe->id);
 
-  struct qe_lowerhalf_s *lower;
+  FAR struct qe_lowerhalf_s *lower;
   uint32_t ctlreg = 0;
 
   /* Disable the QEI */
 
-  lower = (struct qe_lowerhalf_s *)qe;
+  lower = (FAR struct qe_lowerhalf_s *)qe;
   tiva_qe_shutdown(lower);
 
   qe->maxpos = maxpos;
@@ -563,16 +561,16 @@ static int tiva_qe_resetatmaxpos(struct tiva_qe_s *qe,
  *
  ****************************************************************************/
 
-static int tiva_qe_resetatindex(struct tiva_qe_s *qe)
+static int tiva_qe_resetatindex(FAR struct tiva_qe_s *qe)
 {
   sninfo("set index reset mode of QEI %d\n", qe->id);
 
-  struct qe_lowerhalf_s *lower;
+  FAR struct qe_lowerhalf_s *lower;
   uint32_t ctlreg = 0;
 
   /* Disable the QEI */
 
-  lower = (struct qe_lowerhalf_s *)qe;
+  lower = (FAR struct qe_lowerhalf_s *)qe;
   tiva_qe_shutdown(lower);
 
   /* Set reset mode as INDEX */
@@ -591,7 +589,7 @@ static int tiva_qe_resetatindex(struct tiva_qe_s *qe)
   return OK;
 }
 
-/****************************************************************************
+/************************************************************************************
  * Name: tiva_qei_initialize
  *
  * Description:
@@ -605,12 +603,12 @@ static int tiva_qe_resetatindex(struct tiva_qe_s *qe)
  *   On success, a pointer to the lower half QEI driver is returned.
  *   NULL is returned on any failure.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-struct qe_lowerhalf_s *tiva_qei_initialize(int id)
+FAR struct qe_lowerhalf_s *tiva_qei_initialize(int id)
 {
-  struct tiva_qe_s *qe;
-  struct qe_lowerhalf_s *lower;
+  FAR struct tiva_qe_s *qe;
+  FAR struct qe_lowerhalf_s *lower;
 
   switch (id)
     {
@@ -638,7 +636,7 @@ struct qe_lowerhalf_s *tiva_qei_initialize(int id)
 
   /* Make sure that the QEI enable bit has been cleared */
 
-  lower = (struct qe_lowerhalf_s *)qe;
+  lower = (FAR struct qe_lowerhalf_s *)qe;
   tiva_qe_shutdown(lower);
 
   return lower;

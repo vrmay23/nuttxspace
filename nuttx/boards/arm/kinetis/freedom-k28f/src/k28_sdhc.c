@@ -1,8 +1,6 @@
 /****************************************************************************
  * boards/arm/kinetis/freedom-k28f/src/k28_sdhc.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -51,6 +49,7 @@
 #include <stdio.h>
 #include <debug.h>
 #include <errno.h>
+#include <debug.h>
 
 #include <nuttx/sdio.h>
 #include <nuttx/mmcsd.h>
@@ -110,17 +109,15 @@ static void k28_mediachange(void)
     {
       mcinfo("Media change: %d->%d\n",  g_sdhc.inserted, inserted);
 
-      /* Yes.. perform the appropriate action
-       * (this might need some debounce).
-       */
+      /* Yes.. perform the appropriate action (this might need some debounce). */
 
       g_sdhc.inserted = inserted;
       sdhc_mediachange(g_sdhc.sdhc, inserted);
 
-#ifdef HAVE_SDHC_AUTOMOUNTER
+#ifdef CONFIG_FRDMK28F_SDHC_AUTOMOUNT
       /* Let the automounter know about the insertion event */
 
-      k28_sdhc_automount_event(k28_cardinserted());
+      k28_automount_event(k28_cardinserted());
 #endif
     }
 }
@@ -129,7 +126,7 @@ static void k28_mediachange(void)
  * Name: k28_cdinterrupt
  ****************************************************************************/
 
-static int k28_cdinterrupt(int irq, void *context, void *arg)
+static int k28_cdinterrupt(int irq, FAR void *context, FAR void *arg)
 {
   /* All of the work is done by k28_mediachange() */
 
@@ -145,7 +142,7 @@ static int k28_cdinterrupt(int irq, void *context, void *arg)
  * Name: k28_sdhc_initialize
  *
  * Description:
- *   Initialize the SDHC SD card slot
+ *   Inititialize the SDHC SD card slot
  *
  ****************************************************************************/
 
@@ -183,8 +180,7 @@ int k28_sdhc_initialize(void)
   ret = mmcsd_slotinitialize(MMSCD_MINOR, g_sdhc.sdhc);
   if (ret != OK)
     {
-      syslog(LOG_ERR,
-          "ERROR: Failed to bind SDHC to the MMC/SD driver: %d\n",
+      syslog(LOG_ERR, "ERROR: Failed to bind SDHC to the MMC/SD driver: %d\n",
              ret);
       return ret;
     }
@@ -209,7 +205,7 @@ int k28_sdhc_initialize(void)
  *
  ****************************************************************************/
 
-#ifdef HAVE_SDHC_AUTOMOUNTER
+#ifdef HAVE_AUTOMOUNTER
 bool k28_cardinserted(void)
 {
   bool inserted;
@@ -232,7 +228,7 @@ bool k28_cardinserted(void)
  *
  ****************************************************************************/
 
-#ifdef HAVE_SDHC_AUTOMOUNTER
+#ifdef HAVE_AUTOMOUNTER
 bool k28_writeprotected(void)
 {
   /* There are no write protect pins */

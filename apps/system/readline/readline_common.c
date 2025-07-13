@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/system/readline/readline_common.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2008, 2011-2013, 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -41,37 +54,11 @@
 #include "readline.h"
 
 /****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifdef CONFIG_READLINE_CMD_HISTORY
-#  define RL_CMDHIST_LEN        CONFIG_READLINE_CMD_HISTORY_LEN
-#  define RL_CMDHIST_LINELEN    CONFIG_READLINE_CMD_HISTORY_LINELEN
-#endif
-
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-#ifdef CONFIG_READLINE_CMD_HISTORY
-struct cmdhist_s
-{
-  char buf[RL_CMDHIST_LEN][RL_CMDHIST_LINELEN];  /* Circular buffer */
-  int  head;                                     /* Head of the circular buffer */
-  int  offset;                                   /* Offset from head */
-  int  len;                                      /* Size of the circular buffer */
-};
-#endif /* CONFIG_READLINE_CMD_HISTORY */
-
-/****************************************************************************
  * Private Data
  ****************************************************************************/
-
 /* <esc>[K is the VT100 command erases to the end of the line. */
 
-#ifdef CONFIG_READLINE_ECHO
 static const char g_erasetoeol[] = VT100_CLEAREOL;
-#endif
 
 #ifdef CONFIG_READLINE_TABCOMPLETION
 /* Prompt string to present at the beginning of the line */
@@ -84,7 +71,18 @@ static FAR const struct extmatch_vtable_s *g_extmatch_vtbl = NULL;
 #endif /* CONFIG_READLINE_TABCOMPLETION */
 
 #ifdef CONFIG_READLINE_CMD_HISTORY
-static struct cmdhist_s g_cmdhist;
+/* Nghia Ho: command history
+ *
+ * g_cmd_history[][]             Circular buffer
+ * g_cmd_history_head            Head of the circular buffer, most recent command
+ * g_cmd_history_steps_from_head Offset from head
+ * g_cmd_history_len             Number of elements in the circular buffer
+ */
+
+static char g_cmd_history[CONFIG_READLINE_CMD_HISTORY_LEN][CONFIG_READLINE_CMD_HISTORY_LINELEN];
+static int g_cmd_history_head = -1;
+static int g_cmd_history_steps_from_head = 1;
+static int g_cmd_history_len = 0;
 #endif /* CONFIG_READLINE_CMD_HISTORY */
 
 /****************************************************************************
@@ -107,8 +105,7 @@ static struct cmdhist_s g_cmdhist;
  ****************************************************************************/
 
 #if defined(CONFIG_READLINE_TABCOMPLETION) && defined(CONFIG_BUILTIN)
-static int count_builtin_matches(FAR char *buf, FAR int *matches,
-                                 int namelen)
+static int count_builtin_matches(FAR char *buf, FAR int *matches, int namelen)
 {
 #if CONFIG_READLINE_MAX_BUILTINS > 0
   FAR const char *name;
@@ -141,7 +138,7 @@ static int count_builtin_matches(FAR char *buf, FAR int *matches,
  * Name: tab_completion
  *
  * Description:
- *   Unix like tab completion, only for builtin apps
+ *   Nghia - Unix like tab completion, only for builtin apps
  *
  * Input Parameters:
  *   vtbl   - vtbl used to access implementation specific interface
@@ -193,8 +190,7 @@ static void tab_completion(FAR struct rl_common_s *vtbl, char *buf,
         {
           /* Count the number of external commands */
 
-          nr_ext_matches =
-            g_extmatch_vtbl->count_matches(buf, ext_matches, len);
+          nr_ext_matches = g_extmatch_vtbl->count_matches(buf, ext_matches, len);
           nr_matches    += nr_ext_matches;
         }
 
@@ -240,9 +236,7 @@ static void tab_completion(FAR struct rl_common_s *vtbl, char *buf,
               RL_PUTC(vtbl, name[j]);
             }
 
-          /* Don't remove extra characters after the completed word,
-           * if any.
-           */
+          /* Don't remove extra characters after the completed word, if any. */
 
           if (len < name_len)
             {
@@ -278,19 +272,19 @@ static void tab_completion(FAR struct rl_common_s *vtbl, char *buf,
 
               if (tmp_name[0] == '\0')
                 {
-                  strlcpy(tmp_name, name, sizeof(tmp_name));
+                  strncpy(tmp_name, name, sizeof(tmp_name) - 1);
                 }
 
               RL_PUTC(vtbl, ' ');
               RL_PUTC(vtbl, ' ');
 
-              for (j = 0; j < (int)strlen(name); j++)
+              for (j = 0; j < strlen(name); j++)
                 {
                   /* Removing characters that aren't common to all the
                    * matches.
                    */
 
-                  if (j < (int)sizeof(tmp_name) && name[j] != tmp_name[j])
+                  if (name[j] != tmp_name[j])
                     {
                       tmp_name[j] = '\0';
                     }
@@ -313,7 +307,7 @@ static void tab_completion(FAR struct rl_common_s *vtbl, char *buf,
 
               if (tmp_name[0] == '\0')
                 {
-                  strlcpy(tmp_name, name, sizeof(tmp_name));
+                  strncpy(tmp_name, name, sizeof(tmp_name) - 1);
                 }
 
               RL_PUTC(vtbl, ' ');
@@ -325,7 +319,7 @@ static void tab_completion(FAR struct rl_common_s *vtbl, char *buf,
                    * matches.
                    */
 
-                  if (j < sizeof(tmp_name) && name[j] != tmp_name[j])
+                  if (name[j] != tmp_name[j])
                     {
                       tmp_name[j] = '\0';
                     }
@@ -335,16 +329,16 @@ static void tab_completion(FAR struct rl_common_s *vtbl, char *buf,
 
               RL_PUTC(vtbl, '\n');
             }
-
 #endif
-          strlcpy(buf, tmp_name, buflen);
+          strncpy(buf, tmp_name, buflen - 1);
+
           name_len = strlen(tmp_name);
 
           /* Output the original prompt */
 
           if (g_readline_prompt != NULL)
             {
-              for (i = 0; i < (int)strlen(g_readline_prompt); i++)
+              for (i = 0; i < strlen(g_readline_prompt); i++)
                 {
                   RL_PUTC(vtbl, g_readline_prompt[i]);
                 }
@@ -355,9 +349,7 @@ static void tab_completion(FAR struct rl_common_s *vtbl, char *buf,
               RL_PUTC(vtbl, buf[i]);
             }
 
-          /* Don't remove extra characters after the completed word,
-           * if any
-           */
+          /* Don't remove extra characters after the completed word, if any. */
 
           if (len < name_len)
             {
@@ -462,7 +454,7 @@ FAR const struct extmatch_vtable_s *
  *   different creature.
  *
  * Input Parameters:
- *   vtbl    - vtbl used to access implementation specific interface
+ *   vtbl   - vtbl used to access implementation specific interface
  *   buf     - The user allocated buffer to be filled.
  *   buflen  - the size of the buffer.
  *
@@ -473,8 +465,7 @@ FAR const struct extmatch_vtable_s *
  *
  ****************************************************************************/
 
-ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
-                        int buflen)
+ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf, int buflen)
 {
   int escape;
   int nch;
@@ -506,7 +497,7 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
   escape = 0;
   nch    = 0;
 
-  for (; ; )
+  for (;;)
     {
       /* Get the next character. readline_rawgetc() returns EOF on any
        * errors or at the end of file.
@@ -545,30 +536,30 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
               /* We are finished with the escape sequence */
 
 #ifdef CONFIG_READLINE_CMD_HISTORY
-              /* Intercept up and down arrow keys */
+              /* Nghia Ho: intercept up and down arrow keys */
 
-              if (g_cmdhist.len > 0)
+              if (g_cmd_history_len > 0)
                 {
                   if (ch == 'A') /* up arrow */
                     {
                       /* Go to the past command in history */
 
-                      g_cmdhist.offset--;
+                      g_cmd_history_steps_from_head--;
 
-                      if (-g_cmdhist.offset >= g_cmdhist.len)
+                      if (-g_cmd_history_steps_from_head >= g_cmd_history_len)
                         {
-                          g_cmdhist.offset = -(g_cmdhist.len - 1);
+                          g_cmd_history_steps_from_head = -(g_cmd_history_len - 1);
                         }
                     }
                   else if (ch == 'B') /* down arrow */
                     {
                       /* Go to the recent command in history */
 
-                      g_cmdhist.offset++;
+                      g_cmd_history_steps_from_head++;
 
-                      if (g_cmdhist.offset > 1)
+                      if (g_cmd_history_steps_from_head > 1)
                         {
-                          g_cmdhist.offset = 1;
+                          g_cmd_history_steps_from_head = 1;
                         }
                     }
 
@@ -584,29 +575,27 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
 #endif
                     }
 
-                  if (g_cmdhist.offset != 1)
-                    {
-                      int idx = g_cmdhist.head + g_cmdhist.offset;
+                    if (g_cmd_history_steps_from_head != 1)
+                      {
+                        int idx = g_cmd_history_head + g_cmd_history_steps_from_head;
 
-                      /* Circular buffer wrap around */
+                        /* Circular buffer wrap around */
 
-                      if (idx < 0)
-                        {
-                          idx = idx + RL_CMDHIST_LEN;
-                        }
-                      else if (idx >= RL_CMDHIST_LEN)
-                        {
-                          idx = idx - RL_CMDHIST_LEN;
-                        }
+                        if (idx < 0)
+                          {
+                            idx = idx + CONFIG_READLINE_CMD_HISTORY_LEN;
+                          }
+                        else if (idx >= CONFIG_READLINE_CMD_HISTORY_LEN)
+                          {
+                            idx = idx - CONFIG_READLINE_CMD_HISTORY_LEN;
+                          }
 
-                      for (i = 0; g_cmdhist.buf[idx][i] != '\0'; i++)
-                        {
-                          buf[nch++] = g_cmdhist.buf[idx][i];
-                          RL_PUTC(vtbl, g_cmdhist.buf[idx][i]);
-                        }
-
-                      buf[nch] = '\0';
-                    }
+                        for (i = 0; g_cmd_history[idx][i] != '\0'; i++)
+                          {
+                            buf[nch++] = g_cmd_history[idx][i];
+                            RL_PUTC(vtbl, g_cmd_history[idx][i]);
+                          }
+                     }
                 }
 #endif /* CONFIG_READLINE_CMD_HISTORY */
 
@@ -668,37 +657,35 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
        * others both.
        */
 
+#if  defined(CONFIG_EOL_IS_LF) || defined(CONFIG_EOL_IS_BOTH_CRLF)
       else if (ch == '\n')
+#elif defined(CONFIG_EOL_IS_CR)
+      else if (ch == '\r')
+#elif defined(CONFIG_EOL_IS_EITHER_CRLF)
+      else if (ch == '\n' || ch == '\r')
+#endif
         {
 #ifdef CONFIG_READLINE_CMD_HISTORY
-          /* Save history of command, only if there was something
+          /* Nghia Ho: save history of command, only if there was something
            * typed besides return character.
            */
 
           if (nch >= 1)
             {
-              /* If this command is the one at the top of the circular
-               * buffer, don't save it again.
-               */
+              g_cmd_history_head = (g_cmd_history_head + 1) % CONFIG_READLINE_CMD_HISTORY_LEN;
 
-              if (strncmp(buf, g_cmdhist.buf[g_cmdhist.head], nch + 1) != 0)
+              for (i = 0; (i < nch) && i < (CONFIG_READLINE_CMD_HISTORY_LINELEN - 1); i++)
                 {
-                  g_cmdhist.head = (g_cmdhist.head + 1) % RL_CMDHIST_LEN;
-
-                  for (i = 0; (i < nch) && i < (RL_CMDHIST_LINELEN - 1); i++)
-                    {
-                      g_cmdhist.buf[g_cmdhist.head][i] = buf[i];
-                    }
-
-                  g_cmdhist.buf[g_cmdhist.head][i] = '\0';
-
-                  if (g_cmdhist.len < RL_CMDHIST_LEN)
-                    {
-                      g_cmdhist.len++;
-                    }
+                  g_cmd_history[g_cmd_history_head][i] = buf[i];
                 }
 
-              g_cmdhist.offset = 1;
+              g_cmd_history[g_cmd_history_head][i] = '\0';
+              g_cmd_history_steps_from_head = 1;
+
+              if (g_cmd_history_len < CONFIG_READLINE_CMD_HISTORY_LEN)
+                {
+                  g_cmd_history_len++;
+                }
             }
 #endif /* CONFIG_READLINE_CMD_HISTORY */
 
@@ -709,17 +696,27 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
           buf[nch++] = '\n';
           buf[nch]   = '\0';
 
+#ifdef CONFIG_READLINE_ECHO
+          /* Echo the newline to the console */
+
+          RL_PUTC(vtbl, '\n');
+#endif
           return nch;
         }
 
-      /* Otherwise, put the character in the line buffer if the
-       * character is not a control byte
+      /* Otherwise, check if the character is printable and, if so, put the
+       * character in the line buffer
        */
 
-      else if (!iscntrl(ch & 0xff))
+      else if (isprint(ch))
         {
           buf[nch++] = ch;
 
+#ifdef CONFIG_READLINE_ECHO
+          /* Echo the character to the console */
+
+          RL_PUTC(vtbl, ch);
+#endif
           /* Check if there is room for another character and the line's
            * null terminator.  If not then we have to end the line now.
            */
@@ -731,7 +728,7 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
             }
         }
 #ifdef CONFIG_READLINE_TABCOMPLETION
-      else if (ch == '\t') /* TAB character */
+     else if (ch == '\t') /* Nghia - TAB character */
         {
           tab_completion(vtbl, buf, buflen, &nch);
         }

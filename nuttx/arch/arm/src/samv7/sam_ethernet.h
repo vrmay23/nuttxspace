@@ -1,41 +1,53 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/samv7/sam_ethernet.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_SAMV7_SAM_ETHERNET_H
 #define __ARCH_ARM_SRC_SAMV7_SAM_ETHERNET_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 #include <arch/samv7/chip.h>
 
 #include "hardware/sam_emac.h"
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
-
+ ************************************************************************************/
 /* Understood PHY types */
 
 #define SAMV7_PHY_DM9161  0
@@ -153,9 +165,9 @@
 #  endif
 #endif
 
-/****************************************************************************
- * Public Functions Prototypes
- ****************************************************************************/
+/************************************************************************************
+ * Public Functions
+ ************************************************************************************/
 
 #ifndef __ASSEMBLY__
 
@@ -200,7 +212,7 @@ int sam_emac_initialize(int intf);
  *      netdev ioctl.  The application level code have gotten the MAC
  *      address from some configuration parameter or by accessing some
  *      non-volatile storage containing the address.  This is the
- *      "canonically correct" way to set the MAC address.
+ *      "cannonically correct" way to set the MAC address.
  *   2) Alterntively, the board logic may support some other less obvious
  *      non-volatile storage and the board-level boot-up code may access
  *      this and use this interface to set the Ethernet MAC address more
@@ -223,29 +235,27 @@ int sam_emac_initialize(int intf);
 int sam_emac_setmacaddr(int intf, uint8_t mac[6]);
 #endif
 
-/****************************************************************************
+/************************************************************************************
  * Function: sam_phy_boardinitialize
  *
  * Description:
- *   Some boards require specialized initialization of the PHY before it can
- *   be used. This may include such things as configuring GPIOs, resetting
- *   the PHY, etc.  If CONFIG_SAMV7_EMAC0_PHYINIT or
- *   CONFIG_SAMV7_EMAC1_PHYINIT is defined in the configuration then the
- *   board specific logic must provide sam_phyinitialize();
- *   The SAMV7 Ethernet driver will call this function one time before it
- *   first uses the PHY.
+ *   Some boards require specialized initialization of the PHY before it can be used.
+ *   This may include such things as configuring GPIOs, resetting the PHY, etc.  If
+ *   CONFIG_SAMV7_PHYINIT is defined in the configuration then the board specific
+ *   logic must provide sam_phyinitialize();  The SAMV7 Ethernet driver will call
+ *   this function one time before it first uses the PHY.
  *
  * Input Parameters:
- *   intf - 0 for EMAC0 and 1 for EMAC1.
+ *   intf - Always zero for now.
  *
  * Returned Value:
  *   OK on success; Negated errno on failure.
  *
  * Assumptions:
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-#if defined(CONFIG_SAMV7_EMAC0_PHYINIT) || defined(CONFIG_SAMV7_EMAC1_PHYINIT)
+#ifdef CONFIG_SAMV7_PHYINIT
 int sam_phy_boardinitialize(int intf);
 #endif
 

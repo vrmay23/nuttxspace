@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/sched/sched_roundrobin.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2009, 2014-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +42,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sched.h>
-#include <sys/param.h>
 #include <assert.h>
 
 #include <nuttx/sched.h>
@@ -39,56 +51,16 @@
 
 #if CONFIG_RR_INTERVAL > 0
 
-#ifdef CONFIG_SMP
-
 /****************************************************************************
- * Private Data
+ * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_SMP
-static struct smp_call_data_s g_call_data;
+#ifndef MIN
+#  define MIN(a,b) (((a) < (b)) ? (a) : (b))
 #endif
 
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-struct roundrobin_arg_s
-{
-  pid_t pid;
-};
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-static int nxsched_roundrobin_handler(FAR void *cookie)
-{
-  pid_t pid = (uintptr_t)cookie;
-  FAR struct tcb_s *tcb;
-  irqstate_t flags;
-
-  flags = enter_critical_section();
-  tcb = nxsched_get_tcb(pid);
-
-  if (!tcb || tcb->task_state == TSTATE_TASK_INVALID ||
-      (tcb->flags & TCB_FLAG_EXIT_PROCESSING) != 0)
-    {
-      /* There is no TCB with this pid or, if there is, it is not a task. */
-
-      leave_critical_section(flags);
-      return OK;
-    }
-
-  if (tcb->task_state == TSTATE_TASK_RUNNING && tcb->cpu == this_cpu() &&
-      nxsched_reprioritize_rtr(tcb, tcb->sched_priority))
-    {
-      up_switch_context(this_task(), tcb);
-    }
-
-  leave_critical_section(flags);
-  return OK;
-}
+#ifndef MAX
+#  define MAX(a,b) (((a) > (b)) ? (a) : (b))
 #endif
 
 /****************************************************************************
@@ -96,7 +68,7 @@ static int nxsched_roundrobin_handler(FAR void *cookie)
  ****************************************************************************/
 
 /****************************************************************************
- * Name:  nxsched_process_roundrobin
+ * Name:  sched_roundrobin_process
  *
  * Description:
  *   Check if the currently executing task has exceeded its time slice.
@@ -124,8 +96,8 @@ static int nxsched_roundrobin_handler(FAR void *cookie)
  *
  ****************************************************************************/
 
-uint32_t nxsched_process_roundrobin(FAR struct tcb_s *tcb, uint32_t ticks,
-                                    bool noswitches)
+uint32_t sched_roundrobin_process(FAR struct tcb_s *tcb, uint32_t ticks,
+                                  bool noswitches)
 {
   uint32_t ret;
   int decr;
@@ -149,10 +121,10 @@ uint32_t nxsched_process_roundrobin(FAR struct tcb_s *tcb, uint32_t ticks,
   /* Did decrementing the timeslice counter cause the timeslice to expire? */
 
   ret = tcb->timeslice;
-  if (tcb->timeslice <= 0 && !nxsched_islocked_tcb(tcb))
+  if (tcb->timeslice <= 0 && !sched_islocked_tcb(tcb))
     {
       /* We will also suppress context switches if we were called via one
-       * of the unusual cases handled by nxsched_reassess_timer().  In that
+       * of the unusual cases handled by sched_timer_reassess().  In that
        * case, we will return a value of one so that the timer will expire
        * as soon as possible and we can perform this action in the normal
        * timer expiration context.
@@ -183,28 +155,12 @@ uint32_t nxsched_process_roundrobin(FAR struct tcb_s *tcb, uint32_t ticks,
           if (tcb->flink &&
               tcb->flink->sched_priority >= tcb->sched_priority)
             {
-              FAR struct tcb_s *rtcb = this_task();
-
               /* Just resetting the task priority to its current value.
-               * This will cause the task to be rescheduled behind any
+               * This this will cause the task to be rescheduled behind any
                * other tasks at the same priority.
                */
 
-#ifdef CONFIG_SMP
-              if (tcb->task_state == TSTATE_TASK_RUNNING &&
-                  tcb->cpu != this_cpu())
-                {
-                  nxsched_smp_call_init(&g_call_data,
-                                        nxsched_roundrobin_handler,
-                                        (FAR void *)(uintptr_t)tcb->pid);
-                  nxsched_smp_call_single_async(tcb->cpu, &g_call_data);
-                }
-              else
-#endif
-              if (nxsched_reprioritize_rtr(tcb, tcb->sched_priority))
-                {
-                  up_switch_context(this_task(), rtcb);
-                }
+              up_reprioritize_rtr(tcb, tcb->sched_priority);
             }
         }
     }

@@ -1,11 +1,13 @@
 /****************************************************************************
  * arch/arm/src/stm32f7/stm32_flash.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2018 Wolpike LLC. All rights reserved.
- * SPDX-FileCopyrightText: 2011 Uros Platise. All rights reserved.
- * SPDX-FileContributor: Evgeniy Bobkov <evgen@wolpike.com>
- * SPDX-FileContributor: Uros Platise <uros.platise@isotel.eu>
+ *   Copyright (C) 2018 Wolpike LLC. All rights reserved.
+ *   Author: Evgeniy Bobkov <evgen@wolpike.com>
+ *
+ * Ported from stm32f20xxf40xx_flash.c, this is the original license:
+ *
+ *   Copyright (C) 2011 Uros Platise. All rights reserved.
+ *   Author: Uros Platise <uros.platise@isotel.eu>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -50,16 +52,16 @@
 
 #include <nuttx/config.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
-#include <arch/barriers.h>
+#include <nuttx/semaphore.h>
 
 #include <stdbool.h>
 #include <assert.h>
 #include <errno.h>
 
+#include "barriers.h"
+
 #include "hardware/stm32_flash.h"
-#include "stm32_waste.h"
-#include "arm_internal.h"
+#include "up_arch.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -75,17 +77,31 @@
  * Private Data
  ****************************************************************************/
 
-static mutex_t g_lock = NXMUTEX_INITIALIZER;
+static sem_t g_sem = SEM_INITIALIZER(1);
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
+static void up_waste(void)
+{
+}
+
+static int sem_lock(void)
+{
+  return nxsem_wait_uninterruptible(&g_sem);
+}
+
+static inline void sem_unlock(void)
+{
+  nxsem_post(&g_sem);
+}
+
 static void flash_unlock(void)
 {
   while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY)
     {
-      stm32_waste();
+      up_waste();
     }
 
   if (getreg32(STM32_FLASH_CR) & FLASH_CR_LOCK)
@@ -110,14 +126,14 @@ int stm32_flash_unlock(void)
 {
   int ret;
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return ret;
     }
 
   flash_unlock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   return ret;
 }
@@ -126,14 +142,14 @@ int stm32_flash_lock(void)
 {
   int ret;
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return ret;
     }
 
   flash_lock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   return ret;
 }
@@ -207,7 +223,7 @@ int stm32_flash_writeprotect(size_t page, bool enabled)
 
   while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY)
     {
-      stm32_waste();
+      up_waste();
     }
 
   /* Re-lock options */
@@ -323,7 +339,7 @@ ssize_t up_progmem_eraseblock(size_t block)
       return -EFAULT;
     }
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -337,13 +353,10 @@ ssize_t up_progmem_eraseblock(size_t block)
   modifyreg32(STM32_FLASH_CR, FLASH_CR_SNB_MASK, FLASH_CR_SNB(block));
   modifyreg32(STM32_FLASH_CR, 0, FLASH_CR_STRT);
 
-  while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY)
-    {
-      stm32_waste();
-    }
+  while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY) up_waste();
 
   modifyreg32(STM32_FLASH_CR, FLASH_CR_SER, 0);
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   /* Verify */
 
@@ -383,7 +396,7 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
 
   addr -= flash_base;
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -410,37 +423,29 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
        * optimization).
        */
 
-      UP_DSB();
+      ARM_DSB();
 
-      while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY)
-        {
-          stm32_waste();
-        }
+      while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY) up_waste();
 
       /* Verify */
 
       if (getreg32(STM32_FLASH_SR) & FLASH_CR_SER)
         {
           modifyreg32(STM32_FLASH_CR, FLASH_CR_PG, 0);
-          nxmutex_unlock(&g_lock);
+          sem_unlock();
           return -EROFS;
         }
 
       if (getreg8(addr) != *byte)
         {
           modifyreg32(STM32_FLASH_CR, FLASH_CR_PG, 0);
-          nxmutex_unlock(&g_lock);
+          sem_unlock();
           return -EIO;
         }
     }
 
   modifyreg32(STM32_FLASH_CR, FLASH_CR_PG, 0);
 
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
   return written;
-}
-
-uint8_t up_progmem_erasestate(void)
-{
-  return FLASH_ERASEDVALUE;
 }

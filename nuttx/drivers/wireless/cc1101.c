@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/wireless/cc1101.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011 Uros Platise. All rights reserved.
+ *   Author: Uros Platise <uros.platise@isotel.eu>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,8 +46,7 @@
  *     ISM Region 2 (Complete America)
  *
  * Todo:
- *   - Extend max packet length up to 255 bytes or rather
- *     infinite < 4096 bytes
+ *   - Extend max packet length up to 255 bytes or rather infinite < 4096 bytes
  *   - Power up/down modes
  *   - Sequencing between states or add protection for correct termination of
  *     various different state (so that CC1101 does not block in case of
@@ -71,8 +83,7 @@
  * how RSSI and LQI work:
  *
  *  1. A weak signal in the presence of noise may give low RSSI and low LQI.
- *  2. A weak signal in "total" absence of noise may give low RSSI and high
- *     LQI.
+ *  2. A weak signal in "total" absence of noise may give low RSSI and high LQI.
  *  3. Strong noise (usually coming from an interferer) may give high RSSI
  *     and low LQI.
  *  4. A strong signal without much noise may give high RSSI and high LQI.
@@ -94,7 +105,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
-#include <poll.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
@@ -181,8 +191,8 @@
 #define CC1101_VCO_VC_DAC       (0x39 | 0xc0)   /* Current setting from PLL cal module */
 #define CC1101_TXBYTES          (0x3a | 0xc0)   /* Underflow and # of bytes in TXFIFO */
 #define CC1101_RXBYTES          (0x3b | 0xc0)   /* Overflow and # of bytes in RXFIFO */
-#define CC1101_RCCTRL1_STATUS   (0x3c | 0xc0)   /* Last RC oscillator calibration results */
-#define CC1101_RCCTRL0_STATUS   (0x3d | 0xc0)   /* Last RC oscillator calibration results */
+#define CC1101_RCCTRL1_STATUS   (0x3c | 0xc0)   /* Last RC oscilator calibration results */
+#define CC1101_RCCTRL0_STATUS   (0x3d | 0xc0)   /* Last RC oscilator calibration results */
 
 /* Multi byte memory locations */
 
@@ -289,8 +299,7 @@ static int cc1101_file_open(FAR struct file *filep);
 static int cc1101_file_close(FAR struct file *filep);
 static ssize_t cc1101_file_read(FAR struct file *filep, FAR char *buffer,
                                 size_t buflen);
-static ssize_t cc1101_file_write(FAR struct file *filep,
-                                 FAR const char *buffer,
+static ssize_t cc1101_file_write(FAR struct file *filep, FAR const char *buffer,
                                  size_t buflen);
 static int cc1101_file_poll(FAR struct file *filep, FAR struct pollfd *fds,
                             bool setup);
@@ -307,14 +316,27 @@ static const struct file_operations g_cc1101ops =
   cc1101_file_write, /* write */
   NULL,              /* seek */
   NULL,              /* ioctl */
-  NULL,              /* mmap */
-  NULL,              /* truncate */
   cc1101_file_poll   /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  ,
+  NULL               /* unlink */
+#endif
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+static int cc1101_takesem(FAR sem_t *sem)
+{
+  return nxsem_wait(sem);
+}
+
+/****************************************************************************
+ * Name: cc1101_givesem
+ ****************************************************************************/
+
+#define cc1101_givesem(sem) nxsem_post(sem)
 
 /****************************************************************************
  * Name: cc1101_file_open
@@ -332,14 +354,15 @@ static int cc1101_file_open(FAR struct file *filep)
 
   wlinfo("Opening CC1101 dev\n");
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  dev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  dev = (FAR struct cc1101_dev_s *)inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxmutex_lock(&dev->devlock);
+  ret = cc1101_takesem(&dev->devsem);
   if (ret < 0)
     {
       return ret;
@@ -358,7 +381,7 @@ static int cc1101_file_open(FAR struct file *filep)
   dev->nopens++;
 
 errout:
-  nxmutex_unlock(&dev->devlock);
+  nxsem_post(&dev->devsem);
   return ret;
 }
 
@@ -379,14 +402,15 @@ static int cc1101_file_close(FAR struct file *filep)
 
   wlinfo("Closing CC1101 dev\n");
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  dev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  dev = (FAR struct cc1101_dev_s *)inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxmutex_lock(&dev->devlock);
+  ret = cc1101_takesem(&dev->devsem);
   if (ret < 0)
     {
       return ret;
@@ -398,7 +422,7 @@ static int cc1101_file_close(FAR struct file *filep)
 #endif
   dev->nopens--;
 
-  nxmutex_unlock(&dev->devlock);
+  nxsem_post(&dev->devsem);
   return OK;
 }
 
@@ -420,22 +444,23 @@ static ssize_t cc1101_file_write(FAR struct file *filep,
 
   wlinfo("write CC1101 dev\n");
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  dev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  dev = (FAR struct cc1101_dev_s *)inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxmutex_lock(&dev->devlock);
+  ret = cc1101_takesem(&dev->devsem);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = cc1101_write(dev, (FAR const uint8_t *)buffer, buflen);
+  ret = cc1101_write(dev, (const uint8_t *)buffer, buflen);
   cc1101_send(dev);
-  nxmutex_unlock(&dev->devlock);
+  nxsem_post(&dev->devsem);
   return ret;
 }
 
@@ -452,7 +477,7 @@ static void fifo_put(FAR struct cc1101_dev_s *dev, FAR uint8_t *buffer,
   int ret;
   int i;
 
-  ret = nxmutex_lock(&dev->lock_rx_buffer);
+  ret = cc1101_takesem(&dev->sem_rx_buffer);
   if (ret < 0)
     {
       return;
@@ -471,7 +496,7 @@ static void fifo_put(FAR struct cc1101_dev_s *dev, FAR uint8_t *buffer,
     }
 
   dev->nxt_write = (dev->nxt_write + 1) % CONFIG_WL_CC1101_RXFIFO_LEN;
-  nxmutex_unlock(&dev->lock_rx_buffer);
+  nxsem_post(&dev->sem_rx_buffer);
 }
 
 /****************************************************************************
@@ -488,7 +513,7 @@ static uint8_t fifo_get(FAR struct cc1101_dev_s *dev, FAR uint8_t *buffer,
   uint8_t i;
   int ret;
 
-  ret = nxmutex_lock(&dev->lock_rx_buffer);
+  ret = cc1101_takesem(&dev->sem_rx_buffer);
   if (ret < 0)
     {
       return ret;
@@ -512,7 +537,7 @@ static uint8_t fifo_get(FAR struct cc1101_dev_s *dev, FAR uint8_t *buffer,
   dev->fifo_len--;
 
 no_data:
-  nxmutex_unlock(&dev->lock_rx_buffer);
+  nxsem_post(&dev->sem_rx_buffer);
   return pktlen;
 }
 
@@ -531,12 +556,13 @@ static ssize_t cc1101_file_read(FAR struct file *filep, FAR char *buffer,
   FAR struct inode *inode;
   int ret;
 
+  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  dev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  dev = (FAR struct cc1101_dev_s *)inode->i_private;
 
-  ret = nxmutex_lock(&dev->devlock);
+  ret = cc1101_takesem(&dev->devsem);
   if (ret < 0)
     {
       return ret;
@@ -557,8 +583,8 @@ static ssize_t cc1101_file_read(FAR struct file *filep, FAR char *buffer,
       return ret;
     }
 
-  buflen = fifo_get(dev, (FAR uint8_t *)buffer, buflen);
-  nxmutex_unlock(&dev->devlock);
+  buflen = fifo_get(dev, (uint8_t *)buffer, buflen);
+  nxsem_post(&dev->devsem);
   return buflen;
 }
 
@@ -579,15 +605,15 @@ static int cc1101_file_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
   wlinfo("setup: %d\n", (int)setup);
 
-  DEBUGASSERT(fds);
+  DEBUGASSERT(filep && fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  dev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  dev = (FAR struct cc1101_dev_s *)inode->i_private;
 
   /* Exclusive access */
 
-  ret = nxmutex_lock(&dev->devlock);
+  ret = cc1101_takesem(&dev->devsem);
   if (ret < 0)
     {
       return ret;
@@ -622,13 +648,14 @@ static int cc1101_file_poll(FAR struct file *filep, FAR struct pollfd *fds,
        * don't wait for RX.
        */
 
-      nxmutex_lock(&dev->lock_rx_buffer);
+      cc1101_takesem(&dev->sem_rx_buffer);
       if (dev->fifo_len > 0)
         {
-          poll_notify(&fds, 1, POLLIN);
+          dev->pfd->revents |= POLLIN; /* Data available for input */
+          nxsem_post(dev->pfd->sem);
         }
 
-      nxmutex_unlock(&dev->lock_rx_buffer);
+      nxsem_post(&dev->sem_rx_buffer);
     }
   else /* Tear it down */
     {
@@ -636,7 +663,7 @@ static int cc1101_file_poll(FAR struct file *filep, FAR struct pollfd *fds,
     }
 
 errout:
-  nxmutex_unlock(&dev->devlock);
+  nxsem_post(&dev->devsem);
   return ret;
 }
 
@@ -860,7 +887,7 @@ void cc1101_dumpregs(struct cc1101_dev_s *dev, uint8_t addr, uint8_t length)
 
       for (i = 0, j = 0; i < readsize; i++, j += 3)
         {
-          snprintf(&outbuf[j], sizeof(outbuf) - j, " %02x", regbuf[i]);
+          sprintf(&outbuf[j], " %02x", regbuf[i]);
         }
 
       /* Dump the formatted data to the syslog output */
@@ -934,7 +961,7 @@ void cc1101_setpacketctrl(struct cc1101_dev_s *dev)
  *
  ****************************************************************************/
 
-int cc1101_init2(FAR struct cc1101_dev_s *dev)
+FAR int cc1101_init2(FAR struct cc1101_dev_s *dev)
 {
   int ret;
 
@@ -1103,8 +1130,7 @@ int cc1101_powerdown(FAR struct cc1101_dev_s *dev)
  *
  ****************************************************************************/
 
-int cc1101_setgdo(FAR struct cc1101_dev_s *dev, uint8_t pin,
-                  uint8_t function)
+int cc1101_setgdo(FAR struct cc1101_dev_s *dev, uint8_t pin, uint8_t function)
 {
   DEBUGASSERT(dev);
   DEBUGASSERT(pin <= CC1101_IOCFG0);
@@ -1148,36 +1174,30 @@ int cc1101_setgdo(FAR struct cc1101_dev_s *dev, uint8_t pin,
 int cc1101_setrf(FAR struct cc1101_dev_s *dev,
                  FAR const struct c1101_rfsettings_s *settings)
 {
-  int ret;
-
   DEBUGASSERT(dev);
   DEBUGASSERT(settings);
 
-  ret = cc1101_access(dev, CC1101_FSCTRL1,
-                      (FAR uint8_t *)&settings->FSCTRL1, -11);
-  if (ret < 0)
+  if (cc1101_access(
+          dev, CC1101_FSCTRL1, (FAR uint8_t *)&settings->FSCTRL1, -11) < 0)
     {
       return -EIO;
     }
 
-  ret = cc1101_access(dev, CC1101_FOCCFG,
-                      (FAR uint8_t *)&settings->FOCCFG, -5);
-  if (ret < 0)
+  if (cc1101_access(dev, CC1101_FOCCFG, (FAR uint8_t *)&settings->FOCCFG, -5) <
+      0)
     {
       return -EIO;
     }
 
-  ret = cc1101_access(dev, CC1101_FREND1,
-                      (FAR uint8_t *)&settings->FREND1, -6);
-  if (ret < 0)
+  if (cc1101_access(dev, CC1101_FREND1, (FAR uint8_t *)&settings->FREND1, -6) <
+      0)
     {
       return -EIO;
     }
 
   /* Load Power Table */
 
-  ret = cc1101_access(dev, CC1101_PATABLE, (FAR uint8_t *)settings->PA, -8);
-  if (ret < 0)
+  if (cc1101_access(dev, CC1101_PATABLE, (FAR uint8_t *)settings->PA, -8) < 0)
     {
       return -EIO;
     }
@@ -1267,13 +1287,13 @@ uint8_t cc1101_setpower(FAR struct cc1101_dev_s *dev, uint8_t power)
 }
 
 /****************************************************************************
- * Name: cc1101_calc_rssi_dbm
+ * Name: cc1101_calcRSSIdBm
  *
  * Description:
  *
  ****************************************************************************/
 
-int cc1101_calc_rssi_dbm(int rssi)
+int cc1101_calcRSSIdBm(int rssi)
 {
   if (rssi >= 128)
     {
@@ -1331,8 +1351,7 @@ int cc1101_read(FAR struct cc1101_dev_s *dev, FAR uint8_t *buf, size_t size)
 
   nbytes += 2; /* RSSI and LQI */
   buf[0] = nbytes;
-  cc1101_access(dev, CC1101_RXFIFO, buf + 1,
-                (nbytes > size) ? size : nbytes);
+  cc1101_access(dev, CC1101_RXFIFO, buf + 1, (nbytes > size) ? size : nbytes);
 
   /* Flush remaining bytes, if there is no room to receive or if there is a
    * BAD CRC
@@ -1408,7 +1427,7 @@ int cc1101_send(FAR struct cc1101_dev_s *dev)
     }
 
   cc1101_strobe(dev, CC1101_STX);
-  nxsem_wait(&dev->sem_tx);
+  cc1101_takesem(&dev->sem_tx);
 
   /* this is set MCSM1, send auto to rx */
 
@@ -1475,17 +1494,13 @@ int cc1101_register(FAR const char *path, FAR struct cc1101_dev_s *dev)
   dev->nxt_read  = 0;
   dev->nxt_write = 0;
   dev->fifo_len  = 0;
-  nxmutex_init(&dev->devlock);
-  nxmutex_init(&dev->lock_rx_buffer);
-  nxsem_init(&dev->sem_rx, 0, 0);
-  nxsem_init(&dev->sem_tx, 0, 0);
+  nxsem_init(&(dev->devsem), 0, 1);
+  nxsem_init(&(dev->sem_rx_buffer), 0, 1);
+  nxsem_init(&(dev->sem_rx), 0, 0);
+  nxsem_init(&(dev->sem_tx), 0, 0);
 
   if (cc1101_init2(dev) < 0)
     {
-      nxmutex_destroy(&dev->devlock);
-      nxmutex_destroy(&dev->lock_rx_buffer);
-      nxsem_destroy(&dev->sem_rx);
-      nxsem_destroy(&dev->sem_tx);
       kmm_free(dev);
       wlerr("ERROR: Failed to initialize cc1101_init\n");
       return -ENODEV;
@@ -1530,7 +1545,9 @@ void cc1101_isr_process(FAR void *arg)
 
           if (dev->pfd)
             {
-              poll_notify(&dev->pfd, 1, POLLIN);
+              dev->pfd->revents |= POLLIN; /* Data available for input */
+              wlinfo("Wake up polled fd\n");
+              nxsem_post(dev->pfd->sem);
             }
         }
         break;

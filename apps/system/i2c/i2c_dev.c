@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/system/i2c/i2c_dev.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011, 2016, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +40,6 @@
 #include <nuttx/config.h>
 
 #include <stdlib.h>
-#include <unistd.h>
 
 #include <nuttx/i2c/i2c_master.h>
 
@@ -41,7 +53,7 @@
  * Name: i2ccmd_dev
  ****************************************************************************/
 
-int i2ccmd_dev(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv)
+int i2ccmd_dev(FAR struct i2ctool_s *i2ctool, int argc, char **argv)
 {
   struct i2c_msg_s msg;
   FAR char *ptr;
@@ -66,14 +78,6 @@ int i2ccmd_dev(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv)
   saveaddr         = i2ctool->regaddr;
   i2ctool->regaddr = 0;
 
-  /* For backwards compatibility, the default behaviour while scanning will
-   * be to send a read request on the I2C bus. It is also possible to specify
-   * the use of a zero-byte write request instead, but this option will not
-   * be sticky.
-   */
-
-  i2ctool->zerowrite = false;
-
   /* Parse any command line arguments */
 
   for (argndx = 1; argndx < argc; )
@@ -97,16 +101,15 @@ int i2ccmd_dev(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv)
       argndx += nargs;
     }
 
-  /* There should be exactly two more things on the command line:
-   * The first and last addresses to be probed.
+  /* There should be exactly two more things on the command line:  The first and
+   * last addresses to be probed.
    */
 
   if (argndx + 1 < argc)
     {
       first = strtol(argv[argndx], NULL, 16);
       last  = strtol(argv[argndx + 1], NULL, 16);
-      if (first < 0 || first > 0x7f || last < 0 ||
-          last > 0x7f || first > last)
+      if (first < 0 || first > 0x7f || last < 0 || last > 0x7f || first > last)
         {
           i2ctool_printf(i2ctool, g_i2cargrange, argv[0]);
           goto errout;
@@ -131,28 +134,13 @@ int i2ccmd_dev(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv)
   fd = i2cdev_open(i2ctool->bus);
   if (fd < 0)
     {
-      i2ctool_printf(i2ctool, "Failed to get bus %d\n",
-                      i2ctool->bus);
-      goto errout;
-    }
-
-  /* Display message warning user about some devices which don't appear
-   * unless using zero-byte write header.
-   */
-
-  if (!i2ctool->zerowrite)
-    {
-      i2ctool_printf(
-          i2ctool,
-          "NOTE: Some devices may not appear with this "
-          "scan.\nYou may also try a scan with the -z flag to "
-          "discover more devices using a zero-byte write request.\n");
+       i2ctool_printf(i2ctool, "Failed to get bus %d\n", i2ctool->bus);
+       goto errout;
     }
 
   /* Probe each address */
 
-  i2ctool_printf(i2ctool,
-                 "     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f\n");
+  i2ctool_printf(i2ctool, "     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f\n");
   for (i = 0; i < 128; i += 16)
     {
       i2ctool_printf(i2ctool, "%02x: ", i);
@@ -169,22 +157,13 @@ int i2ccmd_dev(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv)
 
           /* Set up data structures */
 
-          msg.frequency = i2ctool->freq;
-          msg.addr = addr;
+          regaddr       = i2ctool->regaddr;
 
-          if (i2ctool->zerowrite)
-            {
-              msg.flags = 0;
-              msg.buffer = NULL;
-              msg.length = 0;
-            }
-          else
-            {
-              regaddr = i2ctool->regaddr;
-              msg.flags = I2C_M_READ;
-              msg.buffer = &regaddr;
-              msg.length = 1;
-            }
+          msg.frequency = i2ctool->freq;
+          msg.addr      = addr;
+          msg.flags     = I2C_M_READ;
+          msg.buffer    = &regaddr;
+          msg.length    = 1;
 
           ret = i2cdev_transfer(fd, &msg, 1);
 
@@ -196,7 +175,6 @@ int i2ccmd_dev(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv)
             {
               i2ctool_printf(i2ctool, "-- ");
             }
-
           i2ctool_flush(i2ctool);
         }
 
@@ -207,6 +185,7 @@ int i2ccmd_dev(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv)
   close(fd);
 
 errout:
+
   /* Restore the previous "sticky" register address unless a new register
    * address was provided on the command line.  In that case the new
    * register address is retained.

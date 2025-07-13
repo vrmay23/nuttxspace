@@ -1,22 +1,35 @@
 /*****************************************************************************
  * arch/renesas/src/sh1/sh1_head.S
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  *****************************************************************************/
 
@@ -29,7 +42,8 @@
 #include <arch/irq.h>		/* IRQ definitions */
 
 #include "chip.h"		/* Chip-specific settings */
-#include "renesas_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
 
 /*****************************************************************************
  * Pre-processor Definitions
@@ -48,13 +62,13 @@
 
 	.globl	_up_lowsetup				/* Early initialization of UART */
 #ifdef USE_EARLYSERIALINIT
-	.globl	_renesas_earlyconsoleinit		/* Early initialization of console driver */
+	.globl	_up_earlyconsoleinit		/* Early initialization of console driver */
 #endif
 #ifdef CONFIG_ARCH_LEDS
 	.globl	_board_autoled_initialize	/* Boot LED setup */
 #endif
 #ifdef CONFIG_DEBUG_FEATURES
-	.globl	_renesas_lowputc					/* Low-level debug output */
+	.globl	_up_lowputc					/* Low-level debug output */
 #endif
 	.globl	_nx_start					/* NuttX entry point */
 
@@ -148,7 +162,7 @@
 
 	.macro	showprogress, code
 #ifdef CONFIG_DEBUG_FEATURES
-	mov.l	.Llowputc, r0				/* Address of renesas_earlyconsoleinit */
+	mov.l	.Llowputc, r0				/* Address of up_earlyconsoleinit */
 	jsr		@r0							/* Call it */
 	mov		#\code, r4					/* Delay slot */
 #endif
@@ -179,9 +193,9 @@ __vector_table:
 	 */
 
 	.long	__start						/* 0-1: Power-on reset (hard, NMI high) PC & SP */
-	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE
+	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE-4
 	.long	__start						/* 2-3: Manual reset (soft, NMI low) PC & SP */
-	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE
+	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE-4
 
 	.rept	SH1_NCMN_VECTORS-4
 	.long	_up_invalid_handler
@@ -345,7 +359,7 @@ __start:
 
 	.align 2
 .Lstack:
-	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE
+	.long	_ebss+CONFIG_IDLETHREAD_STACKSIZE-4
 .Lwcr1:
 	.long	0x5ffffa2
 .Lbcr:
@@ -414,7 +428,7 @@ __start0:
 	/* Perform early console initialization */
 
 #ifdef USE_EARLYSERIALINIT
-	mov.l	.Learlyconsole, r0			/* Address of renesas_earlyconsoleinit */
+	mov.l	.Learlyconsole, r0			/* Address of up_earlyconsoleinit */
 	jsr		@r0							/* Call it */
 	or		r0, r0						/* Delay slot */
 #endif
@@ -470,13 +484,13 @@ __start0:
 	.long	_ebss
 #ifdef USE_EARLYSERIALINIT
 .Learlyconsole:
-	.long	_renesas_earlyconsoleinit
+	.long	_up_earlyconsoleinit
 #endif
 .Llowsetup:
 	.long	_up_lowsetup
 #ifdef CONFIG_DEBUG_FEATURES
 .Llowputc:
-	.long	_renesas_lowputc
+	.long	_up_lowputc
 #endif
 .Lledinit:
 	.long	_board_autoled_initialize

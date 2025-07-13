@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/arm/src/lpc54xx/lpc54_usb0_ohci.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -32,13 +30,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/signal.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/usb/usb.h>
 #include <nuttx/usb/ohci.h>
 #include <nuttx/usb/usbhost.h>
@@ -48,7 +45,9 @@
 
 #include <arch/board/board.h> /* May redefine GPIO settings */
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "chip.h"
 #include "hardware/lpc54_usb.h"
 #include "hardware/lpc54_syscon.h"
@@ -262,7 +261,7 @@ struct lpc54_usbhost_s
   uint8_t          outinterval; /* Minimum periodic IN EP polling interval: 2, 4, 6, 16, or 32 */
 #endif
 
-  mutex_t          lock;        /* Support mutually exclusive access */
+  sem_t            exclsem;     /* Support mutually exclusive access */
   sem_t            pscsem;      /* Semaphore to wait Writeback Done Head event */
 
 #ifdef CONFIG_OHCI_HUB
@@ -270,8 +269,6 @@ struct lpc54_usbhost_s
 
   volatile struct usbhost_hubport_s *hport;
 #endif
-
-  struct usbhost_devaddr_s devgen;  /* Address generation data */
 };
 
 /* This structure describes one asynchronous transfer */
@@ -366,9 +363,15 @@ static void lpc54_checkreg(uint32_t addr, uint32_t val, bool iswrite);
 static uint32_t lpc54_getreg(uint32_t addr);
 static void lpc54_putreg(uint32_t val, uint32_t addr);
 #else
-#  define lpc54_getreg(addr)     getreg32(addr)
-#  define lpc54_putreg(val,addr) putreg32(val,addr)
+# define lpc54_getreg(addr)     getreg32(addr)
+# define lpc54_putreg(val,addr) putreg32(val,addr)
 #endif
+
+/* Semaphores ***************************************************************/
+
+static int  lpc54_takesem(sem_t *sem);
+static int  lpc54_takesem_noncancelable(sem_t *sem);
+#define lpc54_givesem(s) nxsem_post(s);
 
 /* Byte stream access helper functions **************************************/
 
@@ -432,7 +435,7 @@ static int lpc54_ctrltd(struct lpc54_usbhost_s *priv, struct lpc54_ed_s *ed,
 
 /* Interrupt handling *******************************************************/
 
-static int lpc54_usbinterrupt(int irq, void *context, void *arg);
+static int lpc54_usbinterrupt(int irq, void *context, FAR void *arg);
 
 /* USB host controller operations *******************************************/
 
@@ -478,14 +481,14 @@ static ssize_t lpc54_transfer(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
 #ifdef CONFIG_OHCI_ASYNCH
 static void lpc54_asynch_completion(struct lpc54_usbhost_s *priv,
                                     struct lpc54_ed_s *ed);
-static int lpc54_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
-                        uint8_t *buffer, size_t buflen,
-                        usbhost_asynch_t callback, void *arg);
+static int lpc54_asynch(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep,
+                        FAR uint8_t *buffer, size_t buflen,
+                        usbhost_asynch_t callback, FAR void *arg);
 #endif
-static int lpc54_cancel(struct usbhost_driver_s *drvr, usbhost_ep_t ep);
+static int lpc54_cancel(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep);
 #ifdef CONFIG_OHCI_HUB
-static int lpc54_connect(struct usbhost_driver_s *drvr,
-                         struct usbhost_hubport_s *hport,
+static int lpc54_connect(FAR struct usbhost_driver_s *drvr,
+                         FAR struct usbhost_hubport_s *hport,
                          bool connected);
 #endif
 static void lpc54_disconnect(struct usbhost_driver_s *drvr,
@@ -504,38 +507,34 @@ static inline void lpc54_ep0init(struct lpc54_usbhost_s *priv);
  * single global instance.
  */
 
-static struct lpc54_usbhost_s g_usbhost =
-{
-  .lock = NXMUTEX_INITIALIZER,
-  .pscsem = SEM_INITIALIZER(0),
-};
+static struct lpc54_usbhost_s g_usbhost;
 
 /* This is the connection/enumeration interface */
 
 static struct usbhost_connection_s g_usbconn =
 {
-  .wait      = lpc54_wait,
-  .enumerate = lpc54_enumerate,
+  .wait             = lpc54_wait,
+  .enumerate        = lpc54_enumerate,
 };
 
 /* Aligned static memory allocations */
 
 static uint8_t g_hcca[LPC54_HCCA_SIZE] \
-  aligned_data(LPC54_ALIGN_SIZE);
+  __attribute__ ((aligned(LPC54_ALIGN_SIZE)));
 static uint8_t g_tdtail_alloc[LPC54_TD_SIZE] \
-  aligned_data(LPC54_ALIGN_SIZE);
+  __attribute__ ((aligned(LPC54_ALIGN_SIZE)));
 static uint8_t g_edctrl_alloc[LPC54_ED_SIZE] \
-  aligned_data(LPC54_ALIGN_SIZE);
+  __attribute__ ((aligned(LPC54_ALIGN_SIZE)));
 static uint8_t g_edfree_alloc[LPC54_EDFREE_SIZE] \
-  aligned_data(LPC54_ALIGN_SIZE);
+  __attribute__ ((aligned(LPC54_ALIGN_SIZE)));
 static uint8_t g_tdfree_alloc[LPC54_TDFREE_SIZE] \
-  aligned_data(LPC54_ALIGN_SIZE);
+  __attribute__ ((aligned(LPC54_ALIGN_SIZE)));
 static uint8_t g_tbfree_alloc[LPC54_TBFREE_SIZE] \
-  aligned_data(LPC54_ALIGN_SIZE);
+  __attribute__ ((aligned(LPC54_ALIGN_SIZE)));
 
 #if LPC54_IOBUFFERS > 0
 static uint8_t g_iobuffers[LPC54_IOBUF_ALLOC] \
-  aligned_data(LPC54_ALIGN_SIZE);
+  __attribute__ ((aligned(LPC54_ALIGN_SIZE)));
 #endif
 
 /* This is a free list of EDs and TD buffers */
@@ -677,6 +676,54 @@ static void lpc54_putreg(uint32_t val, uint32_t addr)
   putreg32(val, addr);
 }
 #endif
+
+/****************************************************************************
+ * Name: lpc54_takesem
+ *
+ * Description:
+ *   This is just a wrapper to handle the annoying behavior of semaphore
+ *   waits that return due to the receipt of a signal.
+ *
+ ****************************************************************************/
+
+static int lpc54_takesem(sem_t *sem)
+{
+  return nxsem_wait_uninterruptible(sem);
+}
+
+/****************************************************************************
+ * Name: lpc54_takesem_noncancelable
+ *
+ * Description:
+ *   This is just a wrapper to handle the annoying behavior of semaphore
+ *   waits that return due to the receipt of a signal.  This version also
+ *   ignores attempts to cancel the thread.
+ *
+ ****************************************************************************/
+
+static int lpc54_takesem_noncancelable(sem_t *sem)
+{
+  int result;
+  int ret = OK;
+
+  do
+    {
+      result = nxsem_wait_uninterruptible(sem);
+
+      /* The only expected error is ECANCELED which would occur if the
+       * calling thread were canceled.
+       */
+
+      DEBUGASSERT(result == OK || result == -ECANCELED);
+      if (ret == OK && result < 0)
+        {
+          ret = result;
+        }
+    }
+  while (result < 0);
+
+  return ret;
+}
 
 /****************************************************************************
  * Name: lpc54_getle16
@@ -1423,15 +1470,11 @@ static inline int lpc54_reminted(struct lpc54_usbhost_s *priv,
   DEBUGASSERT(curr != NULL);
   if (curr != NULL)
     {
-      /* Clear all current entries in the interrupt table for this
-       * direction
-       */
+      /* Clear all current entries in the interrupt table for this direction */
 
       lpc54_setinttab(0, 2, offset);
 
-      /* Remove the ED from the list..
-       *  Is this ED the first on in the list?
-       */
+      /* Remove the ED from the list..  Is this ED the first on in the list? */
 
       if (prev == NULL)
         {
@@ -1700,7 +1743,7 @@ static int lpc54_ctrltd(struct lpc54_usbhost_s *priv, struct lpc54_ed_s *ed,
 
       /* Wait for the Writeback Done Head interrupt */
 
-      ret = nxsem_wait_uninterruptible(&ed->wdhsem);
+      ret = lpc54_takesem(&ed->wdhsem);
       if (ret < 0)
         {
           /* Task has been canceled */
@@ -1735,7 +1778,7 @@ errout_with_xfrinfo:
  *
  ****************************************************************************/
 
-static int lpc54_usbinterrupt(int irq, void *context, void *arg)
+static int lpc54_usbinterrupt(int irq, void *context, FAR void *arg)
 {
   struct lpc54_usbhost_s *priv = &g_usbhost;
   struct lpc54_ed_s *ed;
@@ -1797,7 +1840,7 @@ static int lpc54_usbinterrupt(int irq, void *context, void *arg)
 
                           if (priv->pscwait)
                             {
-                              nxsem_post(&priv->pscsem);
+                              lpc54_givesem(&priv->pscsem);
                               priv->pscwait = false;
                             }
                         }
@@ -1850,13 +1893,11 @@ static int lpc54_usbinterrupt(int irq, void *context, void *arg)
                           priv->rhport.hport.devclass = NULL;
                         }
 
-                      /* Notify any waiters for the Root Hub Status change
-                       * event
-                       */
+                      /* Notify any waiters for the Root Hub Status change event */
 
                       if (priv->pscwait)
                         {
-                          nxsem_post(&priv->pscsem);
+                          lpc54_givesem(&priv->pscsem);
                           priv->pscwait = false;
                         }
                     }
@@ -1991,7 +2032,7 @@ static int lpc54_usbinterrupt(int irq, void *context, void *arg)
                     {
                       /* Wake up the thread waiting for the WDH event */
 
-                      nxsem_post(&ed->wdhsem);
+                      lpc54_givesem(&ed->wdhsem);
                       xfrinfo->wdhwait = false;
                     }
 
@@ -2116,7 +2157,7 @@ static int lpc54_wait(struct usbhost_connection_s *conn,
       /* Wait for the next connection event */
 
       priv->pscwait = true;
-      ret = nxsem_wait_uninterruptible(&priv->pscsem);
+      ret = lpc54_takesem(&priv->pscsem);
       if (ret < 0)
         {
           return ret;
@@ -2174,9 +2215,7 @@ static int lpc54_rh_enumerate(struct usbhost_connection_s *conn,
 
   nxsig_usleep(100 * 1000);
 
-  /* Put RH port 1 in reset
-   * (the LPC546x supports only a single downstream port)
-   */
+  /* Put RH port 1 in reset (the LPC546x supports only a single downstream port) */
 
   lpc54_putreg(OHCI_RHPORTST_PRS, LPC54_OHCI_RHPORTST1);
 
@@ -2191,8 +2230,8 @@ static int lpc54_rh_enumerate(struct usbhost_connection_s *conn,
   return OK;
 }
 
-static int lpc54_enumerate(struct usbhost_connection_s *conn,
-                           struct usbhost_hubport_s *hport)
+static int lpc54_enumerate(FAR struct usbhost_connection_s *conn,
+                           FAR struct usbhost_hubport_s *hport)
 {
   int ret;
 
@@ -2269,7 +2308,7 @@ static int lpc54_ep0configure(struct usbhost_driver_s *drvr,
 
   /* We must have exclusive access to EP0 and the control list */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc54_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2287,7 +2326,8 @@ static int lpc54_ep0configure(struct usbhost_driver_s *drvr,
     }
 
   ed->hw.ctrl = hwctrl;
-  nxmutex_unlock(&priv->lock);
+
+  lpc54_givesem(&priv->exclsem);
 
   uinfo("EP0 CTRL:%08x\n", ed->hw.ctrl);
   return OK;
@@ -2334,7 +2374,7 @@ static int lpc54_epalloc(struct usbhost_driver_s *drvr,
    * periodic list, and the interrupt table.
    */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc54_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2398,7 +2438,14 @@ static int lpc54_epalloc(struct usbhost_driver_s *drvr,
 #endif
 
       uinfo("EP%d CTRL:%08x\n", epdesc->addr, ed->hw.ctrl);
+
+      /* Initialize the semaphore that is used to wait for the endpoint
+       * WDH event. The wdhsem semaphore is used for signaling and, hence,
+       * should not have priority inheritance enabled.
+       */
+
       nxsem_init(&ed->wdhsem, 0, 0);
+      nxsem_setprotocol(&ed->wdhsem, SEM_PRIO_NONE);
 
       /* Link the common tail TD to the ED's TD list */
 
@@ -2450,7 +2497,7 @@ static int lpc54_epalloc(struct usbhost_driver_s *drvr,
         }
     }
 
-  nxmutex_unlock(&priv->lock);
+  lpc54_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2463,7 +2510,7 @@ static int lpc54_epalloc(struct usbhost_driver_s *drvr,
  * Input Parameters:
  *   drvr - The USB host driver instance obtained as a parameter from the
  *     call to the class create() method.
- *   ep - The endpoint to be freed.
+ *   ep - The endpint to be freed.
  *
  * Returned Value:
  *   On success, zero (OK) is returned. On a failure, a negated errno value
@@ -2489,7 +2536,7 @@ static int lpc54_epfree(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
    * periodic list and the interrupt table.
    */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc54_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2527,7 +2574,7 @@ static int lpc54_epfree(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
   /* Put the ED back into the free list */
 
   lpc54_edfree(ed);
-  nxmutex_unlock(&priv->lock);
+  lpc54_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2573,7 +2620,7 @@ static int lpc54_alloc(struct usbhost_driver_s *drvr,
 
   /* We must have exclusive access to the transfer buffer pool */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc54_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2588,7 +2635,7 @@ static int lpc54_alloc(struct usbhost_driver_s *drvr,
       ret = OK;
     }
 
-  nxmutex_unlock(&priv->lock);
+  lpc54_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2625,9 +2672,9 @@ static int lpc54_free(struct usbhost_driver_s *drvr, uint8_t *buffer)
 
   /* We must have exclusive access to the transfer buffer pool */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc54_takesem_noncancelable(&priv->exclsem);
   lpc54_tbfree(buffer);
-  nxmutex_unlock(&priv->lock);
+  lpc54_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2760,7 +2807,7 @@ static int lpc54_ctrlin(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
   struct lpc54_usbhost_s *priv = (struct lpc54_usbhost_s *)drvr;
   struct lpc54_ed_s *ed = (struct lpc54_ed_s *)ep0;
   uint16_t len;
-  int ret;
+  int  ret;
 
   DEBUGASSERT(priv != NULL && ed != NULL && req != NULL);
 
@@ -2770,7 +2817,7 @@ static int lpc54_ctrlin(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
 
   /* We must have exclusive access to EP0 and the control list */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc54_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2792,7 +2839,7 @@ static int lpc54_ctrlin(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
         }
     }
 
-  nxmutex_unlock(&priv->lock);
+  lpc54_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -2803,7 +2850,7 @@ static int lpc54_ctrlout(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
   struct lpc54_usbhost_s *priv = (struct lpc54_usbhost_s *)drvr;
   struct lpc54_ed_s *ed = (struct lpc54_ed_s *)ep0;
   uint16_t len;
-  int ret;
+  int  ret;
 
   DEBUGASSERT(priv != NULL && ed != NULL && req != NULL);
 
@@ -2813,7 +2860,7 @@ static int lpc54_ctrlout(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
 
   /* We must have exclusive access to EP0 and the control list */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc54_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -2836,7 +2883,7 @@ static int lpc54_ctrlout(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
         }
     }
 
-  nxmutex_unlock(&priv->lock);
+  lpc54_givesem(&priv->exclsem);
   return ret;
 }
 
@@ -3108,7 +3155,7 @@ static ssize_t lpc54_transfer(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
    * table.
    */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = lpc54_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -3125,7 +3172,7 @@ static ssize_t lpc54_transfer(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
     {
       uerr("ERROR: lpc54_alloc_xfrinfo failed\n");
       nbytes = -ENOMEM;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* Initialize the transfer structure */
@@ -3180,7 +3227,7 @@ static ssize_t lpc54_transfer(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
 
   /* Wait for the Writeback Done Head interrupt */
 
-  ret = nxsem_wait_uninterruptible(&ed->wdhsem);
+  ret = lpc54_takesem(&ed->wdhsem);
   if (ret < 0)
     {
       nbytes = (ssize_t)ret;
@@ -3240,8 +3287,8 @@ errout_with_xfrinfo:
   lpc54_free_xfrinfo(xfrinfo);
   ed->xfrinfo = NULL;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_sem:
+  lpc54_givesem(&priv->exclsem);
   return nbytes;
 }
 
@@ -3388,7 +3435,7 @@ static int lpc54_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
    * table.
    */
 
-  ret nxmutex_lock(&priv->lock);
+  ret lpc54_takesem(&priv->exclsem);
   if (ret < 0)
     {
       return ret;
@@ -3405,7 +3452,7 @@ static int lpc54_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
     {
       uerr("ERROR: lpc54_alloc_xfrinfo failed\n");
       ret = -ENOMEM;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* Initialize the transfer structure */
@@ -3425,7 +3472,7 @@ static int lpc54_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
   if (ret < 0)
     {
       uerr("ERROR: lpc54_dma_alloc failed: %d\n", ret);
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* If a buffer was allocated, then use it instead of the callers buffer */
@@ -3449,7 +3496,7 @@ static int lpc54_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
    * completes.
    */
 
-  nxmutex_unlock(&priv->lock);
+  lpc54_givesem(&priv->exclsem);
   return OK;
 
 errout_with_asynch:
@@ -3464,8 +3511,8 @@ errout_with_asynch:
   lpc54_free_xfrinfo(xfrinfo);
   ed->xfrinfo = NULL;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_sem:
+  lpc54_givesem(&priv->exclsem);
   return ret;
 }
 #endif /* CONFIG_OHCI_ASYNCH */
@@ -3489,7 +3536,7 @@ errout_with_lock:
  *
  ****************************************************************************/
 
-static int lpc54_cancel(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
+static int lpc54_cancel(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep)
 {
 #ifdef CONFIG_OHCI_ASYNCH
   struct lpc54_usbhost_s *priv = (struct lpc54_usbhost_s *)drvr;
@@ -3534,9 +3581,7 @@ static int lpc54_cancel(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
               ctrl  = lpc54_getreg(LPC54_OHCI_CTRL);
               lpc54_putreg(ctrl & ~OHCI_CTRL_BLE, LPC54_OHCI_CTRL);
 
-              /* Remove the TDs attached to the ED,
-               * keeping the ED in the list
-               */
+              /* Remove the TDs attached to the ED, keeping the ED in the list */
 
               td           = (struct lpc54_gtd_s *)
                              (ed->hw.headp & ED_HEADP_ADDR_MASK);
@@ -3550,9 +3595,7 @@ static int lpc54_cancel(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
             }
           else
             {
-              /* Remove the TDs attached to the ED,
-               * keeping the Ed in the list
-               */
+              /* Remove the TDs attached to the ED, keeping the Ed in the list */
 
               td           = (struct lpc54_gtd_s *)
                              (ed->hw.headp & ED_HEADP_ADDR_MASK);
@@ -3587,7 +3630,7 @@ static int lpc54_cancel(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
 
               /* Wake up the waiting thread */
 
-              nxsem_post(&ed->wdhsem);
+              lpc54_givesem(&ed->wdhsem);
               xfrinfo->wdhwait = false;
 
               /* And free the transfer structure */
@@ -3598,9 +3641,7 @@ static int lpc54_cancel(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
 #ifdef CONFIG_OHCI_ASYNCH
           else
             {
-              /* Otherwise,
-               * perform the callback and free the transfer structure
-               */
+              /* Otherwise, perform the callback and free the transfer structure */
 
               lpc54_asynch_completion(priv, ed);
             }
@@ -3643,8 +3684,8 @@ static int lpc54_cancel(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
  ****************************************************************************/
 
 #ifdef CONFIG_OHCI_HUB
-static int lpc54_connect(struct usbhost_driver_s *drvr,
-                         struct usbhost_hubport_s *hport,
+static int lpc54_connect(FAR struct usbhost_driver_s *drvr,
+                         FAR struct usbhost_hubport_s *hport,
                          bool connected)
 {
   struct lpc54_usbhost_s *priv = (struct lpc54_usbhost_s *)drvr;
@@ -3664,7 +3705,7 @@ static int lpc54_connect(struct usbhost_driver_s *drvr,
   if (priv->pscwait)
     {
       priv->pscwait = false;
-      nxsem_post(&priv->pscsem);
+      lpc54_givesem(&priv->pscsem);
     }
 
   leave_critical_section(flags);
@@ -3725,7 +3766,7 @@ static inline void lpc54_ep0init(struct lpc54_usbhost_s *priv)
   /* Initialize the common tail TD. */
 
   memset(TDTAIL, 0, sizeof(struct lpc54_gtd_s));
-  TDTAIL->ed = EDCTRL;
+  TDTAIL->ed              = EDCTRL;
 
   /* Link the common tail TD to the ED's TD list */
 
@@ -3828,8 +3869,18 @@ struct usbhost_connection_s *lpc54_usbhost_initialize(int controller)
 
   /* Initialize function address generation logic */
 
-  usbhost_devaddr_initialize(&priv->devgen);
-  priv->rhport.pdevgen = &priv->devgen;
+  usbhost_devaddr_initialize(&priv->rhport);
+
+  /* Initialize semaphores */
+
+  nxsem_init(&priv->pscsem,  0, 0);
+  nxsem_init(&priv->exclsem, 0, 1);
+
+  /* The pscsem semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
+  nxsem_setprotocol(&priv->pscsem, SEM_PRIO_NONE);
 
 #ifndef CONFIG_OHCI_INT_DISABLE
   priv->ininterval  = MAX_PERINTERVAL;
@@ -3914,7 +3965,12 @@ struct usbhost_connection_s *lpc54_usbhost_initialize(int controller)
   memset((void *)TDTAIL, 0, sizeof(struct ohci_gtd_s));
   memset((void *)EDCTRL, 0, sizeof(struct lpc54_ed_s));
 
+  /* The EDCTRL wdhsem semaphore is used for signaling and, hence, should
+   * not have priority inheritance enabled.
+   */
+
   nxsem_init(&EDCTRL->wdhsem, 0, 0);
+  nxsem_setprotocol(&EDCTRL->wdhsem, SEM_PRIO_NONE);
 
   /* Initialize user-configurable EDs */
 

@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/eeprom/spi_xx25xx.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Sebastien Lorquet. All rights reserved.
+ *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -104,13 +117,11 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 #include <nuttx/fs/fs.h>
 
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
 #include <nuttx/spi/spi.h>
 
@@ -177,7 +188,7 @@ struct ee25xx_dev_s
   uint32_t         size;     /* in bytes, expanded from geometry */
   uint16_t         pgsize;   /* write block size, in bytes, expanded from geometry */
   uint16_t         addrlen;  /* number of BITS in data addresses */
-  mutex_t          lock;     /* file access serialization */
+  sem_t            sem;      /* file access serialization */
   uint8_t          refs;     /* The number of times the device has been opened */
   uint8_t          readonly; /* Flags */
 };
@@ -270,7 +281,7 @@ static const struct ee25xx_geom_s g_ee25xx_devices[] =
 
 /* Driver operations */
 
-static const struct file_operations g_ee25xx_fops =
+static const struct file_operations ee25xx_fops =
 {
   ee25xx_open,  /* open */
   ee25xx_close, /* close */
@@ -278,6 +289,7 @@ static const struct file_operations g_ee25xx_fops =
   ee25xx_write, /* write */
   ee25xx_seek,  /* seek */
   ee25xx_ioctl, /* ioctl */
+  NULL          /* poll */
 };
 
 /****************************************************************************
@@ -326,7 +338,7 @@ static inline void ee25xx_unlock(FAR struct spi_dev_s *dev)
  * Name: ee25xx_sendcmd
  *
  * Description: Send command and address as one transaction to take advantage
- * of possible faster DMA transfers. Sending byte per byte is far far slower.
+ * of possible faster DMA transfers. Sending byte per byte is FAR FAR slower.
  *
  ****************************************************************************/
 
@@ -379,7 +391,6 @@ static void ee25xx_waitwritecomplete(struct ee25xx_dev_s *priv)
     {
       /* Select this FLASH part */
 
-      ee25xx_lock(priv->spi);
       SPI_SELECT(priv->spi, SPIDEV_EEPROM(0), true);
 
       /* Send "Read Status Register (RDSR)" command */
@@ -395,7 +406,6 @@ static void ee25xx_waitwritecomplete(struct ee25xx_dev_s *priv)
       /* Deselect the FLASH */
 
       SPI_SELECT(priv->spi, SPIDEV_EEPROM(0), false);
-      ee25xx_unlock(priv->spi);
 
       /* Given that writing could take up to a few milliseconds,
        * the following short delay in the "busy" case will allow
@@ -404,7 +414,9 @@ static void ee25xx_waitwritecomplete(struct ee25xx_dev_s *priv)
 
       if ((status & EE25XX_SR_WIP) != 0)
         {
+          ee25xx_unlock(priv->spi);
           nxsig_usleep(1000);
+          ee25xx_lock(priv->spi);
         }
     }
   while ((status & EE25XX_SR_WIP) != 0);
@@ -453,6 +465,32 @@ static void ee25xx_writepage(FAR struct ee25xx_dev_s *eedev,
 }
 
 /****************************************************************************
+ * Name: ee25xx_semtake
+ *
+ * Acquire a resource to access the device.
+ * The purpose of the semaphore is to block tasks that try to access the
+ * EEPROM while another task is actively using it.
+ *
+ ****************************************************************************/
+
+static int ee25xx_semtake(FAR struct ee25xx_dev_s *eedev)
+{
+  return nxsem_wait_uninterruptible(&eedev->sem);
+}
+
+/****************************************************************************
+ * Name: ee25xx_semgive
+ *
+ * Release a resource to access the device.
+ *
+ ****************************************************************************/
+
+static inline void ee25xx_semgive(FAR struct ee25xx_dev_s *eedev)
+{
+  nxsem_post(&eedev->sem);
+}
+
+/****************************************************************************
  * Driver Functions
  ****************************************************************************/
 
@@ -469,10 +507,10 @@ static int ee25xx_open(FAR struct file *filep)
   FAR struct ee25xx_dev_s *eedev;
   int ret = OK;
 
-  DEBUGASSERT(inode->i_private);
-  eedev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  eedev = (FAR struct ee25xx_dev_s *)inode->i_private;
 
-  ret = nxmutex_lock(&eedev->lock);
+  ret = ee25xx_semtake(eedev);
   if (ret < 0)
     {
       return ret;
@@ -489,7 +527,7 @@ static int ee25xx_open(FAR struct file *filep)
       eedev->refs += 1;
     }
 
-  nxmutex_unlock(&eedev->lock);
+  ee25xx_semgive(eedev);
   return ret;
 }
 
@@ -506,10 +544,10 @@ static int ee25xx_close(FAR struct file *filep)
   FAR struct ee25xx_dev_s *eedev;
   int ret = OK;
 
-  DEBUGASSERT(inode->i_private);
-  eedev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  eedev = (FAR struct ee25xx_dev_s *)inode->i_private;
 
-  ret = nxmutex_lock(&eedev->lock);
+  ret = ee25xx_semtake(eedev);
   if (ret < 0)
     {
       return ret;
@@ -528,7 +566,7 @@ static int ee25xx_close(FAR struct file *filep)
       eedev->refs -= 1;
     }
 
-  nxmutex_unlock(&eedev->lock);
+  ee25xx_semgive(eedev);
   return ret;
 }
 
@@ -546,10 +584,10 @@ static off_t ee25xx_seek(FAR struct file *filep, off_t offset, int whence)
   int                     ret;
   FAR struct inode        *inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  eedev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  eedev = (FAR struct ee25xx_dev_s *)inode->i_private;
 
-  ret = nxmutex_lock(&eedev->lock);
+  ret = ee25xx_semtake(eedev);
   if (ret < 0)
     {
       return ret;
@@ -575,7 +613,7 @@ static off_t ee25xx_seek(FAR struct file *filep, off_t offset, int whence)
 
       /* Return EINVAL if the whence argument is invalid */
 
-      nxmutex_unlock(&eedev->lock);
+      ee25xx_semgive(eedev);
       return -EINVAL;
     }
 
@@ -587,7 +625,7 @@ static off_t ee25xx_seek(FAR struct file *filep, off_t offset, int whence)
    *  value 0 until data is actually written into the gap."
    *
    * We can conform to the first part, but not the second.
-   * But return -EINVAL if
+   * But return EINVAL if
    *
    *  "...the resulting file offset would be negative for a regular file,
    *  block special file, or directory."
@@ -603,7 +641,7 @@ static off_t ee25xx_seek(FAR struct file *filep, off_t offset, int whence)
       ret = -EINVAL;
     }
 
-  nxmutex_unlock(&eedev->lock);
+  ee25xx_semgive(eedev);
   return ret;
 }
 
@@ -616,12 +654,11 @@ static ssize_t ee25xx_read(FAR struct file *filep, FAR char *buffer,
 {
   FAR struct ee25xx_dev_s *eedev;
   FAR struct inode        *inode = filep->f_inode;
-  int ret;
 
-  DEBUGASSERT(inode->i_private);
-  eedev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  eedev = (FAR struct ee25xx_dev_s *)inode->i_private;
 
-  ret = nxmutex_lock(&eedev->lock);
+  ret = ee25xx_semtake(eedev);
   if (ret < 0)
     {
       return ret;
@@ -653,7 +690,7 @@ static ssize_t ee25xx_read(FAR struct file *filep, FAR char *buffer,
   /* Update the file position */
 
   filep->f_pos += len;
-  nxmutex_unlock(&eedev->lock);
+  ee25xx_semgive(eedev);
   return len;
 }
 
@@ -670,8 +707,8 @@ static ssize_t ee25xx_write(FAR struct file *filep, FAR const char *buffer,
   FAR struct inode        *inode = filep->f_inode;
   int                     ret    = -EACCES;
 
-  DEBUGASSERT(inode->i_private);
-  eedev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  eedev = (FAR struct ee25xx_dev_s *)inode->i_private;
 
   if (eedev->readonly)
     {
@@ -692,17 +729,17 @@ static ssize_t ee25xx_write(FAR struct file *filep, FAR const char *buffer,
       len = eedev->size - filep->f_pos;
     }
 
-  ret = nxmutex_lock(&eedev->lock);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
   /* From this point no failure cannot be detected anymore.
    * The user should verify the write by rereading memory.
    */
 
   ret = len; /* save number of bytes written */
+
+  ret = ee25xx_semtake(eedev);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Writes can't happen in a row like the read does.
    * The EEPROM is made of pages, and write sequences
@@ -749,7 +786,8 @@ static ssize_t ee25xx_write(FAR struct file *filep, FAR const char *buffer,
       filep->f_pos += cnt;
     }
 
-  nxmutex_unlock(&eedev->lock);
+  ee25xx_semgive(eedev);
+
   return ret;
 }
 
@@ -767,14 +805,14 @@ static int ee25xx_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct inode        *inode = filep->f_inode;
   int                     ret    = 0;
 
-  DEBUGASSERT(inode->i_private);
-  eedev = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  eedev = (FAR struct ee25xx_dev_s *)inode->i_private;
   UNUSED(eedev);
 
   switch (cmd)
     {
       default:
-        ret = -ENOTTY;
+        ret = -EINVAL;
     }
 
   return ret;
@@ -813,7 +851,7 @@ int ee25xx_initialize(FAR struct spi_dev_s *dev, FAR char *devname,
       return -ENOMEM;
     }
 
-  nxmutex_init(&eedev->lock);
+  nxsem_init(&eedev->sem, 0, 1);
 
   eedev->spi      = dev;
   eedev->size     = 128 << g_ee25xx_devices[devtype].bytes;
@@ -826,9 +864,8 @@ int ee25xx_initialize(FAR struct spi_dev_s *dev, FAR char *devname,
 
   eedev->readonly = !!readonly;
 
-  finfo("EEPROM device %s, %"PRIu32" bytes, "
-        "%u per page, addrlen %u, readonly %d\n",
+  finfo("EEPROM device %s, %d bytes, %d per page, addrlen %d, readonly %d\n",
        devname, eedev->size, eedev->pgsize, eedev->addrlen, eedev->readonly);
 
-  return register_driver(devname, &g_ee25xx_fops, 0666, eedev);
+  return register_driver(devname, &ee25xx_fops, 0666, eedev);
 }

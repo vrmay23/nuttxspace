@@ -1,22 +1,38 @@
 /****************************************************************************
  * drivers/usbmisc/fusb303.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ * FUSB303 USB-C controller driver
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright (C) 2019 Haltian Ltd. All rights reserved.
+ *   Authors: Harri Luhtala <harri.luhtala@haltian.com>
+ *            Juha Niskanen <juha.niskanen@haltian.com>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,7 +50,6 @@
 #include <nuttx/compiler.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/i2c/i2c_master.h>
 
 #include <nuttx/usb/fusb303.h>
@@ -96,7 +111,7 @@ struct fusb303_dev_s
   FAR struct i2c_master_s *i2c;         /* I2C interface */
   uint8_t addr;                         /* I2C address */
   volatile bool int_pending;            /* Interrupt received but handled */
-  mutex_t devlock;                      /* Manages exclusive access */
+  sem_t devsem;                         /* Manages exclusive access */
   FAR struct fusb303_config_s *config;  /* Platform specific configuration */
   FAR struct pollfd *fds[CONFIG_FUSB303_NPOLLWAITERS];
 };
@@ -117,6 +132,7 @@ static ssize_t fusb303_write(FAR struct file *filep, FAR const char *buffer,
 static int fusb303_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 static int fusb303_poll(FAR struct file *filep, FAR struct pollfd *fds,
                         bool setup);
+static void fusb303_notify(FAR struct fusb303_dev_s *priv);
 
 /****************************************************************************
  * Private Data
@@ -130,9 +146,10 @@ static const struct file_operations g_fusb303ops =
   fusb303_write, /* write */
   NULL,          /* seek */
   fusb303_ioctl, /* ioctl */
-  NULL,          /* mmap */
-  NULL,          /* truncate */
   fusb303_poll   /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL         /* unlink */
+#endif
 };
 
 /****************************************************************************
@@ -632,7 +649,7 @@ static int fusb303_open(FAR struct file *filep)
   uint8_t dev_type;
   int ret;
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -643,8 +660,7 @@ static int fusb303_open(FAR struct file *filep)
   ret = fusb303_read_device_id(priv, &dev_id, &dev_type);
   if (ret < 0)
     {
-      fusb303_err("ERROR: No response at given address 0x%02X\n",
-                  priv->addr);
+      fusb303_err("ERROR: No response at given address 0x%02X\n", priv->addr);
       ret = -EFAULT;
     }
   else
@@ -655,7 +671,7 @@ static int fusb303_open(FAR struct file *filep)
       priv->config->irq_enable(priv->config, true);
     }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -673,7 +689,7 @@ static int fusb303_close(FAR struct file *filep)
   FAR struct fusb303_dev_s *priv = inode->i_private;
   int ret;
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -681,7 +697,7 @@ static int fusb303_close(FAR struct file *filep)
 
   priv->config->irq_enable(priv->config, false);
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return OK;
 }
 
@@ -709,7 +725,7 @@ static ssize_t fusb303_read(FAR struct file *filep, FAR char *buffer,
 
   ptr = (struct fusb303_result_s *)buffer;
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -729,7 +745,7 @@ static ssize_t fusb303_read(FAR struct file *filep, FAR char *buffer,
 
   fusb303_clear_interrupts(priv);
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return sizeof(struct fusb303_result_s);
 }
 
@@ -764,7 +780,7 @@ static int fusb303_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct fusb303_dev_s *priv = inode->i_private;
   int ret;
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -776,7 +792,7 @@ static int fusb303_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   {
   case USBCIOC_READ_DEVID:
     {
-      ret = fusb303_read_device_id(priv, (FAR uint8_t *)arg, NULL);
+      ret = fusb303_read_device_id(priv, (uint8_t *)arg, NULL);
     }
     break;
 
@@ -800,13 +816,13 @@ static int fusb303_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   case USBCIOC_READ_STATUS:
     {
-      ret = fusb303_read_status(priv, (FAR uint8_t *)arg);
+      ret = fusb303_read_status(priv, (uint8_t *)arg);
     }
     break;
 
   case USBCIOC_READ_DEVTYPE:
     {
-      ret = fusb303_read_devtype(priv, (FAR uint8_t *)arg);
+      ret = fusb303_read_devtype(priv, (uint8_t *)arg);
     }
     break;
 
@@ -824,7 +840,7 @@ static int fusb303_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
     break;
   }
 
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
 }
 
@@ -845,13 +861,13 @@ static int fusb303_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int ret = OK;
   int i;
 
-  DEBUGASSERT(fds);
+  DEBUGASSERT(filep && fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode->i_private);
-  priv = inode->i_private;
+  DEBUGASSERT(inode && inode->i_private);
+  priv = (FAR struct fusb303_dev_s *)inode->i_private;
 
-  ret = nxmutex_lock(&priv->devlock);
+  ret = nxsem_wait(&priv->devsem);
   if (ret < 0)
     {
       return ret;
@@ -895,7 +911,7 @@ static int fusb303_poll(FAR struct file *filep, FAR struct pollfd *fds,
       flags = enter_critical_section();
       if (priv->int_pending)
         {
-          poll_notify(&fds, 1, POLLIN);
+          fusb303_notify(priv);
         }
 
       leave_critical_section(flags);
@@ -904,7 +920,7 @@ static int fusb303_poll(FAR struct file *filep, FAR struct pollfd *fds,
     {
       /* This is a request to tear down the poll. */
 
-      FAR struct pollfd **slot = (FAR struct pollfd **)fds->priv;
+      struct pollfd **slot = (struct pollfd **)fds->priv;
       DEBUGASSERT(slot != NULL);
 
       /* Remove all memory of the poll setup */
@@ -914,8 +930,40 @@ static int fusb303_poll(FAR struct file *filep, FAR struct pollfd *fds,
     }
 
 out:
-  nxmutex_unlock(&priv->devlock);
+  nxsem_post(&priv->devsem);
   return ret;
+}
+
+/****************************************************************************
+ * Name: fusb303_notify
+ *
+ * Description:
+ *   Notify thread about data to be available
+ *
+ ****************************************************************************/
+
+static void fusb303_notify(FAR struct fusb303_dev_s *priv)
+{
+  int i;
+
+  DEBUGASSERT(priv != NULL);
+
+  /* If there are threads waiting on poll() for FUSB303 data to become
+   * available, then wake them up now.  NOTE: we wake up all waiting threads
+   * because we do not know that they are going to do.  If they all try to
+   * read the data, then some make end up blocking after all.
+   */
+
+  for (i = 0; i < CONFIG_FUSB303_NPOLLWAITERS; i++)
+    {
+      struct pollfd *fds = priv->fds[i];
+      if (fds)
+        {
+          fds->revents |= POLLIN;
+          fusb303_info("Report events: %02x\n", fds->revents);
+          nxsem_post(fds->sem);
+        }
+    }
 }
 
 /****************************************************************************
@@ -936,7 +984,7 @@ static int fusb303_int_handler(int irq, FAR void *context, FAR void *arg)
   flags = enter_critical_section();
   priv->int_pending = true;
 
-  poll_notify(priv->fds, CONFIG_FUSB303_NPOLLWAITERS, POLLIN);
+  fusb303_notify(priv);
   leave_critical_section(flags);
 
   return OK;
@@ -956,17 +1004,16 @@ int fusb303_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   /* Initialize the FUSB303 device structure */
 
-  priv = (FAR struct fusb303_dev_s *)
-                             kmm_zalloc(sizeof(struct fusb303_dev_s));
+  priv = (FAR struct fusb303_dev_s *)kmm_zalloc(sizeof(struct fusb303_dev_s));
   if (!priv)
     {
       fusb303_err("ERROR: Failed to allocate instance\n");
       return -ENOMEM;
     }
 
-  /* Initialize device structure mutex */
+  /* Initialize device structure semaphore */
 
-  nxmutex_init(&priv->devlock);
+  nxsem_init(&priv->devsem, 0, 1);
 
   priv->int_pending = false;
   priv->i2c         = i2c;
@@ -995,7 +1042,8 @@ int fusb303_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   return OK;
 
 errout_with_priv:
-  nxmutex_destroy(&priv->devlock);
+  nxsem_destroy(&priv->devsem);
   kmm_free(priv);
+
   return ret;
 }

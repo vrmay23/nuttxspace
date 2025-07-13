@@ -1,22 +1,36 @@
 /****************************************************************************
  * libs/libnx/nxmu/nx_bitmap.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2011-2013, 2016-2017 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -47,8 +61,8 @@
  *
  * Input Parameters:
  *   hwnd   - The window that will receive the bitmap image
- *   dest   - Describes the rectangular region on the display that will
- *            receive the the bit map.
+ *   dest   - Describes the rectangular region on the display that will receive the
+ *            the bit map.
  *   src    - The start of the source image.
  *   origin - The origin of the upper, left-most corner of the full bitmap.
  *            Both dest and origin are in window coordinates, however, origin
@@ -93,33 +107,38 @@ int nx_bitmap(NXWINDOW hwnd, FAR const struct nxgl_rect_s *dest,
   outmsg.origin.y   = origin->y;
   nxgl_rectcopy(&outmsg.dest, dest);
 
+
   /* Create a semaphore for tracking command completion */
 
   outmsg.sem_done = &sem_done;
 
-  ret = nxsem_init(&sem_done, 0, 0);
+  ret = _SEM_INIT(&sem_done, 0, 0);
   if (ret < 0)
     {
-      gerr("ERROR: nxsem_init failed: %d\n", ret);
+      gerr("ERROR: _SEM_INIT failed: %d\n", _SEM_ERRNO(ret));
       return ret;
     }
+
+  /* The sem_done semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
+  _SEM_SETPROTOCOL(&sem_done, SEM_PRIO_NONE);
 
   /* Forward the fill command to the server */
 
   ret = nxmu_sendwindow(wnd, &outmsg, sizeof(struct nxsvrmsg_bitmap_s));
 
-  /* Wait that the command is completed, so that caller can release the
-   * buffer.
-   */
+  /* Wait that the command is completed, so that caller can release the buffer. */
 
   if (ret == OK)
     {
-      ret = nxsem_wait(&sem_done);
+      ret = _SEM_WAIT(&sem_done);
     }
 
   /* Destroy the semaphore and return. */
 
-  nxsem_destroy(&sem_done);
+  _SEM_DESTROY(&sem_done);
 
   return ret;
 }

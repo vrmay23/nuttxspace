@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/sched/sched_resumescheduler.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -35,14 +48,14 @@
 #include "irq/irq.h"
 #include "sched/sched.h"
 
-#if defined(CONFIG_SCHED_RESUMESCHEDULER)
+#if CONFIG_RR_INTERVAL > 0 || defined(CONFIG_SCHED_RESUMESCHEDULER)
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: nxsched_resume_scheduler
+ * Name: sched_resume_scheduler
  *
  * Description:
  *   Called by architecture specific implementations that block task
@@ -57,25 +70,76 @@
  *
  ****************************************************************************/
 
-void nxsched_resume_scheduler(FAR struct tcb_s *tcb)
+void sched_resume_scheduler(FAR struct tcb_s *tcb)
 {
+#if CONFIG_RR_INTERVAL > 0
 #ifdef CONFIG_SCHED_SPORADIC
+  if ((tcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_RR)
+#endif
+    {
+      /* Reset the task's timeslice. */
+
+      tcb->timeslice = MSEC2TICK(CONFIG_RR_INTERVAL);
+    }
+#endif
+
+#ifdef CONFIG_SCHED_SPORADIC
+#if CONFIG_RR_INTERVAL > 0
+  else
+#endif
   if ((tcb->flags & TCB_FLAG_POLICY_MASK) == TCB_FLAG_SCHED_SPORADIC)
     {
       /* Reset the replenishment cycle if it is appropriate to do so */
 
-      DEBUGVERIFY(nxsched_resume_sporadic(tcb));
+      DEBUGVERIFY(sched_sporadic_resume(tcb));
     }
 #endif
 
   /* Indicate the task has been resumed */
 
 #ifdef CONFIG_SCHED_CRITMONITOR
-  nxsched_resume_critmon(tcb);
+  sched_critmon_resume(tcb);
 #endif
 #ifdef CONFIG_SCHED_INSTRUMENTATION
   sched_note_resume(tcb);
 #endif
+
+#ifdef CONFIG_SMP
+  /* NOTE: The following logic for adjusting global IRQ controls were
+   * derived from sched_addreadytorun() and sched_removedreadytorun()
+   * Here, we only handles clearing logic to defer unlocking IRQ lock
+   * followed by context switching.
+   */
+
+  int me = this_cpu();
+
+  /* Adjust global IRQ controls.  If irqcount is greater than zero,
+   * then this task/this CPU holds the IRQ lock
+   */
+
+  if (tcb->irqcount > 0)
+    {
+      /* Do notihing here
+       * NOTE: spin_setbit() is done in sched_addreadytorun()
+       * and sched_removereadytorun()
+       */
+    }
+
+  /* No.. This CPU will be relinquishing the lock.  But this works
+   * differently if we are performing a context switch from an
+   * interrupt handler and the interrupt handler has established
+   * a critical section.  We can detect this case when
+   * g_cpu_nestcount[me] > 0.
+   */
+
+  else if (g_cpu_nestcount[me] <= 0)
+    {
+      /* Release our hold on the IRQ lock. */
+
+      spin_clrbit(&g_cpu_irqset, me, &g_cpu_irqsetlock,
+                  &g_cpu_irqlock);
+    }
+#endif /* CONFIG_SMP */
 }
 
-#endif /* CONFIG_SCHED_RESUMESCHEDULER */
+#endif /* CONFIG_RR_INTERVAL > 0 || CONFIG_SCHED_RESUMESCHEDULER */

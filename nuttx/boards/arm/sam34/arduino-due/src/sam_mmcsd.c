@@ -1,22 +1,35 @@
 /****************************************************************************
- * boards/arm/sam34/arduino-due/src/sam_mmcsd.c
+ * boards/arm/sam34/arduino-due/src/up_mmcsd.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2010, 2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,15 +47,11 @@
 #include <nuttx/spi/spi.h>
 #include <nuttx/spi/spi_bitbang.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "sam_gpio.h"
 #include "hardware/sam3u_pio.h"
 
 #include "arduino-due.h"
-
-/* Include the bit-band skeleton logic */
-
-#include <nuttx/spi/spi_bitbang.c>
 
 /* In order to use the SD card on the ITEAD shield, you must enable the SPI
  * bit-bang driver as well as support for SPI-based MMC/SD cards.
@@ -84,7 +93,7 @@
 
 /* Calibration value for timing loop */
 
-#define SPI_BITBANG_LOOPSPERMSEC CONFIG_BOARD_LOOPSPERMSEC
+#define SPI_BITBAND_LOOPSPERMSEC CONFIG_BOARD_LOOPSPERMSEC
 
 /* SPI_PERBIT_NSEC is the minimum time to transfer one bit.  This determines
  * the maximum frequency and is also used to calculate delays to achieve
@@ -101,17 +110,23 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-static void spi_select(struct spi_bitbang_s *priv, uint32_t devid,
+static void spi_select(FAR struct spi_bitbang_s *priv, uint32_t devid,
                        bool selected);
-static uint8_t spi_status(struct spi_bitbang_s *priv, uint32_t devid);
+static uint8_t spi_status(FAR struct spi_bitbang_s *priv, uint32_t devid);
 #ifdef CONFIG_SPI_CMDDATA
-static int spi_cmddata(struct spi_bitbang_s *priv, uint32_t devid,
+static int spi_cmddata(FAR struct spi_bitbang_s *priv, uint32_t devid,
                        bool cmd);
 #endif
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Include the bit-band skeleton logic
+ ****************************************************************************/
+
+#include <nuttx/spi/spi_bitbang.c>
 
 /****************************************************************************
  * Name: spi_select
@@ -129,7 +144,7 @@ static int spi_cmddata(struct spi_bitbang_s *priv, uint32_t devid,
  *
  ****************************************************************************/
 
-static void spi_select(struct spi_bitbang_s *priv, uint32_t devid,
+static void spi_select(FAR struct spi_bitbang_s *priv, uint32_t devid,
                        bool selected)
 {
   if (devid == SPIDEV_MMCSD(0))
@@ -160,7 +175,7 @@ static void spi_select(struct spi_bitbang_s *priv, uint32_t devid,
  *
  ****************************************************************************/
 
-static uint8_t spi_status(struct spi_bitbang_s *priv, uint32_t devid)
+static uint8_t spi_status(FAR struct spi_bitbang_s *priv, uint32_t devid)
 {
   if (devid == SPIDEV_MMCSD(0))
     {
@@ -187,7 +202,7 @@ static uint8_t spi_status(struct spi_bitbang_s *priv, uint32_t devid)
  ****************************************************************************/
 
 #ifdef CONFIG_SPI_CMDDATA
-static int spi_cmddata(struct spi_bitbang_s *priv, uint32_t devid,
+static int spi_cmddata(FAR struct spi_bitbang_s *priv, uint32_t devid,
                        bool cmd)
 {
   return OK;
@@ -208,7 +223,7 @@ static int spi_cmddata(struct spi_bitbang_s *priv, uint32_t devid,
  *
  ****************************************************************************/
 
-static struct spi_dev_s *sam_mmcsd_spiinitialize(void)
+static FAR struct spi_dev_s *sam_mmcsd_spiinitialize(void)
 {
   /* Initialize GPIOs */
 
@@ -219,7 +234,7 @@ static struct spi_dev_s *sam_mmcsd_spiinitialize(void)
 
   /* Create the SPI driver instance */
 
-  return spi_create_bitbang(&g_spiops, NULL);
+  return spi_create_bitbang(&g_spiops);
 }
 
 /****************************************************************************
@@ -236,7 +251,7 @@ static struct spi_dev_s *sam_mmcsd_spiinitialize(void)
 
 int sam_sdinitialize(int minor)
 {
-  struct spi_dev_s *spi;
+  FAR struct spi_dev_s *spi;
   int ret;
 
   /* Get the SPI driver instance for the SD chip select */
@@ -260,8 +275,7 @@ int sam_sdinitialize(int minor)
   ret = mmcsd_spislotinitialize(minor, SAM34_MMCSDSLOTNO, spi);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to bind bit bang SPI device"
-            " to MMC/SD slot %d: %d\n",
+      ferr("ERROR: Failed to bind  bit bang SPI device to MMC/SD slot %d: %d\n",
             SAM34_MMCSDSLOTNO, ret);
       return ret;
     }

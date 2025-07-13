@@ -1,22 +1,39 @@
 /****************************************************************************
  * drivers/timers/mcp794xx.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Abdelatif Guettouche. All rights reserved.
+ *   Author: Abdelatif Guettouche <abdelatif.guettouche@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * This file is a part of NuttX:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -79,7 +96,6 @@ struct mcp794xx_dev_s
 {
   FAR struct i2c_master_s *i2c;  /* Contained reference to the I2C bus driver. */
   uint8_t addr;                  /* The I2C device address. */
-  bool coarse_trim;              /* Coarse trim mode */
 };
 
 /****************************************************************************
@@ -186,105 +202,6 @@ static int rtc_bcd2bin(uint8_t value)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: mcp794xx_rtc_set_trim
- *
- * Description:
- *   Sets the digital trimming to correct for inaccuracies of clock source.
- *   Digital trimming consists of the MCP794XX periodically adding or
- *   subtracting clock cycles, resulting in small adjustments in the internal
- *   timing.
- *
- * Input Parameters:
- *   trim_val    - Calculated trimming value, refer to MCP794XX reference
- *                 manual.
- *   rtc_slow    - True indicates RTC is behind real clock, false otherwise.
- *                 This has to be set to ensure correct trimming direction.
- *   coarse_mode - MCP794XX allows coarse mode that trims every second
- *                 instead of every minute.
- *
- * Returned Value:
- *   Zero (OK) on success; a negated errno on failure
- *
- ****************************************************************************/
-
-int mcp794xx_rtc_set_trim(uint8_t trim_val, bool rtc_slow, bool coarse_mode)
-{
-  struct i2c_msg_s msg[2];
-  uint8_t buffer[2];
-  uint8_t address;
-  uint8_t ctrl;
-  int ret;
-
-  if (g_mcp794xx.coarse_trim != coarse_mode)
-    {
-      address = MCP794XX_REG_CONTROL;
-      msg[0].frequency = CONFIG_MCP794XX_I2C_FREQUENCY;
-      msg[0].addr      = g_mcp794xx.addr;
-      msg[0].flags     = I2C_M_NOSTOP;
-      msg[0].buffer    = &address;
-      msg[0].length    = 1;
-
-      msg[1].frequency = CONFIG_MCP794XX_I2C_FREQUENCY;
-      msg[1].addr      = g_mcp794xx.addr;
-      msg[1].flags     = I2C_M_READ;
-      msg[1].buffer    = &ctrl;
-      msg[1].length    = 1;
-
-      ret = I2C_TRANSFER(g_mcp794xx.i2c, msg, 2);
-      if (ret < 0)
-        {
-          rtcerr("ERROR: I2C_TRANSFER failed: %d\n", ret);
-          return ret;
-        }
-
-      ctrl &= ~MCP794XX_CONTROL_CRSTRIM;
-      if (coarse_mode)
-        {
-          ctrl |= MCP794XX_CONTROL_CRSTRIM;
-        }
-
-      buffer[0] = MCP794XX_REG_CONTROL;
-      buffer[1] = ctrl;
-      msg[0].frequency = CONFIG_MCP794XX_I2C_FREQUENCY;
-      msg[0].addr      = g_mcp794xx.addr;
-      msg[0].flags     = 0;
-      msg[0].buffer    = buffer;
-      msg[0].length    = 2;
-
-      ret = I2C_TRANSFER(g_mcp794xx.i2c, msg, 1);
-      if (ret < 0)
-        {
-          rtcerr("ERROR: I2C_TRANSFER failed: %d\n", ret);
-          return ret;
-        }
-
-      g_mcp794xx.coarse_trim = coarse_mode;
-    }
-
-  buffer[0] = MCP794XX_REG_OSCTRIM;
-  buffer[1] = trim_val & 0x7;
-  if (rtc_slow)
-    {
-      buffer[1] |= MCP794XX_OSCTRIM_SIGN;
-    }
-
-  msg[0].frequency = CONFIG_MCP794XX_I2C_FREQUENCY;
-  msg[0].addr      = g_mcp794xx.addr;
-  msg[0].flags     = 0;
-  msg[0].buffer    = buffer;
-  msg[0].length    = 2;
-
-  ret = I2C_TRANSFER(g_mcp794xx.i2c, msg, 1);
-  if (ret < 0)
-    {
-      rtcerr("ERROR: I2C_TRANSFER failed: %d\n", ret);
-      return ret;
-    }
-
-  return OK;
-}
-
-/****************************************************************************
  * Name: mcp794xx_rtc_initialize
  *
  * Description:
@@ -313,10 +230,9 @@ int mcp794xx_rtc_initialize(FAR struct i2c_master_s *i2c, uint8_t addr)
 {
   /* Remember the i2c device and claim that the RTC is enabled */
 
-  g_mcp794xx.i2c         = i2c;
-  g_mcp794xx.addr        = addr;
-  g_mcp794xx.coarse_trim = false;
-  g_rtc_enabled          = true;
+  g_mcp794xx.i2c  = i2c;
+  g_mcp794xx.addr = addr;
+  g_rtc_enabled   = true;
   return OK;
 }
 
@@ -510,17 +426,14 @@ int up_rtc_settime(FAR const struct timespec *tp)
       newtime++;
     }
 
-#ifndef CONFIG_MCP794XX_DATETIME_UTC
-  /* Save datetime in local time. */
-
+#ifdef CONFIG_LIBC_LOCALTIME
   if (localtime_r(&newtime, &newtm) == NULL)
     {
       rtcerr("ERROR: localtime_r failed\n");
       return -EINVAL;
     }
-#else
-  /* Save datetime in UTC time. */
 
+#else
   if (gmtime_r(&newtime, &newtm) == NULL)
     {
       rtcerr("ERROR: gmtime_r failed\n");

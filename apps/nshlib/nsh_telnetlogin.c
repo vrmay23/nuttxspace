@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/nshlib/nsh_telnetlogin.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2013, 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name Gregory Nutt nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,17 +39,14 @@
 
 #include <nuttx/config.h>
 
+#include <stdio.h>
 #include <string.h>
 #include <ctype.h>
-#include <unistd.h>
-#include <termios.h>
 
 #include "fsutils/passwd.h"
 
 #include "nsh.h"
 #include "nsh_console.h"
-#include "nshlib/nshlib.h"
-#include "system/readline.h"
 
 #ifdef CONFIG_NSH_TELNET_LOGIN
 
@@ -55,6 +65,21 @@
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: nsh_telnetecho
+ ****************************************************************************/
+
+static void nsh_telnetecho(FAR struct console_stdio_s *pstate, uint8_t is_use)
+{
+  uint8_t optbuf[4];
+  optbuf[0] = TELNET_IAC;
+  optbuf[1] = (is_use == TELNET_USE_ECHO) ? TELNET_WILL : TELNET_DO;
+  optbuf[2] = 1;
+  optbuf[3] = 0;
+  fputs((char *)optbuf, pstate->cn_outstream);
+  fflush(pstate->cn_outstream);
+}
 
 /****************************************************************************
  * Name: nsh_telnettoken
@@ -136,7 +161,7 @@ static void nsh_telnettoken(FAR struct console_stdio_s *pstate,
 
   /* Copied the token into the buffer */
 
-  strlcpy(buffer, start, buflen);
+  strncpy(buffer, start, buflen);
 }
 
 /****************************************************************************
@@ -150,24 +175,13 @@ static void nsh_telnettoken(FAR struct console_stdio_s *pstate,
 int nsh_telnetlogin(FAR struct console_stdio_s *pstate)
 {
   char username[16];
-  char password[128];
-#ifdef CONFIG_NSH_PLATFORM_CHALLENGE
-  char challenge[128];
-#endif
-  struct termios cfg;
+  char password[16];
   int i;
-  int ret;
-
-#ifdef CONFIG_NSH_PLATFORM_SKIP_LOGIN
-  if (platform_skip_login() == OK)
-    {
-      return OK;
-    }
-#endif
 
   /* Present the NSH Telnet greeting */
 
-  write(OUTFD(pstate), g_telnetgreeting, strlen(g_telnetgreeting));
+  fputs(g_telnetgreeting, pstate->cn_outstream);
+  fflush(pstate->cn_outstream);
 
   /* Loop for the configured number of retries */
 
@@ -175,60 +189,25 @@ int nsh_telnetlogin(FAR struct console_stdio_s *pstate)
     {
       /* Ask for the login username */
 
-      write(OUTFD(pstate), g_userprompt, strlen(g_userprompt));
+      fputs(g_userprompt, pstate->cn_outstream);
+      fflush(pstate->cn_outstream);
 
       username[0] = '\0';
-      if (readline_fd(pstate->cn_line, LINE_MAX,
-                      INFD(pstate), OUTFD(pstate)) >= 0)
-
+      if (fgets(pstate->cn_line, CONFIG_NSH_LINELEN, INSTREAM(pstate)) != NULL)
         {
           /* Parse out the username */
 
           nsh_telnettoken(pstate, username, sizeof(username));
         }
 
-      if (username[0] == '\0')
-        {
-          i--;
-          continue;
-        }
-
-#ifdef CONFIG_NSH_PLATFORM_CHALLENGE
-      platform_challenge(challenge, sizeof(challenge));
-      write(OUTFD(pstate), challenge, strlen(challenge));
-#endif
-
       /* Ask for the login password */
 
-      write(OUTFD(pstate), g_passwordprompt, strlen(g_passwordprompt));
-
-      /* Disable ECHO if its a tty device */
-
-      if (isatty(INFD(pstate)))
-        {
-          if (tcgetattr(INFD(pstate), &cfg) == 0)
-            {
-              cfg.c_lflag &= ~ECHO;
-              tcsetattr(INFD(pstate), TCSANOW, &cfg);
-            }
-        }
+      fputs(g_passwordprompt, pstate->cn_outstream);
+      fflush(pstate->cn_outstream);
+      nsh_telnetecho(pstate, TELNET_NOTUSE_ECHO);
 
       password[0] = '\0';
-      ret = readline_fd(pstate->cn_line, LINE_MAX,
-                      INFD(pstate), OUTFD(pstate));
-
-      /* Enable echo again after password */
-
-      if (isatty(INFD(pstate)))
-        {
-          if (tcgetattr(INFD(pstate), &cfg) == 0)
-            {
-              cfg.c_lflag |= ECHO;
-              tcsetattr(INFD(pstate), TCSANOW, &cfg);
-            }
-        }
-
-      if (ret >= 0)
+      if (fgets(pstate->cn_line, CONFIG_NSH_LINELEN, INSTREAM(pstate)) != NULL)
         {
           /* Parse out the password */
 
@@ -239,14 +218,7 @@ int nsh_telnetlogin(FAR struct console_stdio_s *pstate)
 #if defined(CONFIG_NSH_LOGIN_PASSWD)
           if (PASSWORD_VERIFY_MATCH(passwd_verify(username, password)))
 #elif defined(CONFIG_NSH_LOGIN_PLATFORM)
-#  ifdef CONFIG_NSH_PLATFORM_CHALLENGE
-          if (PASSWORD_VERIFY_MATCH(platform_user_verify(username,
-                                                         challenge,
-                                                         password)))
-#  else
-          if (PASSWORD_VERIFY_MATCH(platform_user_verify(username,
-                                                         password)))
-#  endif
+          if (PASSWORD_VERIFY_MATCH(platform_user_verify(username, password)))
 #elif defined(CONFIG_NSH_LOGIN_FIXED)
           if (strcmp(password, CONFIG_NSH_LOGIN_PASSWORD) == 0 &&
               strcmp(username, CONFIG_NSH_LOGIN_USERNAME) == 0)
@@ -254,23 +226,28 @@ int nsh_telnetlogin(FAR struct console_stdio_s *pstate)
 #  error No user verification method selected
 #endif
             {
-              write(OUTFD(pstate), g_loginsuccess, strlen(g_loginsuccess));
+              fputs(g_loginsuccess, pstate->cn_outstream);
+              fflush(pstate->cn_outstream);
+              nsh_telnetecho(pstate, TELNET_USE_ECHO);
               return OK;
             }
           else
             {
-              write(OUTFD(pstate), g_badcredentials,
-                    strlen(g_badcredentials));
+              fputs(g_badcredentials, pstate->cn_outstream);
+              fflush(pstate->cn_outstream);
 #if CONFIG_NSH_LOGIN_FAILDELAY > 0
               usleep(CONFIG_NSH_LOGIN_FAILDELAY * 1000L);
 #endif
             }
         }
+
+      nsh_telnetecho(pstate, TELNET_USE_ECHO);
     }
 
   /* Too many failed login attempts */
 
-  write(OUTFD(pstate), g_loginfailure, strlen(g_loginfailure));
+  fputs(g_loginfailure, pstate->cn_outstream);
+  fflush(pstate->cn_outstream);
   return -1;
 }
 

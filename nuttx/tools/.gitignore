@@ -16,8 +16,7 @@
 /mkversion
 /nxstyle
 /rmcr
-/incdir
+/*.exe
+/*.dSYM
 /.k2h-body.dat
 /.k2h-apndx.dat
-/jlink-nuttx.so
-__pycache__

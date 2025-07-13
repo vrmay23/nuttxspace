@@ -1,37 +1,50 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/imx1/imx_uart.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_IMX1_IMX_UART_H
-#define __ARCH_ARM_SRC_IMX1_IMX_UART_H
+#ifndef __ARCH_ARM_SRC_IMX1_CHIP_IMX_UART_H
+#define __ARCH_ARM_SRC_IMX1_CHIP_IMX_UART_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
-/* UART Register Offsets ****************************************************/
+/* UART Register Offsets ************************************************************/
 
 #define UART_RXD0             0x0000 /* UART receiver register 0 */
 #define UART_RXD1             0x0004 /* UART receiver register 1 */
@@ -63,7 +76,7 @@
 #define UART_BMPR4            0x00cc /* UART BRM modulator preset register 4 */
 #define UART_UTS              0x00d0 /* UART test register */
 
-/* UART Register Bit Definitions ********************************************/
+/* UART Register Bit Definitions ****************************************************/
 
 /* UART Receiver Register */
 
@@ -136,8 +149,8 @@
 #define UART2_UCR3_INVT       (1 << 1)  /* Bit 1: Inverted Infrared Transmission */
 #define UART2_UCR3_REF30      (1 << 2)  /* Bit 2: Reference frequency 30 mhz */
 #define UART2_UCR3_REF25      (1 << 3)  /* Bit 3: Reference frequency 25 mhz */
-#define UART2_UCR3_AWAKEN     (1 << 4)  /* Bit 4: Asynchronous WAKE Interrupt Enable */
-#define UART2_UCR3_AIRINTEN   (1 << 5)  /* Bit 5: Asynchronous IR WAKE Interrupt Enable */
+#define UART2_UCR3_AWAKEN     (1 << 4)  /* Bit 4: Asychronous WAKE Interrupt Enable */
+#define UART2_UCR3_AIRINTEN   (1 << 5)  /* Bit 5: Asychronous IR WAKE Interrupt Enable */
 #define UART2_UCR3_RXDSEN     (1 << 6)  /* Bit 6: Receive Status Interrupt Enable */
 #define UART2_UCR3_RI         (1 << 7)  /* Bit 7: Ring Indicator */
 #define UART2_UCR3_Reserved2  (1 << 8)  /* Bit 8: Reserved */
@@ -207,8 +220,8 @@
 #define UART_UTS_LOOP         (1 << 12) /* Bit 12: Loop TX and RX for Test */
 #define UART_UTS_FRCPERR      (1 << 13) /* Bit 13: Force Parity Error */
 
-/****************************************************************************
+/************************************************************************************
  * Inline Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-#endif /* __ARCH_ARM_SRC_IMX1_IMX_UART_H */
+#endif /* __ARCH_ARM_SRC_IMX1_CHIP_IMX_UART_H */

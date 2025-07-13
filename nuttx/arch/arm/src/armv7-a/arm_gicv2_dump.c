@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/armv7-a/arm_gicv2_dump.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,23 +40,12 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
-#include <syslog.h>
 #include <debug.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "gic.h"
 
-#if defined(CONFIG_ARMV7A_HAVE_GICv2) && defined(CONFIG_ARMV7A_GICv2_DUMP)
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifdef CONFIG_CPP_HAVE_VARARGS
-#  define gicdump(fmt, ...) syslog(LOG_ALERT, fmt, ##__VA_ARGS__)
-#else
-#  define gicdump(fmt, ...)
-#endif
+#if defined(CONFIG_ARMV7A_HAVE_GICv2) && defined(CONFIG_DEBUG_IRQ_INFO)
 
 /****************************************************************************
  * Private Functions
@@ -67,20 +69,20 @@
 
 static inline void arm_gic_dump_cpu(bool all, int irq, int nlines)
 {
-  gicdump("  CPU Interface Registers:\n");
-  gicdump("       ICR: %08lx    PMR: %08lx    BPR: %08lx    IAR: %08lx\n",
+  irqinfo("  CPU Interface Registers:\n");
+  irqinfo("       ICR: %08x    PMR: %08x    BPR: %08x    IAR: %08x\n",
           getreg32(GIC_ICCICR), getreg32(GIC_ICCPMR),
           getreg32(GIC_ICCBPR), getreg32(GIC_ICCIAR));
-  gicdump("       RPR: %08lx   HPIR: %08lx   ABPR: %08lx\n",
+  irqinfo("       RPR: %08x   HPIR: %08x   ABPR: %08x\n",
           getreg32(GIC_ICCRPR), getreg32(GIC_ICCHPIR),
           getreg32(GIC_ICCABPR));
-  gicdump("      AIAR: %08lx  AHPIR: %08lx    IDR: %08lx\n",
+  irqinfo("      AIAR: %08x  AHPIR: %08x    IDR: %08x\n",
           getreg32(GIC_ICCAIAR), getreg32(GIC_ICCAHPIR),
           getreg32(GIC_ICCIDR));
-  gicdump("      APR1: %08lx   APR2: %08lx   APR3: %08lx   APR4: %08lx\n",
+  irqinfo("      APR1: %08x   APR2: %08x   APR3: %08x   APR4: %08x\n",
           getreg32(GIC_ICCAPR1), getreg32(GIC_ICCAPR2),
           getreg32(GIC_ICCAPR3), getreg32(GIC_ICCAPR4));
-  gicdump("    NSAPR1: %08lx NSAPR2: %08lx NSAPR3: %08lx NSAPR4: %08lx\n",
+  irqinfo("    NSAPR1: %08x NSAPR2: %08x NSAPR3: %08x NSAPR4: %08x\n",
           getreg32(GIC_ICCNSAPR1), getreg32(GIC_ICCNSAPR2),
           getreg32(GIC_ICCNSAPR3), getreg32(GIC_ICCNSAPR4));
 }
@@ -108,7 +110,7 @@ static void arm_gic_dumpregs(uintptr_t regaddr, int nlines, int incr)
   incr <<= 2;
   for (i = 0; i < nlines; i += incr, regaddr += 16)
     {
-      gicdump("         %08lx %08lx %08lx %08lx\n",
+      irqinfo("         %08x %08x %08x %08x\n",
               getreg32(regaddr), getreg32(regaddr + 4),
               getreg32(regaddr + 8), getreg32(regaddr + 12));
     }
@@ -133,7 +135,7 @@ static void arm_gic_dumpregs(uintptr_t regaddr, int nlines, int incr)
 static inline void arm_gic_dump4(const char *name, uintptr_t regaddr,
                                  int nlines)
 {
-  gicdump("       %s[%08lx]\n", name, (unsigned long)regaddr);
+  irqinfo("       %s[%08lx]\n", name, (unsigned long)regaddr);
   arm_gic_dumpregs(regaddr, nlines, 4);
 }
 
@@ -156,7 +158,7 @@ static inline void arm_gic_dump4(const char *name, uintptr_t regaddr,
 static inline void arm_gic_dump8(const char *name, uintptr_t regaddr,
                                  int nlines)
 {
-  gicdump("       %s[%08lx]\n", name, (unsigned long)regaddr);
+  irqinfo("       %s[%08lx]\n", name, (unsigned long)regaddr);
   arm_gic_dumpregs(regaddr, nlines, 8);
 }
 
@@ -179,7 +181,7 @@ static inline void arm_gic_dump8(const char *name, uintptr_t regaddr,
 static inline void arm_gic_dump16(const char *name, uintptr_t regaddr,
                                   int nlines)
 {
-  gicdump("       %s[%08lx]\n", name, (unsigned long)regaddr);
+  irqinfo("       %s[%08lx]\n", name, (unsigned long)regaddr);
   arm_gic_dumpregs(regaddr, nlines, 16);
 }
 
@@ -202,7 +204,7 @@ static inline void arm_gic_dump16(const char *name, uintptr_t regaddr,
 static inline void arm_gic_dump32(const char *name, uintptr_t regaddr,
                                   int nlines)
 {
-  gicdump("       %s[%08lx]\n", name, (unsigned long)regaddr);
+  irqinfo("       %s[%08lx]\n", name, (unsigned long)regaddr);
   arm_gic_dumpregs(regaddr, nlines, 32);
 }
 
@@ -224,8 +226,8 @@ static inline void arm_gic_dump32(const char *name, uintptr_t regaddr,
 
 static inline void arm_gic_dump_distributor(bool all, int irq, int nlines)
 {
-  gicdump("  Distributor Registers:\n");
-  gicdump("       DCR: %08lx   ICTR: %08lx   IIDR: %08lx\n",
+  irqinfo("  Distributor Registers:\n");
+  irqinfo("       DCR: %08x   ICTR: %08x   IIDR: %08x\n",
           getreg32(GIC_ICDDCR), getreg32(GIC_ICDICTR),
           getreg32(GIC_ICDIIDR));
 
@@ -239,32 +241,30 @@ static inline void arm_gic_dump_distributor(bool all, int irq, int nlines)
       arm_gic_dump4("IPTR", GIC_ICDIPTR(0), nlines);
       arm_gic_dump16("ICFR", GIC_ICDICFR(0), nlines);
       arm_gic_dump32("PPSIR/SPISR", GIC_ICDPPISR, nlines);
-      arm_gic_dump16("NSACR", GIC_ICDNSACR(0), nlines);
+      arm_gic_dump32("NSACR", GIC_ICDNSACR(0), nlines);
       arm_gic_dump8("SCPR/SSPR", GIC_ICDSCPR(0), nlines);
     }
   else
     {
-      gicdump("       ISR: %08lx   ISER: %08lx   ISPR: %08lx"
-              "    SAR: %08lx\n",
+      irqinfo("       ISR: %08x   ISER: %08x   ISPR: %08x    SAR: %08x\n",
               getreg32(GIC_ICDISR(irq)), getreg32(GIC_ICDISER(irq)),
               getreg32(GIC_ICDISPR(irq)), getreg32(GIC_ICDSAR(irq)));
-      gicdump("       IPR: %08lx   IPTR: %08lx   ICFR: %08lx"
-              "  SPISR: %08lx\n",
+      irqinfo("       IPR: %08x   IPTR: %08x   ICFR: %08x  SPISR: %08x\n",
               getreg32(GIC_ICDIPR(irq)), getreg32(GIC_ICDIPTR(irq)),
               getreg32(GIC_ICDICFR(irq)), getreg32(GIC_ICDSPISR(irq)));
-      gicdump("     NSACR: %08lx   SCPR: %08lx\n",
+      irqinfo("     NSACR: %08x   SCPR: %08x\n",
               getreg32(GIC_ICDNSACR(irq)), getreg32(GIC_ICDSCPR(irq)));
     }
 
-  gicdump("       PIDR[%08lx]:\n", (unsigned long)GIC_ICDPIDR(0));
-  gicdump("         %08lx %08lx %08lx %08lx\n",
+  irqinfo("       PIDR[%08lx]:\n", (unsigned long)GIC_ICDPIDR(0));
+  irqinfo("         %08x %08x %08x %08x\n",
           getreg32(GIC_ICDPIDR(0)), getreg32(GIC_ICDPIDR(1)),
           getreg32(GIC_ICDPIDR(2)), getreg32(GIC_ICDPIDR(3)));
-  gicdump("         %08lx %08lx %08lx\n",
+  irqinfo("         %08x %08x %08x %08x\n",
           getreg32(GIC_ICDPIDR(4)), getreg32(GIC_ICDPIDR(5)),
           getreg32(GIC_ICDPIDR(6)));
-  gicdump("       CIDR[%08lx]:\n", (unsigned long)GIC_ICDCIDR(0));
-  gicdump("         %08lx %08lx %08lx %08lx\n",
+  irqinfo("       CIDR[%08lx]:\n", (unsigned long)GIC_ICDCIDR(0));
+  irqinfo("         %08x %08x %08x %08x\n",
           getreg32(GIC_ICDCIDR(0)), getreg32(GIC_ICDCIDR(1)),
           getreg32(GIC_ICDCIDR(2)), getreg32(GIC_ICDCIDR(3)));
 }
@@ -295,15 +295,15 @@ void arm_gic_dump(const char *msg, bool all, int irq)
 
   if (all)
     {
-      gicdump("GIC: %s NLINES=%u\n", msg, nlines);
+      irqinfo("GIC: %s NLINES=%u\n", msg, nlines);
     }
   else
     {
-      gicdump("GIC: %s IRQ=%d\n", msg, irq);
+      irqinfo("GIC: %s IRQ=%d\n", msg, irq);
     }
 
   arm_gic_dump_cpu(all, irq, nlines);
   arm_gic_dump_distributor(all, irq, nlines);
 }
 
-#endif /* CONFIG_ARMV7A_HAVE_GICv2 && CONFIG_ARMV7A_GICv2_DUMP */
+#endif /* CONFIG_ARMV7A_HAVE_GICv2 && CONFIG_DEBUG_IRQ_INFO */

@@ -1,22 +1,36 @@
 /****************************************************************************
  * sched/environ/environ.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2009, 2013-2014, 2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -35,11 +49,9 @@
  ****************************************************************************/
 
 #ifdef CONFIG_DISABLE_ENVIRON
-#  define env_dup(group, envp) (0)
-#  define env_release(group)   (0)
+#  define env_dup(group)     (0)
+#  define env_release(group) (0)
 #else
-
-#  define SCHED_ENVIRON_RESERVED (4)
 
 /****************************************************************************
  * Public Data
@@ -62,14 +74,12 @@ extern "C"
  *
  * Description:
  *   Copy the internal environment structure of a task.  This is the action
- *   that is performed when a new task is created:
- *   The new task has a private, exact duplicate of the parent task's
- *    environment.
+ *   that is performed when a new task is created: The new task has a private,
+ *   exact duplicate of the parent task's environment.
  *
  * Input Parameters:
  *   group - The child task group to receive the newly allocated copy of the
  *           parent task groups environment structure.
- *   envp  - Pointer to the environment strings.
  *
  * Returned Value:
  *   zero on success
@@ -79,7 +89,7 @@ extern "C"
  *
  ****************************************************************************/
 
-int env_dup(FAR struct task_group_s *group, FAR char * const *envp);
+int env_dup(FAR struct task_group_s *group);
 
 /****************************************************************************
  * Name: env_release
@@ -116,7 +126,7 @@ void env_release(FAR struct task_group_s *group);
  *   pname - The variable name to find
  *
  * Returned Value:
- *   A index to the name=value string in the environment
+ *   A pointer to the name=value string in the environment
  *
  * Assumptions:
  *   - Not called from an interrupt handler
@@ -124,7 +134,7 @@ void env_release(FAR struct task_group_s *group);
  *
  ****************************************************************************/
 
-ssize_t env_findvar(FAR struct task_group_s *group, FAR const char *pname);
+FAR char *env_findvar(FAR struct task_group_s *group, FAR const char *pname);
 
 /****************************************************************************
  * Name: env_removevar
@@ -135,10 +145,10 @@ ssize_t env_findvar(FAR struct task_group_s *group, FAR const char *pname);
  * Input Parameters:
  *   group - The task group with the environment containing the name=value
  *           pair
- *   index - A index to the name=value pair in the restroom
+ *   pvar  - A pointer to the name=value pair in the restroom
  *
  * Returned Value:
- *   None
+ *   Zero on success
  *
  * Assumptions:
  *   - Not called from an interrupt handler
@@ -147,7 +157,7 @@ ssize_t env_findvar(FAR struct task_group_s *group, FAR const char *pname);
  *
  ****************************************************************************/
 
-void env_removevar(FAR struct task_group_s *group, ssize_t index);
+int env_removevar(FAR struct task_group_s *group, FAR char *pvar);
 
 #undef EXTERN
 #ifdef __cplusplus

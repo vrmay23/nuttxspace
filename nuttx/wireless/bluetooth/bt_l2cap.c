@@ -1,37 +1,41 @@
 /****************************************************************************
  * wireless/bluetooth/bt_l2cap.c
+ * L2CAP handling
  *
- * SPDX-License-Identifier: BSD-3-Clause
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Ported from the Intel/Zephyr arduino101_firmware_source-v1.tar package
+ * where the code was released with a compatible 3-clause BSD license:
  *
  *   Copyright (c) 2016, Intel Corporation
  *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * modification, are permitted provided that the following conditions are met:
  *
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
  *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
  * 3. Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
+ *    contributors may be used to endorse or promote products derived from this
+ *    software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS
- * ; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -219,7 +223,7 @@ static void rej_not_understood(FAR struct bt_conn_s *conn, uint8_t ident)
 static void le_conn_param_rsp(FAR struct bt_conn_s *conn,
                               FAR struct bt_buf_s *buf)
 {
-  FAR struct bt_l2cap_conn_param_rsp_s *rsp = (FAR void *)buf->data;
+  struct bt_l2cap_conn_param_rsp_s *rsp = (void *)buf->data;
 
   if (buf->len < sizeof(*rsp))
     {
@@ -264,7 +268,7 @@ static void le_conn_param_update_req(FAR struct bt_conn_s *conn,
 {
   FAR struct bt_l2cap_sig_hdr_s *hdr;
   FAR struct bt_l2cap_conn_param_rsp_s *rsp;
-  FAR struct bt_l2cap_conn_param_req_s *req = (FAR void *)buf->data;
+  FAR struct bt_l2cap_conn_param_req_s *req = (void *)buf->data;
   uint16_t min;
   uint16_t max;
   uint16_t latency;
@@ -318,7 +322,7 @@ static void le_conn_param_update_req(FAR struct bt_conn_s *conn,
 static void le_sig(FAR struct bt_conn_s *conn, FAR struct bt_buf_s *buf,
                    FAR void *context, uint16_t cid)
 {
-  FAR struct bt_l2cap_sig_hdr_s *hdr = (FAR void *)buf->data;
+  struct bt_l2cap_sig_hdr_s *hdr = (FAR void *)buf->data;
   uint16_t len;
 
   if (buf->len < sizeof(*hdr))
@@ -456,10 +460,6 @@ int bt_l2cap_init(void)
     .receive = le_sig,
   };
 
-  g_channels = NULL;
-  g_default = NULL;
-
-  bt_conn_initialize();
   bt_att_initialize();
 
   ret = bt_smp_initialize();

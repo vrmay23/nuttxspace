@@ -1,22 +1,36 @@
 /****************************************************************************
  * boards/arm/imxrt/imxrt1020-evk/src/imxrt_bringup.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *           Dave Marples <dave@marples.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,17 +40,14 @@
 
 #include <nuttx/config.h>
 
+#include <sys/mount.h>
 #include <sys/types.h>
 #include <syslog.h>
 #include <debug.h>
 
-#include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/wireless/bluetooth/bt_uart.h>
-
-#include "hardware/imxrt_pinmux.h"
-#include "hardware/imxrt_ccm.h"
-#include "imxrt_periphclks.h"
+#include <nuttx/wireless/bluetooth/bt_uart_shim.h>
 
 #include "imxrt_lpi2c.h"
 #include "imxrt_flexspi_nor_boot.h"
@@ -54,6 +65,8 @@
 #  include "nuttx/spi/spi_transfer.h"
 #  include <imxrt_lpspi.h>
 #endif
+
+#include "imxrt1020-evk.h"
 
 #include <arch/board/board.h>  /* Must always be included last */
 
@@ -76,8 +89,8 @@
 #if defined(CONFIG_I2C_DRIVER) && defined(CONFIG_IMXRT_LPI2C)
 static void imxrt_i2c_register(int bus)
 {
-  struct i2c_master_s   *i2c;
-  int                    ret;
+  FAR struct i2c_master_s   *i2c;
+  int                       ret;
 
   i2c = imxrt_i2cbus_initialize(bus);
   if (i2c == NULL)
@@ -151,6 +164,11 @@ int imxrt_bringup(void)
    * capabilities.
    */
 
+#include "up_arch.h"
+#include "hardware/imxrt_pinmux.h"
+#include "hardware/imxrt_ccm.h"
+#include "imxrt_periphclks.h"
+
 #ifdef CONFIG_USBHOST
   ret = imxrt_usbhost_initialize();
   if (ret < 0)
@@ -162,7 +180,7 @@ int imxrt_bringup(void)
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
 
-  ret = nx_mount(NULL, "/proc", "procfs", 0, NULL);
+  ret = mount(NULL, "/proc", "procfs", 0, NULL);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to mount procfs at /proc: %d\n", ret);
@@ -170,10 +188,10 @@ int imxrt_bringup(void)
 #endif
 
 #if defined(CONFIG_I2C_DRIVER)
-    struct i2c_master_s *i2c;
+    FAR struct i2c_master_s *i2c;
 
 #if defined(CONFIG_IMXRT_LPI2C1)
-  imxrt_i2c_register(1);
+  i2c = imxrt_i2c_register(1);
 #endif
 #if defined(CONFIG_IMXRT_LPI2C4)
   i2c = imxrt_i2cbus_initialize(4);

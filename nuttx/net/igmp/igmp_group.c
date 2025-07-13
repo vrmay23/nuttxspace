@@ -1,7 +1,6 @@
 /****************************************************************************
  * net/igmp/igmp_group.c
- *
- * SPDX-License-Identifier: BSD-3-Clause
+ * IGMP group data structure management logic
  *
  *   Copyright (C) 2010, 2013-2014, 2016, 2018 Gregory Nutt.
  *   All rights reserved.
@@ -47,11 +46,9 @@
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
 
-#include <inttypes.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
+#include <queue.h>
 #include <debug.h>
 
 #include <arch/irq.h>
@@ -59,7 +56,6 @@
 #include <nuttx/arch.h>
 #include <nuttx/wdog.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/queue.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/ip.h>
@@ -67,7 +63,6 @@
 
 #include "devif/devif.h"
 #include "igmp/igmp.h"
-#include "utils/utils.h"
 
 #ifdef CONFIG_NET_IGMP
 
@@ -83,12 +78,22 @@
 #  undef IGMP_GRPDEBUG
 #endif
 
-#ifdef IGMP_GRPDEBUG
-#  define grperr    nerr
-#  define grpinfo   ninfo
+#ifdef CONFIG_CPP_HAVE_VARARGS
+#  ifdef IGMP_GRPDEBUG
+#    define grperr(format, ...)    nerr(format, ##__VA_ARGS__)
+#    define grpinfo(format, ...)   ninfo(format, ##__VA_ARGS__)
+#  else
+#    define grperr(x...)
+#    define grpinfo(x...)
+#  endif
 #else
-#  define grperr    _none
-#  define grpinfo   _none
+#  ifdef IGMP_GRPDEBUG
+#    define grperr    nerr
+#    define grpinfo   ninfo
+#  else
+#    define grperr    (void)
+#    define grpinfo   (void)
+#  endif
 #endif
 
 /****************************************************************************
@@ -111,8 +116,8 @@ FAR struct igmp_group_s *igmp_grpalloc(FAR struct net_driver_s *dev,
 {
   FAR struct igmp_group_s *group;
 
-  ninfo("addr: %08" PRIx32 " dev: %p\n", (uint32_t)*addr, dev);
-  group = kmm_zalloc(sizeof(struct igmp_group_s));
+  ninfo("addr: %08x dev: %p\n", *addr, dev);
+  group = (FAR struct igmp_group_s *)kmm_zalloc(sizeof(struct igmp_group_s));
 
   grpinfo("group: %p\n", group);
 
@@ -123,7 +128,18 @@ FAR struct igmp_group_s *igmp_grpalloc(FAR struct net_driver_s *dev,
       /* Initialize the non-zero elements of the group structure */
 
       net_ipv4addr_copy(group->grpaddr, *addr);
+
+      /* This semaphore is used for signaling and, hence, should not have
+       * priority inheritance enabled.
+       */
+
       nxsem_init(&group->sem, 0, 0);
+      nxsem_setprotocol(&group->sem, SEM_PRIO_NONE);
+
+      /* Initialize the group timer (but don't start it yet) */
+
+      group->wdog = wd_create();
+      DEBUGASSERT(group->wdog);
 
       /* Save the interface index */
 
@@ -159,8 +175,7 @@ FAR struct igmp_group_s *igmp_grpfind(FAR struct net_driver_s *dev,
        group;
        group = group->next)
     {
-      grpinfo("Compare: %08" PRIx32 " vs. %08" PRIx32 "\n",
-              (uint32_t)group->grpaddr, (uint32_t)*addr);
+      grpinfo("Compare: %08x vs. %08x\n", group->grpaddr, *addr);
       if (net_ipv4addr_cmp(group->grpaddr, *addr))
         {
           grpinfo("Match!\n");
@@ -213,23 +228,11 @@ FAR struct igmp_group_s *igmp_grpallocfind(FAR struct net_driver_s *dev,
 void igmp_grpfree(FAR struct net_driver_s *dev,
                   FAR struct igmp_group_s *group)
 {
-  unsigned int count;
-  int blresult;
-
   grpinfo("Free: %p flags: %02x\n", group, group->flags);
 
   /* Cancel the wdog */
 
-  wd_cancel(&group->wdog);
-
-  /* Cancel the workqueue */
-
-  blresult = net_breaklock(&count);
-  work_cancel_sync(LPWORK, &group->work);
-  if (blresult >= 0)
-    {
-      net_restorelock(count);
-    }
+  wd_cancel(group->wdog);
 
   /* Remove the group structure from the group list in the device structure */
 
@@ -239,9 +242,9 @@ void igmp_grpfree(FAR struct net_driver_s *dev,
 
   nxsem_destroy(&group->sem);
 
-  /* Cancel the watchdog timer */
+  /* Destroy the wdog */
 
-  wd_cancel(&group->wdog);
+  wd_delete(group->wdog);
 
   /* Then release the group structure resources. */
 

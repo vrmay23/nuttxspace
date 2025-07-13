@@ -1,10 +1,15 @@
 /****************************************************************************
- * arch/arm/src/am335x/am335x_lcdc.c
+ * arch/arm/src/am225x/am335x_lcdc.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2013 Oleksandr Tymoshenko <gonzo@freebsd.org>
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This driver derives from the LPC54xx LCD driver but also includes
+ * information from the FreeBSD AM335x LCD driver which was released under
+ * a two-clause BSD license:
+ *
+ *   Copyright 2013 Oleksandr Tymoshenko <gonzo@freebsd.org>
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,14 +48,14 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/video/fb.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "hardware/am335x_prcm.h"
 #include "am335x_pinmux.h"
 #include "am335x_config.h"
@@ -75,20 +80,20 @@
  * configuration of each color plane.
  */
 
-static int am335x_getvideoinfo(struct fb_vtable_s *vtable,
-                               struct fb_videoinfo_s *vinfo);
-static int am335x_getplaneinfo(struct fb_vtable_s *vtable, int planeno,
-                               struct fb_planeinfo_s *pinfo);
+static int am335x_getvideoinfo(FAR struct fb_vtable_s *vtable,
+             FAR struct fb_videoinfo_s *vinfo);
+static int am335x_getplaneinfo(FAR struct fb_vtable_s *vtable, int planeno,
+             FAR struct fb_planeinfo_s *pinfo);
 
 /* The following is provided only if the video hardware supports RGB color
  * mapping
  */
 
 #ifdef CONFIG_FB_CMAP
-static int am335x_getcmap(struct fb_vtable_s *vtable,
-                          struct fb_cmap_s *cmap);
-static int am335x_putcmap(struct fb_vtable_s *vtable,
-                          const struct fb_cmap_s *cmap);
+static int am335x_getcmap(FAR struct fb_vtable_s *vtable,
+             FAR struct fb_cmap_s *cmap);
+static int am335x_putcmap(FAR struct fb_vtable_s *vtable,
+             FAR const struct fb_cmap_s *cmap);
 #endif
 
 /* The following is provided only if the video hardware supports a hardware
@@ -96,18 +101,18 @@ static int am335x_putcmap(struct fb_vtable_s *vtable,
  */
 
 #ifdef CONFIG_FB_HWCURSOR
-static int am335x_getcursor(struct fb_vtable_s *vtable,
-                            struct fb_cursorattrib_s *attrib);
-static int am335x_setcursor(struct fb_vtable_s *vtable,
-                            struct fb_setcursor_s *settings);
+static int am335x_getcursor(FAR struct fb_vtable_s *vtable,
+             FAR struct fb_cursorattrib_s *attrib);
+static int am335x_setcursor(FAR struct fb_vtable_s *vtable,
+             FAR struct fb_setcursor_s *settings);
 #endif
 
 /* Miscellaneous internal functions */
 
-static int am335x_lcd_interrupt(int irq, void *context, void *arg);
+static int  am335x_lcd_interrupt(int irq, void *context, void *arg);
 static uint32_t am335x_lcd_divisor(uint32_t reference, uint32_t frequency);
-static int am335x_set_refclk(uint32_t frequency);
-static int am335x_get_refclk(uint32_t *frequency);
+static int  am335x_set_refclk(uint32_t frequency);
+static int  am335x_get_refclk(uint32_t *frequency);
 
 /****************************************************************************
  * Private Data
@@ -137,6 +142,7 @@ struct am335x_lcd_dev_s
 
   struct am335x_panel_info_s panel;
 
+  sem_t exclsem;        /* Assure mutually exclusive access */
   nxgl_coord_t stride;  /* Width of framebuffer in bytes */
   size_t fbsize;        /* Size of the framebuffer allocation */
 };
@@ -159,8 +165,8 @@ static struct am335x_lcd_dev_s g_lcddev;
  * Name: am335x_getvideoinfo
  ****************************************************************************/
 
-static int am335x_getvideoinfo(struct fb_vtable_s *vtable,
-                               struct fb_videoinfo_s *vinfo)
+static int am335x_getvideoinfo(FAR struct fb_vtable_s *vtable,
+                               FAR struct fb_videoinfo_s *vinfo)
 {
   struct am335x_lcd_dev_s *priv = &g_lcddev;
 
@@ -185,8 +191,8 @@ static int am335x_getvideoinfo(struct fb_vtable_s *vtable,
  * Name: am335x_getplaneinfo
  ****************************************************************************/
 
-static int am335x_getplaneinfo(struct fb_vtable_s *vtable, int planeno,
-                               struct fb_planeinfo_s *pinfo)
+static int am335x_getplaneinfo(FAR struct fb_vtable_s *vtable, int planeno,
+                               FAR struct fb_planeinfo_s *pinfo)
 {
   struct am335x_lcd_dev_s *priv = &g_lcddev;
 
@@ -195,9 +201,9 @@ static int am335x_getplaneinfo(struct fb_vtable_s *vtable, int planeno,
   if (vtable != NULL && planeno == 0 && pinfo != NULL)
     {
 #ifdef CONFIG_BUILD_KERNEL
-      pinfo->fbmem   = (void *)CONFIG_AM335X_LCDC_FB_PBASE;
+      pinfo->fbmem   = (FAR void *)CONFIG_AM335X_LCDC_FB_PBASE;
 #else
-      pinfo->fbmem   = (void *)CONFIG_AM335X_LCDC_FB_VBASE;
+      pinfo->fbmem   = (FAR void *)CONFIG_AM335X_LCDC_FB_VBASE;
 #endif
       pinfo->fblen   = priv->fbsize;
       pinfo->stride  = priv->stride;
@@ -215,8 +221,8 @@ static int am335x_getplaneinfo(struct fb_vtable_s *vtable, int planeno,
  ****************************************************************************/
 
 #ifdef CONFIG_FB_CMAP
-static int am335x_getcmap(struct fb_vtable_s *vtable,
-                          struct fb_cmap_s *cmap)
+static int am335x_getcmap(FAR struct fb_vtable_s *vtable,
+                          FAR struct fb_cmap_s *cmap)
 {
   return -ENOSYS;
 }
@@ -227,8 +233,8 @@ static int am335x_getcmap(struct fb_vtable_s *vtable,
  ****************************************************************************/
 
 #ifdef CONFIG_FB_CMAP
-static int am335x_putcmap(struct fb_vtable_s *vtable,
-                          const struct fb_cmap_s *cmap)
+static int am335x_putcmap(FAR struct fb_vtable_s *vtable,
+                          FAR const struct fb_cmap_s *cmap)
 {
   return -ENOSYS;
 }
@@ -239,8 +245,8 @@ static int am335x_putcmap(struct fb_vtable_s *vtable,
  ****************************************************************************/
 
 #ifdef CONFIG_FB_HWCURSOR
-static int am335x_getcursor(struct fb_vtable_s *vtable,
-                            struct fb_cursorattrib_s *attrib)
+static int am335x_getcursor(FAR struct fb_vtable_s *vtable,
+                        FAR struct fb_cursorattrib_s *attrib)
 {
   lcdinfo("vtable=%p attrib=%p\n", vtable, attrib);
   return -ENOSYS;
@@ -252,8 +258,8 @@ static int am335x_getcursor(struct fb_vtable_s *vtable,
  ****************************************************************************/
 
 #ifdef CONFIG_FB_HWCURSOR
-static int am335x_setcursor(struct fb_vtable_s *vtable,
-                            struct fb_setcursor_s *settings)
+static int am335x_setcursor(FAR struct fb_vtable_s *vtable,
+                            FAR struct fb_setcursor_s *settings)
 {
   lcdinfo("vtable=%p settings=%p\n", vtable, settings);
   return -ENOSYS;
@@ -333,7 +339,7 @@ done:
 static uint32_t am335x_lcd_divisor(uint32_t reference, uint32_t frequency)
 {
   uint32_t div;
-  int32_t delta;
+  uint32_t delta;
   uint32_t mindelta;
   int i;
 
@@ -369,7 +375,7 @@ static int am335x_set_refclk(uint32_t frequency)
   uint32_t sysclk;
   uint32_t mul;
   uint32_t div;
-  int32_t delta;
+  uint32_t delta;
   uint32_t mindelta;
   int timeout;
   int i;
@@ -379,7 +385,7 @@ static int am335x_set_refclk(uint32_t frequency)
 
   /* Bypass mode */
 
-  putreg32(0x4, AM335X_CM_WKUP_CLKMODE_DPLL_DISP);
+  putreg32(AM335X_CM_WKUP_CLKMODE_DPLL_DISP, 0x4);
 
   /* Make sure it's in bypass mode */
 
@@ -422,7 +428,7 @@ static int am335x_set_refclk(uint32_t frequency)
 
   /* Locked mode */
 
-  putreg32(0x7, AM335X_CM_WKUP_CLKMODE_DPLL_DISP);
+  putreg32(AM335X_CM_WKUP_CLKMODE_DPLL_DISP, 0x7);
 
   timeout = 10000;
   while ((getreg32(AM335X_CM_WKUP_IDLEST_DPLL_DISP) & (1 << 0)) == 0 &&
@@ -500,7 +506,7 @@ static int am335x_get_refclk(uint32_t *frequency)
  *
  ****************************************************************************/
 
-int am335x_lcd_initialize(const struct am335x_panel_info_s *panel)
+int am335x_lcd_initialize(FAR const struct am335x_panel_info_s *panel)
 {
   struct am335x_lcd_dev_s *priv = &g_lcddev;
   uint32_t regval;
@@ -579,6 +585,7 @@ int am335x_lcd_initialize(const struct am335x_panel_info_s *panel)
 
   /* Initialize the device state singleton */
 
+  nxsem_init(&priv->exclsem, 0, 1);
   memcpy(&priv->panel, panel, sizeof(struct am335x_panel_info_s));
 
   /* Save framebuffer information */
@@ -748,11 +755,9 @@ int am335x_lcd_initialize(const struct am335x_panel_info_s *panel)
   putreg32(AM335X_LCD_DMA_CTRL, regval);
 
   putreg32(AM335X_LCD_DMA_FB0_BASE, CONFIG_AM335X_LCDC_FB_PBASE);
-  putreg32(AM335X_LCD_DMA_FB0_BASE,
-           CONFIG_AM335X_LCDC_FB_PBASE + priv->fbsize - 1);
+  putreg32(AM335X_LCD_DMA_FB0_BASE, CONFIG_AM335X_LCDC_FB_PBASE + priv->fbsize - 1);
   putreg32(AM335X_LCD_DMA_FB1_BASE, CONFIG_AM335X_LCDC_FB_PBASE);
-  putreg32(AM335X_LCD_DMA_FB1_CEIL,
-           CONFIG_AM335X_LCDC_FB_PBASE + priv->fbsize - 1);
+  putreg32(AM335X_LCD_DMA_FB1_CEIL, CONFIG_AM335X_LCDC_FB_PBASE + priv->fbsize - 1);
 
   /* Enable LCD */
 
@@ -772,22 +777,23 @@ int am335x_lcd_initialize(const struct am335x_panel_info_s *panel)
 
   putreg32(AM335X_LCD_RASTER_CTRL, regval);
 
-  putreg32(LCD_CLKC_ENABLE_CORE | LCD_CLKC_ENABLE_LIDD |
-           LCD_CLKC_ENABLE_DMA, AM335X_LCD_CLKC_ENABLE);
+  putreg32(AM335X_LCD_CLKC_ENABLE,
+           LCD_CLKC_ENABLE_CORE | LCD_CLKC_ENABLE_LIDD |
+           LCD_CLKC_ENABLE_DMA);
 
-  putreg32(LCD_CLKC_RESET_MAIN, AM335X_LCD_CLKC_RESET);
+  putreg32(AM335X_LCD_CLKC_RESET, LCD_CLKC_RESET_MAIN);
   up_udelay(100);
-  putreg32(0, AM335X_LCD_CLKC_RESET);
+  putreg32(AM335X_LCD_CLKC_RESET, 0);
 
   regval  = LCD_IRQ_DONE | LCD_IRQ_RR_DONE | LCD_IRQ_SYNC | LCD_IRQ_ACB |
            LCD_IRQ_PL | LCD_IRQ_FUF | LCD_IRQ_EOF0 | LCD_IRQ_EOF1;
-  putreg32(regval, AM335X_LCD_IRQ_EN_SET);
+  putreg32(AM335X_LCD_IRQ_EN_SET, regval);
 
   regval  = getreg32(AM335X_LCD_RASTER_CTRL);
   regval |= LCD_RASTER_CTRL_LCD_EN;
   putreg32(AM335X_LCD_RASTER_CTRL, regval);
 
-  putreg32(LCD_SYSC_IDLE_SMART | LCD_SYSC_STANDBY_SMART, AM335X_LCD_SYSC);
+  putreg32(AM335X_LCD_SYSC, LCD_SYSC_IDLE_SMART | LCD_SYSC_STANDBY_SMART);
 
 #ifdef CONFIG_AM335X_LCDC_BACKLIGHT
   /* Turn on the back light
@@ -809,8 +815,7 @@ int am335x_lcd_initialize(const struct am335x_panel_info_s *panel)
  *
  * Description:
  *   Return a a reference to the framebuffer object for the specified video
- *   plane of the specified plane.  Many OSDs support multiple planes of
- *   video.
+ *   plane of the specified plane.  Many OSDs support multiple planes of video.
  *
  * Input Parameters:
  *   display - In the case of hardware with multiple displays, this
@@ -823,7 +828,7 @@ int am335x_lcd_initialize(const struct am335x_panel_info_s *panel)
  *
  ****************************************************************************/
 
-struct fb_vtable_s *up_fbgetvplane(int display, int vplane)
+FAR struct fb_vtable_s *up_fbgetvplane(int display, int vplane)
 {
   lcdinfo("vplane: %d\n", vplane);
   if (vplane == 0)
@@ -889,8 +894,8 @@ void am335x_lcdclear(nxgl_mxpixel_t color)
 #endif
   int i;
 
-  lcdinfo("Clearing display: color=%04jx VRAM=%08lx size=%lu\n",
-          (uintmax_t)color, (unsigned long)CONFIG_AM335X_LCDC_FB_VBASE,
+  lcdinfo("Clearing display: color=%04x VRAM=%08lx size=%lu\n",
+          color, (unsigned long)CONFIG_AM335X_LCDC_FB_VBASE,
           (unsigned long)priv->fbsize);
 
   for (i = 0; i < priv->fbsize; i += incr)

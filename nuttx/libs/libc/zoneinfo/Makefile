@@ -1,28 +1,51 @@
 ############################################################################
 # libs/libc/zoneinfo/Makefile
 #
-# SPDX-License-Identifier: Apache-2.0
+#   Copyright (C) 2015-2016, Gregory Nutt. All rights reserved.
+#   Author: Gregory Nutt <gnutt@nuttx.org>
 #
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.  The
-# ASF licenses this file to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance with the
-# License.  You may obtain a copy of the License at
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the
+#    distribution.
+# 3. Neither the name NuttX nor the names of its contributors may be
+#    used to endorse or promote products derived from this software
+#    without specific prior written permission.
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
-# License for the specific language governing permissions and limitations
-# under the License.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
 
-include $(TOPDIR)/Make.defs
+-include $(TOPDIR)/.config
+-include $(TOPDIR)/Make.defs
 
-ifeq ($(CONFIG_LIBC_ZONEINFO_ROMFS),y)
+ifeq ($(WINTOOL),y)
+INCDIROPT = -w
+endif
+
+# Zoneinfo database
+
+ASRCS =
+CSRCS =
+
+ifeq ($(CONFIG_LIB_ZONEINFO_ROMFS),y)
 CSRCS += tzromfs.c
 endif
 
@@ -36,7 +59,11 @@ ZONEINFO_PATH = $(TOPDIR)/libs/libc/zoneinfo
 TZBIN_PATH = $(ZONEINFO_PATH)/tzbin
 TZCODE_PATH = $(ZONEINFO_PATH)/tzcode
 
+ROOTDEPPATH = --dep-path .
+
 # Common build
+
+VPATH =
 
 all: .built
 .PHONY: romfs register context depend clean distclean
@@ -53,7 +80,7 @@ $(COBJS): %$(OBJEXT): %.c
 
 # ROMFS file system containing the TZ database
 
-ifeq ($(CONFIG_LIBC_ZONEINFO_ROMFS),y)
+ifeq ($(CONFIG_LIB_ZONEINFO_ROMFS),y)
 
 checkgenromfs:
 	@genromfs -h 1>/dev/null 2>&1 || { \
@@ -63,7 +90,7 @@ checkgenromfs:
 	}
 
 romfs_zoneinfo.img : checkgenromfs .tzbuilt
-	@genromfs -f $@ -d $(TZBIN_PATH)/usr/share/zoneinfo -V "TZDatbase" || { echo "genromfs failed" ; exit 1 ; }
+	@genromfs -f $@ -d $(TZBIN_PATH)/etc/zoneinfo -V "TZDatbase" || { echo "genromfs failed" ; exit 1 ; }
 
 romfs_zoneinfo.h : romfs_zoneinfo.img
 	@xxd -i $< >$@ || { echo "xxd of $< failed" ; exit 1 ; }
@@ -74,7 +101,7 @@ else
 
 romfs:
 
-endif # CONFIG_LIBC_ZONEINFO_ROMFS
+endif # CONFIG_LIB_ZONEINFO_ROMFS
 
 # Build TZ database
 
@@ -85,10 +112,10 @@ tzbin:
 	mkdir tzbin
 
 tzcode-latest.tar.gz:
-	$(call DOWNLOAD,ftp://ftp.iana.org/tz,tzcode-latest.tar.gz)
+	$(Q) wget --retr-symlinks ftp://ftp.iana.org/tz/tzcode-latest.tar.gz
 
 tzdata-latest.tar.gz:
-	$(call DOWNLOAD,ftp://ftp.iana.org/tz,tzdata-latest.tar.gz)
+	$(Q) wget --retr-symlinks ftp://ftp.iana.org/tz/tzdata-latest.tar.gz
 
 .tzunpack: tzcode tzcode-latest.tar.gz tzdata-latest.tar.gz
 	$(Q) tar zx -C tzcode -f tzcode-latest.tar.gz
@@ -105,12 +132,8 @@ context: .tzbuilt romfs
 
 # Create dependencies
 
-makedepfile: $(CSRCS:.c=.ddc) $(ASRCS:.S=.dds)
-	$(call CATFILE, Make.dep, $^)
-	$(call DELFILE, $^)
-
-.depend: Makefile $(SRCS) $(TOPDIR)$(DELIM).config
-	$(Q) $(MAKE) makedepfile
+.depend: Makefile $(SRCS)
+	$(Q) $(MKDEP) $(ROOTDEPPATH) "$(CC)" -- $(CFLAGS) -- $(SRCS) >Make.dep
 	$(Q) touch $@
 
 depend: .depend

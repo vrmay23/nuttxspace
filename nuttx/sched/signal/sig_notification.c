@@ -1,22 +1,40 @@
 /****************************************************************************
  * sched/signal/sig_notification.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
+ *   Author: Xiang Xiao <xiaoxiang@pinecone.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Derives from code originally written by:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,10 +44,8 @@
 
 #include <nuttx/config.h>
 
-#include <inttypes.h>
 #include <string.h>
 #include <signal.h>
-#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/signal.h>
@@ -105,15 +121,17 @@ static void nxsig_notification_worker(FAR void *arg)
 int nxsig_notification(pid_t pid, FAR struct sigevent *event,
                        int code, FAR struct sigwork_s *work)
 {
-  sinfo("pid=%" PRIu16 " signo=%d code=%d sival_ptr=%p\n",
-        pid, event->sigev_signo, code, event->sigev_value.sival_ptr);
+  sinfo("pid=%p signo=%d code=%d sival_ptr=%p\n",
+         pid, event->sigev_signo, code, event->sigev_value.sival_ptr);
 
   /* Notify client via a signal? */
 
-  if (event->sigev_notify & SIGEV_SIGNAL)
+  if (event->sigev_notify == SIGEV_SIGNAL)
     {
+#ifdef CONFIG_SCHED_HAVE_PARENT
+      FAR struct tcb_s *rtcb = this_task();
+#endif
       siginfo_t info;
-      bool      thread = false;
 
       /* Yes.. Create the siginfo structure */
 
@@ -121,36 +139,27 @@ int nxsig_notification(pid_t pid, FAR struct sigevent *event,
       info.si_code   = code;
       info.si_errno  = OK;
 #ifdef CONFIG_SCHED_HAVE_PARENT
-      info.si_pid    = this_task()->pid;
+      info.si_pid    = rtcb->pid;
       info.si_status = OK;
 #endif
-      info.si_user   = NULL;
 
       /* Some compilers (e.g., SDCC), do not permit assignment of aggregates.
        * Use of memcpy() is overkill;  We could just copy the larger of the
-       * int and FAR void * members in the union.  memcpy(), however, does
+       * nt and FAR void * members in the union.  memcpy(), however, does
        * not require that we know which is larger.
        */
 
       memcpy(&info.si_value, &event->sigev_value, sizeof(union sigval));
 
-      /* SIGEV_THREAD_ID currently used only by POSIX timer. */
-
-      if (event->sigev_notify & SIGEV_THREAD_ID)
-        {
-          thread = true;
-          pid = event->sigev_notify_thread_id;
-        }
-
       /* Send the signal */
 
-      return nxsig_dispatch(pid, &info, thread);
+      return nxsig_dispatch(pid, &info);
     }
 
 #ifdef CONFIG_SIG_EVTHREAD
   /* Notify the client via a function call */
 
-  else if (event->sigev_notify & SIGEV_THREAD)
+  else if (event->sigev_notify == SIGEV_THREAD)
     {
       /* Initialize the work information */
 
@@ -184,6 +193,6 @@ int nxsig_notification(pid_t pid, FAR struct sigevent *event,
 #ifdef CONFIG_SIG_EVTHREAD
 void nxsig_cancel_notification(FAR struct sigwork_s *work)
 {
-  work_cancel_sync(SIG_EVTHREAD_WORK, &work->work);
+  work_cancel(SIG_EVTHREAD_WORK, &work->work);
 }
 #endif

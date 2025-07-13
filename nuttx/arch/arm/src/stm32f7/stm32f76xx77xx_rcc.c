@@ -1,22 +1,36 @@
 /****************************************************************************
- * arch/arm/src/stm32f7/stm32f76xx77xx_rcc.c
+ * arch/arm/src/stm32f7/stm32f76xxx77xx_rcc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            David Sidrane <david_s5@nscdg.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -223,9 +237,7 @@ static inline void rcc_enableahb1(void)
 #endif
 
 #ifdef CONFIG_STM32F7_OTGFSHS
-#  if defined(CONFIG_STM32F7_INTERNAL_ULPI) || \
-      defined(CONFIG_STM32F7_EXTERNAL_ULPI)
-
+#ifdef BOARD_ENABLE_USBOTG_HSULPI
   /* Enable clocking for  USB OTG HS and external PHY */
 
   regval |= (RCC_AHB1ENR_OTGHSEN | RCC_AHB1ENR_OTGHSULPIEN);
@@ -407,13 +419,13 @@ static inline void rcc_enableapb1(void)
   regval |= RCC_APB1ENR_WWDGEN;
 #endif
 
-#if defined(CONFIG_STM32F7_SPI2) || defined(CONFIG_STM32F7_I2S2)
+#ifdef CONFIG_STM32F7_SPI2
   /* SPI2 clock enable */
 
   regval |= RCC_APB1ENR_SPI2EN;
 #endif
 
-#if defined(CONFIG_STM32F7_SPI3) || defined(CONFIG_STM32F7_I2S3)
+#ifdef CONFIG_STM32F7_SPI3
   /* SPI3 clock enable */
 
   regval |= RCC_APB1ENR_SPI3EN;
@@ -809,7 +821,7 @@ static void stm32_stdclockconfig(void)
       /* Over-drive is needed if
        *  - Voltage output scale 1 mode is selected and SYSCLK frequency is
        *    over 180 MHz.
-       *  - Voltage output scale 2 mode is selected and SYSCLK frequency is
+       *  - Voltage output scale 2 mode is selected and SYSCLK frequence is
        *    over 168 MHz.
        */
 
@@ -862,8 +874,7 @@ static void stm32_stdclockconfig(void)
 
       /* Wait until the PLL source is used as the system clock source */
 
-      while ((getreg32(STM32_RCC_CFGR) & RCC_CFGR_SWS_MASK) !=
-             RCC_CFGR_SWS_PLL)
+      while ((getreg32(STM32_RCC_CFGR) & RCC_CFGR_SWS_MASK) != RCC_CFGR_SWS_PLL)
         {
         }
 
@@ -915,10 +926,7 @@ static void stm32_stdclockconfig(void)
         {
         }
 #endif
-
-#if defined(CONFIG_STM32F7_PLLI2S) || \
-    (STM32_RCC_DCKCFGR1_SAI1SRC == RCC_DCKCFGR1_SAI1SEL(1)) || \
-    (STM32_RCC_DCKCFGR1_SAI2SRC == RCC_DCKCFGR1_SAI2SEL(1))
+#if defined(CONFIG_STM32F7_PLLI2S) || (STM32_RCC_DCKCFGR1_SAI1SRC == RCC_DCKCFGR1_SAI1SEL(1)) || (STM32_RCC_DCKCFGR1_SAI2SRC == RCC_DCKCFGR1_SAI2SEL(1))
 
       /* Configure PLLI2S */
 
@@ -927,10 +935,10 @@ static void stm32_stdclockconfig(void)
                   | RCC_PLLI2SCFGR_PLLI2SP_MASK
                   | RCC_PLLI2SCFGR_PLLI2SQ_MASK
                   | RCC_PLLI2SCFGR_PLLI2SR_MASK);
-      regval |= (STM32_RCC_PLLI2SCFGR_PLLI2SN
-                 | STM32_RCC_PLLI2SCFGR_PLLI2SP
-                 | STM32_RCC_PLLI2SCFGR_PLLI2SQ
-                 | STM32_RCC_PLLI2SCFGR_PLLI2SR);
+      regval |= (STM32_RCC_PLLSAICFGR_PLLSAIN
+                 | STM32_RCC_PLLSAICFGR_PLLSAIP
+                 | STM32_RCC_PLLSAICFGR_PLLSAIQ
+                 | STM32_RCC_PLLSAICFGR_PLLSAIR);
       putreg32(regval, STM32_RCC_PLLI2SCFGR);
 
       /* Enable PLLI2S */

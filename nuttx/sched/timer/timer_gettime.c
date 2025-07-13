@@ -1,8 +1,6 @@
 /****************************************************************************
  * sched/timer/timer_gettime.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -72,7 +70,7 @@
 
 int timer_gettime(timer_t timerid, FAR struct itimerspec *value)
 {
-  FAR struct posix_timer_s *timer = timer_gethandle(timerid);
+  FAR struct posix_timer_s *timer = (FAR struct posix_timer_s *)timerid;
   sclock_t ticks;
 
   if (!timer || !value)
@@ -83,12 +81,12 @@ int timer_gettime(timer_t timerid, FAR struct itimerspec *value)
 
   /* Get the number of ticks before the underlying watchdog expires */
 
-  ticks = wd_gettime(&timer->pt_wdog);
+  ticks = wd_gettime(timer->pt_wdog);
 
   /* Convert that to a struct timespec and return it */
 
-  clock_ticks2time(&value->it_value, ticks);
-  clock_ticks2time(&value->it_interval, timer->pt_delay);
+  clock_ticks2time(ticks, &value->it_value);
+  clock_ticks2time(timer->pt_last, &value->it_interval);
   return OK;
 }
 

@@ -1,22 +1,36 @@
 /****************************************************************************
  * drivers/sensors/mlx90393.c
+ * Character driver for the MLX90393 3-Axis magnetometer.
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 DS-Automotion GmbH. All rights reserved.
+ *   Author: Alexander Entinger <a.entinger@ds-automotion.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,23 +40,21 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <string.h>
 
-#include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/sensors/mlx90393.h>
 #include <nuttx/random.h>
 
 #if defined(CONFIG_SPI) && defined(CONFIG_SENSORS_MLX90393)
 
 /****************************************************************************
- * Private Types
+ * Private
  ****************************************************************************/
 
 struct mlx90393_sensor_data_s
@@ -61,7 +73,7 @@ struct mlx90393_dev_s
   FAR struct mlx90393_config_s *config; /* Pointer to the configuration of
                                          * the MLX90393 sensor */
 
-  mutex_t datalock;                     /* Manages exclusive access to
+  sem_t datasem;                        /* Manages exclusive access to
                                          * this structure */
   struct mlx90393_sensor_data_s data;   /* The data as measured by the
                                          * sensor */
@@ -79,8 +91,7 @@ struct mlx90393_dev_s
 static void mlx90393_start_burst_mode(FAR struct mlx90393_dev_s *dev);
 static void mlx90393_read_measurement_data(FAR struct mlx90393_dev_s *dev);
 static void mlx90393_read_register(FAR struct mlx90393_dev_s *dev,
-                                   uint8_t const reg_addr,
-                                   uint16_t *reg_data);
+                                   uint8_t const reg_addr, uint16_t *reg_data);
 static void mlx90393_write_register(FAR struct mlx90393_dev_s *dev,
                                     uint8_t const reg_addr,
                                     uint16_t const reg_data);
@@ -91,9 +102,9 @@ static void mlx90393_worker(FAR void *arg);
 static int mlx90393_open(FAR struct file *filep);
 static int mlx90393_close(FAR struct file *filep);
 static ssize_t mlx90393_read(FAR struct file *, FAR char *, size_t);
-static ssize_t mlx90393_write(FAR struct file *filep,
-                              FAR const char *buffer,
+static ssize_t mlx90393_write(FAR struct file *filep, FAR const char *buffer,
                               size_t buflen);
+static int mlx90393_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -101,10 +112,16 @@ static ssize_t mlx90393_write(FAR struct file *filep,
 
 static const struct file_operations g_mlx90393_fops =
 {
-  mlx90393_open,   /* open */
-  mlx90393_close,  /* close */
-  mlx90393_read,   /* read */
-  mlx90393_write,  /* write */
+  mlx90393_open,
+  mlx90393_close,
+  mlx90393_read,
+  mlx90393_write,
+  NULL,
+  mlx90393_ioctl,
+  NULL
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL
+#endif
 };
 
 /* Single linked list to store instances of drivers */
@@ -121,9 +138,7 @@ static struct mlx90393_dev_s *g_mlx90393_list = NULL;
 
 static void mlx90393_start_burst_mode(FAR struct mlx90393_dev_s *dev)
 {
-  /* Lock the SPI bus so that only one device can access it at the same
-   * time
-   */
+  /* Lock the SPI bus so that only one device can access it at the same time */
 
   SPI_LOCK(dev->spi, true);
 
@@ -133,7 +148,7 @@ static void mlx90393_start_burst_mode(FAR struct mlx90393_dev_s *dev)
 
   /* Start Burst Mode (Continuous Measurement on all channels) */
 
-  SPI_SEND(dev->spi, MLX90393_SB | MLX90393_ZYXT_BM);
+  SPI_SEND(dev->spi, MLX90393_SB | MLX90393_ZYXT_bm);
 
   /* Write an idle byte to retrieve the status byte */
 
@@ -156,9 +171,7 @@ static void mlx90393_read_measurement_data(FAR struct mlx90393_dev_s *dev)
 {
   int ret;
 
-  /* Lock the SPI bus so that only one device can access it at the same
-   * time
-   */
+  /* Lock the SPI bus so that only one device can access it at the same time */
 
   SPI_LOCK(dev->spi, true);
 
@@ -168,7 +181,7 @@ static void mlx90393_read_measurement_data(FAR struct mlx90393_dev_s *dev)
 
   /* Issue command to read measurement data on all channels */
 
-  SPI_SEND(dev->spi, MLX90393_RM | MLX90393_ZYXT_BM);
+  SPI_SEND(dev->spi, MLX90393_RM | MLX90393_ZYXT_bm);
 
   /* Write an idle byte to retrieve the status byte */
 
@@ -198,12 +211,12 @@ static void mlx90393_read_measurement_data(FAR struct mlx90393_dev_s *dev)
 
   SPI_LOCK(dev->spi, false);
 
-  /* Acquire the mutex before the data is copied */
+  /* Acquire the semaphore before the data is copied */
 
-  ret = nxmutex_lock(&dev->datalock);
+  ret = nxsem_wait(&dev->datasem);
   if (ret != OK)
     {
-      snerr("ERROR: Could not acquire dev->datalock: %d\n", ret);
+      snerr("ERROR: Could not acquire dev->datasem: %d\n", ret);
       return;
     }
 
@@ -214,9 +227,9 @@ static void mlx90393_read_measurement_data(FAR struct mlx90393_dev_s *dev)
   dev->data.y_mag = (int16_t) (y_mag);
   dev->data.z_mag = (int16_t) (z_mag);
 
-  /* Give back the mutex */
+  /* Give back the semaphore */
 
-  nxmutex_unlock(&dev->datalock);
+  nxsem_post(&dev->datasem);
 
   /* Feed sensor data to entropy pool */
 
@@ -230,9 +243,7 @@ static void mlx90393_read_measurement_data(FAR struct mlx90393_dev_s *dev)
 
 static void mlx90393_reset(FAR struct mlx90393_dev_s *dev)
 {
-  /* Lock the SPI bus so that only one device can access it at the same
-   * time
-   */
+  /* Lock the SPI bus so that only one device can access it at the same time */
 
   SPI_LOCK(dev->spi, true);
 
@@ -266,12 +277,9 @@ static void mlx90393_reset(FAR struct mlx90393_dev_s *dev)
  ****************************************************************************/
 
 static void mlx90393_read_register(FAR struct mlx90393_dev_s *dev,
-                                   uint8_t const reg_addr,
-                                   uint16_t *reg_data)
+                                   uint8_t const reg_addr, uint16_t *reg_data)
 {
-  /* Lock the SPI bus so that only one device can access it at the same
-   * time
-   */
+  /* Lock the SPI bus so that only one device can access it at the same time */
 
   SPI_LOCK(dev->spi, true);
 
@@ -311,9 +319,7 @@ static void mlx90393_write_register(FAR struct mlx90393_dev_s *dev,
                                     uint8_t const reg_addr,
                                     uint16_t const reg_data)
 {
-  /* Lock the SPI bus so that only one device can access it at the same
-   * time
-   */
+  /* Lock the SPI bus so that only one device can access it at the same time */
 
   SPI_LOCK(dev->spi, true);
 
@@ -356,8 +362,8 @@ static void mlx90393_write_register(FAR struct mlx90393_dev_s *dev,
 
 static int mlx90393_interrupt_handler(int irq, FAR void *context)
 {
-  /* This function should be called upon a rising edge on the MLX90393 INT
-   * pin since it signals that new data has been measured. (INT = DRDY).
+  /* This function should be called upon a rising edge on the MLX90393 INT pin
+   * since it signals that new data has been measured. (INT = DRDY).
    */
 
   FAR struct mlx90393_dev_s *priv = 0;
@@ -370,8 +376,8 @@ static int mlx90393_interrupt_handler(int irq, FAR void *context)
   DEBUGASSERT(priv != NULL);
 
   /* Task the worker with retrieving the latest sensor data. We should not do
-   * this in a interrupt since it might take too long. Also we cannot lock
-   * the SPI bus from within an interrupt.
+   * this in a interrupt since it might take too long. Also we cannot lock the
+   * SPI bus from within an interrupt.
    */
 
   DEBUGASSERT(priv->work.worker == NULL);
@@ -470,37 +476,36 @@ static ssize_t mlx90393_read(FAR struct file *filep, FAR char *buffer,
 
   /* Check if enough memory was provided for the read call */
 
-  if (buflen < sizeof(struct mlx90393_sensor_data_s))
+  if (buflen < sizeof(FAR struct mlx90393_sensor_data_s))
     {
-      snerr("ERROR: "
-            "Not enough memory for reading out a sensor data sample\n");
+      snerr("ERROR: Not enough memory for reading out a sensor data sample\n");
       return -ENOSYS;
     }
 
   /* Copy the sensor data into the buffer */
 
-  /* Acquire the mutex before the data is copied */
+  /* Acquire the semaphore before the data is copied */
 
-  ret = nxmutex_lock(&priv->datalock);
+  ret = nxsem_wait(&priv->datasem);
   if (ret < 0)
     {
-      snerr("ERROR: Could not acquire priv->datalock: %d\n", ret);
+      snerr("ERROR: Could not acquire priv->datasem: %d\n", ret);
       return ret;
     }
 
   data = (FAR struct mlx90393_sensor_data_s *)buffer;
-  memset(data, 0, sizeof(struct mlx90393_sensor_data_s));
+  memset(data, 0, sizeof(FAR struct mlx90393_sensor_data_s));
 
   data->x_mag = priv->data.x_mag;
   data->y_mag = priv->data.y_mag;
   data->z_mag = priv->data.z_mag;
   data->temperature = priv->data.temperature;
 
-  /* Give back the mutex */
+  /* Give back the semaphore */
 
-  nxmutex_unlock(&priv->datalock);
+  nxsem_post(&priv->datasem);
 
-  return sizeof(struct mlx90393_sensor_data_s);
+  return sizeof(FAR struct mlx90393_sensor_data_s);
 }
 
 /****************************************************************************
@@ -511,6 +516,27 @@ static ssize_t mlx90393_write(FAR struct file *filep, FAR const char *buffer,
                               size_t buflen)
 {
   return -ENOSYS;
+}
+
+/****************************************************************************
+ * Name: mlx90393_ioctl
+ ****************************************************************************/
+
+static int mlx90393_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
+{
+  int ret = OK;
+
+  switch (cmd)
+    {
+      /* Command was not recognized */
+
+    default:
+      snerr("ERROR: Unrecognized cmd: %d\n", cmd);
+      ret = -ENOTTY;
+      break;
+    }
+
+  return ret;
 }
 
 /****************************************************************************
@@ -547,8 +573,7 @@ int mlx90393_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
 
   /* Initialize the MLX90393 device structure */
 
-  priv = (FAR struct mlx90393_dev_s *)
-                      kmm_malloc(sizeof(struct mlx90393_dev_s));
+  priv = (FAR struct mlx90393_dev_s *)kmm_malloc(sizeof(struct mlx90393_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");
@@ -560,7 +585,8 @@ int mlx90393_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
 
   priv->work.worker = NULL;
 
-  nxmutex_init(&priv->datalock); /* Initialize sensor data access mutex */
+  nxsem_init(&priv->datasem, 0, 1);     /* Initialize sensor data access
+                                         * semaphore */
 
   /* Setup SPI frequency and mode */
 
@@ -573,9 +599,7 @@ int mlx90393_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
   if (ret < 0)
     {
       snerr("ERROR: Failed to attach interrupt\n");
-      nxmutex_destroy(&priv->datalock);
-      kmm_free(priv);
-      return ret;
+      return -ENODEV;
     }
 
   /* Register the character driver */
@@ -584,13 +608,13 @@ int mlx90393_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
   if (ret < 0)
     {
       snerr("ERROR: Failed to register driver: %d\n", ret);
-      nxmutex_destroy(&priv->datalock);
       kmm_free(priv);
-      return ret;
+      nxsem_destroy(&priv->datasem);
+      return -ENODEV;
     }
 
-  /* Since we support multiple MLX90393 devices are supported, we will need
-   * to add this new instance to a list of device instances so that it can be
+  /* Since we support multiple MLX90393 devices are supported, we will need to
+   * add this new instance to a list of device instances so that it can be
    * found by the interrupt handler based on the received IRQ number.
    */
 

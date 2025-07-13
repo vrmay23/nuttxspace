@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/sama5/sama5d2-xult/src/sam_boot.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  boards/arm/sama5/sama5d2-xult/src/sam_boot.c
  *
  *  Licensed to the Apache Software Foundation (ASF) under one or more
  *  contributor license agreements.  See the NOTICE file distributed with
@@ -60,7 +58,7 @@ void sam_boardinitialize(void)
   /* Initialize USB if the 1) the HS host or device controller is in the
    * configuration and 2) the weak function sam_usbinitialize() has been
    * brought into the build.
-   * Presumably either CONFIG_USBDEV or CONFIG_USBHOST is also selected.
+   * Presumeably either CONFIG_USBDEV or CONFIG_USBHOST is also selected.
    */
 
 #if defined(CONFIG_SAMA5_UHPHS) || defined(CONFIG_SAMA5_UDPHS)

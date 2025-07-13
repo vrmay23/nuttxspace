@@ -1,10 +1,17 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_gmac.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2013-2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2012 Atmel Corporation
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.orgr>
+ *   Copyright (C) 2013-2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * References:
+ *   SAMA5D3 Series Data Sheet
+ *   Atmel NoOS sample code.
+ *
+ * The Atmel sample code has a BSD compatible license that requires this
+ * copyright notice:
+ *
+ *   Copyright (c) 2012, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,24 +42,18 @@
  *
  ****************************************************************************/
 
-/* References:
- *   SAMA5D3 Series Data Sheet
- *   Atmel NoOS sample code.
- */
-
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
 
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
 #include <string.h>
-#include <assert.h>
 #include <debug.h>
+#include <queue.h>
 #include <errno.h>
 
 #include <arpa/inet.h>
@@ -63,7 +64,7 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/net/gmii.h>
-#include <nuttx/net/ip.h>
+#include <nuttx/net/arp.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/net/phy.h>
 
@@ -71,7 +72,9 @@
 #  include <nuttx/net/pkt.h>
 #endif
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "chip.h"
 #include "hardware/sam_pinmap.h"
 #include "sam_pio.h"
@@ -167,6 +170,12 @@
 
 /* Timing *******************************************************************/
 
+/* TX poll delay = 1 seconds. CLK_TCK is the number of clock ticks per
+ * second
+ */
+
+#define SAM_WDDELAY     (1*CLK_TCK)
+
 /* TX timeout = 1 minute */
 
 #define SAM_TXTIMEOUT   (60*CLK_TCK)
@@ -187,12 +196,13 @@
  * Private Types
  ****************************************************************************/
 
-/* The sam_gmac_s encapsulates all state information for GMAC peripheral */
+/* The sam_gmac_s encapsulates all state information for the GMAC peripheral */
 
 struct sam_gmac_s
 {
   uint8_t               ifup    : 1; /* true:ifup false:ifdown */
-  struct wdog_s         txtimeout;   /* TX timeout timer */
+  WDOG_ID               txpoll;      /* TX poll timer */
+  WDOG_ID               txtimeout;   /* TX timeout timer */
   struct work_s         irqwork;     /* For deferring interrupt work to the work queue */
   struct work_s         pollwork;    /* For deferring poll work to the work queue */
 
@@ -247,12 +257,12 @@ static uint8_t g_pktbuf[MAX_NETDEV_PKTSIZE + CONFIG_NET_GUARDSIZE];
 /* TX descriptors list */
 
 static struct gmac_txdesc_s g_txdesc[CONFIG_SAMA5_GMAC_NTXBUFFERS]
-              aligned_data(8);
+              __attribute__((aligned(8)));
 
 /* RX descriptors list */
 
 static struct gmac_rxdesc_s g_rxdesc[CONFIG_SAMA5_GMAC_NRXBUFFERS]
-              aligned_data(8);
+              __attribute__((aligned(8)));
 
 /* Transmit Buffers
  *
@@ -262,12 +272,12 @@ static struct gmac_rxdesc_s g_rxdesc[CONFIG_SAMA5_GMAC_NRXBUFFERS]
  */
 
 static uint8_t g_txbuffer[CONFIG_SAMA5_GMAC_NTXBUFFERS * GMAC_TX_UNITSIZE]
-               aligned_data(8);
+               __attribute__((aligned(8)));
 
 /* Receive Buffers */
 
 static uint8_t g_rxbuffer[CONFIG_SAMA5_GMAC_NRXBUFFERS * GMAC_RX_UNITSIZE]
-               aligned_data(8);
+               __attribute__((aligned(8)));
 #endif
 
 /****************************************************************************
@@ -283,8 +293,8 @@ static uint32_t sam_getreg(struct sam_gmac_s *priv, uintptr_t addr);
 static void sam_putreg(struct sam_gmac_s *priv, uintptr_t addr,
                        uint32_t val);
 #else
-#  define sam_getreg(priv,addr)     getreg32(addr)
-#  define sam_putreg(priv,addr,val) putreg32(val,addr)
+# define sam_getreg(priv,addr)      getreg32(addr)
+# define sam_putreg(priv,addr,val)  putreg32(val,addr)
 #endif
 
 /* Buffer management */
@@ -306,20 +316,23 @@ static int  sam_recvframe(struct sam_gmac_s *priv);
 static void sam_receive(struct sam_gmac_s *priv);
 static void sam_txdone(struct sam_gmac_s *priv);
 
-static void sam_interrupt_work(void *arg);
-static int  sam_gmac_interrupt(int irq, void *context, void *arg);
+static void sam_interrupt_work(FAR void *arg);
+static int  sam_gmac_interrupt(int irq, void *context, FAR void *arg);
 
 /* Watchdog timer expirations */
 
-static void sam_txtimeout_work(void *arg);
-static void sam_txtimeout_expiry(wdparm_t arg);
+static void sam_txtimeout_work(FAR void *arg);
+static void sam_txtimeout_expiry(int argc, uint32_t arg, ...);
+
+static void sam_poll_work(FAR void *arg);
+static void sam_poll_expiry(int argc, uint32_t arg, ...);
 
 /* NuttX callback functions */
 
 static int  sam_ifup(struct net_driver_s *dev);
 static int  sam_ifdown(struct net_driver_s *dev);
 
-static void sam_txavail_work(void *arg);
+static void sam_txavail_work(FAR void *arg);
 static int  sam_txavail(struct net_driver_s *dev);
 
 #if defined(CONFIG_NET_MCASTGROUP) || defined(CONFIG_NET_ICMPv6)
@@ -368,6 +381,9 @@ static void sam_txreset(struct sam_gmac_s *priv);
 static void sam_rxreset(struct sam_gmac_s *priv);
 static void sam_gmac_reset(struct sam_gmac_s *priv);
 static void sam_macaddress(struct sam_gmac_s *priv);
+#ifdef CONFIG_NET_ICMPv6
+static void sam_ipv6multicast(struct sam_gmac_s *priv);
+#endif
 static int  sam_gmac_configure(struct sam_gmac_s *priv);
 
 /****************************************************************************
@@ -386,7 +402,7 @@ static int  sam_gmac_configure(struct sam_gmac_s *priv);
  *
  * Returned Value:
  *   true:  This is the first register access of this type.
- *   false: This is the same as the preceding register access.
+ *   flase: This is the same as the preceding register access.
  *
  ****************************************************************************/
 
@@ -459,8 +475,8 @@ static uint32_t sam_getreg(struct sam_gmac_s *priv, uintptr_t address)
  ****************************************************************************/
 
 #ifdef CONFIG_SAMA5_GMAC_REGDEBUG
-static void sam_putreg(struct sam_gmac_s *priv,
-                       uintptr_t address, uint32_t regval)
+static void sam_putreg(struct sam_gmac_s *priv, uintptr_t address,
+                       uint32_t regval)
 {
   if (sam_checkreg(priv, true, regval, address))
     {
@@ -554,7 +570,7 @@ static int sam_buffer_initialize(struct sam_gmac_s *priv)
   /* Allocate buffers */
 
   allocsize = CONFIG_SAMA5_GMAC_NTXBUFFERS * sizeof(struct gmac_txdesc_s);
-  priv->txdesc = kmm_memalign(8, allocsize);
+  priv->txdesc = (struct gmac_txdesc_s *)kmm_memalign(8, allocsize);
   if (!priv->txdesc)
     {
       nerr("ERROR: Failed to allocate TX descriptors\n");
@@ -564,7 +580,7 @@ static int sam_buffer_initialize(struct sam_gmac_s *priv)
   memset(priv->txdesc, 0, allocsize);
 
   allocsize = CONFIG_SAMA5_GMAC_NRXBUFFERS * sizeof(struct gmac_rxdesc_s);
-  priv->rxdesc = kmm_memalign(8, allocsize);
+  priv->rxdesc = (struct gmac_rxdesc_s *)kmm_memalign(8, allocsize);
   if (!priv->rxdesc)
     {
       nerr("ERROR: Failed to allocate RX descriptors\n");
@@ -575,7 +591,7 @@ static int sam_buffer_initialize(struct sam_gmac_s *priv)
   memset(priv->rxdesc, 0, allocsize);
 
   allocsize = CONFIG_SAMA5_GMAC_NTXBUFFERS * GMAC_TX_UNITSIZE;
-  priv->txbuffer = kmm_memalign(8, allocsize);
+  priv->txbuffer = (uint8_t *)kmm_memalign(8, allocsize);
   if (!priv->txbuffer)
     {
       nerr("ERROR: Failed to allocate TX buffer\n");
@@ -584,7 +600,7 @@ static int sam_buffer_initialize(struct sam_gmac_s *priv)
     }
 
   allocsize = CONFIG_SAMA5_GMAC_NRXBUFFERS * GMAC_RX_UNITSIZE;
-  priv->rxbuffer = kmm_memalign(8, allocsize);
+  priv->rxbuffer = (uint8_t *)kmm_memalign(8, allocsize);
   if (!priv->rxbuffer)
     {
       nerr("ERROR: Failed to allocate RX buffer\n");
@@ -706,7 +722,7 @@ static int sam_transmit(struct sam_gmac_s *priv)
   up_clean_dcache((uint32_t)txdesc,
                   (uint32_t)txdesc + sizeof(struct gmac_txdesc_s));
 
-  /* Setup/Copy data to transmission buffer */
+  /* Setup/Copy data to transmition buffer */
 
   if (dev->d_len > 0)
     {
@@ -748,8 +764,8 @@ static int sam_transmit(struct sam_gmac_s *priv)
 
   /* Setup the TX timeout watchdog (perhaps restarting the timer) */
 
-  wd_start(&priv->txtimeout, SAM_TXTIMEOUT,
-           sam_txtimeout_expiry, (wdparm_t)priv);
+  wd_start(priv->txtimeout, SAM_TXTIMEOUT, sam_txtimeout_expiry, 1,
+           (uint32_t)priv);
 
   /* Set d_len to zero meaning that the d_buf[] packet buffer is again
    * available.
@@ -802,21 +818,53 @@ static int sam_txpoll(struct net_driver_s *dev)
 {
   struct sam_gmac_s *priv = (struct sam_gmac_s *)dev->d_private;
 
-  /* Send the packet */
-
-  sam_transmit(priv);
-
-  /* Check if there are any free TX descriptors.  We cannot perform
-   * the TX poll if we do not have buffering for another packet.
+  /* If the polling resulted in data that should be sent out on the network,
+   * the field d_len is set to a value > 0.
    */
 
-  if (sam_txfree(priv) == 0)
+  if (priv->dev.d_len > 0)
     {
-      /* We have to terminate the poll if we have no more descriptors
-       * available for another transfer.
+      /* Look up the destination MAC address and add it to the Ethernet
+       * header.
        */
 
-      return -EBUSY;
+#ifdef CONFIG_NET_IPv4
+#ifdef CONFIG_NET_IPv6
+      if (IFF_IS_IPv4(priv->dev.d_flags))
+#endif
+        {
+          arp_out(&priv->dev);
+        }
+#endif /* CONFIG_NET_IPv4 */
+
+#ifdef CONFIG_NET_IPv6
+#ifdef CONFIG_NET_IPv4
+      else
+#endif
+        {
+          neighbor_out(&priv->dev);
+        }
+#endif /* CONFIG_NET_IPv6 */
+
+      if (!devif_loopback(&priv->dev))
+        {
+          /* Send the packet */
+
+          sam_transmit(priv);
+
+          /* Check if there are any free TX descriptors.  We cannot perform
+           * the TX poll if we do not have buffering for another packet.
+           */
+
+          if (sam_txfree(priv) == 0)
+            {
+              /* We have to terminate the poll if we have no more descriptors
+               * available for another transfer.
+               */
+
+              return -EBUSY;
+            }
+        }
     }
 
   /* If zero is returned, the polling will continue until all connections
@@ -859,9 +907,7 @@ static void sam_dopoll(struct sam_gmac_s *priv)
 
   if (sam_txfree(priv) > 0)
     {
-      /* If we have the descriptor,
-       * then poll the network for new XMIT data.
-       */
+      /* If we have the descriptor, then poll the network for new XMIT data. */
 
       devif_poll(dev, sam_txpoll);
     }
@@ -921,7 +967,7 @@ static int sam_recvframe(struct sam_gmac_s *priv)
   up_invalidate_dcache((uintptr_t)rxdesc,
                        (uintptr_t)rxdesc + sizeof(struct gmac_rxdesc_s));
 
-  ninfo("rxndx: %" PRId32 "\n", rxndx);
+  ninfo("rxndx: %d\n", rxndx);
 
   while ((rxdesc->addr & GMACRXD_ADDR_OWNER) != 0)
     {
@@ -1032,8 +1078,7 @@ static int sam_recvframe(struct sam_gmac_s *priv)
               /* Frame size from the GMAC */
 
               dev->d_len = (rxdesc->status & GMACRXD_STA_FRLEN_MASK);
-              ninfo("packet %d-%" PRId32 " (%d)\n",
-                    priv->rxndx, rxndx, dev->d_len);
+              ninfo("packet %d-%d (%d)\n", priv->rxndx, rxndx, dev->d_len);
 
               /* All data have been copied in the application frame buffer,
                * release the RX descriptor
@@ -1068,7 +1113,7 @@ static int sam_recvframe(struct sam_gmac_s *priv)
 
               if (pktlen < dev->d_len)
                 {
-                  nerr("ERROR: Buffer size %d; frame size %" PRId32 "\n",
+                  nerr("ERROR: Buffer size %d; frame size %d\n",
                        dev->d_len, pktlen);
                   return -E2BIG;
                 }
@@ -1172,7 +1217,7 @@ static void sam_receive(struct sam_gmac_s *priv)
        * tap
        */
 
-      pkt_input(&priv->dev);
+       pkt_input(&priv->dev);
 #endif
 
       /* We only accept IP packets of the configured type and ARP packets */
@@ -1182,8 +1227,11 @@ static void sam_receive(struct sam_gmac_s *priv)
         {
           ninfo("IPv4 frame\n");
 
-          /* Receive an IPv4 packet from the network device */
+          /* Handle ARP on input then give the IPv4 packet to the network
+           * layer
+           */
 
+          arp_ipin(&priv->dev);
           ipv4_input(&priv->dev);
 
           /* If the above function invocation resulted in data that should be
@@ -1193,6 +1241,21 @@ static void sam_receive(struct sam_gmac_s *priv)
 
           if (priv->dev.d_len > 0)
             {
+              /* Update the Ethernet header with the correct MAC address */
+
+#ifdef CONFIG_NET_IPv6
+              if (IFF_IS_IPv4(priv->dev.d_flags))
+#endif
+                {
+                  arp_out(&priv->dev);
+                }
+#ifdef CONFIG_NET_IPv6
+              else
+                {
+                  neighbor_out(&priv->dev);
+                }
+#endif
+
               /* And send the packet */
 
               sam_transmit(priv);
@@ -1216,6 +1279,21 @@ static void sam_receive(struct sam_gmac_s *priv)
 
           if (priv->dev.d_len > 0)
             {
+              /* Update the Ethernet header with the correct MAC address */
+
+#ifdef CONFIG_NET_IPv4
+              if (IFF_IS_IPv4(priv->dev.d_flags))
+                {
+                  arp_out(&priv->dev);
+                }
+              else
+#endif
+#ifdef CONFIG_NET_IPv6
+                {
+                  neighbor_out(&priv->dev);
+                }
+#endif
+
               /* And send the packet */
 
               sam_transmit(priv);
@@ -1224,13 +1302,13 @@ static void sam_receive(struct sam_gmac_s *priv)
       else
 #endif
 #ifdef CONFIG_NET_ARP
-      if (BUF->type == HTONS(ETHTYPE_ARP))
+      if (BUF->type == htons(ETHTYPE_ARP))
         {
           ninfo("ARP frame\n");
 
           /* Handle ARP packet */
 
-          arp_input(&priv->dev);
+          arp_arpin(&priv->dev);
 
           /* If the above function invocation resulted in data that should be
            * sent out on the network, the field  d_len will set to a
@@ -1284,7 +1362,7 @@ static void sam_txdone(struct sam_gmac_s *priv)
 
       txdesc = &priv->txdesc[priv->txtail];
       up_invalidate_dcache((uintptr_t)txdesc,
-        (uintptr_t)txdesc + sizeof(struct gmac_txdesc_s));
+                           (uintptr_t)txdesc + sizeof(struct gmac_txdesc_s));
 
       /* Is this TX descriptor done transmitting? (SAMA5D36 datasheet,
        * p. 934)
@@ -1369,9 +1447,9 @@ static void sam_txdone(struct sam_gmac_s *priv)
  *
  ****************************************************************************/
 
-static void sam_interrupt_work(void *arg)
+static void sam_interrupt_work(FAR void *arg)
 {
-  struct sam_gmac_s *priv = (struct sam_gmac_s *)arg;
+  FAR struct sam_gmac_s *priv = (FAR struct sam_gmac_s *)arg;
   uint32_t isr;
   uint32_t rsr;
   uint32_t tsr;
@@ -1389,7 +1467,7 @@ static void sam_interrupt_work(void *arg)
   imr = sam_getreg(priv, SAM_GMAC_IMR);
 
   pending = isr & ~(imr | GMAC_INT_UNUSED);
-  ninfo("isr: %08" PRIx32 " pending: %08" PRIx32 "\n", isr, pending);
+  ninfo("isr: %08x pending: %08x\n", isr, pending);
 
   /* Check for the completion of a transmission.  This should be done before
    * checking for received data (because receiving can cause another
@@ -1415,7 +1493,7 @@ static void sam_interrupt_work(void *arg)
           clrbits = GMAC_TSR_RLE | sam_txinuse(priv);
           sam_txreset(priv);
 
-          nerr("ERROR: Retry Limit Exceeded TSR: %08" PRIx32 "\n", tsr);
+          nerr("ERROR: Retry Limit Exceeded TSR: %08x\n", tsr);
 
           regval = sam_getreg(priv, SAM_GMAC_NCR);
           regval |= GMAC_NCR_TXEN;
@@ -1426,7 +1504,7 @@ static void sam_interrupt_work(void *arg)
 
       if ((tsr & GMAC_TSR_COL) != 0)
         {
-          nerr("ERROR: Collision occurred TSR: %08" PRIx32 "\n", tsr);
+          nerr("ERROR: Collision occurred TSR: %08x\n", tsr);
           clrbits |= GMAC_TSR_COL;
         }
 
@@ -1434,8 +1512,7 @@ static void sam_interrupt_work(void *arg)
 
       if ((tsr & GMAC_TSR_TFC) != 0)
         {
-          nerr("ERROR: Buffers exhausted mid-frame TSR: %08" PRIx32 "\n",
-               tsr);
+          nerr("ERROR: Buffers exhausted mid-frame TSR: %08x\n", tsr);
           clrbits |= GMAC_TSR_TFC;
         }
 
@@ -1450,7 +1527,7 @@ static void sam_interrupt_work(void *arg)
 
       if ((tsr & GMAC_TSR_UND) != 0)
         {
-          nerr("ERROR: Transmit Underrun TSR: %08" PRIx32 "\n", tsr);
+          nerr("ERROR: Transmit Underrun TSR: %08x\n", tsr);
           clrbits |= GMAC_TSR_UND;
         }
 
@@ -1458,7 +1535,7 @@ static void sam_interrupt_work(void *arg)
 
       if ((tsr & GMAC_TSR_HRESP) != 0)
         {
-          nerr("ERROR: HRESP not OK: %08" PRIx32 "\n", tsr);
+          nerr("ERROR: HRESP not OK: %08x\n", tsr);
           clrbits |= GMAC_TSR_HRESP;
         }
 
@@ -1466,7 +1543,7 @@ static void sam_interrupt_work(void *arg)
 
       if ((tsr & GMAC_TSR_LCO) != 0)
         {
-          nerr("ERROR: Late collision: %08" PRIx32 "\n", tsr);
+          nerr("ERROR: Late collision: %08x\n", tsr);
           clrbits |= GMAC_TSR_LCO;
         }
 
@@ -1482,7 +1559,7 @@ static void sam_interrupt_work(void *arg)
   /* Check for the receipt of an RX packet.
    *
    * RXCOMP indicates that a packet has been received and stored in memory.
-   *   The RXCOMP bit is cleared when the interrupt status register was read.
+   *   The RXCOMP bit is cleared whent he interrupt status register was read.
    * RSR:REC indicates that one or more frames have been received and placed
    *   in memory. This indication is cleared by writing a one to this bit.
    */
@@ -1503,7 +1580,7 @@ static void sam_interrupt_work(void *arg)
 
       if ((rsr & GMAC_RSR_RXOVR) != 0)
         {
-          nerr("ERROR: Receiver overrun RSR: %08" PRIx32 "\n", rsr);
+          nerr("ERROR: Receiver overrun RSR: %08x\n", rsr);
           clrbits |= GMAC_RSR_RXOVR;
         }
 
@@ -1520,7 +1597,7 @@ static void sam_interrupt_work(void *arg)
 
       if ((rsr & GMAC_RSR_BNA) != 0)
         {
-          nerr("ERROR: Buffer not available RSR: %08" PRIx32 "\n", rsr);
+          nerr("ERROR: Buffer not available RSR: %08x\n", rsr);
           clrbits |= GMAC_RSR_BNA;
         }
 
@@ -1528,7 +1605,7 @@ static void sam_interrupt_work(void *arg)
 
       if ((rsr & GMAC_RSR_HNO) != 0)
         {
-          nerr("ERROR: HRESP not OK: %08" PRIx32 "\n", rsr);
+          nerr("ERROR: HRESP not OK: %08x\n", rsr);
           clrbits |= GMAC_RSR_HNO;
         }
 
@@ -1588,7 +1665,7 @@ static void sam_interrupt_work(void *arg)
  *
  ****************************************************************************/
 
-static int sam_gmac_interrupt(int irq, void *context, void *arg)
+static int sam_gmac_interrupt(int irq, void *context, FAR void *arg)
 {
   struct sam_gmac_s *priv = &g_gmac;
   uint32_t tsr;
@@ -1616,7 +1693,7 @@ static int sam_gmac_interrupt(int irq, void *context, void *arg)
        * expiration and the deferred interrupt processing.
        */
 
-      wd_cancel(&priv->txtimeout);
+      wd_cancel(priv->txtimeout);
     }
 
   /* Schedule to perform the interrupt processing on the worker thread. */
@@ -1642,9 +1719,9 @@ static int sam_gmac_interrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-static void sam_txtimeout_work(void *arg)
+static void sam_txtimeout_work(FAR void *arg)
 {
-  struct sam_gmac_s *priv = (struct sam_gmac_s *)arg;
+  FAR struct sam_gmac_s *priv = (FAR struct sam_gmac_s *)arg;
 
   nerr("ERROR: Timeout!\n");
 
@@ -1668,7 +1745,8 @@ static void sam_txtimeout_work(void *arg)
  *   The last TX never completed.  Reset the hardware and start again.
  *
  * Input Parameters:
- *   arg  - The argument
+ *   argc - The number of available arguments
+ *   arg  - The first argument
  *
  * Returned Value:
  *   None
@@ -1678,9 +1756,9 @@ static void sam_txtimeout_work(void *arg)
  *
  ****************************************************************************/
 
-static void sam_txtimeout_expiry(wdparm_t arg)
+static void sam_txtimeout_expiry(int argc, uint32_t arg, ...)
 {
-  struct sam_gmac_s *priv = (struct sam_gmac_s *)arg;
+  FAR struct sam_gmac_s *priv = (FAR struct sam_gmac_s *)arg;
 
   /* Disable further Ethernet interrupts.  This will prevent some race
    * conditions with interrupt work.  There is still a potential race
@@ -1692,6 +1770,73 @@ static void sam_txtimeout_expiry(wdparm_t arg)
   /* Schedule to perform the TX timeout processing on the worker thread. */
 
   work_queue(ETHWORK, &priv->irqwork, sam_txtimeout_work, priv, 0);
+}
+
+/****************************************************************************
+ * Function: sam_poll_work
+ *
+ * Description:
+ *   Perform periodic polling from the worker thread
+ *
+ * Input Parameters:
+ *   arg - The argument passed when work_queue() as called.
+ *
+ * Returned Value:
+ *   OK on success
+ *
+ * Assumptions:
+ *   Ethernet interrupts are disabled
+ *
+ ****************************************************************************/
+
+static void sam_poll_work(FAR void *arg)
+{
+  FAR struct sam_gmac_s *priv = (FAR struct sam_gmac_s *)arg;
+  struct net_driver_s *dev  = &priv->dev;
+
+  /* Check if there are any free TX descriptors.  We cannot perform the
+   * TX poll if we do not have buffering for another packet.
+   */
+
+  net_lock();
+  if (sam_txfree(priv) > 0)
+    {
+      /* Update TCP timing states and poll the network for new XMIT data. */
+
+      devif_timer(dev, SAM_WDDELAY, sam_txpoll);
+    }
+
+  /* Setup the watchdog poll timer again */
+
+  wd_start(priv->txpoll, SAM_WDDELAY, sam_poll_expiry, 1, priv);
+  net_unlock();
+}
+
+/****************************************************************************
+ * Function: sam_poll_expiry
+ *
+ * Description:
+ *   Periodic timer handler.  Called from the timer interrupt handler.
+ *
+ * Input Parameters:
+ *   argc - The number of available arguments
+ *   arg  - The first argument
+ *
+ * Returned Value:
+ *   None
+ *
+ * Assumptions:
+ *   Global interrupts are disabled by the watchdog logic.
+ *
+ ****************************************************************************/
+
+static void sam_poll_expiry(int argc, uint32_t arg, ...)
+{
+  FAR struct sam_gmac_s *priv = (FAR struct sam_gmac_s *)arg;
+
+  /* Schedule to perform the interrupt processing on the worker thread. */
+
+  work_queue(ETHWORK, &priv->pollwork, sam_poll_work, priv, 0);
 }
 
 /****************************************************************************
@@ -1716,9 +1861,9 @@ static int sam_ifup(struct net_driver_s *dev)
   struct sam_gmac_s *priv = (struct sam_gmac_s *)dev->d_private;
   int ret;
 
-  ninfo("Bringing up: %u.%u.%u.%u\n",
-        ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
-        ip4_addr3(dev->d_ipaddr), ip4_addr4(dev->d_ipaddr));
+  ninfo("Bringing up: %d.%d.%d.%d\n",
+        dev->d_ipaddr & 0xff, (dev->d_ipaddr >> 8) & 0xff,
+        (dev->d_ipaddr >> 16) & 0xff, dev->d_ipaddr >> 24);
 
   /* Configure the GMAC interface for normal operation. */
 
@@ -1728,6 +1873,12 @@ static int sam_ifup(struct net_driver_s *dev)
   /* Set the MAC address (should have been configured while we were down) */
 
   sam_macaddress(priv);
+
+#ifdef CONFIG_NET_ICMPv6
+  /* Set up IPv6 multicast address filtering */
+
+  sam_ipv6multicast(priv);
+#endif
 
   /* Initialize for PHY access */
 
@@ -1756,6 +1907,10 @@ static int sam_ifup(struct net_driver_s *dev)
   /* Enable normal MAC operation */
 
   ninfo("Enable normal operation\n");
+
+  /* Set and activate a timer process */
+
+  wd_start(priv->txpoll, SAM_WDDELAY, sam_poll_expiry, 1, (uint32_t)priv);
 
   /* Enable the GMAC interrupt */
 
@@ -1792,9 +1947,10 @@ static int sam_ifdown(struct net_driver_s *dev)
   flags = enter_critical_section();
   up_disable_irq(SAM_IRQ_GMAC);
 
-  /* Cancel the TX timeout timers */
+  /* Cancel the TX poll timer and TX timeout timers */
 
-  wd_cancel(&priv->txtimeout);
+  wd_cancel(priv->txpoll);
+  wd_cancel(priv->txtimeout);
 
   /* Put the GMAC in its reset, non-operational state.  This should be
    * a known configuration that will guarantee the sam_ifup() always
@@ -1827,9 +1983,9 @@ static int sam_ifdown(struct net_driver_s *dev)
  *
  ****************************************************************************/
 
-static void sam_txavail_work(void *arg)
+static void sam_txavail_work(FAR void *arg)
 {
-  struct sam_gmac_s *priv = (struct sam_gmac_s *)arg;
+  FAR struct sam_gmac_s *priv = (FAR struct sam_gmac_s *)arg;
 
   ninfo("ifup: %d\n", priv->ifup);
 
@@ -1867,7 +2023,7 @@ static void sam_txavail_work(void *arg)
 
 static int sam_txavail(struct net_driver_s *dev)
 {
-  struct sam_gmac_s *priv = (struct sam_gmac_s *)dev->d_private;
+  FAR struct sam_gmac_s *priv = (FAR struct sam_gmac_s *)dev->d_private;
 
   /* Is our single work structure available?  It may not be if there are
    * pending interrupt actions and we will have to ignore the Tx
@@ -2368,13 +2524,13 @@ static int sam_phyintenable(struct sam_gmac_s *priv)
    * interrupts
    */
 
-  ret = sam_phyread(priv, priv->phyaddr, GMII_KSZ90X1_ICS, &phyval);
+  ret = sam_phyread(priv, priv->phyaddr, GMII_KSZ90x1_ICS, &phyval);
   if (ret == OK)
     {
       /* Enable link up/down interrupts */
 
-      ret = sam_phywrite(priv, priv->phyaddr, GMII_KSZ90X1_ICS,
-                        (GMII_KSZ90X1_INT_LDEN | GMII_KSZ90X1_INT_LUEN));
+      ret = sam_phywrite(priv, priv->phyaddr, GMII_KSZ90x1_ICS,
+                        (GMII_KSZ90x1_INT_LDEN | GMII_KSZ90x1_INT_LUEN));
     }
 
   /* Disable the management port */
@@ -2805,16 +2961,15 @@ static int sam_autonegotiate(struct sam_gmac_s *priv)
 #ifdef SAMA5_GMAC_PHY_KSZ90x1
   /* Set up the KSZ9020/31 PHY */
 
-  phyval = GMII_KSZ90X1_RCCPSR | GMII_ERCR_WRITE;
+  phyval = GMII_KSZ90x1_RCCPSR | GMII_ERCR_WRITE;
   sam_phywrite(priv, priv->phyaddr, GMII_ERCR, phyval);
   sam_phywrite(priv, priv->phyaddr, GMII_ERDWR, 0xf2f4);
 
-  phyval = GMII_KSZ90X1_RRDPSR | GMII_ERCR_WRITE;
+  phyval = GMII_KSZ90x1_RRDPSR | GMII_ERCR_WRITE;
   sam_phywrite(priv, priv->phyaddr, GMII_ERCR, phyval);
   sam_phywrite(priv, priv->phyaddr, GMII_ERDWR, 0x2222);
 
-  ret = sam_phywrite(priv, priv->phyaddr,
-                     GMII_KSZ90X1_ICS, 0xff00);
+  ret = sam_phywrite(priv, priv->phyaddr, GMII_KSZ90x1_ICS, 0xff00);
 #endif
 
   /* Set the Auto_negotiation Advertisement Register, MII advertising for
@@ -3442,6 +3597,79 @@ static void sam_macaddress(struct sam_gmac_s *priv)
 }
 
 /****************************************************************************
+ * Function: sam_ipv6multicast
+ *
+ * Description:
+ *   Configure the IPv6 multicast MAC address.
+ *
+ * Input Parameters:
+ *   priv - A reference to the private driver state structure
+ *
+ * Returned Value:
+ *   OK on success; Negated errno on failure.
+ *
+ * Assumptions:
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_ICMPv6
+static void sam_ipv6multicast(struct sam_gmac_s *priv)
+{
+  struct net_driver_s *dev;
+  uint16_t tmp16;
+  uint8_t mac[6];
+
+  /* For ICMPv6, we need to add the IPv6 multicast address
+   *
+   * For IPv6 multicast addresses, the Ethernet MAC is derived by
+   * the four low-order octets OR'ed with the MAC 33:33:00:00:00:00,
+   * so for example the IPv6 address FF02:DEAD:BEEF::1:3 would map
+   * to the Ethernet MAC address 33:33:00:01:00:03.
+   *
+   * NOTES:  This appears correct for the ICMPv6 Router Solicitation
+   * Message, but the ICMPv6 Neighbor Solicitation message seems to
+   * use 33:33:ff:01:00:03.
+   */
+
+  mac[0] = 0x33;
+  mac[1] = 0x33;
+
+  dev    = &priv->dev;
+  tmp16  = dev->d_ipv6addr[6];
+  mac[2] = 0xff;
+  mac[3] = tmp16 >> 8;
+
+  tmp16  = dev->d_ipv6addr[7];
+  mac[4] = tmp16 & 0xff;
+  mac[5] = tmp16 >> 8;
+
+  ninfo("IPv6 Multicast: %02x:%02x:%02x:%02x:%02x:%02x\n",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  sam_addmac(dev, mac);
+
+#ifdef CONFIG_NET_ICMPv6_AUTOCONF
+  /* Add the IPv6 all link-local nodes Ethernet address.  This is the
+   * address that we expect to receive ICMPv6 Router Advertisement
+   * packets.
+   */
+
+  sam_addmac(dev, g_ipv6_ethallnodes.ether_addr_octet);
+
+#endif /* CONFIG_NET_ICMPv6_AUTOCONF */
+#ifdef CONFIG_NET_ICMPv6_ROUTER
+  /* Add the IPv6 all link-local routers Ethernet address.  This is the
+   * address that we expect to receive ICMPv6 Router Solicitation
+   * packets.
+   */
+
+  sam_addmac(dev, g_ipv6_ethallrouters.ether_addr_octet);
+
+#endif /* CONFIG_NET_ICMPv6_ROUTER */
+}
+#endif /* CONFIG_NET_ICMPv6 */
+
+/****************************************************************************
  * Function: sam_gmac_configure
  *
  * Description:
@@ -3594,7 +3822,25 @@ int sam_gmac_initialize(void)
 #ifdef CONFIG_NETDEV_IOCTL
   priv->dev.d_ioctl   = sam_ioctl;       /* Support PHY ioctl() calls */
 #endif
-  priv->dev.d_private = &g_gmac;         /* Used to recover private state from dev */
+  priv->dev.d_private = (void *)&g_gmac; /* Used to recover private state from dev */
+
+  /* Create a watchdog for timing polling for and timing of transmissions */
+
+  priv->txpoll = wd_create();
+  if (!priv->txpoll)
+    {
+      nerr("ERROR: Failed to create periodic poll timer\n");
+      ret = -EAGAIN;
+      goto errout;
+    }
+
+  priv->txtimeout = wd_create();         /* Create TX timeout timer */
+  if (!priv->txtimeout)
+    {
+      nerr("ERROR: Failed to create periodic poll timer\n");
+      ret = -EAGAIN;
+      goto errout_with_txpoll;
+    }
 
   /* Configure PIO pins to support GMAC */
 
@@ -3606,7 +3852,7 @@ int sam_gmac_initialize(void)
   if (ret < 0)
     {
       nerr("ERROR: sam_buffer_initialize failed: %d\n", ret);
-      return ret;
+      goto errout_with_txtimeout;
     }
 
   /* Attach the IRQ to the driver.  It will not be enabled at the AIC until
@@ -3647,6 +3893,11 @@ int sam_gmac_initialize(void)
 
 errout_with_buffers:
   sam_buffer_free(priv);
+errout_with_txtimeout:
+  wd_delete(priv->txtimeout);
+errout_with_txpoll:
+  wd_delete(priv->txpoll);
+errout:
   return ret;
 }
 

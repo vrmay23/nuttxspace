@@ -1,8 +1,14 @@
 /****************************************************************************
  * include/nuttx/mtd/nand_raw.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2012, Atmel Corporation
+ *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This logic was based largely on Atmel sample code with modifications for
+ * better integration with NuttX.  The Atmel sample code has a BSD
+ * compatible license that requires this copyright notice:
+ *
+ *   Copyright (c) 2012, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,12 +52,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include <nuttx/mtd/mtd.h>
 #include <nuttx/mtd/nand_model.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Nand flash commands */
 
 #define COMMAND_READ_1                  0x00
@@ -263,7 +269,7 @@ struct nand_raw_s
 #endif
 
 #if defined(CONFIG_MTD_NAND_SWECC) || defined(CONFIG_MTD_NAND_HWECC)
-  /* ECC working buffers */
+  /* ECC working buffers*/
 
   uint8_t spare[CONFIG_MTD_NAND_MAXPAGESPARESIZE];
   uint8_t ecc[CONFIG_MTD_NAND_MAXSPAREECCBYTES];

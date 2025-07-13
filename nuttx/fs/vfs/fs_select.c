@@ -1,22 +1,35 @@
 /****************************************************************************
  * fs/vfs/fs_select.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2012-2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -40,17 +53,6 @@
 #include <nuttx/fs/fs.h>
 
 #include "inode/inode.h"
-#include "fs_heap.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifdef CONFIG_FDCHECK
-#  undef FD_ISSET
-#  define FD_ISSET(fd,set) \
- (((((fd_set*)(set))->arr)[_FD_NDX(fd)] & (UINT32_C(1) << _FD_BIT(fd))) != 0)
-#endif
 
 /****************************************************************************
  * Public Functions
@@ -92,21 +94,16 @@ int select(int nfds, FAR fd_set *readfds, FAR fd_set *writefds,
            FAR fd_set *exceptfds, FAR struct timeval *timeout)
 {
   struct pollfd *pollset = NULL;
+  int errcode = OK;
   int fd;
   int npfds;
   int msec;
   int ndx;
   int ret;
 
-  if (nfds < 0)
-    {
-      set_errno(EINVAL);
-      return ERROR;
-    }
+  /* select() is cancellation point */
 
-#ifdef CONFIG_FDCHECK
-  nfds = fdcheck_restore(nfds - 1) + 1;
-#endif
+  enter_cancellation_point();
 
   /* How many pollfd structures do we need to allocate? */
 
@@ -131,12 +128,12 @@ int select(int nfds, FAR fd_set *readfds, FAR fd_set *writefds,
   if (npfds > 0)
     {
       pollset = (FAR struct pollfd *)
-        fs_heap_zalloc(npfds * sizeof(struct pollfd));
+        kmm_zalloc(npfds * sizeof(struct pollfd));
 
       if (pollset == NULL)
         {
-          set_errno(ENOMEM);
-          return ERROR;
+          errcode = ENOMEM;
+          goto errout;
         }
     }
 
@@ -155,11 +152,7 @@ int select(int nfds, FAR fd_set *readfds, FAR fd_set *writefds,
 
       if (readfds && FD_ISSET(fd, readfds))
         {
-#ifdef CONFIG_FDCHECK
-          pollset[ndx].fd      = fdcheck_protect(fd);
-#else
           pollset[ndx].fd      = fd;
-#endif
           pollset[ndx].events |= POLLIN;
           incr                 = 1;
         }
@@ -170,26 +163,16 @@ int select(int nfds, FAR fd_set *readfds, FAR fd_set *writefds,
 
       if (writefds && FD_ISSET(fd, writefds))
         {
-#ifdef CONFIG_FDCHECK
-          pollset[ndx].fd      = fdcheck_protect(fd);
-#else
           pollset[ndx].fd      = fd;
-#endif
           pollset[ndx].events |= POLLOUT;
           incr                 = 1;
         }
 
-      /* The exceptfds set holds the set of FDs that are watched for
-       * exceptions
-       */
+      /* The exceptfds set holds the set of FDs that are watched for exceptions */
 
       if (exceptfds && FD_ISSET(fd, exceptfds))
         {
-#ifdef CONFIG_FDCHECK
-          pollset[ndx].fd      = fdcheck_protect(fd);
-#else
           pollset[ndx].fd      = fd;
-#endif
           incr                  = 1;
         }
 
@@ -216,6 +199,12 @@ int select(int nfds, FAR fd_set *readfds, FAR fd_set *writefds,
   /* Then let poll do all of the real work. */
 
   ret = poll(pollset, npfds, msec);
+  if (ret < 0)
+    {
+      /* poll() failed! Save the errno value */
+
+      errcode = get_errno();
+    }
 
   /* Now set up the return values */
 
@@ -260,7 +249,7 @@ int select(int nfds, FAR fd_set *readfds, FAR fd_set *writefds,
 
           if (writefds)
             {
-              if (pollset[ndx].revents & (POLLOUT | POLLHUP))
+              if (pollset[ndx].revents & POLLOUT)
                 {
                   FD_SET(pollset[ndx].fd, writefds);
                   ret++;
@@ -280,6 +269,18 @@ int select(int nfds, FAR fd_set *readfds, FAR fd_set *writefds,
         }
     }
 
-  fs_heap_free(pollset);
-  return ret;
+  kmm_free(pollset);
+
+  /* Did poll() fail above? */
+
+  if (ret >= 0)
+    {
+      leave_cancellation_point();
+      return ret;
+    }
+
+errout:
+  set_errno(errcode);
+  leave_cancellation_point();
+  return ERROR;
 }

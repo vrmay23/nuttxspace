@@ -1,22 +1,40 @@
 /****************************************************************************
  * drivers/sensors/mcp9844.c
+ * Character driver for the MCP9844 Temperature Sensor
+ * Also supports the MCP9808 Temperature Sensor
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 DS-Automotion GmbH. All rights reserved.
+ *   Author: Alexander Entinger <a.entinger@ds-automotion.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,7 +44,6 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -37,6 +54,14 @@
 #include <nuttx/random.h>
 
 #if defined(CONFIG_I2C) && defined(CONFIG_SENSORS_MCP9844)
+
+/****************************************************************************
+ * Pre-process Definitions
+ ****************************************************************************/
+
+#ifndef CONFIG_MCP9844_I2C_FREQUENCY
+#  define CONFIG_MCP9844_I2C_FREQUENCY 400000
+#endif
 
 /****************************************************************************
  * Private Types
@@ -55,13 +80,14 @@ struct mcp9844_dev_s
 /* I2C helper functions */
 
 static int     mcp9844_read_u16(FAR struct mcp9844_dev_s *priv,
-                                uint8_t const regaddr, FAR uint16_t *value);
+                  uint8_t const regaddr, FAR uint16_t *value);
 static int     mcp9844_write_u16(FAR struct mcp9844_dev_s *priv,
-                                 uint8_t const regaddr,
-                                 uint16_t const regval);
+                  uint8_t const regaddr, uint16_t const regval);
 
 /* Character driver methods */
 
+static int     mcp9844_open(FAR struct file *filep);
+static int     mcp9844_close(FAR struct file *filep);
 static ssize_t mcp9844_read(FAR struct file *filep, FAR char *buffer,
                   size_t buflen);
 static ssize_t mcp9844_write(FAR struct file *filep, FAR const char *buffer,
@@ -75,12 +101,13 @@ static int     mcp9844_ioctl(FAR struct file *filep, int cmd,
 
 static const struct file_operations g_mcp9844_fops =
 {
-  NULL,            /* open */
-  NULL,            /* close */
-  mcp9844_read,    /* read */
-  mcp9844_write,   /* write */
-  NULL,            /* seek */
-  mcp9844_ioctl,   /* ioctl */
+  mcp9844_open,
+  mcp9844_close,
+  mcp9844_read,
+  mcp9844_write,
+  NULL,
+  mcp9844_ioctl,
+  NULL
 };
 
 /****************************************************************************
@@ -91,7 +118,7 @@ static const struct file_operations g_mcp9844_fops =
  * Name: mcp9844_read_u16
  *
  * Description:
- *  Read a 16 bit value from the MCP9844 at the address regaddr.
+ *  Read a 16 bit valie from the MCP9844 at the address regaddr.
  *
  ****************************************************************************/
 
@@ -170,6 +197,32 @@ static int mcp9844_write_u16(FAR struct mcp9844_dev_s *priv,
 }
 
 /****************************************************************************
+ * Name: mcp9844_open
+ *
+ * Description:
+ *   This function is called whenever the MCP9844 device is opened.
+ *
+ ****************************************************************************/
+
+static int mcp9844_open(FAR struct file *filep)
+{
+  return OK;
+}
+
+/****************************************************************************
+ * Name: mcp9844_close
+ *
+ * Description:
+ *   This routine is called when the MCP9844 device is closed.
+ *
+ ****************************************************************************/
+
+static int mcp9844_close(FAR struct file *filep)
+{
+  return OK;
+}
+
+/****************************************************************************
  * Name: mcp9844_read
  ****************************************************************************/
 
@@ -196,7 +249,7 @@ static ssize_t mcp9844_write(FAR struct file *filep, FAR const char *buffer,
 static int mcp9844_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
   FAR struct inode *inode = filep->f_inode;
-  FAR struct mcp9844_dev_s *priv = inode->i_private;
+  FAR struct mcp9844_dev_s *priv  = inode->i_private;
   int ret = OK;
 
   switch (cmd)
@@ -234,16 +287,11 @@ static int mcp9844_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
               raw_temperature &= 0x0fff; /* 0x0fff = 0b 0000 1111 1111 1111 */
 
-              /* The post comma temperature value is encoded in BIT3 to
-               * BIT0
-               */
+              /* The post comma temperature value is encoded in BIT3 to BIT0 */
 
-              temp_result->temp_post_comma =
-                                  (uint8_t)(raw_temperature & 0x000f);
+              temp_result->temp_post_comma = (uint8_t)(raw_temperature & 0x000f);
 
-              /* The pre comma temperature value is encoded in BIT11 to
-               * BIT4
-               */
+              /* The pre comma temperature value is encoded in BIT11 to BIT4 */
 
               temp_result->temp_pre_comma = (int8_t)(raw_temperature >> 4);
             }
@@ -337,8 +385,7 @@ static int mcp9844_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
  *
  * Input Parameters:
  *   devpath - The full path to the driver to register. E.g., "/dev/temp0"
- *   i2c - An instance of the I2C interface to use to communicate with
- *         MCP9844
+ *   i2c - An instance of the I2C interface to use to communicate with MCP9844
  *   addr - The I2C address of the MCP9844.
  *
  * Returned Value:
@@ -349,15 +396,15 @@ static int mcp9844_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 int mcp9844_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
                      uint8_t addr)
 {
-  FAR struct mcp9844_dev_s *priv;
-
   /* Sanity check */
 
   DEBUGASSERT(i2c != NULL);
 
   /* Initialize the MCP9844 device structure */
 
-  priv = kmm_malloc(sizeof(struct mcp9844_dev_s));
+  FAR struct mcp9844_dev_s *priv =
+    (FAR struct mcp9844_dev_s *)kmm_malloc(sizeof(struct mcp9844_dev_s));
+
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");

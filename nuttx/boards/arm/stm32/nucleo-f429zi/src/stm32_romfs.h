@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/stm32/nucleo-f429zi/src/stm32_romfs.h
- *
- * SPDX-License-Identifier: Apache-2.0
+ * boards/arm/stm32f4/nucleo-f429zi/src/stm32_romfs.h
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -51,7 +49,7 @@
  *   Zero (OK) on success, a negated errno value on error.
  *
  * Assumptions/Limitations:
- *   Memory addresses [romfs_data_begin .. romfs_data_end) should contain
+ *   Memory addresses [&romfs_data_begin .. &romfs_data_begin) should contain
  *   ROMFS volume data, as included in the assembly snippet above (l. 84).
  *
  ****************************************************************************/

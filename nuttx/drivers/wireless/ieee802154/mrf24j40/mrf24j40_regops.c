@@ -1,22 +1,37 @@
 /****************************************************************************
  * drivers/wireless/ieee802154/mrf24j40/mrf24j40_regops.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2016 Sebastien Lorquet. All rights reserved.
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
+ *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
+ *   Author: Anthony Merlino <anthony@vergeaero.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +43,6 @@
 
 #include <assert.h>
 #include <debug.h>
-#include <inttypes.h>
 #include <stdio.h>
 
 #include "mrf24j40.h"
@@ -144,16 +158,13 @@ int mrf24j40_regdump(FAR struct mrf24j40_radio_s *dev)
     {
       if ((i & 15) == 0)
         {
-          snprintf(buf, sizeof(buf), "%02" PRIx32 ": ", i & 0xff);
-          len = strlen(buf);
+          len = sprintf(buf, "%02x: ", i & 0xff);
         }
 
-      snprintf(buf + len, sizeof(buf) - len,
-               "%02x ", mrf24j40_getreg(dev->spi, i));
-      len += strlen(buf + len);
+      len += sprintf(buf + len, "%02x ", mrf24j40_getreg(dev->spi, i));
       if ((i & 15) == 15)
         {
-          snprintf(buf + len, sizeof(buf) - len, "\n");
+          sprintf(buf + len, "\n");
           wlinfo("%s", buf);
         }
     }
@@ -164,16 +175,13 @@ int mrf24j40_regdump(FAR struct mrf24j40_radio_s *dev)
     {
       if ((i & 15) == 0)
         {
-          snprintf(buf, sizeof(buf), "%02" PRIx32 ": ", i & 0xff);
-          len = strlen(buf);
+          len = sprintf(buf, "%02x: ", i & 0xff);
         }
 
-      snprintf(buf + len, sizeof(buf) - len,
-               "%02x ", mrf24j40_getreg(dev->spi, i));
-      len += strlen(buf + len);
+      len += sprintf(buf + len, "%02x ", mrf24j40_getreg(dev->spi, i));
       if ((i & 15) == 15)
         {
-          snprintf(buf + len, sizeof(buf) - len, "\n");
+          sprintf(buf + len, "\n");
           wlinfo("%s", buf);
         }
     }

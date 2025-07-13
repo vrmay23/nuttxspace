@@ -1,36 +1,44 @@
 /****************************************************************************
  * apps/testing/ostest/sigprocmask.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-/****************************************************************************
- * Included Files
- ****************************************************************************/
-
-#include <assert.h>
-#include <errno.h>
-#include <signal.h>
+#include <sys/types.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <signal.h>
 #include <string.h>
-#include <sys/types.h>
+#include <errno.h>
 
 #include "ostest.h"
 
@@ -44,14 +52,7 @@
  * Private Data
  ****************************************************************************/
 
-static int g_some_signals[NSIGNALS] =
-{
-  SIGHUP,
-  SIGQUIT,
-  SIGTRAP,
-  SIGBUS,
-  SIGUSR1
-};
+static int g_some_signals[NSIGNALS] = {1, 3, 5, 7, 9};
 
 /****************************************************************************
  * Public Functions
@@ -72,7 +73,6 @@ void sigprocmask_test(void)
     {
       int errcode = errno;
       printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
       goto errout;
     }
 
@@ -83,7 +83,6 @@ void sigprocmask_test(void)
     {
       int errcode = errno;
       printf("sigprocmask_test: ERROR sigemptyset failed: %d\n", errcode);
-      ASSERT(false);
       goto errout;
     }
 
@@ -92,7 +91,6 @@ void sigprocmask_test(void)
     {
       int errcode = errno;
       printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
       goto errout_with_mask;
     }
 
@@ -102,19 +100,12 @@ void sigprocmask_test(void)
     {
       int signo = g_some_signals[i];
 
-      /* SIGKILL and SIGSTOP should not be added to signal mask */
-
-      if (signo != SIGKILL && signo != SIGSTOP)
+      ret = sigaddset(&newmask, signo);
+      if (ret != OK)
         {
-          ret = sigaddset(&newmask, signo);
-          if (ret != OK)
-            {
-              int errcode = errno;
-              printf("sigprocmask_test: ERROR sigaddset failed: %d\n",
-                errcode);
-              ASSERT(false);
-              goto errout_with_mask;
-            }
+          int errcode = errno;
+          printf("sigprocmask_test: ERROR sigaddset failed: %d\n", errcode);
+          goto errout_with_mask;
         }
 
       ret = sighold(signo);
@@ -122,7 +113,6 @@ void sigprocmask_test(void)
         {
           int errcode = errno;
           printf("sigprocmask_test: ERROR sighold failed: %d\n", errcode);
-          ASSERT(false);
           goto errout_with_mask;
         }
     }
@@ -134,7 +124,6 @@ void sigprocmask_test(void)
     {
       int errcode = errno;
       printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
       goto errout_with_mask;
     }
 
@@ -143,7 +132,6 @@ void sigprocmask_test(void)
   if (memcmp(&currmask, &newmask, sizeof(sigset_t)) != 0)
     {
       printf("sigprocmask_test: ERROR unexpected sigprocmask\n");
-      ASSERT(false);
       goto errout_with_mask;
     }
 
@@ -154,7 +142,6 @@ void sigprocmask_test(void)
     {
       int errcode = errno;
       printf("sigprocmask_test: ERROR sigfillset failed: %d\n", errcode);
-      ASSERT(false);
       goto errout;
     }
 
@@ -163,7 +150,6 @@ void sigprocmask_test(void)
     {
       int errcode = errno;
       printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
       goto errout_with_mask;
     }
 
@@ -178,7 +164,6 @@ void sigprocmask_test(void)
         {
           int errcode = errno;
           printf("sigprocmask_test: ERROR sigdelset failed: %d\n", errcode);
-          ASSERT(false);
           goto errout_with_mask;
         }
 
@@ -187,7 +172,6 @@ void sigprocmask_test(void)
         {
           int errcode = errno;
           printf("sigprocmask_test: ERROR sigrelse failed: %d\n", errcode);
-          ASSERT(false);
           goto errout_with_mask;
         }
     }
@@ -199,47 +183,6 @@ void sigprocmask_test(void)
     {
       int errcode = errno;
       printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
-      goto errout_with_mask;
-    }
-
-  /* SIGKILL and SIGSTOP should never be added to signal mask,
-   * so delete them from newmask before comparing.
-   */
-
-  ret = sigdelset(&newmask, SIGKILL);
-  if (ret != OK)
-    {
-      int errcode = errno;
-      printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
-      goto errout_with_mask;
-    }
-
-  ret = sigdelset(&newmask, SIGSTOP);
-  if (ret != OK)
-    {
-      int errcode = errno;
-      printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
-      goto errout_with_mask;
-    }
-
-  ret = sigdelset(&currmask, SIGKILL);
-  if (ret != OK)
-    {
-      int errcode = errno;
-      printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
-      goto errout_with_mask;
-    }
-
-  ret = sigdelset(&currmask, SIGSTOP);
-  if (ret != OK)
-    {
-      int errcode = errno;
-      printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
       goto errout_with_mask;
     }
 
@@ -248,7 +191,6 @@ void sigprocmask_test(void)
   if (memcmp(&currmask, &newmask, sizeof(sigset_t)) != 0)
     {
       printf("sigprocmask_test: ERROR unexpected sigprocmask\n");
-      ASSERT(false);
       goto errout_with_mask;
     }
 
@@ -257,11 +199,10 @@ void sigprocmask_test(void)
     {
       int errcode = errno;
       printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
       goto errout;
     }
 
-  printf("sigprocmask_test: SUCCESS\n");
+  printf("sigprocmask_test: SUCCESS\n" );
   FFLUSH();
   return;
 
@@ -271,11 +212,10 @@ errout_with_mask:
     {
       int errcode = errno;
       printf("sigprocmask_test: ERROR sigprocmask failed: %d\n", errcode);
-      ASSERT(false);
       goto errout;
     }
 
 errout:
-  printf("sigprocmask_test: Aborting\n");
+  printf("sigprocmask_test: Aborting\n" );
   FFLUSH();
 }

@@ -1,8 +1,6 @@
 /****************************************************************************
  * mm/kmm_heap/kmm_mallinfo.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -26,6 +24,8 @@
 
 #include <nuttx/config.h>
 
+#include <stdlib.h>
+
 #include <nuttx/mm/mm.h>
 
 #ifdef CONFIG_MM_KERNEL_HEAP
@@ -45,20 +45,9 @@
 
 struct mallinfo kmm_mallinfo(void)
 {
-  return mm_mallinfo(g_kmmheap);
+  struct mallinfo info;
+  mm_mallinfo(&g_kmmheap, &info);
+  return info;
 }
 
-/****************************************************************************
- * Name: kmm_mallinfo_task
- *
- * Description:
- *   kmm_mallinfo_task returns a copy of updated current heap information of
- *   task with specified pid for the user heap.
- *
- ****************************************************************************/
-
-struct mallinfo_task kmm_mallinfo_task(FAR const struct malltask *task)
-{
-  return mm_mallinfo_task(g_kmmheap, task);
-}
 #endif /* CONFIG_MM_KERNEL_HEAP */

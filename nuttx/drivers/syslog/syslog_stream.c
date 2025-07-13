@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/syslog/syslog_stream.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,142 +39,153 @@
 
 #include <nuttx/config.h>
 
+#include <stdio.h>
+#include <unistd.h>
+#include <assert.h>
 #include <errno.h>
-#include <sys/types.h>
 
-#include <nuttx/kmalloc.h>
 #include <nuttx/streams.h>
+#include <nuttx/mm/iob.h>
 #include <nuttx/syslog/syslog.h>
 
-#ifdef CONFIG_SYSLOG_STREAM
-
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-/* This structure contains all SYSLOGing state information */
-
-struct syslog_stream_s
-{
-  syslog_channel_t     channel;
-  FAR struct lib_outstream_s *stream;
-};
-
-/****************************************************************************
- * Private Function Prototypes
- ****************************************************************************/
-
-static ssize_t syslog_stream_write(FAR syslog_channel_t *channel,
-                                   FAR const char *buffer, size_t buflen);
-static int syslog_stream_putc(FAR syslog_channel_t *channel, int ch);
-static int syslog_stream_force(FAR syslog_channel_t *channel, int ch);
-static int syslog_stream_flush(FAR syslog_channel_t *channel);
-void syslog_stream_uninit(FAR syslog_channel_t *channel);
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
-
-static const struct syslog_channel_ops_s g_syslog_stream_ops =
-{
-  syslog_stream_putc,
-  NULL,
-  syslog_stream_flush,
-  syslog_stream_write,
-  syslog_stream_write,
-  syslog_stream_uninit
-};
+#include "syslog.h"
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: syslog_stream_write
- *
- * Description:
- *   This is the low-level, multiple byte, system logging interface provided
- *   for the driver interface.
- *
- * Input Parameters:
- *   channel    - Handle to syslog channel to be used.
- *   buffer     - The buffer containing the data to be output.
- *   buflen     - The number of bytes in the buffer.
- *
- * Returned Value:
- *   On success, the number of characters written is returned. A negated
- *   errno value is returned on any failure.
- *
+ * Name: syslogstream_flush
  ****************************************************************************/
 
-static ssize_t syslog_stream_write(FAR syslog_channel_t *channel,
-                                   FAR const char *buffer, size_t buflen)
+#ifdef CONFIG_SYSLOG_BUFFER
+static int syslogstream_flush(FAR struct lib_syslogstream_s *stream)
 {
-  FAR struct syslog_stream_s *chan =
-    (FAR struct syslog_stream_s *)channel;
-  ssize_t nwritten;
-  irqstate_t flags;
+  FAR struct iob_s *iob;
+  int ret = OK;
 
-  flags = enter_critical_section();
-  nwritten = lib_stream_puts(chan->stream, buffer, buflen);
-  leave_critical_section(flags);
-  return nwritten;
+  DEBUGASSERT(stream != NULL);
+  iob = stream->iob;
+
+  /* Do we have an IO buffer? Is there anything buffered? */
+
+  if (iob != NULL && iob->io_len > 0)
+    {
+      /* Yes write the buffered data */
+
+      do
+        {
+          ssize_t nbytes = syslog_write((FAR const char *)iob->io_data,
+                                        (size_t)iob->io_len);
+          if (nbytes < 0)
+            {
+              ret = (int)nbytes;
+            }
+          else
+            {
+              iob->io_len = 0;
+              ret = OK;
+            }
+        }
+      while (ret == -EINTR);
+    }
+
+  return ret;
 }
+#endif
 
 /****************************************************************************
- * Name: syslog_stream_putc
- *
- * Description:
- *   This is the low-level, single character, system logging interface
- *   provided for the driver interface.
- *
- * Input Parameters:
- *   channel    - Handle to syslog channel to be used.
- *   ch         - The character to add to the SYSLOG (must be positive).
- *
- * Returned Value:
- *   On success, the character is echoed back to the caller. A negated errno
- *   value is returned on any failure.
- *
+ * Name: syslogstream_addchar
  ****************************************************************************/
 
-static int syslog_stream_putc(FAR syslog_channel_t *channel, int ch)
+#ifdef CONFIG_SYSLOG_BUFFER
+static void syslogstream_addchar(FAR struct lib_syslogstream_s *stream, int ch)
 {
-  FAR struct syslog_stream_s *chan =
-    (FAR struct syslog_stream_s *)channel;
-  irqstate_t flags;
+  FAR struct iob_s *iob = stream->iob;
 
-  flags = enter_critical_section();
-  lib_stream_putc(chan->stream, ch);
-  leave_critical_section(flags);
+  /* Add the incoming character to the buffer */
 
-  return OK;
+  iob->io_data[iob->io_len] = ch;
+  iob->io_len++;
+
+  /* Increment the total number of bytes buffered. */
+
+  stream->public.nput++;
+
+  /* Is the buffer full? */
+
+  if (iob->io_len >= CONFIG_IOB_BUFSIZE)
+    {
+      /* Yes.. then flush the buffer */
+
+      syslogstream_flush(stream);
+    }
 }
+#endif
 
 /****************************************************************************
- * Name: syslog_stream_flush
- *
- * Description:
- *   Flush any buffer data in the file system to media.
- *
- * Input Parameters:
- *   channel    - Handle to syslog channel to be used.
- *
- * Returned Value:
- *   Zero (OK) on success; a negated errno value is returned on any failure.
- *
+ * Name: syslogstream_putc
  ****************************************************************************/
 
-static int syslog_stream_flush(FAR syslog_channel_t *channel)
+static void syslogstream_putc(FAR struct lib_outstream_s *this, int ch)
 {
-  FAR struct syslog_stream_s *chan =
-    (FAR struct syslog_stream_s *)channel;
-  irqstate_t flags;
+  /* Discard carriage returns */
 
-  flags = enter_critical_section();
-  lib_stream_flush(chan->stream);
-  leave_critical_section(flags);
-  return OK;
+  if (ch != '\r')
+    {
+#ifdef CONFIG_SYSLOG_BUFFER
+      FAR struct lib_syslogstream_s *stream =
+        (FAR struct lib_syslogstream_s *)this;
+
+      DEBUGASSERT(stream != NULL);
+
+      /* Do we have an IO buffer? */
+
+      if (stream->iob != NULL)
+        {
+          /* Is this a linefeed? */
+
+          if (ch == '\n')
+            {
+              /* Yes... pre-pend carriage return */
+
+              syslogstream_addchar(stream, '\r');
+            }
+
+          /* Add the incoming character to the buffer */
+
+          syslogstream_addchar(stream, ch);
+        }
+      else
+#endif
+        {
+          int ret;
+
+          /* Try writing until the write was successful or until an
+           * irrecoverable error occurs.
+           */
+
+          do
+            {
+              /* Write the character to the supported logging device.  On
+               * failure, syslog_putc returns a negated errno value.
+               */
+
+              ret = syslog_putc(ch);
+              if (ret >= 0)
+                {
+                  this->nput++;
+                  return;
+                }
+
+              /* The special return value -EINTR means that syslog_putc() was
+               * awakened by a signal.  This is not a real error and must be
+               * ignored in this context.
+               */
+            }
+          while (ret == -EINTR);
+        }
+    }
 }
 
 /****************************************************************************
@@ -169,77 +193,84 @@ static int syslog_stream_flush(FAR syslog_channel_t *channel)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: syslog_stream_uninit
+ * Name: syslogstream_create
  *
  * Description:
- *   Disable the channel in preparation to use a different
- *   SYSLOG device.
+ *   Initializes a stream for use with the configured syslog interface.
+ *   Only accessible from with the OS SYSLOG logic.
  *
  * Input Parameters:
- *   channel    - Handle to syslog channel to be used.
+ *   stream - User allocated, uninitialized instance of struct
+ *            lib_syslogstream_s to be initialized.
  *
  * Returned Value:
- *   Zero (OK) is returned on success; a negated errno value is returned on
- *   any failure.
- *
- * Assumptions:
- *   The caller has already switched the SYSLOG source to some safe channel
- *   (the default channel).
+ *   None (User allocated instance initialized).
  *
  ****************************************************************************/
 
-void syslog_stream_uninit(FAR syslog_channel_t *channel)
+void syslogstream_create(FAR struct lib_syslogstream_s *stream)
 {
-  FAR struct syslog_stream_s *chan =
-    (FAR struct syslog_stream_s *)channel;
-
-  /* Attempt to flush any buffered data. */
-
-  syslog_stream_flush(channel);
-
-  /* Free the channel structure */
-
-  kmm_free(chan);
-}
-
-/****************************************************************************
- * Name: syslog_stream_channel
- *
- * Description:
- *   Initialize to use the device stream as the SYSLOG sink.
- *
- *   On power up, the SYSLOG facility is non-existent or limited to very
- *   low-level output.  This function may be called later in the
- *   initialization sequence after full driver support has been initialized.
- *   (via syslog_initialize())  It installs the configured SYSLOG drivers
- *   and enables full SYSLOGing capability.
- *
- * Input Parameters:
- *   stream - The stream device to be used.
- *
- * Returned Value:
- *   Returns a newly created SYSLOG channel, or NULL in case of any failure.
- *
- ****************************************************************************/
-
-FAR syslog_channel_t *
-syslog_stream_channel(FAR struct lib_outstream_s *stream)
-{
-  FAR struct syslog_stream_s *chan;
+#ifdef CONFIG_SYSLOG_BUFFER
+  FAR struct iob_s *iob;
+#endif
 
   DEBUGASSERT(stream != NULL);
 
-  chan = (FAR struct syslog_stream_s *)
-    kmm_zalloc(sizeof(struct syslog_stream_s));
+  /* Initialize the common fields */
 
-  if (chan == NULL)
+  stream->public.put   = syslogstream_putc;
+  stream->public.flush = lib_noflush;
+  stream->public.nput  = 0;
+
+#ifdef CONFIG_SYSLOG_BUFFER
+  /* Allocate an IOB */
+
+  iob                  = iob_tryalloc(true, IOBUSER_SYSLOG);
+  stream->iob          = iob;
+
+  if (iob != NULL)
     {
-      return NULL;
-    }
+      /* Initialize the IOB */
 
-  chan->stream = stream;
-  chan->channel.sc_ops = &g_syslog_stream_ops;
-  return (FAR syslog_channel_t *)chan;
+      iob->io_len      = 0;
+      iob->io_offset   = 0;
+      iob->io_pktlen   = 0;
+    }
+#endif
 }
 
-#endif /* CONFIG_SYSLOG_STREAM */
+/****************************************************************************
+ * Name: syslogstream_destroy
+ *
+ * Description:
+ *   Free resources held by the syslog stream.
+ *
+ * Input Parameters:
+ *   stream - User allocated, uninitialized instance of struct
+ *            lib_syslogstream_s to be initialized.
+ *
+ * Returned Value:
+ *   None (Resources freed).
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SYSLOG_BUFFER
+void syslogstream_destroy(FAR struct lib_syslogstream_s *stream)
+{
+  DEBUGASSERT(stream != NULL);
+
+  /* Verify that there is an IOB attached (there should be) */
+
+  if (stream->iob != NULL)
+    {
+      /* Flush the output buffered in the IOB */
+
+      syslogstream_flush(stream);
+
+      /* Free the IOB */
+
+      iob_free(stream->iob, IOBUSER_SYSLOG);
+      stream->iob = NULL;
+    }
+}
+#endif

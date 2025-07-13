@@ -1,8 +1,6 @@
 /****************************************************************************
  * drivers/analog/ads7828.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -30,6 +28,7 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <semaphore.h>
 #include <errno.h>
 #include <assert.h>
 #include <debug.h>
@@ -96,7 +95,7 @@ static int ads7828_readchannel(FAR struct ads7828_dev_s *priv,
 /* ADC methods */
 
 static int  ads7828_bind(FAR struct adc_dev_s *dev,
-                         FAR const struct adc_callback_s *callback);
+                     FAR const struct adc_callback_s *callback);
 static void ads7828_reset(FAR struct adc_dev_s *dev);
 static int  ads7828_setup(FAR struct adc_dev_s *dev);
 static void ads7828_shutdown(FAR struct adc_dev_s *dev);
@@ -110,20 +109,20 @@ static int  ads7828_ioctl(FAR struct adc_dev_s *dev, int cmd,
 
 static const struct adc_ops_s g_adcops =
 {
-  ads7828_bind,      /* ao_bind */
-  ads7828_reset,     /* ao_reset */
-  ads7828_setup,     /* ao_setup */
-  ads7828_shutdown,  /* ao_shutdown */
-  ads7828_rxint,     /* ao_rxint */
-  ads7828_ioctl      /* ao_read */
+  .ao_bind     = ads7828_bind,      /* ao_bind */
+  .ao_reset    = ads7828_reset,     /* ao_reset */
+  .ao_setup    = ads7828_setup,     /* ao_setup */
+  .ao_shutdown = ads7828_shutdown,  /* ao_shutdown */
+  .ao_rxint    = ads7828_rxint,     /* ao_rxint */
+  .ao_ioctl    = ads7828_ioctl      /* ao_read */
 };
 
 static struct ads7828_dev_s g_adcpriv;
 
 static struct adc_dev_s g_adcdev =
 {
-  &g_adcops,    /* ad_ops */
-  &g_adcpriv    /* ad_priv */
+  .ad_ops  = &g_adcops,
+  .ad_priv = &g_adcpriv,
 };
 
 /****************************************************************************
@@ -238,7 +237,7 @@ static int ads7828_readchannel(FAR struct ads7828_dev_s *priv,
       i2cmsg[1].flags = I2C_M_READ;
 
       uint16_t buf;
-      i2cmsg[1].buffer = (FAR uint8_t *)(&buf);
+      i2cmsg[1].buffer = (uint8_t *)(&buf);
       i2cmsg[1].length = sizeof(buf);
       ret = I2C_TRANSFER(priv->i2c, i2cmsg, 2);
       if (ret < 0)
@@ -282,10 +281,11 @@ static int ads7828_bind(FAR struct adc_dev_s *dev,
 
 static void ads7828_reset(FAR struct adc_dev_s *dev)
 {
-  FAR struct ads7828_dev_s *priv = (FAR struct ads7828_dev_s *)dev->ad_priv;
+    FAR struct ads7828_dev_s *priv =
+                                (FAR struct ads7828_dev_s *)dev->ad_priv;
 
-  priv->cmdbyte = 0;
-  priv->chanstrobed = 0xffu;
+    priv->cmdbyte = 0;
+    priv->chanstrobed = 0xffu;
 }
 
 /****************************************************************************

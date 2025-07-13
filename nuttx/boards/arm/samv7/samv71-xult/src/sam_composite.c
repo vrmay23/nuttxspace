@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/samv7/samv71-xult/src/sam_composite.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <nuttx/usb/cdcacm.h>
 #include <nuttx/usb/usbmsc.h>
 #include <nuttx/usb/composite.h>
-#include <assert.h>
 #include <debug.h>
 
 #include "samv71-xult.h"
@@ -43,7 +55,7 @@
  ****************************************************************************/
 
 #ifdef CONFIG_USBMSC_COMPOSITE
-static void *g_mschandle;
+static FAR void *g_mschandle;
 #endif
 
 /****************************************************************************
@@ -75,8 +87,8 @@ static void *g_mschandle;
 
 #ifdef CONFIG_USBMSC_COMPOSITE
 static int board_mscclassobject(int minor,
-                                struct usbdev_devinfo_s *devinfo,
-                                struct usbdevclass_driver_s **classdev)
+                                FAR struct usbdev_devinfo_s *devinfo,
+                                FAR struct usbdevclass_driver_s **classdev)
 {
   int ret;
 
@@ -125,12 +137,12 @@ static int board_mscclassobject(int minor,
  * Name: board_mscuninitialize
  *
  * Description:
- *   Un-initialize the USB storage class driver. This is just an application
+ *   Un-initialize the USB storage class driver.  This is just an application-
  *   specific wrapper aboutn usbmsc_unitialize() that is called form the
  *   composite device logic.
  *
  * Input Parameters:
- *   classdev - The class driver instance previously given to the composite
+ *   classdev - The class driver instrance previously give to the composite
  *     driver by board_mscclassobject().
  *
  * Returned Value:
@@ -139,7 +151,7 @@ static int board_mscclassobject(int minor,
  ****************************************************************************/
 
 #ifdef CONFIG_USBMSC_COMPOSITE
-static void board_mscuninitialize(struct usbdevclass_driver_s *classdev)
+static void board_mscuninitialize(FAR struct usbdevclass_driver_s *classdev)
 {
   DEBUGASSERT(g_mschandle != NULL);
   usbmsc_uninitialize(g_mschandle);
@@ -182,7 +194,7 @@ int board_composite_initialize(int port)
  *
  ****************************************************************************/
 
-void *board_composite_connect(int port, int configid)
+FAR void *board_composite_connect(int port, int configid)
 {
   /* Here we are composing the configuration of the usb composite device.
    *
@@ -265,7 +277,7 @@ void *board_composite_connect(int port, int configid)
       ifnobase += dev[1].devinfo.ninterfaces;
       strbase  += dev[1].devinfo.nstrings;
 
-      return composite_initialize(composite_getdevdescs(), dev, 2);
+      return composite_initialize(2, dev);
 #else
       return NULL;
 #endif
@@ -301,9 +313,7 @@ void *board_composite_connect(int port, int configid)
 
       for (ia = 0; ia < 3; ia++)
         {
-          /* Ask the cdcacm driver to fill in the constants we didn't know
-           * here
-           */
+          /* Ask the cdcacm driver to fill in the constants we didn't know here */
 
           cdcacm_get_composite_devdesc(&dev[ia]);
 
@@ -334,7 +344,7 @@ void *board_composite_connect(int port, int configid)
           strbase  += dev[ia].devinfo.nstrings;
         }
 
-      return composite_initialize(composite_getdevdescs(), dev, 3);
+      return composite_initialize(3, dev);
     }
   else
     {

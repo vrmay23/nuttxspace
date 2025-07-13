@@ -1,22 +1,40 @@
 /****************************************************************************
- * apps/netutils/discover/discover.c
+ * netutils/discover/discover.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012 Max Holtzberg. All rights reserved.
+ *   Copyright (C) 2008, 2011-2012 Gregory Nutt. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Authors: Max Holtzberg <mh@uvc.de>
+ *            Gregory Nutt <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * This code is derived from the netutils/dhcpd code.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -45,7 +63,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Configuration ************************************************************/
 
 #ifndef CONFIG_DISCOVER_STACK_SIZE
@@ -73,7 +90,6 @@
 #endif
 
 /* Internal Definitions *****************************************************/
-
 /* Discover request packet format:
  * Byte Description
  * 0    Protocol identifier (0x99)
@@ -138,7 +154,7 @@ static inline void discover_initresponse(void);
  * Private Functions
  ****************************************************************************/
 
-static inline void discover_initresponse(void)
+static inline void discover_initresponse()
 {
   int chk = 0;
   int i;
@@ -146,33 +162,32 @@ static inline void discover_initresponse(void)
   g_state.response[0] = DISCOVER_PROTO_ID;
   g_state.response[1] = DISCOVER_RESPONSE;
 
-  strlcpy((char *)&g_state.response[2], g_state.info.description,
-          DISCOVER_RESPONSE_SIZE - 2);
+  strncpy((char*) &g_state.response[2], g_state.info.description,
+          DISCOVER_RESPONSE_SIZE-3);
 
-  for (i = 0; i < DISCOVER_RESPONSE_SIZE - 1; i++)
+  for (i = 0; i < DISCOVER_RESPONSE_SIZE-1; i++)
     {
       chk -= g_state.response[i];
     }
 
   /* Append check sum */
 
-  g_state.response[DISCOVER_RESPONSE_SIZE - 1] = chk & 0xff;
+  g_state.response[DISCOVER_RESPONSE_SIZE-1] = chk & 0xff;
 }
 
 static int discover_daemon(int argc, char *argv[])
 {
   int sockfd = -1;
   int nbytes;
-  socklen_t addrlen = sizeof(struct sockaddr_in);
+  int addrlen = sizeof(struct sockaddr_in);
   struct sockaddr_in srcaddr;
 
   /* memset(&g_state, 0, sizeof(struct discover_state_s)); */
-
   discover_initresponse();
 
   ninfo("Started\n");
 
-  for (; ; )
+  for (;;)
     {
       /* Create a socket to listen for requests from DHCP clients */
 
@@ -189,7 +204,8 @@ static int discover_daemon(int argc, char *argv[])
       /* Read the next packet */
 
       nbytes = recvfrom(sockfd, &g_state.request, sizeof(g_state.request), 0,
-                        (struct sockaddr *)&srcaddr, &addrlen);
+                        (struct sockaddr*) &srcaddr,
+                        (socklen_t *) &addrlen);
       if (nbytes < 0)
         {
           /* On errors (other EINTR), close the socket and try again */
@@ -200,7 +216,6 @@ static int discover_daemon(int argc, char *argv[])
               close(sockfd);
               sockfd = -1;
             }
-
           continue;
         }
 
@@ -209,8 +224,7 @@ static int discover_daemon(int argc, char *argv[])
           continue;
         }
 
-      ninfo("Received discover from %08" PRIx32 "\n",
-            srcaddr.sin_addr.s_addr);
+      ninfo("Received discover from %08lx'\n", srcaddr.sin_addr.s_addr);
 
       discover_respond(&srcaddr.sin_addr.s_addr);
     }
@@ -237,7 +251,7 @@ static inline int discover_parse(request_t packet)
 
   if (packet[2] == 0xff || packet[2] == g_state.info.devclass)
     {
-      for (i = 0; i < DISCOVER_REQUEST_SIZE - 1; i++)
+      for (i = 0; i < DISCOVER_REQUEST_SIZE-1; i++)
         chk -= packet[i];
 
       if ((chk & 0xff) != packet[3])
@@ -250,7 +264,6 @@ static inline int discover_parse(request_t packet)
           return OK;
         }
     }
-
   return ERROR;
 }
 
@@ -285,7 +298,7 @@ static inline int discover_respond(in_addr_t *ipaddr)
   return ret;
 }
 
-static inline int discover_socket(void)
+static inline int discover_socket()
 {
   int sockfd;
 #if defined(HAVE_SO_REUSEADDR) || defined(HAVE_SO_BROADCAST)
@@ -306,8 +319,7 @@ static inline int discover_socket(void)
 
 #ifdef HAVE_SO_REUSEADDR
   optval = 1;
-  ret = setsockopt(sockfd, SOL_SOCKET,
-                   SO_REUSEADDR, &optval, sizeof(int));
+  ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int));
   if (ret < 0)
     {
       nerr("ERROR: setsockopt SO_REUSEADDR failed: %d\n", errno);
@@ -318,8 +330,7 @@ static inline int discover_socket(void)
 
 #ifdef HAVE_SO_BROADCAST
   optval = 1;
-  ret = setsockopt(sockfd, SOL_SOCKET,
-                   SO_BROADCAST, &optval, sizeof(int));
+  ret = setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, (void*)&optval, sizeof(int));
   if (ret < 0)
     {
       nerr("ERROR: setsockopt SO_BROADCAST failed: %d\n", errno);
@@ -331,7 +342,7 @@ static inline int discover_socket(void)
   return sockfd;
 }
 
-static inline int discover_openlistener(void)
+static inline int discover_openlistener()
 {
   struct sockaddr_in addr;
   struct ifreq req;
@@ -349,7 +360,7 @@ static inline int discover_openlistener(void)
 
   /* Get the IP address of the selected device */
 
-  strlcpy(req.ifr_name, CONFIG_DISCOVER_INTERFACE, IFNAMSIZ);
+  strncpy(req.ifr_name, CONFIG_DISCOVER_INTERFACE, IFNAMSIZ);
   ret = ioctl(sockfd, SIOCGIFADDR, (unsigned long)&req);
   if (ret < 0)
     {
@@ -357,9 +368,8 @@ static inline int discover_openlistener(void)
       close(sockfd);
       return ERROR;
     }
-
-  g_state.serverip = ((struct sockaddr_in *)&req.ifr_addr)->sin_addr.s_addr;
-  ninfo("serverip: %08" PRIx32 "\n", ntohl(g_state.serverip));
+  g_state.serverip = ((struct sockaddr_in*)&req.ifr_addr)->sin_addr.s_addr;
+  ninfo("serverip: %08lx\n", ntohl(g_state.serverip));
 
   /* Bind the socket to a local port. We have to bind to INADDRY_ANY to
    * receive broadcast messages.
@@ -371,12 +381,12 @@ static inline int discover_openlistener(void)
 
   ret = bind(sockfd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in));
   if (ret < 0)
-    {
-      nerr("ERROR: bind failed, port=%d addr=%08lx: %d\n",
-           addr.sin_port, (long)addr.sin_addr.s_addr, errno);
-      close(sockfd);
-      return ERROR;
-    }
+   {
+     nerr("ERROR: bind failed, port=%d addr=%08lx: %d\n",
+          addr.sin_port, (long)addr.sin_addr.s_addr, errno);
+     close(sockfd);
+     return ERROR;
+   }
 
   return sockfd;
 }
@@ -396,7 +406,7 @@ static inline int discover_openresponder(void)
       return ERROR;
     }
 
-  /* Bind the socket to a local port. */
+  /* Bind the socket to a local port.*/
 
   addr.sin_family      = AF_INET;
   addr.sin_port        = 0;
@@ -404,12 +414,12 @@ static inline int discover_openresponder(void)
 
   ret = bind(sockfd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in));
   if (ret < 0)
-    {
-      nerr("ERROR: bind failed, port=%d addr=%08lx: %d\n",
-           addr.sin_port, (long)addr.sin_addr.s_addr, errno);
-      close(sockfd);
-      return ERROR;
-    }
+   {
+     nerr("ERROR: bind failed, port=%d addr=%08lx: %d\n",
+          addr.sin_port, (long)addr.sin_addr.s_addr, errno);
+     close(sockfd);
+     return ERROR;
+   }
 
   return sockfd;
 }

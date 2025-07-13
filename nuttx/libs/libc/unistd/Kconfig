@@ -12,18 +12,18 @@ config LIBC_EXECFUNCS
 	---help---
 		Enable support for the exec[l|v] family of functions that can be
 		used to start other programs, terminating the current program and
-		the posix_spawn() family of functions that can be used to start other
+		the posix_spawn() familty of functions that can be used start other
 		programs without terminating the current program.  The typical
 		usage of the exec[l|v] functions is (1) first call vfork() to create
 		a new thread, then (2) call exec[l|v] to replace the new thread with
 		a program from the file system.
 
 		NOTE 1: This two step process start is completely unnecessary in
-		NuttX and is provided only for compatibility with Unix systems.  These
+		NuttX and is provided only for compatibily with Unix systems.  These
 		functions are essentially just wrapper functions that (1) call the
 		non-standard binfmt function 'exec', and then (2) exit(0).  Since
 		the new thread will be terminated by the exec[l|v] call, it really
-		served no purpose other than to support Unix compatibility.
+		served no purpose other than to suport Unix compatility.
 
 		The posix_spawn() functions do not have this inefficiency.
 
@@ -94,48 +94,29 @@ config EXECFUNCS_SYSTEM_SYMTAB
 endif # EXECFUNCS_HAVE_SYMTAB
 endif # LIBC_EXECFUNCS
 
-config POSIX_SPAWN_DEFAULT_STACKSIZE
+config POSIX_SPAWN_PROXY_STACKSIZE
+	int "Spawn Stack Size"
+	default 1024
+	---help---
+		If posix_spawn[p]() and task_spawn() use I/O redirection options,
+		they will require an intermediary/proxy task to muck with the file
+		descriptors.  This configuration item specifies the stack size
+		used for the proxy. Default: 1024 bytes.
+
+config TASK_SPAWN_DEFAULT_STACKSIZE
 	int "Default task_spawn Stack Size"
 	default DEFAULT_TASK_STACKSIZE
+	depends on !ARCH_ADDRENV
 	---help---
 		The actual size to use for the child task's stack can be set with
-		posix_spawnattr_setstacksize().  This value specifies the default
-		stack size to use if posix_spawnattr_setstacksize() is not used.
+		task_spawnattr_setstacksize().  This value specifies the default
+		stack size to use if task_spawnattr_setstacksize() is not used.
 		Default: 2048.
 
 endmenu # Program Execution Options
 
-config LIBC_HOSTNAME
+config LIB_HOSTNAME
 	string "Host name for this device"
 	default ""
 	---help---
 		A unique name to identify device on the network
-
-config LIBC_OPEN_MAX
-	int "OPEN_MAX for this device"
-	default 256
-	---help---
-		The maximum number of files that a process can have open
-		at any time.  Must not be less than _POSIX_OPEN_MAX.
-
-config NAME_MAX
-	int "Maximum size of a file name"
-	default 32
-	---help---
-		The maximum size of a file name.
-
-config PATH_MAX
-	int "Maximum size of path name"
-	default 256
-	---help---
-		The maximum size of path name.
-
-config LINE_MAX
-	int "Maximum size of line"
-	default 64 if DEFAULT_SMALL
-	default 80 if !DEFAULT_SMALL
-	---help---
-		The maximum size of line. Unless otherwise noted, the maximum length, in bytes,
-		of a utility's input line (either standard input or another file), when the
-		utility is described as processing text files. The length includes room for
-		the trailing newline.

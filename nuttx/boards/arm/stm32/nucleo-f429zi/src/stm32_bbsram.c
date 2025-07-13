@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/stm32/nucleo-f429zi/src/stm32_bbsram.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * boards/arm/stm32f4/nucleo-f429zi/src/stm32_bbsram.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -33,21 +31,18 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <syslog.h>
 
-#include <sys/param.h>
-
 #include <nuttx/fs/fs.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
 #include "stm32_bbsram.h"
 
 #include "nucleo-144.h"
 
-#ifdef CONFIG_STM32_BBSRAM
+#ifdef CONFIG_STM32F4_BBSRAM
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -76,7 +71,7 @@
 #define BBSRAM_USED            ((4*BBSRAM_HEADER_SIZE)+ \
                                 (BBSRAM_SIZE_FN0+BBSRAM_SIZE_FN1+ \
                                  BBSRAM_SIZE_FN2))
-#define BBSRAM_REAMINING       (STM32_BBSRAM_SIZE-BBSRAM_USED)
+#define BBSRAM_REAMINING       (STM32F4_BBSRAM_SIZE-BBSRAM_USED)
 #if CONFIG_ARCH_INTERRUPTSTACK <= 3
 #  define BBSRAM_NUMBER_STACKS 1
 #else
@@ -106,13 +101,15 @@
   0 \
 }
 
+#define ARRAYSIZE(a) (sizeof((a))/sizeof(a[0]))
+
 /* For Assert keep this much of the file name */
 
 #define MAX_FILE_PATH_LENGTH 40
 
 #define HEADER_TIME_FMT      "%Y-%m-%d-%H:%M:%S"
 #define HEADER_TIME_FMT_NUM  (2+ 0+ 0+ 0+ 0+ 0)
-#define HEADER_TIME_FMT_LEN  (((nitems(HEADER_TIME_FMT)-1) + \
+#define HEADER_TIME_FMT_LEN  (((ARRAYSIZE(HEADER_TIME_FMT)-1) + \
                                 HEADER_TIME_FMT_NUM))
 
 /****************************************************************************
@@ -138,7 +135,7 @@ typedef struct
 #if CONFIG_ARCH_INTERRUPTSTACK > 3
   _stack_t interrupt;
 #endif
-} stacks_t;
+} stack_t;
 
 /* Not Used for reference only */
 
@@ -234,16 +231,18 @@ typedef enum
 
 typedef struct
 {
-  fault_flags_t flags;                            /* What is in the dump */
-  uintptr_t     current_regs;                     /* Used to validate the dump */
-  int           lineno;                           /* __LINE__ to up_assert */
-  pid_t         pid;                              /* Process ID */
-  uint32_t      regs[XCPTCONTEXT_REGS];           /* Interrupt register save area */
-  stack_t       stacks;                           /* Stack info */
-  char          name[CONFIG_TASK_NAME_SIZE + 1];  /* Task name (with NULL
-                                                   * terminator) */
-  char          filename[MAX_FILE_PATH_LENGTH];   /* the Last of chars in
-                                                   * __FILE__ to up_assert */
+  fault_flags_t flags;                  /* What is in the dump */
+  uintptr_t     current_regs;           /* Used to validate the dump */
+  int           lineno;                 /* __LINE__ to up_assert */
+  int           pid;                    /* Process ID */
+  uint32_t      regs[XCPTCONTEXT_REGS]; /* Interrupt register save area */
+  stack_t       stacks;                 /* Stack info */
+#if CONFIG_TASK_NAME_SIZE > 0
+  char          name[CONFIG_TASK_NAME_SIZE + 1]; /* Task name (with NULL
+                                                  * terminator) */
+#endif
+  char          filename[MAX_FILE_PATH_LENGTH];  /* the Last of chars in
+                                                  * __FILE__ to up_assert */
 } info_t;
 
 typedef struct
@@ -265,7 +264,7 @@ typedef struct
  * Private Data
  ****************************************************************************/
 
-static uint8_t g_sdata[STM32_BBSRAM_SIZE];
+static uint8_t g_sdata[STM32F4_BBSRAM_SIZE];
 
 /****************************************************************************
  * Private Functions
@@ -277,7 +276,7 @@ static uint8_t g_sdata[STM32_BBSRAM_SIZE];
 
 static int hardfault_get_desc(struct bbsramd_s *desc)
 {
-  struct file filestruct;
+  FAR struct file filestruct;
   int ret;
 
   ret = file_open(&filestruct, HARDFAULT_PATH, O_RDONLY);
@@ -288,7 +287,7 @@ static int hardfault_get_desc(struct bbsramd_s *desc)
     }
   else
     {
-      ret = file_ioctl(&filestruct, STM32_BBSRAM_GETDESC_IOCTL,
+      ret = file_ioctl(&filestruct, STM32F4_BBSRAM_GETDESC_IOCTL,
                        (unsigned long)((uintptr_t)desc));
       file_close(&filestruct);
 
@@ -306,7 +305,7 @@ static int hardfault_get_desc(struct bbsramd_s *desc)
  * Name: copy_reverse
  ****************************************************************************/
 
-#if defined(CONFIG_STM32_SAVE_CRASHDUMP)
+#if defined(CONFIG_STM32F4_SAVE_CRASHDUMP)
 static void copy_reverse(stack_word_t *dest, stack_word_t *src, int size)
 {
   while (size--)
@@ -314,7 +313,7 @@ static void copy_reverse(stack_word_t *dest, stack_word_t *src, int size)
       *dest++ = *src--;
     }
 }
-#endif /* CONFIG_STM32_SAVE_CRASHDUMP */
+#endif /* CONFIG_STM32F4_SAVE_CRASHDUMP */
 
 /****************************************************************************
  * Public Functions
@@ -326,7 +325,7 @@ static void copy_reverse(stack_word_t *dest, stack_word_t *src, int size)
 
 int stm32_bbsram_int(void)
 {
-  int filesizes[CONFIG_STM32_BBSRAM_FILES + 1] = BSRAM_FILE_SIZES;
+  int filesizes[CONFIG_STM32F4_BBSRAM_FILES + 1] = BSRAM_FILE_SIZES;
   char buf[HEADER_TIME_FMT_LEN + 1];
   struct bbsramd_s desc;
   int rv;
@@ -338,7 +337,7 @@ int stm32_bbsram_int(void)
 
   stm32_bbsraminitialize(BBSRAM_PATH, filesizes);
 
-#if defined(CONFIG_STM32_SAVE_CRASHDUMP)
+#if defined(CONFIG_STM32F4_SAVE_CRASHDUMP)
   /* Panic Logging in Battery Backed Up Files
    * Do we have an hard fault in BBSRAM?
    */
@@ -362,14 +361,14 @@ int stm32_bbsram_int(void)
           syslog(LOG_INFO, "Fault Logged on %s - Valid\n", buf);
         }
 
-      rv = nx_unlink(HARDFAULT_PATH);
+      rv = unlink(HARDFAULT_PATH);
       if (rv < 0)
         {
           syslog(LOG_INFO, "stm32 bbsram: Failed to unlink Fault Log file"
                  "[%s] (%d)\n", HARDFAULT_PATH, rv);
         }
     }
-#endif /* CONFIG_STM32_SAVE_CRASHDUMP */
+#endif /* CONFIG_STM32F4_SAVE_CRASHDUMP */
 
   return rv;
 }
@@ -378,15 +377,17 @@ int stm32_bbsram_int(void)
  * Name: board_crashdump
  ****************************************************************************/
 
-#if defined(CONFIG_STM32_SAVE_CRASHDUMP)
-void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
-                     const char *filename, int lineno,
-                     const char *msg, void *regs)
+#if defined(CONFIG_STM32F4_SAVE_CRASHDUMP)
+void board_crashdump(uintptr_t currentsp, FAR void *tcb,
+                     FAR const uint8_t *filename, int lineno)
 {
   fullcontext_t *pdump = (fullcontext_t *)&g_sdata;
+  FAR struct tcb_s *rtcb;
   int rv;
 
   enter_critical_section();
+
+  rtcb = (FAR struct tcb_s *)tcb;
 
   /* Zero out everything */
 
@@ -406,7 +407,7 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
           offset = len - sizeof(pdump->info.filename);
         }
 
-      strlcpy(pdump->info.filename, (char *)&filename[offset],
+      strncpy(pdump->info.filename, (char *)&filename[offset],
               sizeof(pdump->info.filename));
     }
 
@@ -416,20 +417,27 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
    * fault.
    */
 
-  pdump->info.current_regs = (uintptr_t)running_regs();
+  pdump->info.current_regs = (uintptr_t) CURRENT_REGS;
 
   /* Save Context */
 
-  strlcpy(pdump->info.name, get_task_name(tcb), sizeof(pdump->info.name));
+#if CONFIG_TASK_NAME_SIZE > 0
+  strncpy(pdump->info.name, rtcb->name, CONFIG_TASK_NAME_SIZE);
+#endif
 
-  pdump->info.pid = tcb->pid;
+  pdump->info.pid = rtcb->pid;
 
-  if (up_interrupt_context())
+  /* If  current_regs is not NULL then we are in an interrupt context
+   * and the user context is in current_regs else we are running in
+   * the users context
+   */
+
+  if (CURRENT_REGS)
     {
-      pdump->info.stacks.interrupt.sp = sp;
-      pdump->info.flags |= (REGS_PRESENT | USERSTACK_PRESENT |
+      pdump->info.stacks.interrupt.sp = currentsp;
+      pdump->info.flags |= (REGS_PRESENT | USERSTACK_PRESENT | \
                             INTSTACK_PRESENT);
-      memcpy(pdump->info.regs, running_regs(),
+      memcpy(pdump->info.regs, (void *)CURRENT_REGS,
              sizeof(pdump->info.regs));
       pdump->info.stacks.user.sp = pdump->info.regs[REG_R13];
     }
@@ -438,18 +446,25 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
       /* users context */
 
       pdump->info.flags |= USERSTACK_PRESENT;
-      pdump->info.stacks.user.sp = sp;
+      pdump->info.stacks.user.sp = currentsp;
     }
 
-  pdump->info.stacks.user.top = (uint32_t)tcb->stack_base_ptr +
-                                          tcb->adj_stack_size;
-  pdump->info.stacks.user.size = (uint32_t)tcb->adj_stack_size;
+  if (pdump->info.pid == 0)
+    {
+      pdump->info.stacks.user.top = g_idle_topstack - 4;
+      pdump->info.stacks.user.size = CONFIG_IDLETHREAD_STACKSIZE;
+    }
+  else
+    {
+      pdump->info.stacks.user.top = (uint32_t) rtcb->adj_stack_ptr;
+      pdump->info.stacks.user.size = (uint32_t) rtcb->adj_stack_size;
+    }
 
 #if CONFIG_ARCH_INTERRUPTSTACK > 3
   /* Get the limits on the interrupt stack memory */
 
-  pdump->info.stacks.interrupt.top = (uint32_t)g_intstacktop;
-  pdump->info.stacks.interrupt.size = (CONFIG_ARCH_INTERRUPTSTACK & ~3);
+  pdump->info.stacks.interrupt.top = (uint32_t)&g_intstackbase;
+  pdump->info.stacks.interrupt.size  = (CONFIG_ARCH_INTERRUPTSTACK & ~3);
 
   /* If In interrupt Context save the interrupt stack data centered
    * about the interrupt stack pointer
@@ -458,8 +473,8 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
   if ((pdump->info.flags & INTSTACK_PRESENT) != 0)
     {
       stack_word_t *ps = (stack_word_t *) pdump->info.stacks.interrupt.sp;
-      copy_reverse(pdump->istack, &ps[nitems(pdump->istack) / 2],
-                   nitems(pdump->istack));
+      copy_reverse(pdump->istack, &ps[ARRAYSIZE(pdump->istack) / 2],
+                   ARRAYSIZE(pdump->istack));
     }
 
   /* Is it Invalid? */
@@ -480,8 +495,8 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
   if ((pdump->info.flags & USERSTACK_PRESENT) != 0)
     {
       stack_word_t *ps = (stack_word_t *) pdump->info.stacks.user.sp;
-      copy_reverse(pdump->ustack, &ps[nitems(pdump->ustack) / 2],
-                   nitems(pdump->ustack));
+      copy_reverse(pdump->ustack, &ps[ARRAYSIZE(pdump->ustack) / 2],
+                   ARRAYSIZE(pdump->ustack));
     }
 
   /* Is it Invalid? */
@@ -504,16 +519,16 @@ void board_crashdump(uintptr_t sp, struct tcb_s *tcb,
 
       while (*dead)
         {
-          arm_lowputc(*dead++);
+          up_lowputc(*dead++);
         }
     }
   else if (rv == -ENOSPC)
     {
       /* hard fault again */
 
-      arm_lowputc('!');
+      up_lowputc('!');
     }
 }
-#endif /* CONFIG_STM32_SAVE_CRASHDUMP */
+#endif /* CONFIG_STM32F4_SAVE_CRASHDUMP */
 
 #endif /* CONFIG_STM32_BBSRAM */

@@ -1,22 +1,42 @@
 /****************************************************************************
  * boards/arm/sama5/sama5d3x-ek/src/sam_sdram.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013-2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Most of this file derives from Atmel sample code for the SAMA5D3x-E
+ * board.  That sample code has licensing that is compatible with the NuttX
+ * modified BSD license:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright (c) 2012, Atmel Corporation
+ *   All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor Atmel nor the names of its contributors may
+ *    be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +48,8 @@
 
 #include <debug.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "sam_periphclks.h"
 #include "hardware/sam_memorymap.h"
 #include "hardware/sam_pmc.h"
@@ -51,14 +72,14 @@
 
 /* SDRAM differences */
 
-#if defined(CONFIG_SAMA5D3XEK_MT47H128M16RT)
+#if defined(CONFIG_SAMA5D3xEK_MT47H128M16RT)
 
   /* Used for SDRAM command handshaking */
 
 #  define DDR2_BA0    (1 << 26)
 #  define DDR2_BA1    (1 << 27)
 
-#elif defined(CONFIG_SAMA5D3XEK_MT47H64M16HR)
+#elif defined(CONFIG_SAMA5D3xEK_MT47H64M16HR)
 
   /* Used for SDRAM command handshaking */
 
@@ -90,13 +111,13 @@
 #define LOOP_GUARD 100
 #  define CYCLES_TO_COUNT(cycles) (((cycles) / 6) + LOOP_GUARD)
 
-#if defined(CONFIG_SAMA5D3XEK_384MHZ)
+#if defined(CONFIG_SAMA5D3xEK_384MHZ)
 #  define NSEC_TO_COUNT(nsec)     ((((nsec) * 1000) / 15625) + LOOP_GUARD)
 #  define USEC_TO_COUNT(usec)     ((((usec) * 1000000) / 15625) + LOOP_GUARD)
-#elif defined(CONFIG_SAMA5D3XEK_528MHZ)
+#elif defined(CONFIG_SAMA5D3xEK_528MHZ)
 #  define NSEC_TO_COUNT(nsec)     ((((nsec) * 1000) / 11364) + LOOP_GUARD)
 #  define USEC_TO_COUNT(usec)     ((((usec) * 1000000) / 11364) + LOOP_GUARD)
-#else /* #elif defined(CONFIG_SAMA5D3XEK_396MHZ) */
+#else /* #elif defined(CONFIG_SAMA5D3xEK_396MHZ) */
 #  define NSEC_TO_COUNT(nsec)     ((((nsec) * 1000) / 15152) + LOOP_GUARD)
 #  define USEC_TO_COUNT(usec)     ((((usec) * 1000000) / 15152) + LOOP_GUARD)
 #endif
@@ -231,7 +252,7 @@ void sam_sdram_config(void)
    * Register
    */
 
-#if defined(CONFIG_SAMA5D3XEK_MT47H128M16RT)
+#if defined(CONFIG_SAMA5D3xEK_MT47H128M16RT)
 
   /* For MT47H128M16RT
    *
@@ -257,9 +278,9 @@ void sam_sdram_config(void)
            MPDDRC_CR_OCD_EXIT | /* Off-chip Driver */
            MPDDRC_CR_8BANKS |   /* Number of Banks */
            MPDDRC_CR_NDQS |     /* Not DQS */
-           MPDDRC_CR_UNAL;      /* support Unaligned Access */
+           MPDDRC_CR_UNAL;      /* upport Unaligned Access */
 
-#elif defined(CONFIG_SAMA5D3XEK_MT47H64M16HR)
+#elif defined(CONFIG_SAMA5D3xEK_MT47H64M16HR)
   /* For MT47H64M16HR
    *
    *   NC      = 10 DDR column bits
@@ -284,7 +305,7 @@ void sam_sdram_config(void)
            MPDDRC_CR_OCD_EXIT | /* Off-chip Driver */
            MPDDRC_CR_8BANKS |   /* Number of Banks */
            MPDDRC_CR_NDQS |     /* Not DQS */
-           MPDDRC_CR_UNAL;      /* support Unaligned Access */
+           MPDDRC_CR_UNAL;      /* upport Unaligned Access */
 
 #else
 #  error Unknown SDRAM type

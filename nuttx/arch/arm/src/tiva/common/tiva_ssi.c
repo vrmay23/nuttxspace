@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/arm/src/tiva/common/tiva_ssi.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,22 +25,21 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 
 #include <nuttx/irq.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 #include "tiva_enablepwr.h"
 #include "tiva_enableclks.h"
@@ -158,7 +155,7 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
 struct tiva_ssidev_s
@@ -204,7 +201,7 @@ struct tiva_ssidev_s
    * reduce the overhead of constant SPI re-configuration.
    */
 
-  mutex_t  lock;                /* For exclusive access to the SSI bus */
+  sem_t    exclsem;             /* For exclusive access to the SSI bus */
   uint32_t frequency;           /* Current desired SCLK frequency */
   uint32_t actual;              /* Current actual SCLK frequency */
   uint8_t  mode;                /* Current mode 0,1,2,3 */
@@ -225,6 +222,11 @@ static inline void ssi_putreg(struct tiva_ssidev_s *priv,
 
 static uint32_t ssi_disable(struct tiva_ssidev_s *priv);
 static void ssi_enable(struct tiva_ssidev_s *priv, uint32_t enable);
+
+#ifndef CONFIG_SSI_POLLWAIT
+static int ssi_semtake(sem_t *sem);
+#define ssi_semgive(s) nxsem_post(s);
+#endif
 
 /* SSI data transfer */
 
@@ -249,29 +251,29 @@ static int  ssi_transfer(struct tiva_ssidev_s *priv, const void *txbuffer,
 
 #ifndef CONFIG_SSI_POLLWAIT
 static inline struct tiva_ssidev_s *ssi_mapirq(int irq);
-static int  ssi_interrupt(int irq, void *context, void *arg);
+static int  ssi_interrupt(int irq, void *context, FAR void *arg);
 #endif
 
 /* SPI methods */
 
-static int  ssi_lock(struct spi_dev_s *dev, bool lock);
+static int  ssi_lock(FAR struct spi_dev_s *dev, bool lock);
 static uint32_t ssi_setfrequencyinternal(struct tiva_ssidev_s *priv,
               uint32_t frequency);
-static uint32_t ssi_setfrequency(struct spi_dev_s *dev,
+static uint32_t ssi_setfrequency(FAR struct spi_dev_s *dev,
               uint32_t frequency);
 static void ssi_setmodeinternal(struct tiva_ssidev_s *priv,
               enum spi_mode_e mode);
-static void ssi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode);
+static void ssi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode);
 static void ssi_setbitsinternal(struct tiva_ssidev_s *priv, int nbits);
-static void ssi_setbits(struct spi_dev_s *dev, int nbits);
-static uint32_t ssi_send(struct spi_dev_s *dev, uint32_t wd);
+static void ssi_setbits(FAR struct spi_dev_s *dev, int nbits);
+static uint32_t ssi_send(FAR struct spi_dev_s *dev, uint32_t wd);
 #ifdef CONFIG_SPI_EXCHANGE
-static void ssi_exchange(struct spi_dev_s *dev, const void *txbuffer,
-                         void *rxbuffer, size_t nwords);
+static void ssi_exchange(FAR struct spi_dev_s *dev, FAR const void *txbuffer,
+                         FAR void *rxbuffer, size_t nwords);
 #else
-static void ssi_sndblock(struct spi_dev_s *dev, const void *buffer,
+static void ssi_sndblock(FAR struct spi_dev_s *dev, FAR const void *buffer,
               size_t nwords);
-static void ssi_recvblock(struct spi_dev_s *dev, void *buffer,
+static void ssi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
               size_t nwords);
 #endif
 
@@ -314,58 +316,42 @@ static struct tiva_ssidev_s g_ssidev[] =
 #if NSSI_ENABLED > 1
     .base = TIVA_SSI0_BASE,
 #endif
-#ifndef CONFIG_SSI_POLLWAIT
-    .xfrsem = SEM_INITIALIZER(0),
-#endif
 #if !defined(CONFIG_SSI_POLLWAIT) && NSSI_ENABLED > 1
     .irq  = TIVA_IRQ_SSI0,
 #endif
-    .lock = NXMUTEX_INITIALIZER,
   },
 #endif
 #ifdef CONFIG_TIVA_SSI1
   {
-    .ops     = &g_spiops,
+    .ops  = &g_spiops,
 #if NSSI_ENABLED > 1
-    .base    = TIVA_SSI1_BASE,
-#endif
-#ifndef CONFIG_SSI_POLLWAIT
-    .xfrsem  = SEM_INITIALIZER(0),
+    .base = TIVA_SSI1_BASE,
 #endif
 #if !defined(CONFIG_SSI_POLLWAIT) && NSSI_ENABLED > 1
-    .irq     = TIVA_IRQ_SSI1,
+    .irq  = TIVA_IRQ_SSI1,
 #endif
-    .lock    = NXMUTEX_INITIALIZER,
   },
 #endif
 #ifdef CONFIG_TIVA_SSI2
   {
-    .ops     = &g_spiops,
+    .ops  = &g_spiops,
 #if NSSI_ENABLED > 1
-    .base    = TIVA_SSI2_BASE,
-#endif
-#ifndef CONFIG_SSI_POLLWAIT
-    .xfrsem  = SEM_INITIALIZER(0),
+    .base = TIVA_SSI2_BASE,
 #endif
 #if !defined(CONFIG_SSI_POLLWAIT) && NSSI_ENABLED > 1
-    .irq     = TIVA_IRQ_SSI2,
+    .irq  = TIVA_IRQ_SSI2,
 #endif
-    .lock    = NXMUTEX_INITIALIZER,
   },
 #endif
 #ifdef CONFIG_TIVA_SSI3
   {
-    .ops    = &g_spiops,
+    .ops  = &g_spiops,
 #if NSSI_ENABLED > 1
-    .base   = TIVA_SSI3_BASE,
-#endif
-#ifndef CONFIG_SSI_POLLWAIT
-    .xfrsem = SEM_INITIALIZER(0),
+    .base = TIVA_SSI3_BASE,
 #endif
 #if !defined(CONFIG_SSI_POLLWAIT) && NSSI_ENABLED > 1
-    .irq    = TIVA_IRQ_SSI3,
+    .irq  = TIVA_IRQ_SSI3,
 #endif
-    .lock   = NXMUTEX_INITIALIZER,
   },
 #endif
 };
@@ -455,7 +441,7 @@ static uint32_t ssi_disable(struct tiva_ssidev_s *priv)
   retval = ssi_getreg(priv, TIVA_SSI_CR1_OFFSET);
   regval = (retval & ~SSI_CR1_SSE);
   ssi_putreg(priv, TIVA_SSI_CR1_OFFSET, regval);
-  spiinfo("CR1: %08" PRIx32 "\n", regval);
+  spiinfo("CR1: %08x\n", regval);
   return retval;
 }
 
@@ -482,8 +468,29 @@ static void ssi_enable(struct tiva_ssidev_s *priv, uint32_t enable)
   regval &= ~SSI_CR1_SSE;
   regval  |= (enable & SSI_CR1_SSE);
   ssi_putreg(priv, TIVA_SSI_CR1_OFFSET, regval);
-  spiinfo("CR1: %08" PRIx32 "\n", regval);
+  spiinfo("CR1: %08x\n", regval);
 }
+
+/****************************************************************************
+ * Name: ssi_semtake
+ *
+ * Description:
+ *   Wait for a semaphore (handling interruption by signals);
+ *
+ * Input Parameters:
+ *   priv   - Device-specific state data
+ *   enable - The previous operational state
+ *
+ * Returned Value:
+ *
+ ****************************************************************************/
+
+#ifndef CONFIG_SSI_POLLWAIT
+static int ssi_semtake(sem_t *sem)
+{
+  return nxsem_wait_uninterruptible(sem);
+}
+#endif
 
 /****************************************************************************
  * Name: ssi_txnull, ssi_txuint16, and ssi_txuint8
@@ -883,7 +890,7 @@ static int ssi_transfer(struct tiva_ssidev_s *priv, const void *txbuffer,
   leave_critical_section(flags);
   do
     {
-      ret = nxsem_wait_uninterruptible(&priv->xfrsem);
+      ret = ssi_semtake(&priv->xfrsem);
     }
   while (priv->nrxwords < priv->nwords && ret >= 0);
 
@@ -982,7 +989,7 @@ static inline struct tiva_ssidev_s *ssi_mapirq(int irq)
  ****************************************************************************/
 
 #ifndef CONFIG_SSI_POLLWAIT
-static int ssi_interrupt(int irq, void *context, void *arg)
+static int ssi_interrupt(int irq, void *context, FAR void *arg)
 {
   struct tiva_ssidev_s *priv = ssi_mapirq(irq);
   uint32_t regval;
@@ -1031,7 +1038,7 @@ static int ssi_interrupt(int irq, void *context, void *arg)
       /* Wake up the waiting thread */
 
       spiinfo("Transfer complete\n");
-      nxsem_post(&priv->xfrsem);
+      ssi_semgive(&priv->xfrsem);
     }
 
   return OK;
@@ -1059,18 +1066,18 @@ static int ssi_interrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-static int ssi_lock(struct spi_dev_s *dev, bool lock)
+static int ssi_lock(FAR struct spi_dev_s *dev, bool lock)
 {
-  struct tiva_ssidev_s *priv = (struct tiva_ssidev_s *)dev;
+  FAR struct tiva_ssidev_s *priv = (FAR struct tiva_ssidev_s *)dev;
   int ret;
 
   if (lock)
     {
-      ret = nxmutex_lock(&priv->lock);
+      ret = nxsem_wait_uninterruptible(&priv->exclsem);
     }
   else
     {
-      ret = nxmutex_unlock(&priv->lock);
+      ret = nxsem_post(&priv->exclsem);
     }
 
   return ret;
@@ -1103,7 +1110,7 @@ static uint32_t ssi_setfrequencyinternal(struct tiva_ssidev_s *priv,
   uint32_t scr;
   uint32_t actual;
 
-  spiinfo("frequency: %" PRId32 "\n", frequency);
+  spiinfo("frequency: %d\n", frequency);
   DEBUGASSERT(frequency);
 
   /* Has the frequency changed? */
@@ -1173,7 +1180,7 @@ static uint32_t ssi_setfrequencyinternal(struct tiva_ssidev_s *priv,
       regval &= ~SSI_CR0_SCR_MASK;
       regval |= (scr << SSI_CR0_SCR_SHIFT);
       ssi_putreg(priv, TIVA_SSI_CR0_OFFSET, regval);
-      spiinfo("CR0: %08" PRIx32 " CPSR: %08" PRIx32 "\n", regval, cpsdvsr);
+      spiinfo("CR0: %08x CPSR: %08x\n", regval, cpsdvsr);
 
       /* Calculate the actual frequency */
 
@@ -1190,16 +1197,14 @@ static uint32_t ssi_setfrequencyinternal(struct tiva_ssidev_s *priv,
   return priv->actual;
 }
 
-static uint32_t ssi_setfrequency(struct spi_dev_s *dev,
+static uint32_t ssi_setfrequency(FAR struct spi_dev_s *dev,
                                  uint32_t frequency)
 {
   struct tiva_ssidev_s *priv = (struct tiva_ssidev_s *)dev;
   uint32_t enable;
   uint32_t actual;
 
-  /* NOTE that the SSI must be disabled when setting any configuration
-   * registers.
-   */
+  /* NOTE that the SSI must be disabled when setting any configuration registers. */
 
   enable = ssi_disable(priv);
   actual = ssi_setfrequencyinternal(priv, frequency);
@@ -1242,19 +1247,19 @@ static void ssi_setmodeinternal(struct tiva_ssidev_s *priv,
 
       switch (mode)
         {
-        case SPIDEV_MODE0: /* CPOL=0 CPHA=0 */
+        case SPIDEV_MODE0: /* CPOL=0 CHPHA=0 */
           modebits = 0;
           break;
 
-        case SPIDEV_MODE1: /* CPOL=0 CPHA=1 */
+        case SPIDEV_MODE1: /* CPOL=0 CHPHA=1 */
           modebits = SSI_CR0_SPH;
           break;
 
-        case SPIDEV_MODE2: /* CPOL=1 CPHA=0 */
+        case SPIDEV_MODE2: /* CPOL=1 CHPHA=0 */
           modebits = SSI_CR0_SPO;
          break;
 
-        case SPIDEV_MODE3: /* CPOL=1 CPHA=1 */
+        case SPIDEV_MODE3: /* CPOL=1 CHPHA=1 */
           modebits = SSI_CR0_SPH | SSI_CR0_SPO;
           break;
 
@@ -1268,22 +1273,20 @@ static void ssi_setmodeinternal(struct tiva_ssidev_s *priv,
       regval &= ~(SSI_CR0_FRF_MASK | SSI_CR0_SPH | SSI_CR0_SPO);
       regval |= modebits;
       ssi_putreg(priv, TIVA_SSI_CR0_OFFSET, regval);
-      spiinfo("CR0: %08" PRIx32 "\n", regval);
+      spiinfo("CR0: %08x\n", regval);
 
-      /* Save the mode so that subsequent re-configurations will be faster */
+      /* Save the mode so that subsequent re-configuratins will be faster */
 
       priv->mode = mode;
     }
 }
 
-static void ssi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
+static void ssi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
 {
   struct tiva_ssidev_s *priv = (struct tiva_ssidev_s *)dev;
   uint32_t enable;
 
-  /* NOTE that the SSI must be disabled when setting any configuration
-   * registers.
-   */
+  /* NOTE that the SSI must be disabled when setting any configuration registers. */
 
   enable = ssi_disable(priv);
   ssi_setmodeinternal(priv, mode);
@@ -1320,20 +1323,18 @@ static void ssi_setbitsinternal(struct tiva_ssidev_s *priv, int nbits)
       regval &= ~SSI_CR0_DSS_MASK;
       regval |= ((nbits - 1) << SSI_CR0_DSS_SHIFT);
       ssi_putreg(priv, TIVA_SSI_CR0_OFFSET, regval);
-      spiinfo("CR0: %08" PRIx32 "\n", regval);
+      spiinfo("CR0: %08x\n", regval);
 
       priv->nbits = nbits;
     }
 }
 
-static void ssi_setbits(struct spi_dev_s *dev, int nbits)
+static void ssi_setbits(FAR struct spi_dev_s *dev, int nbits)
 {
   struct tiva_ssidev_s *priv = (struct tiva_ssidev_s *)dev;
   uint32_t enable;
 
-  /* NOTE that the SSI must be disabled when setting any configuration
-   * registers.
-   */
+  /* NOTE that the SSI must be disabled when setting any configuration registers. */
 
   enable = ssi_disable(priv);
   ssi_setbitsinternal(priv, nbits);
@@ -1356,7 +1357,7 @@ static void ssi_setbits(struct spi_dev_s *dev, int nbits)
  *
  ****************************************************************************/
 
-static uint32_t ssi_send(struct spi_dev_s *dev, uint32_t wd)
+static uint32_t ssi_send(FAR struct spi_dev_s *dev, uint32_t wd)
 {
   struct tiva_ssidev_s *priv = (struct tiva_ssidev_s *)dev;
   uint32_t response = 0;
@@ -1387,8 +1388,8 @@ static uint32_t ssi_send(struct spi_dev_s *dev, uint32_t wd)
  ****************************************************************************/
 
 #ifdef CONFIG_SPI_EXCHANGE
-static void ssi_exchange(struct spi_dev_s *dev, const void *txbuffer,
-                         void *rxbuffer, size_t nwords)
+static void ssi_exchange(FAR struct spi_dev_s *dev, FAR const void *txbuffer,
+                         FAR void *rxbuffer, size_t nwords)
 {
   struct tiva_ssidev_s *priv = (struct tiva_ssidev_s *)dev;
   ssi_transfer(priv, txbuffer, rxbuffer, nwords);
@@ -1416,7 +1417,7 @@ static void ssi_exchange(struct spi_dev_s *dev, const void *txbuffer,
  ****************************************************************************/
 
 #ifndef CONFIG_SPI_EXCHANGE
-static void ssi_sndblock(struct spi_dev_s *dev, const void *buffer,
+static void ssi_sndblock(FAR struct spi_dev_s *dev, FAR const void *buffer,
                          size_t nwords)
 {
   struct tiva_ssidev_s *priv = (struct tiva_ssidev_s *)dev;
@@ -1445,7 +1446,7 @@ static void ssi_sndblock(struct spi_dev_s *dev, const void *buffer,
  ****************************************************************************/
 
 #ifndef CONFIG_SPI_EXCHANGE
-static void ssi_recvblock(struct spi_dev_s *dev, void *buffer,
+static void ssi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
                           size_t nwords)
 {
   struct tiva_ssidev_s *priv = (struct tiva_ssidev_s *)dev;
@@ -1479,7 +1480,7 @@ static void ssi_recvblock(struct spi_dev_s *dev, void *buffer,
  *
  ****************************************************************************/
 
-struct spi_dev_s *tiva_ssibus_initialize(int port)
+FAR struct spi_dev_s *tiva_ssibus_initialize(int port)
 {
   struct tiva_ssidev_s *priv;
   irqstate_t flags;
@@ -1616,13 +1617,21 @@ struct spi_dev_s *tiva_ssibus_initialize(int port)
 
   /* Initialize the state structure */
 
+#ifndef CONFIG_SSI_POLLWAIT
+  /* The xfrsem semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
+  nxsem_init(&priv->xfrsem, 0, 0);
+  nxsem_setprotocol(&priv->xfrsem, SEM_PRIO_NONE);
+#endif
+  nxsem_init(&priv->exclsem, 0, 1);
+
   /* Set all CR1 fields to reset state.  This will be master mode. */
 
   ssi_putreg(priv, TIVA_SSI_CR1_OFFSET, 0);
 
-  /* Set all CR0 fields to the reset state. This will also select Freescale
-   * SPI mode.
-   */
+  /* Set all CR0 fields to the reset state. This will also select Freescale SPI mode. */
 
   ssi_putreg(priv, TIVA_SSI_CR0_OFFSET, 0);
 
@@ -1676,7 +1685,7 @@ struct spi_dev_s *tiva_ssibus_initialize(int port)
 #endif /* CONFIG_SSI_POLLWAIT */
 
   leave_critical_section(flags);
-  return (struct spi_dev_s *)priv;
+  return (FAR struct spi_dev_s *)priv;
 }
 
 #endif /* NSSI_ENABLED > 0 */

@@ -1,22 +1,36 @@
 /****************************************************************************
- * sched/sched/sched_removereadytorun.c
+ * sched/sched_removereadytorun.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2012, 2016-2017 Gregory Nutt.
+ *   All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,12 +41,11 @@
 #include <nuttx/config.h>
 
 #include <stdbool.h>
+#include <queue.h>
 #include <assert.h>
-
 #include <nuttx/sched_note.h>
 
 #include "irq/irq.h"
-#include "sched/queue.h"
 #include "sched/sched.h"
 
 /****************************************************************************
@@ -40,7 +53,7 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: nxsched_remove_readytorun
+ * Name: sched_removereadytorun
  *
  * Description:
  *   This function removes a TCB from the ready to run list.
@@ -62,12 +75,9 @@
  ****************************************************************************/
 
 #ifndef CONFIG_SMP
-bool nxsched_remove_readytorun(FAR struct tcb_s *rtcb)
+bool sched_removereadytorun(FAR struct tcb_s *rtcb)
 {
-  FAR dq_queue_t *tasklist;
   bool doswitch = false;
-
-  tasklist = TLIST_HEAD(rtcb);
 
   /* Check if the TCB to be removed is at the head of the ready to run list.
    * There is only one list, g_readytorun, and it always contains the
@@ -75,7 +85,7 @@ bool nxsched_remove_readytorun(FAR struct tcb_s *rtcb)
    * then we are removing the currently active task.
    */
 
-  if (rtcb->blink == NULL && TLIST_ISRUNNABLE(rtcb->task_state))
+  if (rtcb->blink == NULL)
     {
       /* There must always be at least one task in the list (the IDLE task)
        * after the TCB being removed.
@@ -85,7 +95,6 @@ bool nxsched_remove_readytorun(FAR struct tcb_s *rtcb)
       DEBUGASSERT(nxttcb != NULL);
 
       nxttcb->task_state = TSTATE_TASK_RUNNING;
-      up_update_task(nxttcb);
       doswitch = true;
     }
 
@@ -93,27 +102,17 @@ bool nxsched_remove_readytorun(FAR struct tcb_s *rtcb)
    * is always the g_readytorun list.
    */
 
-  dq_rem((FAR dq_entry_t *)rtcb, tasklist);
+  dq_rem((FAR dq_entry_t *)rtcb, (FAR dq_queue_t *)&g_readytorun);
 
   /* Since the TCB is not in any list, it is now invalid */
 
   rtcb->task_state = TSTATE_TASK_INVALID;
-
   return doswitch;
-}
-
-void nxsched_remove_self(FAR struct tcb_s *tcb)
-{
-  nxsched_remove_readytorun(tcb);
-  if (list_pendingtasks()->head)
-    {
-      nxsched_merge_pending();
-    }
 }
 #endif /* !CONFIG_SMP */
 
 /****************************************************************************
- * Name: nxsched_remove_readytorun
+ * Name: sched_removereadytorun
  *
  * Description:
  *   This function removes a TCB from the ready to run list.
@@ -135,196 +134,211 @@ void nxsched_remove_self(FAR struct tcb_s *tcb)
  ****************************************************************************/
 
 #ifdef CONFIG_SMP
-void nxsched_remove_running(FAR struct tcb_s *tcb)
+bool sched_removereadytorun(FAR struct tcb_s *rtcb)
 {
   FAR dq_queue_t *tasklist;
-  FAR struct tcb_s *nxttcb;
-  FAR struct tcb_s *rtrtcb = NULL;
+  bool doswitch = false;
   int cpu;
+
+  /* Lock the tasklists before accessing */
+
+  irqstate_t lock = sched_tasklist_lock();
 
   /* Which CPU (if any) is the task running on?  Which task list holds the
    * TCB?
    */
 
-  DEBUGASSERT(tcb->task_state == TSTATE_TASK_RUNNING);
-  cpu = tcb->cpu;
-  tasklist = &g_assignedtasks[cpu];
+  cpu      = rtcb->cpu;
+  tasklist = TLIST_HEAD(rtcb->task_state, cpu);
 
-  /* Check if the TCB to be removed is at the head of a running list.
+  /* Check if the TCB to be removed is at the head of a ready-to-run list.
    * For the case of SMP, there are two lists involved:  (1) the
    * g_readytorun list that holds non-running tasks that have not been
    * assigned to a CPU, and (2) and the g_assignedtasks[] lists which hold
    * tasks assigned a CPU, including the task that is currently running on
    * that CPU.  Only this latter list contains the currently active task
-   * only removing the head of that list can result in a context switch.
+   * only only removing the head of that list can result in a context
+   * switch.
    *
-   * tcb->blink == NULL will tell us if the TCB is at the head of the
-   * running list and, hence, a candidate for the new running task.
+   * rtcb->blink == NULL will tell us if the TCB is at the head of the
+   * ready-to-run list and, hence, a candidate for the new running task.
    *
    * If so, then the tasklist RUNNABLE attribute will inform us if the list
    * holds the currently executing task and, hence, if a context switch
    * should occur.
    */
 
-  DEBUGASSERT(tcb->blink == NULL);
-  DEBUGASSERT(TLIST_ISRUNNABLE(tcb->task_state));
-
-  /* There must always be at least one task in the list (the IDLE task)
-   * after the TCB being removed.
-   */
-
-  nxttcb = tcb->flink;
-  DEBUGASSERT(nxttcb != NULL);
-
-  /* The task is running but the CPU that it was running on has been
-   * paused.  We can now safely remove its TCB from the running
-   * task list.  In the SMP case this may be either the g_readytorun()
-   * or the g_assignedtasks[cpu] list.
-   */
-
-  dq_rem_head((FAR dq_entry_t *)tcb, tasklist);
-
-  /* Find the highest priority non-running tasks in the g_assignedtasks
-   * list of other CPUs, and also non-idle tasks, place them in the
-   * g_readytorun list. so as to find the task with the highest priority,
-   * globally
-   */
-
-  for (int i = 0; i < CONFIG_SMP_NCPUS; i++)
+  if (rtcb->blink == NULL && TLIST_ISRUNNABLE(rtcb->task_state))
     {
-      if (i == cpu)
-        {
-          /* The highest priority task of the current
-           * CPU has been found, which is nxttcb.
-           */
+      FAR struct tcb_s *nxttcb;
+      FAR struct tcb_s *rtrtcb = NULL;
+      int me;
 
-          continue;
-        }
-
-      for (rtrtcb = (FAR struct tcb_s *)g_assignedtasks[i].head;
-                !is_idle_task(rtrtcb); rtrtcb = rtrtcb->flink)
-        {
-          if (rtrtcb->task_state != TSTATE_TASK_RUNNING &&
-              CPU_ISSET(cpu, &rtrtcb->affinity))
-            {
-              /* We have found the task with the highest priority whose
-               * CPU index is i. Since this task must be between the two
-               * tasks, we can use the dq_rem_mid macro to delete it.
-               */
-
-              dq_rem_mid(rtrtcb);
-              rtrtcb->task_state = TSTATE_TASK_READYTORUN;
-
-              /* Add rtrtcb to g_readytorun to find
-               * the task with the highest global priority
-               */
-
-              nxsched_add_prioritized(rtrtcb, &g_readytorun);
-              break;
-            }
-        }
-    }
-
-  /* Which task will go at the head of the list?  It will be either the
-   * next tcb in the assigned task list (nxttcb) or a TCB in the
-   * g_readytorun list.  We can only select a task from that list if
-   * the affinity mask includes the current CPU.
-   */
-
-  /* Search for the highest priority task that can run on this
-   * CPU.
-   */
-
-  for (rtrtcb = (FAR struct tcb_s *)g_readytorun.head;
-        rtrtcb != NULL && !CPU_ISSET(cpu, &rtrtcb->affinity);
-        rtrtcb = rtrtcb->flink);
-
-  /* Did we find a task in the g_readytorun list?  Which task should
-   * we use?  We decide strictly by the priority of the two tasks:
-   * Either (1) the task currently at the head of the
-   * g_assignedtasks[cpu] list (nexttcb) or (2) the highest priority
-   * task from the g_readytorun list with matching affinity (rtrtcb).
-   */
-
-  if (rtrtcb != NULL && rtrtcb->sched_priority >= nxttcb->sched_priority)
-    {
-      /* The TCB rtrtcb has the higher priority and it can be run on
-       * target CPU. Remove that task (rtrtcb) from the g_readytorun
-       * list and add to the head of the g_assignedtasks[cpu] list.
+      /* There must always be at least one task in the list (the IDLE task)
+       * after the TCB being removed.
        */
 
-      dq_rem((FAR dq_entry_t *)rtrtcb, &g_readytorun);
-      dq_addfirst_nonempty((FAR dq_entry_t *)rtrtcb, tasklist);
+      nxttcb = (FAR struct tcb_s *)rtcb->flink;
+      DEBUGASSERT(nxttcb != NULL);
 
-      rtrtcb->cpu = cpu;
-      nxttcb = rtrtcb;
-    }
+      /* If we are modifying the head of some assigned task list other than
+       * our own, we will need to stop that CPU.
+       */
 
-  /* NOTE: If the task runs on another CPU(cpu), adjusting global IRQ
-   * controls will be done in the pause handler on the new CPU(cpu).
-   * If the task is scheduled on this CPU(me), do nothing because
-   * this CPU already has a critical section
-   */
+      me = this_cpu();
+      if (cpu != me)
+        {
+          sched_tasklist_unlock(lock);
+          DEBUGVERIFY(up_cpu_pause(cpu));
+          lock = sched_tasklist_lock();
+        }
 
-  nxttcb->task_state = TSTATE_TASK_RUNNING;
+      /* The task is running but the CPU that it was running on has been
+       * paused.  We can now safely remove its TCB from the ready-to-run
+       * task list.  In the SMP case this may be either the g_readytorun()
+       * or the g_assignedtasks[cpu] list.
+       */
 
-  /* Since the TCB is no longer in any list, it is now invalid */
+      dq_rem((FAR dq_entry_t *)rtcb, tasklist);
 
-  tcb->task_state = TSTATE_TASK_INVALID;
+      /* Which task will go at the head of the list?  It will be either the
+       * next tcb in the assigned task list (nxttcb) or a TCB in the
+       * g_readytorun list.  We can only select a task from that list if
+       * the affinity mask includes the current CPU.
+       *
+       * If pre-emption is locked or another CPU is in a critical section,
+       * then use the 'nxttcb' which will probably be the IDLE thread.
+       * REVISIT: What if it is not the IDLE thread?
+       */
 
-  up_update_task(nxttcb);
-}
+      if (!sched_islocked_global() && !irq_cpu_locked(me))
+        {
+          /* Search for the highest priority task that can run on this
+           * CPU.
+           */
 
-void nxsched_remove_self(FAR struct tcb_s *tcb)
-{
-  nxsched_remove_running(tcb);
-  if (g_pendingtasks.head)
-    {
-      nxsched_merge_pending();
-    }
-}
+          for (rtrtcb = (FAR struct tcb_s *)g_readytorun.head;
+               rtrtcb != NULL && !CPU_ISSET(cpu, &rtrtcb->affinity);
+               rtrtcb = (FAR struct tcb_s *)rtrtcb->flink);
+        }
 
-bool nxsched_remove_readytorun(FAR struct tcb_s *tcb)
-{
-  if (tcb->task_state == TSTATE_TASK_RUNNING)
-    {
-      DEBUGASSERT(tcb->cpu == this_cpu());
-      nxsched_remove_running(tcb);
-      return true;
+      /* Did we find a task in the g_readytorun list?  Which task should
+       * we use?  We decide strictly by the priority of the two tasks:
+       * Either (1) the task currently at the head of the
+       * g_assignedtasks[cpu] list (nexttcb) or (2) the highest priority
+       * task from the g_readytorun list with matching affinity (rtrtcb).
+       */
+
+      if (rtrtcb != NULL && rtrtcb->sched_priority >= nxttcb->sched_priority)
+        {
+          FAR struct tcb_s *tmptcb;
+
+          /* The TCB at the head of the ready to run list has the higher
+           * priority.  Remove that task from the head of the g_readytorun
+           * list and add to the head of the g_assignedtasks[cpu] list.
+           */
+
+          tmptcb = (FAR struct tcb_s *)
+            dq_remfirst((FAR dq_queue_t *)&g_readytorun);
+
+          dq_addfirst((FAR dq_entry_t *)tmptcb, tasklist);
+
+          tmptcb->cpu = cpu;
+          nxttcb = tmptcb;
+        }
+
+      /* Will pre-emption be disabled after the switch?  If the lockcount is
+       * greater than zero, then this task/this CPU holds the scheduler lock.
+       */
+
+      if (nxttcb->lockcount > 0)
+        {
+          /* Yes... make sure that scheduling logic knows about this */
+
+          spin_setbit(&g_cpu_lockset, cpu, &g_cpu_locksetlock,
+                      &g_cpu_schedlock);
+        }
+      else
+        {
+          /* No.. we may need to perform release our hold on the lock. */
+
+          spin_clrbit(&g_cpu_lockset, cpu, &g_cpu_locksetlock,
+                      &g_cpu_schedlock);
+        }
+
+      /* Adjust global IRQ controls.  If irqcount is greater than zero,
+       * then this task/this CPU holds the IRQ lock
+       */
+
+      if (nxttcb->irqcount > 0)
+        {
+          /* Yes... make sure that scheduling logic on other CPUs knows
+           * that we hold the IRQ lock.
+           */
+
+          spin_setbit(&g_cpu_irqset, cpu, &g_cpu_irqsetlock,
+                      &g_cpu_irqlock);
+        }
+
+      /* No.. This CPU will be relinquishing the lock.  But this works
+       * differently if we are performing a context switch from an
+       * interrupt handler and the interrupt handler has established
+       * a critical section.  We can detect this case when
+       * g_cpu_nestcount[me] > 0.
+       */
+
+      else if (g_cpu_nestcount[me] <= 0)
+        {
+          /* Do nothing here
+           * NOTE: spin_clrbit() will be done in sched_resumescheduler()
+           */
+        }
+
+      /* Sanity check.  g_cpu_netcount should be greater than zero
+       * only while we are within the critical section and within
+       * an interrupt handler.  If we are not in an interrupt handler
+       * then there is a problem; perhaps some logic previously
+       * called enter_critical_section() with no matching call to
+       * leave_critical_section(), leaving the non-zero count.
+       */
+
+      else
+        {
+          DEBUGASSERT(up_interrupt_context());
+        }
+
+      nxttcb->task_state = TSTATE_TASK_RUNNING;
+
+      /* All done, restart the other CPU (if it was paused). */
+
+      doswitch = true;
+      if (cpu != me)
+        {
+          /* In this we will not want to report a context switch to this
+           * CPU.  Only the other CPU is affected.
+           */
+
+          DEBUGVERIFY(up_cpu_resume(cpu));
+          doswitch = false;
+        }
     }
   else
     {
-      FAR dq_queue_t *tasklist;
-      int i;
-
-      /* if tcb == g_delivertasks[i] we set NULL to g_delivertasks[i] */
-
-      for (i = 0; i < CONFIG_SMP_NCPUS; i++)
-        {
-          if (tcb == g_delivertasks[i])
-            {
-              g_delivertasks[i] = NULL;
-              tcb->task_state = TSTATE_TASK_INVALID;
-              return false;
-            }
-        }
-
-      tasklist = TLIST_HEAD(tcb, tcb->cpu);
-
-      DEBUGASSERT(tcb->task_state != TSTATE_TASK_RUNNING);
-
-      /* The task is not running.  Just remove its TCB from the task
+      /* The task is not running.  Just remove its TCB from the ready-to-run
        * list.  In the SMP case this may be either the g_readytorun() or the
        * g_assignedtasks[cpu] list.
        */
 
-      dq_rem((FAR dq_entry_t *)tcb, tasklist);
-
-      /* Since the TCB is no longer in any list, it is now invalid */
-
-      tcb->task_state = TSTATE_TASK_INVALID;
+      dq_rem((FAR dq_entry_t *)rtcb, tasklist);
     }
 
-  return false;
+  /* Since the TCB is no longer in any list, it is now invalid */
+
+  rtcb->task_state = TSTATE_TASK_INVALID;
+
+  /* Unlock the tasklists */
+
+  sched_tasklist_unlock(lock);
+  return doswitch;
 }
 #endif /* CONFIG_SMP */

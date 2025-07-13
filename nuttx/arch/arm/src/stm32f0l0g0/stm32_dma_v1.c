@@ -1,22 +1,36 @@
 /****************************************************************************
- * arch/arm/src/stm32f0l0g0/stm32_dma_v1.c
+ * arch/arm/src/stm32/stm32_dma_v1.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009, 2011-2013, 2016-2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,17 +42,17 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 
 #include <arch/chip/chip.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
 #include "sched/sched.h"
 #include "chip.h"
 #include "stm32_dma.h"
@@ -52,7 +66,7 @@
  */
 
 #ifdef CONFIG_STM32F0L0G0_HAVE_DMAMUX
-#  error DMAMUX not supported here. Look at stm32_dma_v1mux.c
+#  error DMAMUX not supported yet
 #endif
 
 /****************************************************************************
@@ -102,74 +116,62 @@ static struct stm32_dma_s g_dma[DMA_NCHANNELS] =
   {
     .chan     = 0,
     .irq      = STM32_IRQ_DMA1CH1,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMACHAN_OFFSET(0),
   },
   {
     .chan     = 1,
     .irq      = STM32_IRQ_DMA1CH2,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMACHAN_OFFSET(1),
   },
   {
     .chan     = 2,
     .irq      = STM32_IRQ_DMA1CH3,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMACHAN_OFFSET(2),
   },
   {
     .chan     = 3,
     .irq      = STM32_IRQ_DMA1CH4,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMACHAN_OFFSET(3),
   },
   {
     .chan     = 4,
     .irq      = STM32_IRQ_DMA1CH5,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMACHAN_OFFSET(4),
   },
   {
     .chan     = 5,
     .irq      = STM32_IRQ_DMA1CH6,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMACHAN_OFFSET(5),
   },
   {
     .chan     = 6,
     .irq      = STM32_IRQ_DMA1CH7,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMACHAN_OFFSET(6),
   },
 #if STM32_NDMA > 1
   {
     .chan     = 0,
     .irq      = STM32_IRQ_DMA2CH1,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMACHAN_OFFSET(0),
   },
   {
     .chan     = 1,
     .irq      = STM32_IRQ_DMA2CH2,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMACHAN_OFFSET(1),
   },
   {
     .chan     = 2,
     .irq      = STM32_IRQ_DMA2CH3,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMACHAN_OFFSET(2),
   },
   {
     .chan     = 3,
     .irq      = STM32_IRQ_DMA2CH4,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMACHAN_OFFSET(3),
   },
   {
     .chan     = 4,
     .irq      = STM32_IRQ_DMA2CH5,
-    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMACHAN_OFFSET(4),
   },
 #endif
@@ -216,6 +218,24 @@ static inline void dmachan_putreg(struct stm32_dma_s *dmach,
 }
 
 /****************************************************************************
+ * Name: stm32_dmatake() and stm32_dmagive()
+ *
+ * Description:
+ *   Used to get exclusive access to a DMA channel.
+ *
+ ****************************************************************************/
+
+static int stm32_dmatake(FAR struct stm32_dma_s *dmach)
+{
+  return nxsem_wait_uninterruptible(&dmach->sem);
+}
+
+static inline void stm32_dmagive(FAR struct stm32_dma_s *dmach)
+{
+  nxsem_post(&dmach->sem);
+}
+
+/****************************************************************************
  * Name: stm32_dmachandisable
  *
  * Description:
@@ -251,7 +271,7 @@ static void stm32_dmachandisable(struct stm32_dma_s *dmach)
  *
  ****************************************************************************/
 
-static int stm32_dmainterrupt(int irq, void *context, void *arg)
+static int stm32_dmainterrupt(int irq, void *context, FAR void *arg)
 {
   struct stm32_dma_s *dmach;
   uint32_t isr;
@@ -312,7 +332,7 @@ static int stm32_dmainterrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-void weak_function arm_dma_initialize(void)
+void weak_function up_dma_initialize(void)
 {
   struct stm32_dma_s *dmach;
   int chndx;
@@ -322,6 +342,7 @@ void weak_function arm_dma_initialize(void)
   for (chndx = 0; chndx < DMA_NCHANNELS; chndx++)
     {
       dmach = &g_dma[chndx];
+      nxsem_init(&dmach->sem, 0, 1);
 
       /* Attach DMA interrupt vectors */
 
@@ -395,7 +416,7 @@ DMA_HANDLE stm32_dmachannel(unsigned int chndef)
    * is available if it is currently being used by another driver
    */
 
-  ret = nxsem_wait_uninterruptible(&dmach->sem);
+  ret = stm32_dmatake(dmach);
   if (ret < 0)
     {
       return NULL;
@@ -442,7 +463,7 @@ void stm32_dmafree(DMA_HANDLE handle)
 
   /* Release the channel */
 
-  nxsem_post(&dmach->sem);
+  stm32_dmagive(dmach);
 }
 
 /****************************************************************************
@@ -532,7 +553,7 @@ void stm32_dmastart(DMA_HANDLE handle, dma_callback_t callback,
 
   DEBUGASSERT(handle != NULL);
 
-  /* Save the callback info.  This will be invoked when the DMA completes. */
+  /* Save the callback info.  This will be invoked whent the DMA completes */
 
   dmach->callback = callback;
   dmach->arg      = arg;
@@ -629,7 +650,7 @@ size_t stm32_dmaresidual(DMA_HANDLE handle)
  ****************************************************************************/
 
 #ifdef CONFIG_STM32F0L0G0_DMACAPABLE
-bool stm32_dmacapable(uintptr_t maddr, uint32_t count, uint32_t ccr)
+bool stm32_dmacapable(uint32_t maddr, uint32_t count, uint32_t ccr)
 {
   uint32_t transfer_size;
   uint32_t mend;

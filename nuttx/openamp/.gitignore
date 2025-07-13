@@ -2,6 +2,3 @@
 /.openamp_headers
 /libmetal
 /open-amp
-/*.zip
-/.openamp_patch
-/detect_64_atomic*

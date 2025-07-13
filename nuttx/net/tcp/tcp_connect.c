@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/tcp/tcp_connect.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2012, 2015-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -37,16 +50,13 @@
 #include <arch/irq.h>
 
 #include <nuttx/semaphore.h>
-#include <nuttx/tls.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/net/udp.h>
 #include <nuttx/net/tcp.h>
 
 #include "devif/devif.h"
-#include "netdev/netdev.h"
 #include "socket/socket.h"
-#include "inet/inet.h"
 #include "tcp/tcp.h"
 
 #ifdef NET_TCP_HAVE_STACK
@@ -59,6 +69,7 @@ struct tcp_connect_s
 {
   FAR struct tcp_conn_s  *tc_conn;    /* Reference to TCP connection structure */
   FAR struct devif_callback_s *tc_cb; /* Reference to callback instance */
+  FAR struct socket *tc_psock;        /* The socket being connected */
   sem_t tc_sem;                       /* Semaphore signals recv completion */
   int tc_result;                      /* OK on success, otherwise a negated errno. */
 };
@@ -72,6 +83,7 @@ static inline int psock_setup_callbacks(FAR struct socket *psock,
 static void psock_teardown_callbacks(FAR struct tcp_connect_s *pstate,
                                      int status);
 static uint16_t psock_connect_eventhandler(FAR struct net_driver_s *dev,
+                                           FAR void *pvconn,
                                            FAR void *pvpriv, uint16_t flags);
 
 /****************************************************************************
@@ -90,9 +102,15 @@ static inline int psock_setup_callbacks(FAR struct socket *psock,
 
   /* Initialize the TCP state structure */
 
+  /* This semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
   nxsem_init(&pstate->tc_sem, 0, 0); /* Doesn't really fail */
+  nxsem_setprotocol(&pstate->tc_sem, SEM_PRIO_NONE);
 
   pstate->tc_conn   = conn;
+  pstate->tc_psock  = psock;
   pstate->tc_result = -EAGAIN;
 
   /* Set up the callbacks in the connection */
@@ -147,7 +165,7 @@ static void psock_teardown_callbacks(FAR struct tcp_connect_s *pstate,
  *
  * Input Parameters:
  *   dev      The structure of the network driver that reported the event
- *   pvpriv   An instance of struct tcp_connect_s cast to void*
+ *   pvconn   The connection structure associated with the socket
  *   flags    Set of events describing why the callback was invoked
  *
  * Returned Value:
@@ -159,10 +177,10 @@ static void psock_teardown_callbacks(FAR struct tcp_connect_s *pstate,
  ****************************************************************************/
 
 static uint16_t psock_connect_eventhandler(FAR struct net_driver_s *dev,
+                                           FAR void *pvconn,
                                            FAR void *pvpriv, uint16_t flags)
 {
-  struct tcp_connect_s *pstate = pvpriv;
-  FAR struct tcp_conn_s *conn;
+  struct tcp_connect_s *pstate = (struct tcp_connect_s *)pvpriv;
 
   ninfo("flags: %04x\n", flags);
 
@@ -170,8 +188,6 @@ static uint16_t psock_connect_eventhandler(FAR struct net_driver_s *dev,
 
   if (pstate)
     {
-      conn = pstate->tc_conn;
-
       /* The following errors should be detected here (someday)
        *
        *     ECONNREFUSED
@@ -179,8 +195,8 @@ static uint16_t psock_connect_eventhandler(FAR struct net_driver_s *dev,
        *     ENETUNREACH
        *       Network is unreachable.
        *     ETIMEDOUT
-       *       Timeout while attempting connection. The server may be too
-       *       busy to accept new connections.
+       *       Timeout while attempting connection. The server may be too busy
+       *       to accept new connections.
        */
 
       /* TCP_CLOSE: The remote host has closed the connection
@@ -216,13 +232,16 @@ static uint16_t psock_connect_eventhandler(FAR struct net_driver_s *dev,
 
       else if ((flags & TCP_CONNECTED) != 0)
         {
+          FAR struct socket *psock = pstate->tc_psock;
+          DEBUGASSERT(psock);
+
           /* Mark the connection bound and connected.  NOTE this is
            * is done here (vs. later) in order to avoid any race condition
            * in the socket state.  It is known to connected here and now,
            * but not necessarily at any time later.
            */
 
-          conn->sconn.s_flags |= (_SF_BOUND | _SF_CONNECTED);
+          psock->s_flags |= (_SF_BOUND | _SF_CONNECTED);
 
           /* Indicate that the socket is no longer connected */
 
@@ -273,8 +292,7 @@ static uint16_t psock_connect_eventhandler(FAR struct net_driver_s *dev,
  *   Perform a TCP connection
  *
  * Input Parameters:
- *   psock - A reference to the socket structure of the socket to be
- *           connected
+ *   psock - A reference to the socket structure of the socket to be connected
  *   addr  - The address of the remote server to connect to
  *
  * Returned Value:
@@ -288,10 +306,8 @@ static uint16_t psock_connect_eventhandler(FAR struct net_driver_s *dev,
 int psock_tcp_connect(FAR struct socket *psock,
                       FAR const struct sockaddr *addr)
 {
-  FAR struct tcp_conn_s *conn;
-  struct tcp_connect_s   state;
-  struct tcp_callback_s  info;
-  int                    ret = OK;
+  struct tcp_connect_s state;
+  int                  ret = OK;
 
   /* Interrupts must be disabled through all of the following because
    * we cannot allow the network callback to occur until we are completely
@@ -300,126 +316,63 @@ int psock_tcp_connect(FAR struct socket *psock,
 
   net_lock();
 
-  conn = psock->s_conn;
-
   /* Get the connection reference from the socket */
 
-  if (conn == NULL) /* Should always be non-NULL */
+  if (!psock->s_conn) /* Should always be non-NULL */
     {
       ret = -EINVAL;
-    }
-  else if (conn->tcpstateflags == TCP_CLOSED)
-    {
-      nerr("ERROR: tcp conn was released, connect failed \n");
-      ret = -ENOTCONN;
     }
   else
     {
       /* Perform the TCP connection operation */
 
-      ret = tcp_connect(conn, addr);
+      ret = tcp_connect(psock->s_conn, addr);
     }
 
   if (ret >= 0)
     {
-      /* Update laddr to device addr */
+      /* Set up the callbacks in the connection */
 
-#ifdef CONFIG_NET_IPv6
-#ifdef CONFIG_NET_IPv4
-      if (conn->domain == PF_INET6)
+      ret = psock_setup_callbacks(psock, &state);
+      if (ret >= 0)
         {
-#endif
-          if (net_ipv6addr_cmp(conn->u.ipv6.laddr, g_ipv6_unspecaddr))
-            {
-              net_ipv6addr_copy(conn->u.ipv6.laddr,
-                        netdev_ipv6_srcaddr(conn->dev, conn->u.ipv6.raddr));
-            }
-#endif /* CONFIG_NET_IPv6 */
+          /* Wait for either the connect to complete or for an error/timeout
+           * to occur. NOTES:  net_lockedwait will also terminate if a signal
+           * is received.
+           */
 
-#ifdef CONFIG_NET_IPv4
-#ifdef CONFIG_NET_IPv6
-        }
-      else
-#endif
-        {
-          if (net_ipv4addr_cmp(conn->u.ipv4.laddr, INADDR_ANY))
-            {
-              net_ipv4addr_copy(conn->u.ipv4.laddr, conn->dev->d_ipaddr);
-            }
-        }
-#endif /* CONFIG_NET_IPv4 */
+          ret = net_lockedwait(&state.tc_sem);
 
-      /* Notify the device driver that new connection is available. */
+          /* Uninitialize the state structure */
 
-      netdev_txnotify_dev(conn->dev);
+          nxsem_destroy(&state.tc_sem);
 
-      /* Non-blocking connection ? set the socket error
-       * and start the monitor
-       */
+          /* If net_lockedwait failed, negated errno was returned. */
 
-      if (_SS_ISNONBLOCK(conn->sconn.s_flags))
-        {
-          ret = -EINPROGRESS;
-        }
-      else
-        {
-          /* Set up the callbacks in the connection */
-
-          ret = psock_setup_callbacks(psock, &state);
           if (ret >= 0)
             {
-              /* Push a cancellation point onto the stack.  This will be
-               * called if the thread is canceled.
+              /* If the wait succeeded, then get the new error value from
+               * the state structure
                */
 
-              info.tc_conn = conn;
-              info.tc_cb = state.tc_cb;
-              info.tc_sem = &state.tc_sem;
-              tls_cleanup_push(tls_get_info(), tcp_callback_cleanup, &info);
-
-              /* Wait for either the connect to complete or for an
-               * error/timeout to occur.
-               * NOTES:  net_sem_wait will also terminate if a
-               * signal is received.
-               */
-
-              ret = net_sem_wait(&state.tc_sem);
-
-              tls_cleanup_pop(tls_get_info(), 0);
-
-              /* Uninitialize the state structure */
-
-              nxsem_destroy(&state.tc_sem);
-
-              /* If net_sem_wait failed, negated errno was returned. */
-
-              if (ret >= 0)
-                {
-                  /* If the wait succeeded, then get the new error
-                   * value from the state structure
-                   */
-
-                  ret = state.tc_result;
-                }
-
-              /* Make sure that no further events are processed */
-
-              psock_teardown_callbacks(&state, ret);
+              ret = state.tc_result;
             }
+
+          /* Make sure that no further events are processed */
+
+          psock_teardown_callbacks(&state, ret);
         }
 
       /* Check if the socket was successfully connected. */
 
-      if (ret >= 0 || ret == -EINPROGRESS)
+      if (ret >= 0)
         {
-          int ret2;
-
           /* Yes... Now that we are connected, we need to set up to monitor
            * the state of the connection up the connection event monitor.
            */
 
-          ret2 = tcp_start_monitor(psock);
-          if (ret2 < 0)
+          ret = tcp_start_monitor(psock);
+          if (ret < 0)
             {
               /* tcp_start_monitor() can only fail on certain race
                * conditions where the connection was lost just before
@@ -427,8 +380,7 @@ int psock_tcp_connect(FAR struct socket *psock,
                * happen in this context, but just in case...
                */
 
-              tcp_stop_monitor(conn, TCP_ABORT);
-              ret = ret2;
+              tcp_stop_monitor(psock->s_conn, TCP_ABORT);
             }
         }
     }

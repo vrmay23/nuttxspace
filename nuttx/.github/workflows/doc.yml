@@ -10,44 +10,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
----
-name: "Build Documentation"
+name: Doc
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - 'Documentation/**'
-
   pull_request:
-    paths:
-      - 'Documentation/**'
-
-concurrency:
-  group: docs-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
 
 jobs:
-  build-html:
-    runs-on: ubuntu-latest
+  docs:
+    runs-on: ubuntu-18.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.8'
-      - name: Generate Documentation
-        run: |
-          cd Documentation/
-          pip3 install pipenv
-          pipenv install
-          pipenv run make html
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sphinx-docs
-          path: |
-            Documentation/_build/html/
-            Documentation/_build/latex/*.pdf
+    - uses: actions/checkout@v2
+      with:
+        path: nuttx
+        fetch-depth: 1
+    - name: Generate Inlined Docs
+      run: |
+        echo "Inline Docs"
+        npm install --no-audit inliner
+        inliner=`pwd`/node_modules/inliner/cli/index.js
+        build_output=`pwd`/build
+        mkdir $build_output
+        cd nuttx/Documentation
+        find ./ -type f -name "*.html" -exec  script -e -c "$inliner {} > $build_output/{}" \;
+        ls -l $build_output/
+    - uses: actions/upload-artifact@v1
+      with:
+        name: htmldocs
+        path: ./build/

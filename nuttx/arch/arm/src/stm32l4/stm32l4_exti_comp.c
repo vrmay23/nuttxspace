@@ -1,9 +1,8 @@
 /****************************************************************************
- * arch/arm/src/stm32l4/stm32l4_exti_comp.c
+ * arch/arm/src/stm32/stm32l4_exti_comp.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved
- * SPDX-FileCopyrightText: 2016 Motorola Mobility LLC. All rights reserved.
+ *   Copyright (c) 2017 Gregory Nutt. All rights reserved
+ *   Copyright (c) 2016 Motorola Mobility, LLC. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,7 +42,7 @@
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "stm32l4_comp.h"
 #include "stm32l4_exti.h"
 #include "hardware/stm32l4_exti.h"
@@ -79,11 +78,11 @@ static const uint32_t g_comp_lines[STM32L4_COMP_NUM] =
 #endif
 };
 
-/****************************************************************************
+ /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-static int stm32l4_exti_comp_isr(int irq, void *context, void *arg)
+static int stm32l4_exti_comp_isr(int irq, void *context, FAR void *arg)
 {
   uint32_t pr;
   uint32_t ln;
@@ -142,9 +141,9 @@ int stm32l4_exti_comp(int cmp, bool risingedge, bool fallingedge,
   irqstate_t flags;
   uint32_t ln = g_comp_lines[cmp];
 
-  /* Perform the following within a critical section so that the handler gets
-   * installed correctly before the next interrupt is received.
-   */
+ /* Perform the following within a critical section so that the handler gets
+  * installed correctly before the next interrupt is received.
+  */
 
   flags = enter_critical_section();
 
@@ -162,10 +161,8 @@ int stm32l4_exti_comp(int cmp, bool risingedge, bool fallingedge,
 
   /* Configure rising/falling edges */
 
-  modifyreg32(STM32L4_EXTI1_RTSR, risingedge  ?
-              0 : ln, risingedge  ? ln : 0);
-  modifyreg32(STM32L4_EXTI1_FTSR, fallingedge ?
-              0 : ln, fallingedge ? ln : 0);
+  modifyreg32(STM32L4_EXTI1_RTSR, risingedge  ? 0 : ln, risingedge  ? ln : 0);
+  modifyreg32(STM32L4_EXTI1_FTSR, fallingedge ? 0 : ln, fallingedge ? ln : 0);
 
   /* Enable Events and Interrupts */
 

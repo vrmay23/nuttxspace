@@ -1,4 +1,6 @@
 /arch
+/apps
+/avr
 /math.h
 /float.h
 /stdarg.h
@@ -6,11 +8,6 @@
 /features.h
 /uClibc++
 /libcxx
-/libcxxabi
 /machine
-/newlib
 /openamp
-/openlibm
 /metal
-/etl
-/minmea

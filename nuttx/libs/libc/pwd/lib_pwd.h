@@ -1,22 +1,35 @@
 /****************************************************************************
  * libs/libc/pwd/lib_pwd.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Michael Jung <mijung@gmx.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,24 +43,16 @@
 #include <nuttx/config.h>
 
 #include <pwd.h>
-#include <shadow.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef CONFIG_LIBC_PASSWD_LINESIZE
-#  define CONFIG_LIBC_PASSWD_LINESIZE 80
-#endif
-
-#define ROOT_NAME   "root"
-#define ROOT_UID    0
-#define ROOT_GID    0
-#define ROOT_GEOCS  "root"
-#define ROOT_DIR    "/root"
-#define ROOT_SHELL  "/bin/nsh"
-#define ROOT_PASSWD "root"
-#define ROOT_PWDP   "$1$123$SGj4CnC7VtiFx.tjjtazK1"
+#define ROOT_NAME  "root"
+#define ROOT_UID   0
+#define ROOT_GID   0
+#define ROOT_DIR   "/root"
+#define ROOT_SHELL "/bin/nsh"
 
 /****************************************************************************
  * Public Data
@@ -61,23 +66,21 @@ extern "C"
 #define EXTERN extern
 #endif
 
+#ifdef CONFIG_LIBC_PASSWD_FILE
 /* Data for non-reentrant group functions */
 
-EXTERN int g_passwd_index;
 EXTERN struct passwd g_passwd;
-EXTERN struct spwd g_spwd;
 EXTERN char g_passwd_buffer[CONFIG_LIBC_PASSWD_LINESIZE];
+#endif
 
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
 
 FAR struct passwd *getpwbuf(uid_t uid, gid_t gid, FAR const char *name,
-                            FAR const char *gecos, FAR const char *dir,
-                            FAR const char *shell, FAR const char *passwd);
+                            FAR const char *dir, FAR const char *shell);
 int getpwbuf_r(uid_t uid, gid_t gid, FAR const char *name,
-               FAR const char *gecos, FAR const char *dir,
-               FAR const char *shell, FAR const char *passwd,
+               FAR const char *dir, FAR const char *shell,
                FAR struct passwd *pwd, FAR char *buf, size_t buflen,
                FAR struct passwd **result);
 
@@ -86,8 +89,6 @@ int pwd_findby_name(FAR const char *uname, FAR struct passwd *entry,
                     FAR char *buffer, size_t buflen);
 int pwd_findby_uid(uid_t uid, FAR struct passwd *entry, FAR char *buffer,
                    size_t buflen);
-int pwd_findby_index(int index, FAR struct passwd *entry,
-                     FAR char *buffer, size_t buflen);
 #endif
 
 #undef EXTERN

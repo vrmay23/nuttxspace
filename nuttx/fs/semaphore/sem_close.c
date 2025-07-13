@@ -1,8 +1,6 @@
 /****************************************************************************
  * fs/semaphore/sem_close.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,7 +25,6 @@
 #include <nuttx/config.h>
 
 #include <sched.h>
-#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/kmalloc.h>
@@ -35,7 +32,6 @@
 #include <nuttx/fs/fs.h>
 
 #include "inode/inode.h"
-#include "vfs/vfs.h"
 
 #ifdef CONFIG_FS_NAMED_SEMAPHORES
 
@@ -44,7 +40,7 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name:  nxsem_close
+ * Name:  sem_close
  *
  * Description:
  *   This function is called to indicate that the calling task is finished
@@ -60,7 +56,7 @@
  *  sem - semaphore descriptor
  *
  * Returned Value:
- *  0 (OK), or negated errno if unsuccessful.
+ *  0 (OK), or -1 (ERROR) if unsuccessful.
  *
  * Assumptions:
  *   - Care must be taken to avoid risking the deletion of a semaphore that
@@ -69,10 +65,11 @@
  *
  ****************************************************************************/
 
-int nxsem_close(FAR sem_t *sem)
+int sem_close(FAR sem_t *sem)
 {
   FAR struct nsem_inode_s *nsem;
   struct inode *inode;
+  int ret;
 
   DEBUGASSERT(sem);
 
@@ -82,13 +79,34 @@ int nxsem_close(FAR sem_t *sem)
   DEBUGASSERT(nsem->ns_inode);
   inode = nsem->ns_inode;
 
+  /* Decrement the reference count on the inode */
+
+  do
+    {
+      ret = inode_semtake();
+
+      /* The only error that is expected is due to thread cancellation.
+       * At this point, we must continue to free the semaphore anyway.
+       */
+
+      DEBUGASSERT(ret == OK || ret == -ECANCELED);
+    }
+  while (ret < 0);
+
+  if (inode->i_crefs > 0)
+    {
+      inode->i_crefs--;
+    }
+
   /* If the semaphore was previously unlinked and the reference count has
    * decremented to zero, then release the semaphore and delete the inode
    * now.
    */
 
-  if (atomic_fetch_sub(&inode->i_crefs, 1) <= 1)
+  if (inode->i_crefs <= 0 && (inode->i_flags & FSNODEFLAG_DELETED) != 0)
     {
+      /* Destroy the semaphore and free the container */
+
       nxsem_destroy(&nsem->ns_sem);
       group_free(NULL, nsem);
 
@@ -96,13 +114,14 @@ int nxsem_close(FAR sem_t *sem)
        * unlinked, then the peer pointer should be NULL.
        */
 
-#ifdef CONFIG_FS_NOTIFY
-      notify_close2(inode);
-#endif
+      inode_semgive();
+
       DEBUGASSERT(inode->i_peer == NULL);
       inode_free(inode);
+      return OK;
     }
 
+  inode_semgive();
   return OK;
 }
 

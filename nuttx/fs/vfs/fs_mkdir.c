@@ -1,8 +1,6 @@
 /****************************************************************************
  * fs/vfs/fs_mkdir.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -35,14 +33,23 @@
 #include <nuttx/fs/fs.h>
 
 #include "inode/inode.h"
-#include "vfs.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
+#undef FS_HAVE_WRITABLE_MOUNTPOINT
+#if !defined(CONFIG_DISABLE_MOUNTPOINT) && CONFIG_NFILE_STREAMS > 0
+#  define FS_HAVE_WRITABLE_MOUNTPOINT 1
+#endif
+
+#undef FS_HAVE_PSEUDOFS_OPERATIONS
+#if !defined(CONFIG_DISABLE_PSEUDOFS_OPERATIONS) && CONFIG_NFILE_STREAMS > 0
+#  define FS_HAVE_PSEUDOFS_OPERATIONS 1
+#endif
+
 #undef FS_HAVE_MKDIR
-#if !defined(CONFIG_DISABLE_MOUNTPOINT) || !defined(CONFIG_DISABLE_PSEUDOFS_OPERATIONS)
+#if defined(FS_HAVE_WRITABLE_MOUNTPOINT) || defined(FS_HAVE_PSEUDOFS_OPERATIONS)
 #  define FS_HAVE_MKDIR 1
 #endif
 
@@ -66,8 +73,6 @@ int mkdir(const char *pathname, mode_t mode)
   int errcode;
   int ret;
 
-  mode &= ~getumask();
-
   /* Find the inode that includes this path */
 
   SETUP_SEARCH(&desc, pathname, false);
@@ -81,12 +86,6 @@ int mkdir(const char *pathname, mode_t mode)
 
       inode = desc.node;
       DEBUGASSERT(inode != NULL);
-
-      if (desc.relpath[0] == '\0')
-        {
-          errcode = EEXIST;
-          goto errout_with_inode;
-        }
 
 #ifndef CONFIG_DISABLE_MOUNTPOINT
       /* Check if the inode is a valid mountpoint. */
@@ -141,9 +140,15 @@ int mkdir(const char *pathname, mode_t mode)
        * count of zero.
        */
 
-      inode_lock();
-      ret = inode_reserve(pathname, mode, &inode);
-      inode_unlock();
+      ret = inode_semtake();
+      if (ret < 0)
+        {
+          errcode = -ret;
+          goto errout_with_search;
+        }
+
+      ret = inode_reserve(pathname, &inode);
+      inode_semgive();
 
       if (ret < 0)
         {
@@ -162,9 +167,6 @@ int mkdir(const char *pathname, mode_t mode)
   /* Directory successfully created */
 
   RELEASE_SEARCH(&desc);
-#ifdef CONFIG_FS_NOTIFY
-  notify_mkdir(pathname);
-#endif
   return OK;
 
 errout_with_inode:

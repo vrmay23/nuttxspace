@@ -1,8 +1,6 @@
 /****************************************************************************
  * net/igmp/igmp_leave.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- *
  *   Copyright (C) 2010-2011, 2014, 2018 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -21,21 +19,21 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of CITEL Technologies Ltd nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
+ * 3. Neither the name of CITEL Technologies Ltd nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY CITEL TECHNOLOGIES AND CONTRIBUTORS ``AS IS''
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL CITEL TECHNOLOGIES OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * ARE DISCLAIMED.  IN NO EVENT SHALL CITEL TECHNOLOGIES OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -140,25 +138,13 @@ int igmp_leavegroup(struct net_driver_s *dev,
   ninfo("Leaving group: %p\n", group);
   if (group)
     {
-      DEBUGASSERT(group->njoins > 0);
-      group->njoins--;
-
-      /* Take no further actions if there are other members of this group
-       * on this host.
+      /* Cancel the timer and discard any queued Membership Reports.  Canceling
+       * the timer will prevent any new Membership Reports from being sent;
+       * clearing the flags will discard any pending Membership Reports that
+       * could interfere with the Leave Group.
        */
 
-      if (group->njoins > 0)
-        {
-          return OK;
-        }
-
-      /* Cancel the timer and discard any queued Membership Reports.
-       * Canceling the timer will prevent any new Membership Reports from
-       * being sent; clearing the flags will discard any pending Membership
-       * Reports that could interfere with the Leave Group.
-       */
-
-      wd_cancel(&group->wdog);
+      wd_cancel(group->wdog);
       CLR_SCHEDMSG(group->flags);
       CLR_WAITMSG(group->flags);
 
@@ -166,7 +152,7 @@ int igmp_leavegroup(struct net_driver_s *dev,
 
       /* Send a leave if the flag is set according to the state diagram */
 
-      if (IFF_IS_UP(dev->d_flags) && IS_LASTREPORT(group->flags))
+      if (IS_LASTREPORT(group->flags))
         {
           ninfo("Schedule Leave Group message\n");
           IGMP_STATINCR(g_netstats.igmp.leave_sched);
@@ -182,7 +168,7 @@ int igmp_leavegroup(struct net_driver_s *dev,
 
       igmp_grpfree(dev, group);
 
-      /* And remove the group address from the drivers MAC filter set */
+      /* And remove the group address from the ethernet drivers MAC filter set */
 
       igmp_removemcastmac(dev, (FAR in_addr_t *)&grpaddr->s_addr);
       return OK;

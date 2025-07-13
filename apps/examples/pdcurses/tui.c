@@ -1,27 +1,45 @@
 /****************************************************************************
  * apps/examples/pdcurses/tui.c
+ * Textual User Interface
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Author : P.J. Kunst <kunst@prl.philips.nl>
+ *   Date   : 25-02-93
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * $Id: tui.c,v 1.34 2008/07/14 12:35:23 wmcbrine Exp $
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Adapted by: Gregory Nutt <gnutt@nuttx.org>
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Adapted from the original public domain pdcurses by Gregory Nutt and
+ * released as part of NuttX under the 3-clause BSD license:
  *
- ****************************************************************************/
-
-/****************************************************************************
-  * Adapted from the original public domain pdcurses by Gregory Nutt
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
  ****************************************************************************/
 
 /****************************************************************************
@@ -43,7 +61,7 @@
  ****************************************************************************/
 
 #ifdef A_COLOR
-#  define TITLECOLOR       1            /* color pair indices */
+#  define TITLECOLOR       1    /* color pair indices */
 #  define MAINMENUCOLOR    (2 | A_BOLD)
 #  define MAINMENUREVCOLOR (3 | A_BOLD | A_REVERSE)
 #  define SUBMENUCOLOR     (4 | A_BOLD)
@@ -53,7 +71,7 @@
 #  define INPUTBOXCOLOR    8
 #  define EDITBOXCOLOR     (9 | A_BOLD | A_REVERSE)
 #else
-#  define TITLECOLOR       0            /* color pair indices */
+#  define TITLECOLOR       0    /* color pair indices */
 #  define MAINMENUCOLOR    (A_BOLD)
 #  define MAINMENUREVCOLOR (A_BOLD | A_REVERSE)
 #  define SUBMENUCOLOR     (A_BOLD)
@@ -64,11 +82,11 @@
 #  define EDITBOXCOLOR     (A_BOLD | A_REVERSE)
 #endif
 
-#define th 1                            /* title window height */
-#define mh 1                            /* main menu height */
-#define sh 2                            /* status window height */
+#define th 1                    /* title window height */
+#define mh 1                    /* main menu height */
+#define sh 2                    /* status window height */
 #define bh (LINES - th - mh - sh)       /* body window height */
-#define bw COLS                         /* body window width */
+#define bw COLS                 /* body window width */
 
 /****************************************************************************
  * Private Data
@@ -94,9 +112,8 @@ static char *padstr(char *s, int length)
   static char buf[MAXSTRLEN];
   char fmt[10];
 
-  snprintf(fmt, sizeof(fmt),
-           (int)strlen(s) > length ? "%%.%ds" : "%%-%ds", length);
-  snprintf(buf, sizeof(buf), fmt, s);
+  sprintf(fmt, (int)strlen(s) > length ? "%%.%ds" : "%%-%ds", length);
+  sprintf(buf, fmt, s);
 
   return buf;
 }
@@ -209,7 +226,7 @@ static void idle(void)
     }
 
   tp = localtime(&t);
-  snprintf(buf, sizeof(buf), " %.2d-%.2d-%.4d  %.2d:%.2d:%.2d",
+  sprintf(buf, " %.2d-%.2d-%.4d  %.2d:%.2d:%.2d",
           tp->tm_mday, tp->tm_mon + 1, tp->tm_year + 1900,
           tp->tm_hour, tp->tm_min, tp->tm_sec);
 
@@ -301,12 +318,7 @@ static void mainhelp(void)
 
 static void mainmenu(menu *mp)
 {
-  int nitems;
-  int barlen;
-  int c;
-  int cur0;
-  int old = -1;
-  int cur = 0;
+  int nitems, barlen, old = -1, cur = 0, c, cur0;
 
   menudim(mp, &nitems, &barlen);
   repaintmainmenu(barlen, mp);
@@ -607,12 +619,13 @@ void domenu(const menu *mp)
           do
             {
               cur = (cur + 1) % nitems;
+
             }
-          while ((cur != cur0) && (hotkey(mp[cur].name)
-                                   != toupper((int)key)));
+          while ((cur != cur0) && (hotkey(mp[cur].name) != toupper((int)key)));
 
           key = (hotkey(mp[cur].name) == toupper((int)key)) ? '\n' : ERR;
         }
+
     }
 
   rmerror();
@@ -699,27 +712,18 @@ static void repainteditbox(WINDOW *win, int x, char *buf)
 
 int weditstr(WINDOW *win, char *buf, int field)
 {
-  char org[MAXSTRLEN];
-  char *tp;
-  char *bp = buf;
-  bool defdisp = true;
-  bool stop = false;
-  bool insert = false;
-  int cury;
-  int curx;
-  int begy;
-  int begx;
-  int oldattr;
-  int c = 0;
+  char org[MAXSTRLEN], *tp, *bp = buf;
+  bool defdisp = true, stop = false, insert = false;
+  int cury, curx, begy, begx, oldattr;
   WINDOW *wedit;
+  int c = 0;
 
-  if ((field >= MAXSTRLEN) || (buf == NULL) ||
-      ((int)strlen(buf) > field - 1))
+  if ((field >= MAXSTRLEN) || (buf == NULL) || ((int)strlen(buf) > field - 1))
     {
       return ERR;
     }
 
-  strlcpy(org, buf, sizeof(org));             /* save original */
+  strcpy(org, buf);             /* save original */
 
   wrefresh(win);
   getyx(win, cury, curx);
@@ -776,7 +780,7 @@ int weditstr(WINDOW *win, char *buf, int field)
         case KEY_DC:
           if (*bp != 0)
             {
-              memmove((void *)(bp), (const void *)(bp + 1), strlen(bp));
+              memmove((void *)(bp), (const void *)(bp+1), strlen(bp));
             }
           break;
 
@@ -785,8 +789,7 @@ int weditstr(WINDOW *win, char *buf, int field)
             {
               if (bp > buf)
                 {
-                  memmove((void *)(bp - 1), (const void *)bp,
-                          strlen(bp) + 1);
+                  memmove((void *)(bp - 1), (const void *)bp, strlen(bp) + 1);
                   bp--;
                 }
             }
@@ -851,10 +854,7 @@ int weditstr(WINDOW *win, char *buf, int field)
 WINDOW *winputbox(WINDOW *win, int nlines, int ncols)
 {
   WINDOW *winp;
-  int cury;
-  int curx;
-  int begy;
-  int begx;
+  int cury, curx, begy, begx;
 
   getyx(win, cury, curx);
   getbegyx(win, begy, begx);
@@ -868,16 +868,7 @@ WINDOW *winputbox(WINDOW *win, int nlines, int ncols)
 int getstrings(const char *desc[], char *buf[], int field)
 {
   WINDOW *winput;
-  int oldy;
-  int oldx;
-  int maxy;
-  int maxx;
-  int nlines;
-  int ncols;
-  int i;
-  int n;
-  int l;
-  int mmax = 0;
+  int oldy, oldx, maxy, maxx, nlines, ncols, i, n, l, mmax = 0;
   int c = 0;
   bool stop = false;
 

@@ -1,22 +1,40 @@
 /****************************************************************************
  * net/pkt/pkt_input.c
+ * Handling incoming packet input
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014, 2020 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Adapted for NuttX from logic in uIP which also has a BSD-like license:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Original author Adam Dunkels <adam@dunkels.com>
+ *   Copyright () 2001-2003, Adam Dunkels.
+ *   All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote
+ *    products derived from this software without specific prior
+ *    written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +48,6 @@
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/mm/iob.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/net/pkt.h>
 
@@ -38,142 +55,10 @@
 #include "pkt/pkt.h"
 
 /****************************************************************************
- * Private Functions
+ * Pre-processor Definitions
  ****************************************************************************/
 
-/****************************************************************************
- * Name: pkt_datahandler
- *
- * Description:
- *   Handle packet that are not accepted by the application.
- *
- * Input Parameters:
- *   dev    - Device instance only the input packet in d_buf, length = d_len;
- *   conn   - A pointer to the PKT connection structure
- *
- * Returned Value:
- *   The number of bytes actually buffered is returned.  This will be either
- *   zero or equal to buflen; partial packets are not buffered.
- *
- ****************************************************************************/
-
-static uint16_t pkt_datahandler(FAR struct net_driver_s *dev,
-                                FAR struct pkt_conn_s *conn)
-{
-  FAR struct iob_s *iob = iob_tryalloc(true);
-  int ret;
-
-  if (iob == NULL)
-    {
-      return 0;
-    }
-
-  /* Clone an I/O buffer chain of the L2 data, use throttled IOB to avoid
-   * overconsumption.
-   * TODO: Optimize IOB clone after we support shared IOB.
-   */
-
-  ret = iob_clone_partial(dev->d_iob, dev->d_len, -NET_LL_HDRLEN(dev),
-                          iob, 0, true, false);
-  if (ret < 0)
-    {
-      nerr("ERROR: Failed to clone the I/O buffer chain: %d\n", ret);
-      goto errout;
-    }
-
-  /* Add the new I/O buffer chain to the tail of the read-ahead queue (again
-   * without waiting).
-   */
-
-  if ((ret = iob_tryadd_queue(iob, &conn->readahead)) < 0)
-    {
-      nerr("ERROR: Failed to queue the I/O buffer chain: %d\n", ret);
-      goto errout;
-    }
-  else
-    {
-      ninfo("Buffered %d bytes\n", dev->d_len);
-      return dev->d_len;
-    }
-
-errout:
-  iob_free_chain(iob);
-  return 0;
-}
-
-/****************************************************************************
- * Name: pkt_in
- *
- * Description:
- *   Handle incoming packet input
- *
- *   This is the iob buffer version of pkt_input(),
- *   this function will support send/receive iob vectors directly between
- *   the driver and l3/l4 stack to avoid unnecessary memory copies,
- *   especially on hardware that supports Scatter/gather, which can
- *   greatly improve performance
- *   this function will uses d_iob as packets input which used by some
- *   NICs such as celluler net driver.
- *
- * Input Parameters:
- *   dev - The device driver structure containing the received packet
- *
- * Returned Value:
- *   OK     The packet has been processed  and can be deleted
- *  -EAGAIN There is a matching connection, but could not dispatch the packet
- *          yet.  Useful when a packet arrives before a recv call is in
- *          place.
- *
- * Assumptions:
- *   The network is locked.
- *
- ****************************************************************************/
-
-static int pkt_in(FAR struct net_driver_s *dev)
-{
-  FAR struct pkt_conn_s *conn;
-  int ret = OK;
-
-  conn = pkt_active(dev);
-  if (conn)
-    {
-      uint16_t flags;
-
-      /* Setup for the application callback */
-
-      dev->d_appdata = dev->d_buf;
-      dev->d_sndlen  = 0;
-
-      /* Perform the application callback */
-
-      flags = pkt_callback(dev, conn, PKT_NEWDATA);
-
-      /* If the operation was successful, the PKT_NEWDATA flag is removed
-       * and thus the packet can be deleted (OK will be returned).
-       */
-
-      if ((flags & PKT_NEWDATA) != 0)
-        {
-          /* Add the PKT to the socket read-ahead buffer. */
-
-          if (pkt_datahandler(dev, conn) == 0)
-            {
-              /* No.. the packet was not processed now.  Return -EAGAIN so
-               * that the driver may retry again later.
-               */
-
-              nwarn("WARNING: Packet not processed\n");
-              ret = -EAGAIN;
-            }
-        }
-    }
-  else
-    {
-      ninfo("No PKT listener\n");
-    }
-
-  return ret;
-}
+#define PKTBUF ((FAR struct eth_hdr_s *)&dev->d_buf)
 
 /****************************************************************************
  * Public Functions
@@ -199,26 +84,48 @@ static int pkt_in(FAR struct net_driver_s *dev)
  *
  ****************************************************************************/
 
-int pkt_input(FAR struct net_driver_s *dev)
+int pkt_input(struct net_driver_s *dev)
 {
-  FAR uint8_t *buf;
-  int ret;
+  FAR struct pkt_conn_s *conn;
+  FAR struct eth_hdr_s  *pbuf = (FAR struct eth_hdr_s *)dev->d_buf;
+  int ret = OK;
 
-  if (dev->d_iob != NULL)
+  conn = pkt_active(pbuf);
+  if (conn)
     {
-      buf = dev->d_buf;
+      uint16_t flags;
 
-      /* Set the device buffer to l2 */
+      /* Setup for the application callback */
 
-      dev->d_buf = NETLLBUF;
-      ret = pkt_in(dev);
+      dev->d_appdata = dev->d_buf;
+      dev->d_sndlen  = 0;
 
-      dev->d_buf = buf;
+      /* Perform the application callback */
 
-      return ret;
+      flags = pkt_callback(dev, conn, PKT_NEWDATA);
+
+      /* If the operation was successful, the PKT_NEWDATA flag is removed
+       * and thus the packet can be deleted (OK will be returned).
+       */
+
+      if ((flags & PKT_NEWDATA) != 0)
+        {
+          /* No.. the packet was not processed now.  Return -EAGAIN so
+           * that the driver may retry again later.  We still need to
+           * set d_len to zero so that the driver is aware that there
+           * is nothing to be sent.
+           */
+
+           nwarn("WARNING: Packet not processed\n");
+           ret = -EAGAIN;
+        }
+    }
+  else
+    {
+      ninfo("No PKT listener\n");
     }
 
-  return netdev_input(dev, pkt_in, false);
+  return ret;
 }
 
 #endif /* CONFIG_NET && CONFIG_NET_PKT */

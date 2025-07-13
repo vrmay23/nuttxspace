@@ -1,9 +1,8 @@
 /****************************************************************************
- * arch/x86/src/qemu/qemu_keypad.c
+ * arch/x86/src/qemu_keypad.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2013 Li Zhuoyi. All rights reserved.
- * SPDX-FileContributor: Li Zhuoyi <lzyy.cn@gmail.com>
+ *   Copyright (C) 2013 Li Zhuoyi. All rights reserved.
+ *   Author: Li Zhuoyi <lzyy.cn@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -109,32 +108,32 @@ typedef enum
   KEY_CARET          = 94,
   KEY_UNDERSCORE     = 95,
   KEY_BACKQUOTE      = 96,
-  KEY_LOW_A          = 97,
-  KEY_LOW_B          = 98,
-  KEY_LOW_C          = 99,
-  KEY_LOW_D          = 100,
-  KEY_LOW_E          = 101,
-  KEY_LOW_F          = 102,
-  KEY_LOW_G          = 103,
-  KEY_LOW_H          = 104,
-  KEY_LOW_I          = 105,
-  KEY_LOW_J          = 106,
-  KEY_LOW_K          = 107,
-  KEY_LOW_L          = 108,
-  KEY_LOW_M          = 109,
-  KEY_LOW_N          = 110,
-  KEY_LOW_O          = 111,
-  KEY_LOW_P          = 112,
-  KEY_LOW_Q          = 113,
-  KEY_LOW_R          = 114,
-  KEY_LOW_S          = 115,
-  KEY_LOW_T          = 116,
-  KEY_LOW_U          = 117,
-  KEY_LOW_V          = 118,
-  KEY_LOW_W          = 119,
-  KEY_LOW_X          = 120,
-  KEY_LOW_Y          = 121,
-  KEY_LOW_Z          = 122,
+  KEY_a              = 97,
+  KEY_b              = 98,
+  KEY_c              = 99,
+  KEY_d              = 100,
+  KEY_e              = 101,
+  KEY_f              = 102,
+  KEY_g              = 103,
+  KEY_h              = 104,
+  KEY_i              = 105,
+  KEY_j              = 106,
+  KEY_k              = 107,
+  KEY_l              = 108,
+  KEY_m              = 109,
+  KEY_n              = 110,
+  KEY_o              = 111,
+  KEY_p              = 112,
+  KEY_q              = 113,
+  KEY_r              = 114,
+  KEY_s              = 115,
+  KEY_t              = 116,
+  KEY_u              = 117,
+  KEY_v              = 118,
+  KEY_w              = 119,
+  KEY_x              = 120,
+  KEY_y              = 121,
+  KEY_z              = 122,
   KEY_DELETE         = 127,
   KEY_DEBUG          = 138,     /* 0x80+0x0a */
 
@@ -198,13 +197,15 @@ typedef enum
   /* Add any other keys here */
 
   KEY_LAST
-} mdk_key;
+} MDKKey;
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static ssize_t keypad_read(struct file *filep, char *buf, size_t buflen);
+static int keypad_open(struct file *filep);
+static int keypad_close(struct file *filep);
+static ssize_t keypad_read(struct file *filep, FAR char *buf, size_t buflen);
 
 /****************************************************************************
  * Private Data
@@ -229,7 +230,7 @@ static const unsigned char g_kdbus[128] =
   KEY_F1,                                                /* 59 - F1 key ... > */
   KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9,
   KEY_F10,                                               /* < ... F10 */
-  0,                                                     /* 69 - Num lock */
+  0,                                                     /* 69 - Num lock*/
   0,                                                     /* Scroll Lock */
   KEY_HOME,                                              /* Home key */
   KEY_UP,                                                /* Up Arrow */
@@ -239,7 +240,7 @@ static const unsigned char g_kdbus[128] =
   0,
   KEY_RIGHT,                                             /* Right Arrow */
   '+',
-  KEY_END,                                               /* 79 - End key */
+  KEY_END,                                               /* 79 - End key*/
   KEY_DOWN,                                              /* Down Arrow */
   KEY_PAGEDOWN,                                          /* Page Down */
   KEY_INSERT,                                            /* Insert Key */
@@ -252,16 +253,29 @@ static const unsigned char g_kdbus[128] =
 
 static const struct file_operations g_keypadops =
 {
-  NULL,         /* open */
-  NULL,         /* close */
-  keypad_read,  /* read */
+  keypad_open,                  /* open */
+  keypad_close,                 /* close */
+  keypad_read,                  /* read */
+  0,                            /* write */
+  0,                            /* seek */
+  0,                            /* ioctl */
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-static ssize_t keypad_read(struct file *filep, char *buf, size_t buflen)
+static int keypad_open(struct file *filep)
+{
+  return OK;
+}
+
+static int keypad_close(struct file *filep)
+{
+  return OK;
+}
+
+static ssize_t keypad_read(struct file *filep, FAR char *buf, size_t buflen)
 {
   uint_fast8_t keycode = 0;
   uint_fast8_t scancode = 0;
@@ -292,7 +306,6 @@ static ssize_t keypad_read(struct file *filep, char *buf, size_t buflen)
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
-
 /****************************************************************************
  * Name:  qemu_keypad
  *

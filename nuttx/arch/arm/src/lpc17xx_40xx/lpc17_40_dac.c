@@ -1,10 +1,13 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/lpc17xx_40xx/lpc17_40_dac.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2010, 2014, 2016 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2011 Li Zhuoyi. All rights reserved.
- * SPDX-FileContributor: Li Zhuoyi <lzyy.cn@gmail.com>
+ *   Copyright (C) 2011 Li Zhuoyi. All rights reserved.
+ *   Author: Li Zhuoyi <lzyy.cn@gmail.com>
+ *   History: 0.1 2011-08-05 initial version
+ *
+ * This file is a part of NuttX:
+ *
+ *   Copyright (C) 2010, 2014, 2016 Gregory Nutt. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +36,7 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -53,7 +56,9 @@
 #include <nuttx/arch.h>
 #include <nuttx/analog/dac.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 
 #include "hardware/lpc17_40_syscon.h"
@@ -73,12 +78,12 @@
 
 /* DAC methods */
 
-static void dac_reset(struct dac_dev_s *dev);
-static int  dac_setup(struct dac_dev_s *dev);
-static void dac_shutdown(struct dac_dev_s *dev);
-static void dac_txint(struct dac_dev_s *dev, bool enable);
-static int  dac_send(struct dac_dev_s *dev, struct dac_msg_s *msg);
-static int  dac_ioctl(struct dac_dev_s *dev, int cmd, unsigned long arg);
+static void dac_reset(FAR struct dac_dev_s *dev);
+static int  dac_setup(FAR struct dac_dev_s *dev);
+static void dac_shutdown(FAR struct dac_dev_s *dev);
+static void dac_txint(FAR struct dac_dev_s *dev, bool enable);
+static int  dac_send(FAR struct dac_dev_s *dev, FAR struct dac_msg_s *msg);
+static int  dac_ioctl(FAR struct dac_dev_s *dev, int cmd, unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -107,7 +112,7 @@ static struct dac_dev_s g_dacdev =
  * is called, before ao_setup() and on error conditions.
  */
 
-static void dac_reset(struct dac_dev_s *dev)
+static void dac_reset(FAR struct dac_dev_s *dev)
 {
   irqstate_t flags;
   uint32_t regval;
@@ -119,7 +124,7 @@ static void dac_reset(struct dac_dev_s *dev)
   regval |= (SYSCON_PCLKSEL_CCLK8 << SYSCON_PCLKSEL0_DAC_SHIFT);
   putreg32(regval, LPC17_40_SYSCON_PCLKSEL0);
 
-  /* putreg32(DAC_CTRL_DBLBUFEN, LPC17_40_DAC_CTRL); ? */
+  //putreg32(DAC_CTRL_DBLBUFEN, LPC17_40_DAC_CTRL); ?
 
   lpc17_40_configgpio(GPIO_AOUT);
 
@@ -132,7 +137,7 @@ static void dac_reset(struct dac_dev_s *dev)
  * are all disabled upon return.
  */
 
-static int  dac_setup(struct dac_dev_s *dev)
+static int  dac_setup(FAR struct dac_dev_s *dev)
 {
   return OK;
 }
@@ -141,17 +146,17 @@ static int  dac_setup(struct dac_dev_s *dev)
  * This method reverses the operation the setup method.
  */
 
-static void dac_shutdown(struct dac_dev_s *dev)
+static void dac_shutdown(FAR struct dac_dev_s *dev)
 {
 }
 
 /* Call to enable or disable TX interrupts */
 
-static void dac_txint(struct dac_dev_s *dev, bool enable)
+static void dac_txint(FAR struct dac_dev_s *dev, bool enable)
 {
 }
 
-static int  dac_send(struct dac_dev_s *dev, struct dac_msg_s *msg)
+static int  dac_send(FAR struct dac_dev_s *dev, FAR struct dac_msg_s *msg)
 {
   /* adjust the binary value to the lpc1768's register format (plus high
    * speed profile in bit 16)
@@ -164,7 +169,7 @@ static int  dac_send(struct dac_dev_s *dev, struct dac_msg_s *msg)
 
 /* All ioctl calls will be routed through this method */
 
-static int dac_ioctl(struct dac_dev_s *dev, int cmd, unsigned long arg)
+static int dac_ioctl(FAR struct dac_dev_s *dev, int cmd, unsigned long arg)
 {
   aerr("ERROR: Fix me -- Not Implemented\n");
   return 0;
@@ -185,7 +190,7 @@ static int dac_ioctl(struct dac_dev_s *dev, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-struct dac_dev_s *lpc17_40_dacinitialize(void)
+FAR struct dac_dev_s *lpc17_40_dacinitialize(void)
 {
   return &g_dacdev;
 }

@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/module/mod_procfs.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -39,7 +52,7 @@
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/module.h>
-#include <nuttx/lib/elf.h>
+#include <nuttx/lib/modlib.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/procfs.h>
 
@@ -102,13 +115,12 @@ static int     modprocfs_stat(FAR const char *relpath, FAR struct stat *buf);
  * with any compiler.
  */
 
-const struct procfs_operations g_module_operations =
+const struct procfs_operations module_operations =
 {
   modprocfs_open,       /* open */
   modprocfs_close,      /* close */
   modprocfs_read,       /* read */
   NULL,                 /* write */
-  NULL,                 /* poll */
   modprocfs_dup,        /* dup */
 
   NULL,                 /* opendir */
@@ -137,13 +149,21 @@ static int modprocfs_callback(FAR struct module_s *modp, FAR void *arg)
   priv = (FAR struct modprocfs_file_s *)arg;
 
   linesize = snprintf(priv->line, MOD_LINELEN,
-                      "%s,%p,%p,%u,%p,%lu,%p,%lu\n",
-                      modp->modname,
+                      "%s,%p,%p,%p,%u,%p,%lu,%p,%lu\n",
+                      modp->modname, modp->initializer,
                       modp->modinfo.uninitializer, modp->modinfo.arg,
                       modp->modinfo.nexports,
+#if defined(CONFIG_ARCH_USE_MODULE_TEXT)
                       modp->textalloc,
+#else
+                      modp->alloc,
+#endif
                       (unsigned long)modp->textsize,
+#if defined(CONFIG_ARCH_USE_MODULE_TEXT)
                       (FAR uint8_t *)modp->dataalloc,
+#else
+                      (FAR uint8_t *)modp->alloc + modp->textsize,
+#endif
                       (unsigned long)modp->datasize);
   copysize = procfs_memcpy(priv->line, linesize, priv->buffer,
                            priv->remaining, &priv->offset);
@@ -151,7 +171,7 @@ static int modprocfs_callback(FAR struct module_s *modp, FAR void *arg)
   priv->buffer    += copysize;
   priv->remaining -= copysize;
 
-  return priv->totalsize >= priv->buflen;
+  return (priv->totalsize >= priv->buflen) ? 1 : 0;
 }
 
 /****************************************************************************
@@ -191,7 +211,7 @@ static int modprocfs_open(FAR struct file *filep, FAR const char *relpath,
    * filep->f_priv.
    */
 
-  filep->f_priv = priv;
+  filep->f_priv = (FAR void *)priv;
   return OK;
 }
 
@@ -225,7 +245,7 @@ static ssize_t modprocfs_read(FAR struct file *filep, FAR char *buffer,
   FAR struct modprocfs_file_s *priv;
   int ret;
 
-  finfo("buffer=%p buflen=%zu\n", buffer, buflen);
+  finfo("buffer=%p buflen=%lu\n", buffer, (unsigned long)buflen);
 
   /* Recover our private data from the struct file instance */
 
@@ -240,7 +260,7 @@ static ssize_t modprocfs_read(FAR struct file *filep, FAR char *buffer,
   priv->buflen    = buflen;
   priv->offset    = filep->f_pos;
 
-  ret = libelf_registry_foreach(modprocfs_callback, priv);
+  ret = modlib_registry_foreach(modprocfs_callback, priv);
   if (ret >= 0)
     {
       filep->f_pos += priv->totalsize;
@@ -286,7 +306,7 @@ static int modprocfs_dup(FAR const struct file *oldp, FAR struct file *newp)
 
   /* Save the new attributes in the new file structure */
 
-  newp->f_priv = newpriv;
+  newp->f_priv = (FAR void *)newpriv;
   return OK;
 }
 
@@ -300,7 +320,7 @@ static int modprocfs_dup(FAR const struct file *oldp, FAR struct file *newp)
 static int modprocfs_stat(FAR const char *relpath, FAR struct stat *buf)
 {
   memset(buf, 0, sizeof(struct stat));
-  buf->st_mode = S_IFREG | S_IROTH | S_IRGRP | S_IRUSR;
+  buf->st_mode    = S_IFREG | S_IROTH | S_IRGRP | S_IRUSR;
   return OK;
 }
 

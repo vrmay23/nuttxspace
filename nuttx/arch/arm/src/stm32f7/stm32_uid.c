@@ -1,9 +1,8 @@
-/****************************************************************************
- * arch/arm/src/stm32f7/stm32_uid.c
+/************************************************************************************
+ * arch/arm/src/stm32/stm32_uid.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Marawan Ragab. All rights reserved.
- * SPDX-FileContributor: Marawan Ragab <marawan31@gmail.com>
+ *   Copyright (C) 2015 Marawan Ragab. All rights reserved.
+ *   Author: Marawan Ragab <marawan31@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,11 +31,11 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -46,9 +45,9 @@
 
 #ifdef STM32_SYSMEM_UID
 
-/****************************************************************************
+/************************************************************************************
  * Public Functions
- ****************************************************************************/
+ ************************************************************************************/
 
 void stm32_get_uniqueid(uint8_t uniqueid[12])
 {
@@ -56,7 +55,7 @@ void stm32_get_uniqueid(uint8_t uniqueid[12])
 
   for (i = 0; i < 12; i++)
     {
-      uniqueid[i] = *((uint8_t *)(STM32_SYSMEM_UID) + i);
+      uniqueid[i] = *((uint8_t*)(STM32_SYSMEM_UID)+i);
     }
 }
 

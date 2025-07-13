@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/samv7/sam_tc.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -53,9 +66,6 @@
 #define TC_CHAN6     6  /* TC2 */
 #define TC_CHAN7     7
 #define TC_CHAN8     8
-#define TC_CHAN9     9  /* TC3 */
-#define TC_CHAN10    10
-#define TC_CHAN11    11
 
 /* Register identifier used with sam_tc_setregister */
 
@@ -76,7 +86,6 @@
 /****************************************************************************
  * Public Types
  ****************************************************************************/
-
 /* An opaque handle used to represent a timer channel */
 
 typedef void *TC_HANDLE;
@@ -191,7 +200,7 @@ void sam_tc_stop(TC_HANDLE handle);
  *   arg     An opaque argument that will be provided when the interrupt
  *           handler callback is executed.  Ignored if handler is NULL.
  *   mask    The value of the timer interrupt mask register that defines
- *           which interrupts should be enabled.  Ignored if handler is
+ *           which interrupts should be disabled.  Ignored if handler is
  *           NULL.
  *
  * Returned Value:
@@ -208,7 +217,7 @@ tc_handler_t sam_tc_attach(TC_HANDLE handle, tc_handler_t handler,
  * Name: sam_tc_getpending
  *
  * Description:
- *   Return the current contents of the interrupt status register, clearing
+ *   Return the current contents of the interrutp status register, clearing
  *   all pending interrupts.
  *
  * Input Parameters:
@@ -220,23 +229,6 @@ tc_handler_t sam_tc_attach(TC_HANDLE handle, tc_handler_t handler,
  ****************************************************************************/
 
 uint32_t sam_tc_getpending(TC_HANDLE handle);
-
-/****************************************************************************
- * Name: sam_tc_settcclks
- *
- * Description:
- *   Set the value of TCCLKS clock selection in TC_CMR register
- *
- * Input Parameters:
- *   handle  The handle that represents the timer state
- *   tcclks  The clock selection value to set
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-void sam_tc_settcclks(TC_HANDLE handle, uint32_t tcclks);
 
 /****************************************************************************
  * Name: sam_tc_setregister
@@ -254,7 +246,7 @@ void sam_tc_settcclks(TC_HANDLE handle, uint32_t tcclks);
  *
  ****************************************************************************/
 
-void sam_tc_setregister(TC_HANDLE handle, int regid, uint16_t regval);
+void sam_tc_setregister(TC_HANDLE handle, int regid, uint32_t regval);
 
 /****************************************************************************
  * Name: sam_tc_getregister
@@ -271,7 +263,7 @@ void sam_tc_setregister(TC_HANDLE handle, int regid, uint16_t regval);
  *
  ****************************************************************************/
 
-uint16_t sam_tc_getregister(TC_HANDLE handle, int regid);
+uint32_t sam_tc_getregister(TC_HANDLE handle, int regid);
 
 /****************************************************************************
  * Name: sam_tc_getcounter
@@ -287,24 +279,24 @@ uint16_t sam_tc_getregister(TC_HANDLE handle, int regid);
  *
  ****************************************************************************/
 
-uint16_t sam_tc_getcounter(TC_HANDLE handle);
+uint32_t sam_tc_getcounter(TC_HANDLE handle);
 
 /****************************************************************************
- * Name: sam_tc_setblockmode
+ * Name: sam_tc_infreq
  *
  * Description:
- *   Set the value of TC_BMR register
+ *   Return the timer input frequency, that is, the MCK frequency divided
+ *   down so that the timer/counter is driven within its maximum frequency.
  *
  * Input Parameters:
- *   handle Channel handle previously allocated by sam_tc_allocate()
- *   regval Then value to set in the register
+ *   None
  *
  * Returned Value:
- *   None
+ *  The timer input frequency.
  *
  ****************************************************************************/
 
-void sam_tc_setblockmode(TC_HANDLE handle, uint32_t regval);
+uint32_t sam_tc_infreq(void);
 
 /****************************************************************************
  * Name: sam_tc_divfreq

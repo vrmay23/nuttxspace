@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/nrf52/nrf52_serial.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author:  Janne Rosberg <janne@offcode.fi>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,28 +44,26 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/fs/ioctl.h>
 #include <nuttx/serial/serial.h>
-
-#ifdef CONFIG_SERIAL_TERMIOS
-#  include <termios.h>
-#endif
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "chip.h"
 #include "nrf52_config.h"
 #include "hardware/nrf52_uarte.h"
 #include "nrf52_clockconfig.h"
 #include "nrf52_lowputc.h"
 #include "nrf52_serial.h"
+
+#include <arch/board/board.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -88,7 +99,7 @@
 #ifdef CONFIG_UART0_SERIAL_CONSOLE
 #  define CONSOLE_DEV         g_uart0port /* UART0 is console */
 #  define TTYS0_DEV           g_uart0port /* UART0 is ttyS0 */
-#elif defined(CONFIG_UART1_SERIAL_CONSOLE)
+#elif CONFIG_UART1_SERIAL_CONSOLE
 #  define CONSOLE_DEV         g_uart1port /* UART1 is console */
 #  define TTYS0_DEV           g_uart1port /* UART1 is ttyS0 */
 #endif
@@ -118,9 +129,9 @@ static int  nrf52_setup(struct uart_dev_s *dev);
 static void nrf52_shutdown(struct uart_dev_s *dev);
 static int  nrf52_attach(struct uart_dev_s *dev);
 static void nrf52_detach(struct uart_dev_s *dev);
-static int  nrf52_interrupt(int irq, void *context, void *arg);
+static int  nrf52_interrupt(int irq, void *context, FAR void *arg);
 static int  nrf52_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  nrf52_receive(struct uart_dev_s *dev, unsigned int *status);
+static int  nrf52_receive(struct uart_dev_s *dev, uint32_t *status);
 static void nrf52_rxint(struct uart_dev_s *dev, bool enable);
 static bool nrf52_rxavailable(struct uart_dev_s *dev);
 static void nrf52_send(struct uart_dev_s *dev, int ch);
@@ -376,15 +387,15 @@ static void nrf52_detach(struct uart_dev_s *dev)
  * Name: nrf52_interrupt
  *
  * Description:
- *   This is the UART interrupt handler.  It will be invoked when an
- *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
- *   uart_recvchars to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'arg' to the
+ *   This is the UART status interrupt handler.  It will be invoked when an
+ *   interrupt received on the 'irq'  It should call uart_transmitchars or
+ *   uart_receivechar to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'irq' number into the
  *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
-static int nrf52_interrupt(int irq, void *context, void *arg)
+static int nrf52_interrupt(int irq, void *context, FAR void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   struct nrf52_dev_s *priv;
@@ -412,23 +423,6 @@ static int nrf52_interrupt(int irq, void *context, void *arg)
 }
 
 /****************************************************************************
- * Name: nrf52_set_format
- *
- * Description:
- *   Set the serial line format and speed.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_SERIAL_TERMIOS
-void nrf52_set_format(struct uart_dev_s *dev)
-{
-  struct nrf52_dev_s *priv = (struct nrf52_dev_s *)dev->priv;
-
-  nrf52_usart_setformat(priv->uartbase, &priv->config);
-}
-#endif
-
-/****************************************************************************
  * Name: nrf52_ioctl
  *
  * Description:
@@ -438,116 +432,7 @@ void nrf52_set_format(struct uart_dev_s *dev)
 
 static int nrf52_ioctl(struct file *filep, int cmd, unsigned long arg)
 {
-#ifdef CONFIG_SERIAL_TERMIOS
-  struct inode         *inode  = filep->f_inode;
-  struct uart_dev_s    *dev    = inode->i_private;
-  struct nrf52_dev_s   *priv   = (struct nrf52_dev_s *)dev->priv;
-  struct uart_config_s *config = &priv->config;
-#endif
-  int                   ret    = OK;
-
-  switch (cmd)
-    {
-#ifdef CONFIG_SERIAL_TERMIOS
-      case TCGETS:
-        {
-          struct termios *termiosp = (struct termios *)arg;
-
-          if (!termiosp)
-            {
-              ret = -EINVAL;
-              break;
-            }
-
-          termiosp->c_cflag = ((config->parity != 0) ? PARENB : 0)
-                              | ((config->parity == 1) ? PARODD : 0)
-                              | ((config->stopbits2) ? CSTOPB : 0) |
-#ifdef CONFIG_SERIAL_OFLOWCONTROL
-                              ((config->oflow) ? CCTS_OFLOW : 0) |
-#endif
-#ifdef CONFIG_SERIAL_IFLOWCONTROL
-                              ((config->iflow) ? CRTS_IFLOW : 0) |
-#endif
-                              CS8;
-
-          cfsetispeed(termiosp, config->baud);
-
-          break;
-        }
-
-      case TCSETS:
-        {
-          struct termios *termiosp = (struct termios *)arg;
-
-          if (!termiosp)
-            {
-              ret = -EINVAL;
-              break;
-            }
-
-          /* Perform some sanity checks before accepting any changes */
-
-          if ((termiosp->c_cflag & CSIZE) != CS8)
-            {
-              ret = -EINVAL;
-              break;
-            }
-
-#ifndef HAVE_UART_STOPBITS
-          if ((termiosp->c_cflag & CSTOPB) != 0)
-            {
-              ret = -EINVAL;
-              break;
-            }
-#endif
-
-          if (termiosp->c_cflag & PARODD)
-            {
-              ret = -EINVAL;
-              break;
-            }
-
-          /* TODO: CCTS_OFLOW and CRTS_IFLOW */
-
-          /* Parity */
-
-          if (termiosp->c_cflag & PARENB)
-            {
-              config->parity = (termiosp->c_cflag & PARODD) ? 1 : 2;
-            }
-          else
-            {
-              config->parity = 0;
-            }
-
-#ifdef HAVE_UART_STOPBITS
-          /* Stop bits */
-
-          config->stopbits2 = (termiosp->c_cflag & CSTOPB) != 0;
-#endif
-
-          /* Note that only cfgetispeed is used because we have knowledge
-           * that only one speed is supported.
-           */
-
-          config->baud = cfgetispeed(termiosp);
-
-          /* Effect the changes */
-
-          nrf52_set_format(dev);
-
-          break;
-        }
-#endif
-
-      default:
-        {
-          ret = -ENOTTY;
-          break;
-        }
-    }
-
-  return ret;
+  return -ENOTTY;
 }
 
 /****************************************************************************
@@ -560,7 +445,7 @@ static int nrf52_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int nrf52_receive(struct uart_dev_s *dev, unsigned int *status)
+static int nrf52_receive(struct uart_dev_s *dev, uint32_t *status)
 {
   struct nrf52_dev_s *priv = (struct nrf52_dev_s *)dev->priv;
   uint32_t data;
@@ -731,10 +616,10 @@ static bool nrf52_txempty(struct uart_dev_s *dev)
  *
  * Description:
  *   Performs the low level UART initialization early in debug so that the
- *   serial console will be available during boot up.  This must be called
+ *   serial console will be available during bootup.  This must be called
  *   before nrf52_serialinit.  NOTE:  This function depends on GPIO pin
- *   configuration performed in nrf52_lowsetup() and main clock
- *   initialization performed in nrf_clock_configure().
+ *   configuration performed in nrf52_lowsetup() and main clock iniialization
+ *   performed in nrf_clock_configure().
  *
  ****************************************************************************/
 
@@ -751,7 +636,7 @@ void nrf52_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: arm_serialinit
+ * Name: up_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
@@ -765,7 +650,7 @@ void nrf52_earlyserialinit(void)
  *
  ****************************************************************************/
 
-void arm_serialinit(void)
+void up_serialinit(void)
 {
   unsigned minor = 0;
   unsigned i     = 0;
@@ -775,19 +660,20 @@ void arm_serialinit(void)
   /* Register the serial console */
 
   uart_register("/dev/console", &CONSOLE_DEV);
+#endif
+
   uart_register("/dev/ttyS0", &TTYS0_DEV);
   minor = 1;
-#endif
 
   /* Register all remaining UARTs */
 
-  strlcpy(devname, "/dev/ttySx", sizeof(devname));
+  strcpy(devname, "/dev/ttySx");
 
   for (i = 0; i < NRF52_NUART; i++)
     {
       /* Don't create a device for non-configured ports. */
 
-      if (g_uart_devs[i] == NULL)
+      if (g_uart_devs[i] == 0)
         {
           continue;
         }
@@ -814,13 +700,24 @@ void arm_serialinit(void)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_UART_CONSOLE
   /* struct nrf52_dev_s *priv = (struct nrf52_dev_s *)CONSOLE_DEV.priv; */
 
-  arm_lowputc(ch);
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
 #endif
+
+  return ch;
 }
 
 #else /* USE_SERIALDRIVER */
@@ -833,10 +730,20 @@ void up_putc(int ch)
  *
  ****************************************************************************/
 
-void up_putc(int ch)
+int up_putc(int ch)
 {
 #ifdef HAVE_UART_CONSOLE
-  arm_lowputc(ch);
+  /* Check for LF */
+
+  if (ch == '\n')
+    {
+      /* Add CR */
+
+      up_lowputc('\r');
+    }
+
+  up_lowputc(ch);
+  return ch;
 #endif
 }
 

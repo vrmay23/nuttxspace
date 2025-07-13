@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/sama5/sama5d3-xplained/src/sam_usb.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -40,7 +53,7 @@
 #include <nuttx/usb/usbhost.h>
 #include <nuttx/usb/usbdev_trace.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "sam_pio.h"
 #include "sam_usbhost.h"
 #include "hardware/sam_ohci.h"
@@ -52,6 +65,14 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+#ifndef CONFIG_SAMA5D3XPLAINED_USBHOST_PRIO
+#  define CONFIG_SAMA5D3XPLAINED_USBHOST_PRIO 50
+#endif
+
+#ifndef CONFIG_SAMA5D3XPLAINED_USBHOST_STACKSIZE
+#  define CONFIG_SAMA5D3XPLAINED_USBHOST_STACKSIZE 1024
+#endif
+
 #ifdef HAVE_USBDEV
 #  undef CONFIG_SAMA5_UHPHS_RHPORT1
 #endif
@@ -59,6 +80,15 @@
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
+/* Retained device driver handles */
+
+#ifdef CONFIG_SAMA5_OHCI
+static struct usbhost_connection_s *g_ohciconn;
+#endif
+#ifdef CONFIG_SAMA5_EHCI
+static struct usbhost_connection_s *g_ehciconn;
+#endif
 
 /* Overcurrent interrupt handler */
 
@@ -71,6 +101,86 @@ static xcpt_t g_ochandler;
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: usbhost_waiter
+ *
+ * Description:
+ *   Wait for USB devices to be connected to either the OHCI or EHCI hub.
+ *
+ ****************************************************************************/
+
+#ifdef HAVE_USBHOST
+#ifdef CONFIG_DEBUG_USB
+static int usbhost_waiter(struct usbhost_connection_s *dev,
+                          const char *hcistr)
+#else
+static int usbhost_waiter(struct usbhost_connection_s *dev)
+#endif
+{
+  struct usbhost_hubport_s *hport;
+
+  uinfo("Running\n");
+  for (; ; )
+    {
+      /* Wait for the device to change state */
+
+      DEBUGVERIFY(CONN_WAIT(dev, &hport));
+      uinfo("%s\n", hport->connected ? "connected" : "disconnected");
+
+      /* Did we just become connected? */
+
+      if (hport->connected)
+        {
+          /* Yes.. enumerate the newly connected device */
+
+          CONN_ENUMERATE(dev, hport);
+        }
+    }
+
+  /* Keep the compiler from complaining */
+
+  return 0;
+}
+#endif
+
+/****************************************************************************
+ * Name: ohci_waiter
+ *
+ * Description:
+ *   Wait for USB devices to be connected to the OHCI hub.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SAMA5_OHCI
+static int ohci_waiter(int argc, char *argv[])
+{
+#ifdef CONFIG_DEBUG_USB
+  return usbhost_waiter(g_ohciconn, "OHCI");
+#else
+  return usbhost_waiter(g_ohciconn);
+#endif
+}
+#endif
+
+/****************************************************************************
+ * Name: ehci_waiter
+ *
+ * Description:
+ *   Wait for USB devices to be connected to the EHCI hub.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SAMA5_EHCI
+static int ehci_waiter(int argc, char *argv[])
+{
+#ifdef CONFIG_DEBUG_USB
+  return usbhost_waiter(g_ehciconn, "EHCI");
+#else
+  return usbhost_waiter(g_ehciconn);
+#endif
+}
+#endif
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -78,14 +188,14 @@ static xcpt_t g_ochandler;
  * Name: sam_usbinitialize
  *
  * Description:
- *   Called from sam_usbinitialize very early in initialization to setup
+ *   Called from sam_usbinitialize very early in inialization to setup
  *   USB-related GPIO pins for the SAMA5D3-Xplained board.
  *
  * USB Ports
  *   The SAMA5D3 series-MB features three USB communication ports:
  *
- *     1. Port A Host High Speed (EHCI) and Full Speed (OHCI) multiplexed
- *        with USB Device High Speed Micro AB connector, J20
+ *     1. Port A Host High Speed (EHCI) and Full Speed (OHCI) multiplexed with
+ *        USB Device High Speed Micro AB connector, J20
  *
  *     2. Port B Host High Speed (EHCI) and Full Speed (OHCI) standard type A
  *        connector, J19 upper port
@@ -191,14 +301,8 @@ void weak_function sam_usbinitialize(void)
 #ifdef HAVE_USBHOST
 int sam_usbhost_initialize(void)
 {
+  pid_t pid;
   int ret;
-
-#ifdef CONFIG_SAMA5_OHCI
-  struct usbhost_connection_s *ohciconn;
-#endif
-#ifdef CONFIG_SAMA5_EHCI
-  struct usbhost_connection_s *ehciconn;
-#endif
 
   /* First, register all of the class drivers needed to support the drivers
    * that we care about
@@ -211,16 +315,6 @@ int sam_usbhost_initialize(void)
   if (ret < 0)
     {
       uerr("ERROR: usbhost_hub_initialize failed: %d\n", ret);
-    }
-#endif
-
-#ifdef CONFIG_USBHOST_BTHCI
-  /* Register USB Bluetooth support */
-
-  ret = usbhost_bthci_initialize();
-  if (ret != OK)
-    {
-      uerr("ERROR: Failed to register the bt controller: %d\n", ret);
     }
 #endif
 
@@ -254,33 +348,24 @@ int sam_usbhost_initialize(void)
     }
 #endif
 
-#ifdef CONFIG_USBHOST_HIDMOUSE
-  /* Initialize the HID mouse class */
-
-  ret = usbhost_mouse_init();
-  if (ret != OK)
-    {
-      uerr("ERROR: Failed to register the HID mouse class\n");
-    }
-#endif
-
   /* Then get an instance of the USB host interface. */
 
 #ifdef CONFIG_SAMA5_OHCI
   /* Get an instance of the USB OHCI interface */
 
-  ohciconn = sam_ohci_initialize(0);
-  if (!ohciconn)
+  g_ohciconn = sam_ohci_initialize(0);
+  if (!g_ohciconn)
     {
       uerr("ERROR: sam_ohci_initialize failed\n");
       return -ENODEV;
     }
 
-  /* Initialize waiter */
+  /* Start a thread to handle device connection. */
 
-  ret = usbhost_waiter_initialize(ohciconn);
-
-  if (ret < 0)
+  pid = kthread_create("OHCI Monitor", CONFIG_SAMA5D3XPLAINED_USBHOST_PRIO,
+                       CONFIG_SAMA5D3XPLAINED_USBHOST_STACKSIZE,
+                       (main_t)ohci_waiter, (FAR char * const *)NULL);
+  if (pid < 0)
     {
       uerr("ERROR: Failed to create ohci_waiter task: %d\n", ret);
       return -ENODEV;
@@ -290,18 +375,19 @@ int sam_usbhost_initialize(void)
 #ifdef CONFIG_SAMA5_EHCI
   /* Get an instance of the USB EHCI interface */
 
-  ehciconn = sam_ehci_initialize(0);
-  if (!ehciconn)
+  g_ehciconn = sam_ehci_initialize(0);
+  if (!g_ehciconn)
     {
       uerr("ERROR: sam_ehci_initialize failed\n");
       return -ENODEV;
     }
 
-  /* Initialize waiter */
+  /* Start a thread to handle device connection. */
 
-  ret = usbhost_waiter_initialize(ehciconn);
-
-  if (ret < 0)
+  pid = kthread_create("EHCI Monitor", CONFIG_SAMA5D3XPLAINED_USBHOST_PRIO,
+                       CONFIG_SAMA5D3XPLAINED_USBHOST_STACKSIZE,
+                       (main_t)ehci_waiter, (FAR char * const *)NULL);
+  if (pid < 0)
     {
       uerr("ERROR: Failed to create ehci_waiter task: %d\n", ret);
       return -ENODEV;
@@ -465,7 +551,7 @@ xcpt_t sam_setup_overcurrent(xcpt_t handler)
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV
-void sam_usbsuspend(struct usbdev_s *dev, bool resume)
+void sam_usbsuspend(FAR struct usbdev_s *dev, bool resume)
 {
   uinfo("resume: %d\n", resume);
 }

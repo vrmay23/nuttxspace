@@ -1,60 +1,69 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/xmc4/hardware/xmc4_scu.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Reference: XMC4500 Reference Manual V1.5 2014-07 Microcontrollers.
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- ****************************************************************************/
-
-/****************************************************************************
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
  * May include some logic from sample code provided by Infineon:
  *
  *   Copyright (C) 2011-2015 Infineon Technologies AG. All rights reserved.
  *
- * Infineon Technologies AG (Infineon) is supplying this software for use
- * with Infineon's microcontrollers.  This file can be freely distributed
- * within development tools that are supporting such microcontrollers.
+ *   Infineon Technologies AG (Infineon) is supplying this software for use with
+ *   Infineon's microcontrollers.  This file can be freely distributed within
+ *   development tools that are supporting such microcontrollers.
  *
- * THIS SOFTWARE IS PROVIDED AS IS. NO WARRANTIES, WHETHER EXPRESS, IMPLIED
- * OR STATUTORY, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE APPLY TO THIS
- * SOFTWARE. INFINEON SHALL NOT, IN ANY CIRCUMSTANCES, BE LIABLE FOR SPECIAL,
- * INCIDENTAL, OR CONSEQUENTIAL DAMAGES, FOR ANY REASON WHATSOEVER.
+ *   THIS SOFTWARE IS PROVIDED AS IS. NO WARRANTIES, WHETHER EXPRESS, IMPLIED
+ *   OR STATUTORY, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF
+ *   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE APPLY TO THIS SOFTWARE.
+ *   INFINEON SHALL NOT, IN ANY CIRCUMSTANCES, BE LIABLE FOR SPECIAL, INCIDENTAL,
+ *   OR CONSEQUENTIAL DAMAGES, FOR ANY REASON WHATSOEVER.
  *
- ****************************************************************************/
-
-/* Reference: XMC4500 Reference Manual V1.5 2014-07 Microcontrollers. */
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_XMC4_HARDWARE_XMC4_SCU_H
 #define __ARCH_ARM_SRC_XMC4_HARDWARE_XMC4_SCU_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/xmc4_memorymap.h"
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
-/* Register Offsets *********************************************************/
-
+/* Register Offsets *****************************************************************/
 /* General SCU Registers */
 
 #define XMC4_SCU_ID_OFFSET          0x0000    /* Module Identification Register */
@@ -64,9 +73,6 @@
 #define XMC4_SCU_GPR0_OFFSET        0x002c    /* General Purpose Register 0 */
 #define XMC4_SCU_GPR1_OFFSET        0x0030    /* General Purpose Register 1 */
 #define XMC4_SCU_ETH0CON_OFFSET     0x0040    /* Ethernet 0 Port Control */
-#define XMC4_SCU_ECAT0CON_OFFSET    0x01b0    /* EtherCAT 0 Common Port Control */
-#define XMC4_SCU_ECAT0CONP0_OFFSET  0x01b4    /* EtherCAT 0 Port 0 Control */
-#define XMC4_SCU_ECAT0CONP1_OFFSET  0x01b8    /* EtherCAT 0 Port 1 Control */
 #define XMC4_SCU_CCUCON_OFFSET      0x004c    /* CCUx Global Start Control Register */
 #define XMC4_SCU_DTSCON_OFFSET      0x008c    /* DTS Control */
 #define XMC4_SCU_DTSSTAT_OFFSET     0x0090    /* DTS Status */
@@ -157,7 +163,6 @@
 #define XMC4_SCU_EXTCLKCR_OFFSET    0x0028    /* External clock Control Register */
 #define XMC4_SCU_SLEEPCR_OFFSET     0x0030    /* Sleep Control Register */
 #define XMC4_SCU_DSLEEPCR_OFFSET    0x0034    /* Deep Sleep Control Register */
-#define XMC4_SCU_ECATCLKCR_OFFSET   0x0038    /* EtherCat Control Register */
 #ifdef XMC4_SCU_GATING
 #  define XMC4_SCU_CGATSTAT0_OFFSET 0x0040    /* Peripheral 0 Clock Gating Status */
 #  define XMC4_SCU_CGATSET0_OFFSET  0x0044    /* Peripheral 0 Clock Gating Set */
@@ -189,8 +194,7 @@
 #define XMC4_SCU_USBPLLCON_OFFSET   0x0014    /* USB PLL Control Register */
 #define XMC4_SCU_CLKMXSTAT_OFFSET   0x0028    /* Clock Multiplexing Status Register */
 
-/* Register Addresses *******************************************************/
-
+/* Register Addresses ***************************************************************/
 /* General SCU Registers */
 
 #define XMC4_SCU_ID                 (XMC4_SCU_GENERAL_BASE+XMC4_SCU_ID_OFFSET)
@@ -200,9 +204,6 @@
 #define XMC4_SCU_GPR0               (XMC4_SCU_GENERAL_BASE+XMC4_SCU_GPR0_OFFSET)
 #define XMC4_SCU_GPR1               (XMC4_SCU_GENERAL_BASE+XMC4_SCU_GPR1_OFFSET)
 #define XMC4_SCU_ETH0CON            (XMC4_SCU_GENERAL_BASE+XMC4_SCU_ETH0CON_OFFSET)
-#define XMC4_SCU_ECAT0CON           (XMC4_SCU_GENERAL_BASE+XMC4_SCU_ECAT0CON_OFFSET)
-#define XMC4_SCU_ECAT0CONP0         (XMC4_SCU_GENERAL_BASE+XMC4_SCU_ECAT0CONP0_OFFSET)
-#define XMC4_SCU_ECAT0CONP1         (XMC4_SCU_GENERAL_BASE+XMC4_SCU_ECAT0CONP1_OFFSET)
 #define XMC4_SCU_CCUCON             (XMC4_SCU_GENERAL_BASE+XMC4_SCU_CCUCON_OFFSET)
 #define XMC4_SCU_DTSCON             (XMC4_SCU_GENERAL_BASE+XMC4_SCU_DTSCON_OFFSET)
 #define XMC4_SCU_DTSSTAT            (XMC4_SCU_GENERAL_BASE+XMC4_SCU_DTSSTAT_OFFSET)
@@ -293,7 +294,6 @@
 #define XMC4_SCU_EXTCLKCR           (XMC4_SCU_CLK_BASE+XMC4_SCU_EXTCLKCR_OFFSET)
 #define XMC4_SCU_SLEEPCR            (XMC4_SCU_CLK_BASE+XMC4_SCU_SLEEPCR_OFFSET)
 #define XMC4_SCU_DSLEEPCR           (XMC4_SCU_CLK_BASE+XMC4_SCU_DSLEEPCR_OFFSET)
-#define XMC4_SCU_ECATCLKCR          (XMC4_SCU_CLK_BASE+ XMC4_SCU_ECATCLKCR_OFFSET)
 #ifdef XMC4_SCU_GATING
 #  define XMC4_SCU_CGATSTAT0        (XMC4_SCU_CLK_BASE+XMC4_SCU_CGATSTAT0_OFFSET)
 #  define XMC4_SCU_CGATSET0         (XMC4_SCU_CLK_BASE+XMC4_SCU_CGATSET0_OFFSET)
@@ -325,7 +325,7 @@
 #define XMC4_SCU_USBPLLCON          (XMC4_SCU_PLL_BASE+XMC4_SCU_USBPLLCON_OFFSET)
 #define XMC4_SCU_CLKMXSTAT          (XMC4_SCU_PLL_BASE+XMC4_SCU_CLKMXSTAT_OFFSET)
 
-/* Register Bit-Field Definitions *******************************************/
+/* Register Bit-Field Definitions ***************************************************/
 
 /* General SCU Registers */
 
@@ -334,7 +334,7 @@
 #define SCU_ID_MOD_REV_SHIFT        (0)       /* Bits 0-7: Module Revision Number */
 #define SCU_ID_MOD_REV_MASK         (0xff << SCU_ID_MOD_REV_SHIFT)
 #define SCU_ID_MOD_TYPE_SHIFT       (8)       /* Bits 8-15: Module Type */
-#define SCU_ID_MOD_TYPE_MASK        (0xff << SCU_ID_MOD_TYPE_SHIFT)
+#define SCU_ID_MOD_TYPE_MASK        (0xff << SCU_ID_MOD_REV_SHIFT)
 #define SCU_ID_MOD_NUMBER_SHIFT     (16)      /* Bits 16-31: Module Number Value */
 #define SCU_ID_MOD_NUMBER_MASK      (0xffff << SCU_ID_MOD_NUMBER_SHIFT)
 
@@ -343,9 +343,9 @@
 /* Manufactory ID */
 
 #define SCU_IDMANUF_DEPT_SHIFT      (0)       /* Bits 0-4: Department Identification Number */
-#define SCU_IDMANUF_DEPT_MASK       (31 << SCU_IDMANUF_DEPT_SHIFT)
+#define SCU_IDMANUF_DEPT_MASK       (31 << SCU_IDMANUF_MOD_DEPT_SHIFT)
 #define SCU_IDMANUF_MANUF_SHIFT     (5)       /* Bits 5-15: Manufacturer Identification Number */
-#define SCU_IDMANUF_MANUF_MASK      (0x7ff << SCU_IDMANUF_MANUF_SHIFT)
+#define SCU_IDMANUF_MANUF_MASK      (0x7ff << SCU_IDMANUF_MOD_MANUF_SHIFT)
 
 /* Start-up Control */
 
@@ -355,10 +355,9 @@
 #  define SCU_STCON_HWCON_ACBSL     (1 << SCU_STCON_HWCON_SHIFT)  /* ASC BSL enabled */
 #  define SCU_STCON_HWCON_BMI       (2 << SCU_STCON_HWCON_SHIFT)  /* BMI customized boot enabled */
 #  define SCU_STCON_HWCON_CANBSL    (3 << SCU_STCON_HWCON_SHIFT)  /* CAN BSL enabled */
-
 #define SCU_STCON_SWCON_SHIFT       (8)       /* Bits 8-11: SW Configuration */
 #define SCU_STCON_SWCON_MASK        (15 << SCU_STCON_SWCON_SHIFT)
-#  define SCU_STCON_SWCON_ROM       (0 << SCU_STCON_SWCON_SHIFT)  /* Normal boot from Boot ROM */
+#  define SCU_STCON_SWCON_ ROM      (0 << SCU_STCON_SWCON_SHIFT)  /* Normal boot from Boot ROM */
 #  define SCU_STCON_SWCON_ASCBSL    (1 << SCU_STCON_SWCON_SHIFT)  /* ASC BSL enabled */
 #  define SCU_STCON_SWCON_BMI       (2 << SCU_STCON_SWCON_SHIFT)  /* BMI customized boot enabled */
 #  define SCU_STCON_SWCON_CANBSL    (3 << SCU_STCON_SWCON_SHIFT)  /* CAN BSL enabled */
@@ -377,196 +376,69 @@
 #  define SCU_ETH0CON_RXD0B         (1 << SCU_ETH0CON_RXD0_SHIFT) /* Data input RXD0B is selected */
 #  define SCU_ETH0CON_RXD0C         (2 << SCU_ETH0CON_RXD0_SHIFT) /* Data input RXD0C is selected */
 #  define SCU_ETH0CON_RXD0D         (3 << SCU_ETH0CON_RXD0_SHIFT) /* Data input RXD0D is selected */
-
 #define SCU_ETH0CON_RXD1_SHIFT      (2)       /* Bits 2-3: MAC Receive Input 1 */
 #define SCU_ETH0CON_RXD1_MASK       (3 << SCU_ETH0CON_RXD1_SHIFT)
 #  define SCU_ETH0CON_RXD1A         (0 << SCU_ETH0CON_RXD1_SHIFT) /* Data input RXD1A is selected */
 #  define SCU_ETH0CON_RXD1B         (1 << SCU_ETH0CON_RXD1_SHIFT) /* Data input RXD1B is selected */
 #  define SCU_ETH0CON_RXD1C         (2 << SCU_ETH0CON_RXD1_SHIFT) /* Data input RXD1C is selected */
 #  define SCU_ETH0CON_RXD1D         (3 << SCU_ETH0CON_RXD1_SHIFT) /* Data input RXD1D is selected */
-
 #define SCU_ETH0CON_RXD2_SHIFT      (4)       /* Bits 4-5: MAC Receive Input 2 */
 #define SCU_ETH0CON_RXD2_MASK       (3 << SCU_ETH0CON_RXD2_SHIFT)
 #  define SCU_ETH0CON_RXD2A         (0 << SCU_ETH0CON_RXD2_SHIFT) /* Data input RXD2A is selected */
 #  define SCU_ETH0CON_RXD2B         (1 << SCU_ETH0CON_RXD2_SHIFT) /* Data input RXD2B is selected */
 #  define SCU_ETH0CON_RXD2C         (2 << SCU_ETH0CON_RXD2_SHIFT) /* Data input RXD2C is selected */
 #  define SCU_ETH0CON_RXD2D         (3 << SCU_ETH0CON_RXD2_SHIFT) /* Data input RXD2D is selected */
-
 #define SCU_ETH0CON_RXD3_SHIFT      (6)       /* Bits 6-7: MAC Receive Input 3 */
 #define SCU_ETH0CON_RXD3_MASK       (3 << SCU_ETH0CON_RXD3_SHIFT)
 #  define SCU_ETH0CON_RXD3A         (0 << SCU_ETH0CON_RXD3_SHIFT) /* Data input RXD3A is selected */
 #  define SCU_ETH0CON_RXD3B         (1 << SCU_ETH0CON_RXD3_SHIFT) /* Data input RXD3B is selected */
 #  define SCU_ETH0CON_RXD3C         (2 << SCU_ETH0CON_RXD3_SHIFT) /* Data input RXD3C is selected */
 #  define SCU_ETH0CON_RXD3D         (3 << SCU_ETH0CON_RXD3_SHIFT) /* Data input RXD3D is selected */
-
 #define SCU_ETH0CON_CLKRMII_SHIFT   (8)       /* Bits 8-9: RMII clock input */
 #define SCU_ETH0CON_CLKRMII_MASK    (3 << SCU_ETH0CON_CLKRMII_SHIFT)
 #  define SCU_ETH0CON_CLKRMIIA      (0 << SCU_ETH0CON_CLKRMII_SHIFT) /* Data input RMIIA is selected */
 #  define SCU_ETH0CON_CLKRMIIB      (1 << SCU_ETH0CON_CLKRMII_SHIFT) /* Data input RMIIB is selected */
 #  define SCU_ETH0CON_CLKRMIIC      (2 << SCU_ETH0CON_CLKRMII_SHIFT) /* Data input RMIIC is selected */
 #  define SCU_ETH0CON_CLKRMIID      (3 << SCU_ETH0CON_CLKRMII_SHIFT) /* Data input RMIID is selected */
-
 #define SCU_ETH0CON_CRSDV_SHIFT     (10)      /* Bits 10-11: CRS_DV input */
 #define SCU_ETH0CON_CRSDV_MASK      (3 << SCU_ETH0CON_CRSDV_SHIFT)
 #  define SCU_ETH0CON_CRSDVA        (0 << SCU_ETH0CON_CRSDV_SHIFT) /* Data input CRS_DVA is selected */
 #  define SCU_ETH0CON_CRSDVB        (1 << SCU_ETH0CON_CRSDV_SHIFT) /* Data input CRS_DVB is selected */
 #  define SCU_ETH0CON_CRSDVC        (2 << SCU_ETH0CON_CRSDV_SHIFT) /* Data input CRS_DVC is selected */
 #  define SCU_ETH0CON_CRSDVD        (3 << SCU_ETH0CON_CRSDV_SHIFT) /* Data input CRS_DVD is selected */
-
 #define SCU_ETH0CON_CRS_SHIFT       (12)      /* Bits 12-13: CRS input */
 #define SCU_ETH0CON_CRS_MASK        (3 << SCU_ETH0CON_CRS_SHIFT)
 #  define SCU_ETH0CON_CRSA          (0 << SCU_ETH0CON_CRS_SHIFT) /* Data input CRSA is selected */
 #  define SCU_ETH0CON_CRSB          (1 << SCU_ETH0CON_CRS_SHIFT) /* Data input CRSB is selected */
 #  define SCU_ETH0CON_CRSC          (2 << SCU_ETH0CON_CRS_SHIFT) /* Data input CRSC is selected */
 #  define SCU_ETH0CON_CRSD          (3 << SCU_ETH0CON_CRS_SHIFT) /* Data input CRSD is selected */
-
 #define SCU_ETH0CON_RXER_SHIFT      (14)      /* Bits 14-15: RXER Input */
 #define SCU_ETH0CON_RXER_MASK       (3 << SCU_ETH0CON_RXER_SHIFT)
 #  define SCU_ETH0CON_RXERA         (0 << SCU_ETH0CON_RXER_SHIFT) /* Data input RXERA is selected */
 #  define SCU_ETH0CON_RXERB         (1 << SCU_ETH0CON_RXER_SHIFT) /* Data input RXERB is selected */
 #  define SCU_ETH0CON_RXERC         (2 << SCU_ETH0CON_RXER_SHIFT) /* Data input RXERC is selected */
 #  define SCU_ETH0CON_RXERD         (3 << SCU_ETH0CON_RXER_SHIFT) /* Data input RXERD is selected */
-
 #define SCU_ETH0CON_COL_SHIFT       (16)      /* Bits 16-17: COL input */
 #define SCU_ETH0CON_COL_MASK        (3 << SCU_ETH0CON_COL_SHIFT)
 #  define SCU_ETH0CON_COLA          (0 << SCU_ETH0CON_COL_SHIFT) /* Data input COLA is selected */
 #  define SCU_ETH0CON_COLB          (1 << SCU_ETH0CON_COL_SHIFT) /* Data input COLB is selected */
 #  define SCU_ETH0CON_COLC          (2 << SCU_ETH0CON_COL_SHIFT) /* Data input COLC is selected */
 #  define SCU_ETH0CON_COLD          (3 << SCU_ETH0CON_COL_SHIFT) /* Data input COLD is selected */
-
 #define SCU_ETH0CON_CLKTX_SHIFT     (18)      /* Bits 18-19: CLK_TX input */
 #define SCU_ETH0CON_CLKTX_MASK      (3 << SCU_ETH0CON_CLKTX_SHIFT)
 #  define SCU_ETH0CON_CLKTXA        (0 << SCU_ETH0CON_CLKTX_SHIFT) /* Data input CLK_TXA is selected */
 #  define SCU_ETH0CON_CLKTXB        (1 << SCU_ETH0CON_CLKTX_SHIFT) /* Data input CLK_TXB is selected */
 #  define SCU_ETH0CON_CLKTXC        (2 << SCU_ETH0CON_CLKTX_SHIFT) /* Data input CLK_TXC is selected */
 #  define SCU_ETH0CON_CLKTXD        (3 << SCU_ETH0CON_CLKTX_SHIFT) /* Data input CLK_TXD is selected */
-
 #define SCU_ETH0CON_MDIO_SHIFT      (22)      /* Bits 22-23: MDIO Input Select */
 #define SCU_ETH0CON_MDIO_MASK       (3 << SCU_ETH0CON_MDIO_SHIFT)
 #  define SCU_ETH0CON_MDIOA         (0 << SCU_ETH0CON_MDIO_SHIFT) /* Data input MDIOA is selected */
 #  define SCU_ETH0CON_MDIOB         (1 << SCU_ETH0CON_MDIO_SHIFT) /* Data input MDIOB is selected */
 #  define SCU_ETH0CON_MDIOC         (2 << SCU_ETH0CON_MDIO_SHIFT) /* Data input MDIOC is selected */
 #  define SCU_ETH0CON_MDIOD         (3 << SCU_ETH0CON_MDIO_SHIFT) /* Data input MDIOD is selected */
-
 #define SCU_ETH0CON_INFSEL          (1 << 26) /* Bit 26: Ethernet MAC Interface Selection */
 #  define SCU_ETH0CON_INFSEL_MII    (0)       /*         0=MII */
 #  define SCU_ETH0CON_INFSEL_RMII   (1 << 26) /*         1=RMII */
-
-/* EtherCAT 0 Port Control */
-
-/* Common */
-#define SCU_ECAT0CON_MDIO_SHIFT (22)
-#define SCU_ECAT0CON_MDIOA  (0 << SCU_ECAT0CON_MDIO_SHIFT)
-#define SCU_ECAT0CON_MDIOB  (1 << SCU_ECAT0CON_MDIO_SHIFT)
-#define SCU_ECAT0CON_MDIOC  (2 << SCU_ECAT0CON_MDIO_SHIFT)
-#define SCU_ECAT0CON_MDIOD  (3 << SCU_ECAT0CON_MDIO_SHIFT)
-
-#define SCU_ECAT0CON_PHY_OFFSET_SHIFT (16)
-#define SCU_ECAT0CON_PHY_OFFSET (1 << SCU_ECAT0CON_PHY_OFFSET_SHIFT)
-
-#define SCU_ECAT0CON_ECATRSTEN_SHIFT  (0)
-#define SCU_ECAT0CON_ECATRSTEN        (0 << SCU_ECAT0CON_ECATRSTEN_SHIFT)
-
-/* Port 0 */
-#define SCU_ECAT0CON_RXD0_SHIFT  (0)
-#define SCU_ECAT0CON_PORT0_RXD0A (0 << SCU_ECAT0CON_RXD0_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD0B (1 << SCU_ECAT0CON_RXD0_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD0C (2 << SCU_ECAT0CON_RXD0_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD0D (3 << SCU_ECAT0CON_RXD0_SHIFT)
-
-#define SCU_ECAT0CON_RXD1_SHIFT  (2)
-#define SCU_ECAT0CON_PORT0_RXD1A (0 << SCU_ECAT0CON_RXD1_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD1B (1 << SCU_ECAT0CON_RXD1_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD1C (2 << SCU_ECAT0CON_RXD1_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD1D (3 << SCU_ECAT0CON_RXD1_SHIFT)
-
-#define SCU_ECAT0CON_RXD2_SHIFT  (4)
-#define SCU_ECAT0CON_PORT0_RXD2A (0 << SCU_ECAT0CON_RXD2_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD2B (1 << SCU_ECAT0CON_RXD2_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD2C (2 << SCU_ECAT0CON_RXD2_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD2D (3 << SCU_ECAT0CON_RXD2_SHIFT)
-
-#define SCU_ECAT0CON_RXD3_SHIFT  (6)
-#define SCU_ECAT0CON_PORT0_RXD3A (0 << SCU_ECAT0CON_RXD3_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD3B (1 << SCU_ECAT0CON_RXD3_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD3C (2 << SCU_ECAT0CON_RXD3_SHIFT)
-#define SCU_ECAT0CON_PORT0_RXD3D (3 << SCU_ECAT0CON_RXD3_SHIFT)
-
-#define SCU_ECAT0CON_RX_ERR_SHIFT  (8)
-#define SCU_ECAT0CON_PORT0_RX_ERRA (0 << SCU_ECAT0CON_RX_ERR_SHIFT)
-#define SCU_ECAT0CON_PORT0_RX_ERRB (1 << SCU_ECAT0CON_RX_ERR_SHIFT)
-#define SCU_ECAT0CON_PORT0_RX_ERRC (2 << SCU_ECAT0CON_RX_ERR_SHIFT)
-#define SCU_ECAT0CON_PORT0_RX_ERRD (3 << SCU_ECAT0CON_RX_ERR_SHIFT)
-
-#define SCU_ECAT0CON_RX_DV_SHIFT  (10)
-#define SCU_ECAT0CON_PORT0_RX_DVA (0 << SCU_ECAT0CON_RX_DV_SHIFT)
-#define SCU_ECAT0CON_PORT0_RX_DVB (1 << SCU_ECAT0CON_RX_DV_SHIFT)
-#define SCU_ECAT0CON_PORT0_RX_DVC (2 << SCU_ECAT0CON_RX_DV_SHIFT)
-#define SCU_ECAT0CON_PORT0_RX_DVD (3 << SCU_ECAT0CON_RX_DV_SHIFT)
-
-#define SCU_ECAT0CON_RX_CLK_SHIFT  (12)
-#define SCU_ECAT0CON_PORT0_RX_CLKA (0 << SCU_ECAT0CON_RX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT0_RX_CLKB (1 << SCU_ECAT0CON_RX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT0_RX_CLKC (2 << SCU_ECAT0CON_RX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT0_RX_CLKD (3 << SCU_ECAT0CON_RX_CLK_SHIFT)
-
-#define SCU_ECAT0CON_LINK_SHIFT  (16)
-#define SCU_ECAT0CON_PORT0_LINKA (0 << SCU_ECAT0CON_LINK_SHIFT)
-#define SCU_ECAT0CON_PORT0_LINKB (1 << SCU_ECAT0CON_LINK_SHIFT)
-#define SCU_ECAT0CON_PORT0_LINKC (2 << SCU_ECAT0CON_LINK_SHIFT)
-#define SCU_ECAT0CON_PORT0_LINKD (3 << SCU_ECAT0CON_LINK_SHIFT)
-
-#define SCU_ECAT0CON_TX_CLK_SHIFT  (28)
-#define SCU_ECAT0CON_PORT0_TX_CLKA (0 << SCU_ECAT0CON_TX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT0_TX_CLKB (1 << SCU_ECAT0CON_TX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT0_TX_CLKC (2 << SCU_ECAT0CON_TX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT0_TX_CLKD (3 << SCU_ECAT0CON_TX_CLK_SHIFT)
-
-/* Port 1 */
-#define SCU_ECAT0CON_PORT1_RXD0A   (0 << SCU_ECAT0CON_RXD0_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD0B   (1 << SCU_ECAT0CON_RXD0_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD0C   (2 << SCU_ECAT0CON_RXD0_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD0D   (3 << SCU_ECAT0CON_RXD0_SHIFT)
-
-#define SCU_ECAT0CON_PORT1_RXD1A   (0 << SCU_ECAT0CON_RXD1_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD1B   (1 << SCU_ECAT0CON_RXD1_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD1C   (2 << SCU_ECAT0CON_RXD1_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD1D   (3 << SCU_ECAT0CON_RXD1_SHIFT)
-
-#define SCU_ECAT0CON_PORT1_RXD2A   (0 << SCU_ECAT0CON_RXD2_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD2B   (1 << SCU_ECAT0CON_RXD2_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD2C   (2 << SCU_ECAT0CON_RXD2_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD2D   (3 << SCU_ECAT0CON_RXD2_SHIFT)
-
-#define SCU_ECAT0CON_PORT1_RXD3A   (0 << SCU_ECAT0CON_RXD3_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD3B   (1 << SCU_ECAT0CON_RXD3_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD3C   (2 << SCU_ECAT0CON_RXD3_SHIFT)
-#define SCU_ECAT0CON_PORT1_RXD3D   (3 << SCU_ECAT0CON_RXD3_SHIFT)
-
-#define SCU_ECAT0CON_PORT1_RX_ERRA (0 << SCU_ECAT0CON_RX_ERR_SHIFT)
-#define SCU_ECAT0CON_PORT1_RX_ERRB (1 << SCU_ECAT0CON_RX_ERR_SHIFT)
-#define SCU_ECAT0CON_PORT1_RX_ERRC (2 << SCU_ECAT0CON_RX_ERR_SHIFT)
-#define SCU_ECAT0CON_PORT1_RX_ERRD (3 << SCU_ECAT0CON_RX_ERR_SHIFT)
-
-#define SCU_ECAT0CON_PORT1_RX_DVA  (0 << SCU_ECAT0CON_RX_DV_SHIFT)
-#define SCU_ECAT0CON_PORT1_RX_DVB  (1 << SCU_ECAT0CON_RX_DV_SHIFT)
-#define SCU_ECAT0CON_PORT1_RX_DVC  (2 << SCU_ECAT0CON_RX_DV_SHIFT)
-#define SCU_ECAT0CON_PORT1_RX_DVD  (3 << SCU_ECAT0CON_RX_DV_SHIFT)
-
-#define SCU_ECAT0CON_PORT1_RX_CLKA (0 << SCU_ECAT0CON_RX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT1_RX_CLKB (1 << SCU_ECAT0CON_RX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT1_RX_CLKC (2 << SCU_ECAT0CON_RX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT1_RX_CLKD (3 << SCU_ECAT0CON_RX_CLK_SHIFT)
-
-#define SCU_ECAT0CON_PORT1_LINKA   (0 << SCU_ECAT0CON_LINK_SHIFT)
-#define SCU_ECAT0CON_PORT1_LINKB   (1 << SCU_ECAT0CON_LINK_SHIFT)
-#define SCU_ECAT0CON_PORT1_LINKC   (2 << SCU_ECAT0CON_LINK_SHIFT)
-#define SCU_ECAT0CON_PORT1_LINKD   (3 << SCU_ECAT0CON_LINK_SHIFT)
-
-#define SCU_ECAT0CON_PORT1_TX_CLKA (0 << SCU_ECAT0CON_TX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT1_TX_CLKB (1 << SCU_ECAT0CON_TX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT1_TX_CLKC (2 << SCU_ECAT0CON_TX_CLK_SHIFT)
-#define SCU_ECAT0CON_PORT1_TX_CLKD (3 << SCU_ECAT0CON_TX_CLK_SHIFT)
 
 /* CCUx Global Start Control Register */
 
@@ -608,9 +480,7 @@
 #define SCU_SDMMCDEL_TAPDEL_MASK    (15 << SCU_SDMMCDEL_TAPDEL_SHIFT)
 #  define SCU_SDMMCDEL_TAPDEL(n)    ((uint32_t)((n)-1) << SCU_SDMMCDEL_TAPDEL_SHIFT)
 
-/* Out-Of-Range Comparator Enable Register 0 and
- * Out-Of-Range Comparator Enable Register 1
- */
+/* Out-Of-Range Comparator Enable Register 0 and Out-Of-Range Comparator Enable Register 1 */
 
 #define SCU_GORCEN_ENORC6           (1 << 6)  /* Bit 6:  Enable Out of Range Comparator, Channel 6 */
 #define SCU_GORCEN_ENORC7           (1 << 7)  /* Bit 7:  Enable Out of Range Comparator, Channel 7 */
@@ -641,8 +511,8 @@
 
 /* Interrupt Control SCU Registers */
 
-/* Service Request Status, RAW Service Request Status,
- * Service Request Mask, Service Request Clear, Service Request Set
+/* Service Request Status, RAW Service Request Status, Service Request Mask, Service
+ * Request Clear, Service Request Set
  */
 
 #define SCU_INT_PRWARN              (1 << 0)  /* Bit 0:  WDT pre-warning Interrupt */
@@ -779,8 +649,8 @@
 
 /* Trap Control Registers */
 
-/* Trap Status Register, Trap Raw Status Register,
- * Trap Mask Register, Trap Clear Register, and Trap Set Register
+/* Trap Status Register, Trap Raw Status Register, Trap Mask Register, Trap Clear
+ * Register, and Trap Set Register
  */
 
 #define SCU_TRAP_SOSCWDGT           (1 << 0)  /* Bit 0:  OSC_HP Oscillator Watchdog Trap */
@@ -825,7 +695,6 @@
 #define SCU_PWRMON_ENB              (1 << 16) /* Bit 16: Enable */
 
 /* Hibernation SCU Registers */
-
 /* Hibernate Domain Status Register */
 
 #define SCU_HDSTAT_EPEV             (1 << 0)  /* Bit 0:  Wake-up Pin Event Positive Edge Status */
@@ -884,7 +753,6 @@
 #  define SCU_HDCR_HIBIO0SEL_OD     (12 << SCU_HDCR_HIBIO0SEL_SHIFT) /* Open-drain HIB Control output */
 #  define SCU_HDCR_HIBIO0SEL_ODWDT  (13 << SCU_HDCR_HIBIO0SEL_SHIFT) /* Open-drain WDT service output */
 #  define SCU_HDCR_HIBIO0SEL_ODGPIO (14 << SCU_HDCR_HIBIO0SEL_SHIFT) /* Open-drain GPIO output */
-
 #define SCU_HDCR_HIBIO1SEL_SHIFT    (20)      /* Bits 20-23: HIB_IO_1 Pin I/O Control */
 #define SCU_HDCR_HIBIO1SEL_MASK     (15 << SCU_HDCR_HIBIO1SEL_SHIFT)
 #  define SCU_HDCR_HIBIO1SEL_DIR    (0 << SCU_HDCR_HIBIO1SEL_SHIFT)  /* Direct input */
@@ -946,8 +814,8 @@
 #define SCU_RSTCLR_HIBRS            (1 << 9)  /* Bit 9:  Clear Hibernate Reset */
 #define SCU_RSTCLR_LCKEN            (1 << 10) /* Bit 10: Clear Hibernate Reset */
 
-/* Peripheral Reset Status Register 0, Peripheral Reset Set Register 0,
- * Peripheral Reset Clear Register 0
+/* Peripheral Reset Status Register 0, Peripheral Reset Set Register 0, Peripheral
+ * Reset Clear Register 0
  */
 
 #define SCU_PR0_VADCRS              (1 << 0)  /* Bit 0:  VADC Reset */
@@ -962,8 +830,8 @@
 #define SCU_PR0_USIC0RS             (1 << 11) /* Bit 11: USIC0 Reset */
 #define SCU_PR0_ERU1RS              (1 << 16) /* Bit 16: ERU1 Reset */
 
-/* Peripheral Reset Status Register 1, Peripheral Reset Set Register 1,
- * Peripheral Reset Clear Register 1
+/* Peripheral Reset Status Register 1, Peripheral Reset Set Register 1, Peripheral
+ * Reset Clear Register 1
  */
 
 #define SCU_PR1_CCU43RS             (1 << 0)  /* Bit 0:  CCU43 Reset */
@@ -975,8 +843,8 @@
 #define SCU_PR1_USIC2RS             (1 << 8)  /* Bit 8:  USIC2 Reset */
 #define SCU_PR1_PPORTSRS            (1 << 9)  /* Bit 9:  PORTS Reset */
 
-/* Peripheral Reset Status Register 1, Peripheral Reset Set Register 1,
- * Peripheral Reset Clear Register 1
+/* Peripheral Reset Status Register 1, Peripheral Reset Set Register 1, Peripheral
+ * Reset Clear Register 1
  */
 
 #define SCU_PR2_WDTRS               (1 << 1)  /* Bit 1:  WDT Reset */
@@ -985,19 +853,16 @@
 #define SCU_PR2_DMA1RS              (1 << 5)  /* Bit 5:  DMA1 Reset */
 #define SCU_PR2_FCERS               (1 << 6)  /* Bit 6:  FCE Reset */
 #define SCU_PR2_USBRS               (1 << 7)  /* Bit 7:  USB Reset */
-#define SCU_PR2_ECAT0RS             (1 << 10) /* Bit 10: ECAT0 Reset */
 
-/* Peripheral Reset Status Register 3, Peripheral Reset Set Register 3,
- * Peripheral Reset Clear Register 3
+/* Peripheral Reset Status Register 3, Peripheral Reset Set Register 3, Peripheral
+ * Reset Clear Register 3
  */
 
 #define SCU_PR3_EBURS               (1 << 2)  /* Bit 2:  EBU Reset */
 
 /* Clock Control SCU Registers */
 
-/* Clock Status Register, Clock Set Control Register,
- * Clock clear Control Register
- */
+/* Clock Status Register, Clock Set Control Register, Clock clear Control Register */
 
 #define SCU_CLK_USBC                (1 << 0)  /* Bit 0:  USB Clock */
 #define SCU_CLK_MMCC                (1 << 1)  /* Bit 1:  MMC Clock */
@@ -1065,7 +930,6 @@
 #  define SCU_EXTCLKCR_ECKSEL_FSYS  (0 << SCU_EXTCLKCR_ECKSEL_SHIFT) /* fSYS clock */
 #  define SCU_EXTCLKCR_ECKSEL_FUSB  (2 << SCU_EXTCLKCR_ECKSEL_SHIFT) /* fUSB clock divided by ECKDIV */
 #  define SCU_EXTCLKCR_ECKSEL_FPLL  (3 << SCU_EXTCLKCR_ECKSEL_SHIFT) /* fPLL clock divided by ECKDIV */
-
 #define SCU_EXTCLKCR_ECKDIV_SHIFT   (16)      /* Bits 16-24: External Clock Divider Value */
 #define SCU_EXTCLKCR_ECKDIV_MASK    (0x1ff << SCU_EXTCLKCR_ECKDIV_SHIFT)
 #  define SCU_EXTCLKCR_ECKDIV(n)    ((uint32_t)((n)-1) << SCU_EXTCLKCR_ECKDIV_SHIFT)
@@ -1097,9 +961,7 @@
 #define SCU_DSLEEPCR_CCUCR          (1 << 20) /* Bit 20: CCU Clock Control in Deep Sleep Mod */
 #define SCU_DSLEEPCR_WDTCR          (1 << 21) /* Bit 21: WDT Clock Control in Deep Sleep Mode */
 
-/* Peripheral 0 Clock Gating Status, Peripheral 0 Clock Gating Set,
- * Peripheral 0 Clock Gating Clear
- */
+/* Peripheral 0 Clock Gating Status, Peripheral 0 Clock Gating Set, Peripheral 0 Clock Gating Clear */
 
 #ifdef XMC4_SCU_GATING
 #  define SCU_CGAT0_VADC            (1 << 0)  /* Bit 0:  VADC Gating Status */
@@ -1115,9 +977,7 @@
 #  define SCU_CGAT0_ERU1            (1 << 16) /* Bit 16: ERU1 Gating Status */
 #endif
 
-/* Peripheral 1 Clock Gating Status, Peripheral 1 Clock Gating Set,
- * Peripheral 1 Clock Gating Clear
- */
+/* Peripheral 1 Clock Gating Status, Peripheral 1 Clock Gating Set, Peripheral 1 Clock Gating Clear */
 
 #ifdef XMC4_SCU_GATING
 #  define SCU_CGAT1_CCU43           (1 << 0)  /* Bit 0:  CCU43 Gating Status */
@@ -1130,9 +990,7 @@
 #  define SCU_CGAT1_PPORTS          (1 << 9)  /* Bit 9:  PORTS Gating Status */
 #endif
 
-/* Peripheral 2 Clock Gating Status, Peripheral 2 Clock Gating Set,
- * Peripheral 2 Clock Gating Clear
- */
+/* Peripheral 2 Clock Gating Status, Peripheral 2 Clock Gating Set, Peripheral 2 Clock Gating Clear */
 
 #ifdef XMC4_SCU_GATING
 #  define SCU_CGAT2_WDT             (1 << 1)  /* Bit 1:  WDT Gating Status */
@@ -1144,9 +1002,7 @@
 #  define SCU_CGAT2_ECAT            (1 << 10) /* Bit 10: ECAT Gating Status */
 #endif
 
-/* Peripheral 3 Clock Gating Status, Peripheral 3 Clock Gating Set,
- * Peripheral 3 Clock Gating Clear
- */
+/* Peripheral 3 Clock Gating Status, Peripheral 3 Clock Gating Set, Peripheral 3 Clock Gating Clear */
 
 #ifdef XMC4_SCU_GATING
 #  define SCU_CGAT3_EBU             (1 << 2)  /* Bit 2:  EBU Gating Status */

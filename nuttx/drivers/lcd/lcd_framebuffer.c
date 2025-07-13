@@ -1,22 +1,35 @@
 /****************************************************************************
- * drivers/lcd/lcd_framebuffer.c
+ * drivers/lcd/lcd_frambuffer.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017=-2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,6 +47,8 @@
 
 #include <nuttx/board.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/nx/nx.h>
+#include <nuttx/nx/nxglib.h>
 #include <nuttx/lcd/lcd.h>
 #include <nuttx/video/fb.h>
 
@@ -73,8 +88,8 @@ struct lcdfb_dev_s
 
 /* Update the LCD when there is a change to the framebuffer */
 
-static int lcdfb_updateearea(FAR struct fb_vtable_s *vtable,
-             FAR const struct fb_area_s *area);
+static int lcdfb_update(FAR struct lcdfb_dev_s *priv,
+             FAR const struct nxgl_rect_s *rect);
 
 /* Get information about the video controller configuration and the
  * configuration of each color plane.
@@ -106,8 +121,6 @@ static int lcdfb_getcursor(FAR struct fb_vtable_s *vtable,
 static int lcdfb_setcursor(FAR struct fb_vtable_s *vtable,
              FAR struct fb_setcursor_s *settings);
 #endif
-
-static int lcdfb_setpower(FAR struct fb_vtable_s *vtable, int power);
 
 /****************************************************************************
  * Private Data
@@ -154,112 +167,82 @@ static FAR struct lcdfb_dev_s *lcdfb_find(int display)
 }
 
 /****************************************************************************
- * Name: lcdfb_updateearea
+ * Name: lcdfb_update
  *
  * Description:
  * Update the LCD when there is a change to the framebuffer.
  *
  ****************************************************************************/
 
-static int lcdfb_updateearea(FAR struct fb_vtable_s *vtable,
-                             FAR const struct fb_area_s *area)
+static int lcdfb_update(FAR struct lcdfb_dev_s *priv,
+                        FAR const struct nxgl_rect_s *rect)
 {
-  FAR struct lcdfb_dev_s *priv = (FAR struct lcdfb_dev_s *)vtable;
   FAR struct lcd_planeinfo_s *pinfo = &priv->pinfo;
-  FAR uint8_t *run = priv->fbmem;
+  FAR uint8_t *run;
   fb_coord_t row;
-  fb_coord_t startx = 0;
-  fb_coord_t endx = priv->xres - 1;
-  fb_coord_t width = priv->xres;
-  fb_coord_t starty = 0;
-  fb_coord_t endy = priv->yres - 1;
+  fb_coord_t startx;
+  fb_coord_t endx;
+  fb_coord_t width;
+  fb_coord_t starty;
+  fb_coord_t endy;
   int ret;
 
-  if (area != NULL)
+  /* Clip to fit in the framebuffer */
+
+  startx = rect->pt1.x;
+  if (startx < 0)
     {
-      /* Clip to fit in the framebuffer */
-
-      startx = area->x;
-      if (startx < 0)
-        {
-          startx = 0;
-        }
-
-      endx = startx + area->w - 1;
-      if (endx >= priv->xres)
-        {
-          endx = priv->xres - 1;
-        }
-
-      starty = area->y;
-      if (starty < 0)
-        {
-          starty = 0;
-        }
-
-      endy = starty + area->h - 1;
-      if (endy >= priv->yres)
-        {
-          endy = priv->yres - 1;
-        }
-
-      /* If the display uses a value of BPP < 8, then we may have to extend
-       * the rectangle on the left so that it is byte aligned.  Works for
-       * BPP={1,2,4}
-       */
-
-      if (pinfo->bpp < 8)
-        {
-          unsigned int pixperbyte = 8 / pinfo->bpp;
-          startx &= ~(pixperbyte - 1);
-        }
-
-      /* Get the starting position in the framebuffer */
-
-      run  = priv->fbmem + starty * priv->stride;
-      run += (startx * pinfo->bpp + 7) >> 3;
+      startx = 0;
     }
 
-  if (pinfo->putarea != NULL)
+  endx = rect->pt2.x;
+  if (endx >= priv->xres)
     {
-      /* Each Driver's callback function putarea may be optimized by checking
-       * if it is a full screen/full row mode or not.
-       * In case of full screen/row mode the memory layout of drivers memory
-       * and data provided to putarea function may be (or not, it depends of
-       * display and driver implementation) identical.
-       * Identical memory layout let us to use:
-       * - memcopy (if there is shadow buffer in driver implementation)
-       * - apply DMA channel to transfer data to driver memory.
+      endx = priv->xres-1;
+    }
+
+  starty = rect->pt1.y;
+  if (starty < 0)
+    {
+      starty = 0;
+    }
+
+  endy = rect->pt2.y;
+  if (endy >= priv->yres)
+    {
+      endy = priv->yres-1;
+    }
+
+  /* If the display uses a value of BPP < 8, then we may have to extend the
+   * rectangle on the left so that it is byte aligned.  Works for BPP={1,2,4}
+   */
+
+  if (pinfo->bpp < 8)
+    {
+      unsigned int pixperbyte = 8 / pinfo->bpp;
+      startx &= ~(pixperbyte - 1);
+    }
+
+  width = endx - startx + 1;
+
+  /* Get the starting position in the framebuffer */
+
+  run  = priv->fbmem + starty * priv->stride;
+  run += (startx * pinfo->bpp + 7) >> 3;
+
+  for (row = starty; row <= endy; row++)
+    {
+      /* REVISIT: Some LCD hardware certain alignment requirements on DMA
+       * memory.
        */
 
-      ret = pinfo->putarea(pinfo->dev, starty, endy, startx, endx,
-                           run, priv->stride);
+      ret = pinfo->putrun(row, startx, run, width);
       if (ret < 0)
         {
-          lcderr("Failed to update area");
           return ret;
         }
-    }
-  else
-    {
-      width = endx - startx + 1;
 
-      for (row = starty; row <= endy; row++)
-        {
-          ret = pinfo->putrun(pinfo->dev, row, startx, run, width);
-          if (ret < 0)
-            {
-              lcderr("Failed to update row");
-              return ret;
-            }
-
-          run += priv->stride;
-        }
-    }
-
-  if (pinfo->redraw != NULL)
-    {
-      pinfo->redraw(pinfo->dev);
+      run += priv->stride;
     }
 
   return OK;
@@ -347,7 +330,7 @@ static int lcdfb_getcmap(FAR struct fb_vtable_s *vtable,
 
   if (priv != NULL && cmap != NULL)
     {
-      /* Get the color map from the contained LCD */
+      /* Get the video info from the contained LCD */
 
       lcd = priv->lcd
       DEBUGASSERT(lcd->getcmap != NULL);
@@ -381,7 +364,7 @@ static int lcdfb_putcmap(FAR struct fb_vtable_s *vtable,
 
   if (priv != NULL && cmap != NULL)
     {
-      /* Set the color map to the contained LCD */
+      /* Get the video info from the contained LCD */
 
       lcd = priv->lcd
       DEBUGASSERT(lcd->putcmap != NULL);
@@ -402,7 +385,7 @@ static int lcdfb_putcmap(FAR struct fb_vtable_s *vtable,
 
 #ifdef CONFIG_FB_HWCURSOR
 static int lcdfb_getcursor(FAR struct fb_vtable_s *vtable,
-                           FAR struct fb_cursorattrib_s *attrib)
+                        FAR struct fb_cursorattrib_s *attrib)
 {
   lcdinfo("vtable=%p attrib=%p\n", vtable, attrib);
   FAR struct lcdfb_dev_s *priv;
@@ -416,7 +399,7 @@ static int lcdfb_getcursor(FAR struct fb_vtable_s *vtable,
 
   if (priv != NULL && attrib != NULL)
     {
-      /* Get the cursor info from the contained LCD */
+      /* Get the video info from the contained LCD */
 
       lcd = priv->lcd
       DEBUGASSERT(lcd->getcursor != NULL);
@@ -437,7 +420,7 @@ static int lcdfb_getcursor(FAR struct fb_vtable_s *vtable,
 
 #ifdef CONFIG_FB_HWCURSOR
 static int lcdfb_setcursor(FAR struct fb_vtable_s *vtable,
-                           FAR struct fb_setcursor_s *settings)
+                       FAR struct fb_setcursor_s *settings)
 {
   FAR struct lcdfb_dev_s *priv;
   FAR struct lcd_dev_s *lcd;
@@ -450,7 +433,7 @@ static int lcdfb_setcursor(FAR struct fb_vtable_s *vtable,
 
   if (priv != NULL && settings != NULL)
     {
-      /* Set the cursor info to the contained LCD */
+      /* Get the video info from the contained LCD */
 
       lcd = priv->lcd
       DEBUGASSERT(lcd->setcursor != NULL);
@@ -464,121 +447,6 @@ static int lcdfb_setcursor(FAR struct fb_vtable_s *vtable,
   return ret;
 }
 #endif
-
-/****************************************************************************
- * Name: lcdfb_setpower
- ****************************************************************************/
-
-static int lcdfb_setpower(FAR struct fb_vtable_s *vtable, int power)
-{
-  int ret = -EINVAL;
-  FAR struct lcdfb_dev_s *priv;
-  FAR struct lcd_dev_s *lcd;
-
-  DEBUGASSERT(vtable != NULL);
-
-  priv = (FAR struct lcdfb_dev_s *)vtable;
-
-  if (priv != NULL)
-    {
-      lcd = priv->lcd;
-      DEBUGASSERT(lcd->setpower != NULL);
-
-      ret = lcd->setpower(lcd, power);
-      if (ret < 0)
-        {
-          lcderr("ERROR: LCD setpower() failed: %d\n", ret);
-        }
-    }
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: lcdfb_ioctl
- ****************************************************************************/
-
-static int lcdfb_ioctl(FAR struct fb_vtable_s *vtable,
-                       int cmd, unsigned long arg)
-{
-  int ret = -EINVAL;
-  FAR struct lcdfb_dev_s *priv;
-  FAR struct lcd_dev_s *lcd;
-
-  DEBUGASSERT(vtable != NULL);
-
-  priv = (FAR struct lcdfb_dev_s *)vtable;
-
-  if (priv != NULL)
-    {
-      lcd = priv->lcd;
-
-      if (lcd->ioctl)
-        {
-          ret = lcd->ioctl(lcd, cmd, arg);
-        }
-      else
-        {
-          ret = -ENOTTY;
-        }
-    }
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: lcdfb_open
- ****************************************************************************/
-
-static int lcdfb_open(FAR struct fb_vtable_s *vtable)
-{
-  int ret = OK;
-  FAR struct lcdfb_dev_s *priv;
-  FAR struct lcd_dev_s *lcd;
-
-  DEBUGASSERT(vtable != NULL);
-
-  priv = (FAR struct lcdfb_dev_s *)vtable;
-
-  if (priv != NULL)
-    {
-      lcd = priv->lcd;
-
-      if (lcd->open)
-        {
-          ret = lcd->open(lcd);
-        }
-    }
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: lcdfb_close
- ****************************************************************************/
-
-static int lcdfb_close(FAR struct fb_vtable_s *vtable)
-{
-  int ret = OK;
-  FAR struct lcdfb_dev_s *priv;
-  FAR struct lcd_dev_s *lcd;
-
-  DEBUGASSERT(vtable != NULL);
-
-  priv = (FAR struct lcdfb_dev_s *)vtable;
-
-  if (priv != NULL)
-    {
-      lcd = priv->lcd;
-
-      if (lcd->close)
-        {
-          ret = lcd->close(lcd);
-        }
-    }
-
-  return ret;
-}
 
 /****************************************************************************
  * Public Functions
@@ -605,7 +473,7 @@ int up_fbinitialize(int display)
   FAR struct lcdfb_dev_s *priv;
   FAR struct lcd_dev_s *lcd;
   struct fb_videoinfo_s vinfo;
-  struct fb_area_s area;
+  struct nxgl_rect_s rect;
   int ret;
 
   lcdinfo("display=%d\n", display);
@@ -613,7 +481,7 @@ int up_fbinitialize(int display)
 
   /* Allocate the framebuffer state structure */
 
-  priv = kmm_zalloc(sizeof(struct lcdfb_dev_s));
+  priv = (FAR struct lcdfb_dev_s *)kmm_zalloc(sizeof(struct lcdfb_dev_s));
   if (priv == NULL)
     {
       lcderr("ERROR: Failed to allocate state structure\n");
@@ -634,11 +502,6 @@ int up_fbinitialize(int display)
   priv->vtable.getcursor    = lcdfb_getcursor,
   priv->vtable.setcursor    = lcdfb_setcursor,
 #endif
-  priv->vtable.updatearea   = lcdfb_updateearea,
-  priv->vtable.setpower     = lcdfb_setpower,
-  priv->vtable.ioctl        = lcdfb_ioctl,
-  priv->vtable.open         = lcdfb_open,
-  priv->vtable.close        = lcdfb_close,
 
 #ifdef CONFIG_LCD_EXTERNINIT
   /* Use external graphics driver initialization */
@@ -647,8 +510,7 @@ int up_fbinitialize(int display)
   if (lcd == NULL)
     {
       gerr("ERROR: board_graphics_setup failed, devno=%d\n", display);
-      ret = -ENODEV;
-      goto errout_with_state;
+      return EXIT_FAILURE;
     }
 #else
   /* Initialize the LCD device */
@@ -699,7 +561,7 @@ int up_fbinitialize(int display)
   priv->stride = ((size_t)priv->xres * priv->pinfo.bpp + 7) >> 3;
   priv->fblen  = priv->stride * priv->yres;
 
-  priv->fbmem  = kmm_zalloc(priv->fblen);
+  priv->fbmem  = (FAR uint8_t *)kmm_zalloc(priv->fblen);
   if (priv->fbmem == NULL)
     {
       lcderr("ERROR: Failed to allocate frame buffer memory\n");
@@ -714,12 +576,12 @@ int up_fbinitialize(int display)
 
   /* Write the entire framebuffer to the LCD */
 
-  area.x = 0;
-  area.y = 0;
-  area.w = priv->xres;
-  area.h = priv->yres;
+  rect.pt1.x = 0;
+  rect.pt1.y = 0;
+  rect.pt2.x = priv->xres - 1;
+  rect.pt2.y = priv->yres - 1;
 
-  ret = lcdfb_updateearea(&priv->vtable, &area);
+  ret = lcdfb_update(priv, &rect);
   if (ret < 0)
     {
       lcderr("FB update failed: %d\n", ret);
@@ -727,15 +589,15 @@ int up_fbinitialize(int display)
 
   /* Turn the LCD on at 75% power */
 
-  priv->lcd->setpower(priv->lcd, ((3*CONFIG_LCD_MAXPOWER + 3) / 4));
+  priv->lcd->setpower(priv->lcd, ((3*CONFIG_LCD_MAXPOWER + 3)/4));
   return OK;
 
 errout_with_lcd:
 #ifndef CONFIG_LCD_EXTERNINIT
   board_lcd_uninitialize();
-#endif
 
 errout_with_state:
+#endif
   kmm_free(priv);
   return ret;
 }
@@ -745,8 +607,7 @@ errout_with_state:
  *
  * Description:
  *   Return a a reference to the framebuffer object for the specified video
- *   plane of the specified plane.  Many OSDs support multiple planes of
- *   video.
+ *   plane of the specified plane.  Many OSDs support multiple planes of video.
  *
  * Input Parameters:
  *   display - In the case of hardware with multiple displays, this
@@ -836,5 +697,58 @@ void up_fbuninitialize(int display)
         }
     }
 }
+
+/****************************************************************************
+ * Name: nx_notify_rectangle
+ *
+ * Description:
+ *   When CONFIG_LCD_UPDATE=y, then the graphics system will callout to
+ *   inform some external module that the display has been updated.  This
+ *   would be useful in a couple for cases.
+ *
+ *   - When a serial LCD is used, but a framebuffer is used to access the
+ *     LCD.  In this case, the update callout can be used to refresh the
+ *     affected region of the display.
+ *
+ *   - When VNC is enabled.  This is case, this callout is necessary to
+ *     update the remote frame buffer to match the local framebuffer.
+ *
+ *   When this feature is enabled, some external logic must provide this
+ *   interface.  This is the function that will handle the notification.  It
+ *   receives the rectangular region that was updated on the provided plane.
+ *
+ *   NOTE: This function is also required for use with the LCD framebuffer
+ *   driver front end when CONFIG_LCD_UPDATE=y, although that use does not
+ *   depend on CONFIG_NX (and this function seems misnamed in that case).
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_LCD_UPDATE) || defined(CONFIG_NX_UPDATE)
+void nx_notify_rectangle(FAR NX_PLANEINFOTYPE *pinfo,
+                         FAR const struct nxgl_rect_s *rect)
+{
+  FAR struct fb_planeinfo_s *fpinfo = (FAR struct fb_planeinfo_s *)pinfo;
+  FAR struct lcdfb_dev_s *priv;
+  int ret;
+
+  DEBUGASSERT(fpinfo != NULL && rect != NULL);
+
+  /* Look up the LCD framebuffer state structure for this display.
+   *
+   * REVISIT:  If many LCD framebuffers are used, then this lookup would be
+   * a performance issue.
+   */
+
+  priv = lcdfb_find(fpinfo->display);
+  if (priv != NULL)
+    {
+      ret = lcdfb_update(priv, rect);
+      if (ret < 0)
+        {
+          lcderr("FB update failed: %d\n", ret);
+        }
+    }
+}
+#endif
 
 #endif /* CONFIG_LCD_FRAMEBUFFER */

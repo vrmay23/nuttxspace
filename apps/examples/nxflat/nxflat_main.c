@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/nxflat/nxflat_main.c
+ * examples/nxflat/nxflat_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009, 2011, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
 #include <nuttx/compiler.h>
 
 #include <sys/mount.h>
-#include <sys/boardctl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -41,6 +53,10 @@
 #include <nuttx/drivers/ramdisk.h>
 #include <nuttx/binfmt/binfmt.h>
 
+#include "tests/romfs.h"
+#include "tests/dirlist.h"
+#include "tests/symtab.h"
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -48,6 +64,10 @@
 /* Check configuration.  This is not all of the configuration settings that
  * are required -- only the more obvious.
  */
+
+#ifdef CONFIG_BINFMT_DISABLE
+#  error "The binary loader is disabled (CONFIG_BINFMT_DISABLE)!"
+#endif
 
 #ifndef CONFIG_NXFLAT
 #  error "You must select CONFIG_NXFLAT in your configuration file"
@@ -65,9 +85,6 @@
 #  error "You must not disable loadable modules via CONFIG_BINFMT_DISABLE in your configuration file"
 #endif
 
-#ifndef CONFIG_BOARDCTL_ROMDISK
-#  error "CONFIG_BOARDCTL_ROMDISK should be enabled in the configuration file"
-#endif
 /* Describe the ROMFS file system */
 
 #define SECTORSIZE   512
@@ -79,15 +96,28 @@
  * that the output will be synchronous with the debug output.
  */
 
-#ifdef CONFIG_DEBUG_INFO
-#  define message                 _info
+#ifdef CONFIG_CPP_HAVE_VARARGS
+#  ifdef CONFIG_DEBUG_INFO
+#    define message(format, ...)    syslog(LOG_INFO, format, ##__VA_ARGS__)
+#  else
+#    define message(format, ...)    printf(format, ##__VA_ARGS__)
+#  endif
+#  ifdef CONFIG_DEBUG_ERROR
+#    define errmsg(format, ...)     syslog(LOG_ERR, format, ##__VA_ARGS__)
+#  else
+#    define errmsg(format, ...)     fprintf(stderr, format, ##__VA_ARGS__)
+#  endif
 #else
-#  define message                 printf
-#endif
-#ifdef CONFIG_DEBUG_ERROR
-#  define errmsg                  _err
-#else
-#  define errmsg                  printf
+#  ifdef CONFIG_DEBUG_INFO
+#    define message                 _info
+#  else
+#    define message                 printf
+#  endif
+#  ifdef CONFIG_DEBUG_ERROR
+#    define errmsg                  _err
+#  else
+#    define errmsg                  printf
+#  endif
 #endif
 
 /****************************************************************************
@@ -95,24 +125,11 @@
  ****************************************************************************/
 
 static const char delimiter[] =
-  "**************************************"
-  "**************************************";
+  "****************************************************************************";
 
-#ifndef CONFIG_LIBC_ENVPATH
+#ifndef CONFIG_LIB_ENVPATH
 static char fullpath[128];
 #endif
-
-/****************************************************************************
- * Symbols from Auto-Generated Code
- ****************************************************************************/
-
-extern const unsigned char romfs_img[];
-extern const unsigned int romfs_img_len;
-
-extern const char *dirlist[];
-
-extern const struct symtab_s g_nxflat_exports[];
-extern const int g_nxflat_nexports;
 
 /****************************************************************************
  * Private Functions
@@ -137,21 +154,15 @@ static inline void testheader(FAR const char *progname)
 
 int main(int argc, FAR char *argv[])
 {
-  FAR char *args[2];
+  FAR char *args[1];
   int ret;
   int i;
-  struct boardioc_romdisk_s desc;
 
   /* Create a ROM disk for the ROMFS filesystem */
 
   message("Registering romdisk\n");
-
-  desc.minor    = 0;                                    /* Minor device number of the ROM disk. */
-  desc.nsectors = NSECTORS(romfs_img_len);              /* The number of sectors in the ROM disk */
-  desc.sectsize = SECTORSIZE;                           /* The size of one sector in bytes */
-  desc.image    = (FAR uint8_t *)romfs_img;             /* File system image */
-
-  ret = boardctl(BOARDIOC_ROMDISK, (uintptr_t)&desc);
+  ret = romdisk_register(0, (FAR uint8_t *)romfs_img,
+                         NSECTORS(romfs_img_len), SECTORSIZE);
   if (ret < 0)
     {
       errmsg("ERROR: romdisk_register failed: %d\n", ret);
@@ -166,11 +177,11 @@ int main(int argc, FAR char *argv[])
   ret = mount(ROMFSDEV, MOUNTPT, "romfs", MS_RDONLY, NULL);
   if (ret < 0)
     {
-      errmsg("ERROR: mount(%s,%s,romfs) failed: %d\n",
+      errmsg("ERROR: mount(%s,%s,romfs) failed: %s\n",
              ROMFSDEV, MOUNTPT, errno);
     }
 
-#if defined(CONFIG_LIBC_ENVPATH) && !defined(CONFIG_PATH_INITIAL)
+#if defined(CONFIG_LIB_ENVPATH) && !defined(CONFIG_PATH_INITIAL)
   /* Does the system support the PATH variable?  Has the PATH variable
    * already been set?  If YES and NO, then set the PATH variable to
    * the ROMFS mountpoint.
@@ -197,10 +208,10 @@ int main(int argc, FAR char *argv[])
        * search the PATH variable to find the executable.
        */
 
-#ifdef CONFIG_LIBC_ENVPATH
+#ifdef CONFIG_LIB_ENVPATH
       filename = dirlist[i];
 #else
-      snprintf(fullpath, sizeof(fullpath), "%s/%s", MOUNTPT, dirlist[i]);
+      snprintf(fullpath, 128, "%s/%s", MOUNTPT, dirlist[i]);
       filename = fullpath;
 #endif
 
@@ -213,9 +224,8 @@ int main(int argc, FAR char *argv[])
        * table information is available within the OS.
        */
 
-      args[0] = (FAR char *)dirlist[i];
-      args[1] = NULL;
-      ret = exec(filename, args, NULL, g_nxflat_exports, g_nxflat_nexports);
+      args[0] = NULL;
+      ret = exec(filename, args, g_nxflat_exports, NEXPORTS);
       if (ret < 0)
         {
           errmsg("ERROR: exec(%s) failed: %d\n", dirlist[i], errno);

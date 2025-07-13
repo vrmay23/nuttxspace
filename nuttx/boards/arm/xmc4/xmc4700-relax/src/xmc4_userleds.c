@@ -1,8 +1,6 @@
 /****************************************************************************
  * boards/arm/xmc4/xmc4700-relax/src/xmc4_userleds.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -40,13 +38,12 @@
  * Name: board_userled_initialize
  ****************************************************************************/
 
-uint32_t board_userled_initialize(void)
+void board_userled_initialize(void)
 {
   /* Configure LED1-2 GPIOs for output */
 
   xmc4_gpio_config(GPIO_LED1);
   xmc4_gpio_config(GPIO_LED2);
-  return BOARD_NLEDS;
 }
 
 /****************************************************************************
@@ -57,11 +54,11 @@ void board_userled(int led, bool ledon)
 {
   gpioconfig_t ledcfg;
 
-  if (led == BOARD_LED0)
+  if (led == BOARD_LED1)
     {
       ledcfg = GPIO_LED1;
     }
-  else if (led == BOARD_LED1)
+  else if (led == BOARD_LED2)
     {
       ledcfg = GPIO_LED2;
     }
@@ -77,13 +74,13 @@ void board_userled(int led, bool ledon)
  * Name: board_userled_all
  ****************************************************************************/
 
-void board_userled_all(uint32_t ledset)
+void board_userled_all(uint8_t ledset)
 {
   bool ledon;
 
-  ledon = ((ledset & BOARD_LED0_BIT) != 0);
+  ledon = ((ledset & BOARD_LED1_BIT) != 0);
   xmc4_gpio_write(GPIO_LED1, ledon);
 
-  ledon = ((ledset & BOARD_LED1_BIT) != 0);
+  ledon = ((ledset & BOARD_LED2_BIT) != 0);
   xmc4_gpio_write(GPIO_LED2, ledon);
 }

@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/poll/net_reader.c
+ * examples/poll/net_reader.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2011-2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -78,9 +91,8 @@ static void net_configure(void)
   uint8_t mac[IFHWADDRLEN];
 #endif
 
-  /* Configure the network
-   * Many embedded network interfaces must have a software assigned MAC
-   */
+  /* Configure the network */
+  /* Many embedded network interfaces must have a software assigned MAC */
 
 #ifdef CONFIG_EXAMPLES_POLL_NOMAC
   mac[0] = 0x00;
@@ -134,7 +146,7 @@ static void net_receive(int sd)
 
   /* Loop while we have the connection */
 
-  for (; ; )
+  for (;;)
     {
       /* Wait for incoming message */
 
@@ -142,7 +154,7 @@ static void net_receive(int sd)
         {
           FD_ZERO(&readset);
           FD_SET(sd, &readset);
-          ret = select(sd + 1, &readset, NULL, NULL, &timeout);
+          ret = select(sd + 1, (FAR fd_set*)&readset, (FAR fd_set*)NULL, (FAR fd_set*)NULL, &timeout);
         }
       while (ret < 0 && errno == EINTR);
 
@@ -180,7 +192,7 @@ static void net_receive(int sd)
             }
           else
             {
-              buffer[ret] = '\0';
+              buffer[ret]='\0';
               printf("net_reader: Read '%s' (%d bytes)\n", buffer, ret);
 
               /* Echo the data back to the client */
@@ -192,8 +204,7 @@ static void net_receive(int sd)
                     {
                       if (errno != EINTR)
                         {
-                           printf("net_reader: Send failed sd=%d: %d\n",
-                                  sd, errno);
+                           printf("net_reader: Send failed sd=%d: %d\n", sd, errno);
                            return;
                         }
                     }
@@ -243,8 +254,7 @@ void *net_reader(pthread_addr_t pvarg)
   /* Set socket to reuse address */
 
   optval = 1;
-  if (setsockopt(listensd, SOL_SOCKET, SO_REUSEADDR,
-                 &optval, sizeof(int)) < 0)
+  if (setsockopt(listensd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int)) < 0)
     {
       printf("net_reader: setsockopt SO_REUSEADDR failure: %d\n", errno);
       goto errout_with_listensd;
@@ -256,8 +266,7 @@ void *net_reader(pthread_addr_t pvarg)
   addr.sin_port        = HTONS(LISTENER_PORT);
   addr.sin_addr.s_addr = INADDR_ANY;
 
-  if (bind(listensd, (struct sockaddr *)&addr,
-           sizeof(struct sockaddr_in)) < 0)
+  if (bind(listensd, (struct sockaddr*)&addr, sizeof(struct sockaddr_in)) < 0)
     {
       printf("net_reader: bind failure: %d\n", errno);
       goto errout_with_listensd;
@@ -273,15 +282,13 @@ void *net_reader(pthread_addr_t pvarg)
 
   /* Connection loop */
 
-  for (; ; )
+  for (;;)
     {
       /* Accept only one connection */
 
-      printf("net_reader: Accepting new connections on port %d\n",
-             LISTENER_PORT);
+      printf("net_reader: Accepting new connections on port %d\n", LISTENER_PORT);
       addrlen = sizeof(struct sockaddr_in);
-      acceptsd = accept4(listensd, (struct sockaddr *)&addr, &addrlen,
-                         SOCK_CLOEXEC);
+      acceptsd = accept(listensd, (struct sockaddr*)&addr, &addrlen);
       if (acceptsd < 0)
         {
           printf("net_reader: accept failure: %d\n", errno);
@@ -290,16 +297,13 @@ void *net_reader(pthread_addr_t pvarg)
 
       printf("net_reader: Connection accepted on sd=%d\n", acceptsd);
 
-      /* Configure to "linger" until all data is sent when the socket is
-       * closed
-       */
+      /* Configure to "linger" until all data is sent when the socket is closed */
 
 #ifdef POLL_HAVE_SOLINGER
       ling.l_onoff  = 1;
       ling.l_linger = 30;     /* timeout is seconds */
 
-      if (setsockopt(acceptsd, SOL_SOCKET, SO_LINGER,
-                     &ling, sizeof(struct linger)) < 0)
+      if (setsockopt(acceptsd, SOL_SOCKET, SO_LINGER, &ling, sizeof(struct linger)) < 0)
         {
           printf("net_reader: setsockopt SO_LINGER failure: %d\n", errno);
           goto errout_with_acceptsd;

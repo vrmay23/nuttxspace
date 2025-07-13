@@ -1,22 +1,37 @@
 /****************************************************************************
- * apps/examples/usrsocktest/usrsocktest_multi_thread.c
+ * examples/usrsocktest/usrsocktest_multi_thread.c
+ * Multi-threaded access to sockets
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
+ *   Authors: Roman Saveljev <roman.saveljev@haltian.com>
+ *            Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -24,18 +39,20 @@
  * Included Files
  ****************************************************************************/
 
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <assert.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <unistd.h>
 
 #include "defines.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+#ifndef ARRAY_SIZE
+#  define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
 
 /****************************************************************************
  * Private Types
@@ -89,12 +106,12 @@ static void usrsock_socket_multitask_do_work(int *sd)
 
 static FAR void *usrsock_socket_multitask_thread(FAR void *param)
 {
-  usrsock_socket_multitask_do_work((int *)param);
+  usrsock_socket_multitask_do_work((int*)param);
   return NULL;
 }
 
 /****************************************************************************
- * Name: multithread test group setup
+ * Name: MultiThread test group setup
  *
  * Description:
  *   Setup function executed before each testcase in this test group
@@ -110,25 +127,22 @@ static FAR void *usrsock_socket_multitask_thread(FAR void *param)
  *
  ****************************************************************************/
 
-TEST_SETUP(multithread)
+TEST_SETUP(MultiThread)
 {
   int i;
-
-  for (i = 0; i < nitems(sds); i++)
+  for (i = 0; i < ARRAY_SIZE(sds); i++)
     {
       sds[i] = -1;
     }
-
-  for (i = 0; i < nitems(tids); i++)
+  for (i = 0; i < ARRAY_SIZE(tids); i++)
     {
       tids[i] = -1;
     }
-
   started = false;
 }
 
 /****************************************************************************
- * Name: multithread test group teardown
+ * Name: MultiThread test group teardown
  *
  * Description:
  *   Setup function executed after each testcase in this test group
@@ -144,40 +158,38 @@ TEST_SETUP(multithread)
  *
  ****************************************************************************/
 
-TEST_TEAR_DOWN(multithread)
+TEST_TEAR_DOWN(MultiThread)
 {
-  int unused_data ret;
+  int ret;
   int i;
 
-  for (i = 0; i < nitems(tids); i++)
+  for (i = 0; i < ARRAY_SIZE(tids); i++)
     {
       if (tids[i] != -1)
         {
           ret = pthread_cancel(tids[i]);
-          TEST_ASSERT_EQUAL(ret, OK);
+          assert(ret == OK);
           ret = pthread_join(tids[i], NULL);
-          TEST_ASSERT_EQUAL(ret, OK);
+          assert(ret == OK);
         }
     }
-
-  for (i = 0; i < nitems(sds); i++)
+  for (i = 0; i < ARRAY_SIZE(sds); i++)
     {
       if (sds[i] != -1)
         {
           ret = close(sds[i]);
-          TEST_ASSERT_TRUE(ret >= 0);
+          assert(ret >= 0);
         }
     }
-
   if (started)
     {
       ret = usrsocktest_daemon_stop();
-      TEST_ASSERT_EQUAL(ret, OK);
+      assert(ret == OK);
     }
 }
 
 /****************************************************************************
- * Name: open_close
+ * Name: OpenClose
  *
  * Description:
  *   Open and close socket with multiple threads
@@ -193,7 +205,7 @@ TEST_TEAR_DOWN(multithread)
  *
  ****************************************************************************/
 
-TEST(multithread, open_close)
+TEST(MultiThread, OpenClose)
 {
   int ret;
   int i;
@@ -206,13 +218,12 @@ TEST(multithread, open_close)
   usrsocktest_daemon_config.endpoint_block_connect = false;
   usrsocktest_daemon_config.endpoint_addr = "127.0.0.1";
   usrsocktest_daemon_config.endpoint_port = 255;
-  TEST_ASSERT_EQUAL(OK,
-                    usrsocktest_daemon_start(&usrsocktest_daemon_config));
+  TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(&usrsocktest_daemon_config));
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_active_sockets());
 
   /* Launch worker threads. */
 
-  for (i = 0; i < nitems(tids); i++)
+  for (i = 0; i < ARRAY_SIZE(tids); i++)
     {
       ret = pthread_create(&tids[i], NULL, usrsock_socket_multitask_thread,
                            sds + i);
@@ -249,7 +260,7 @@ TEST(multithread, open_close)
  * Public Functions
  ****************************************************************************/
 
-TEST_GROUP(multithread)
+TEST_GROUP(MultiThread)
 {
-  RUN_TEST_CASE(multithread, open_close);
+  RUN_TEST_CASE(MultiThread, OpenClose);
 }

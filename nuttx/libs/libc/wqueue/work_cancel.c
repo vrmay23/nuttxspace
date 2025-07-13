@@ -1,22 +1,35 @@
 /****************************************************************************
  * libs/libc/wqueue/work_cancel.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009-2010, 2012-2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,16 +39,16 @@
 
 #include <nuttx/config.h>
 
+#include <queue.h>
 #include <assert.h>
 #include <errno.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/queue.h>
 #include <nuttx/wqueue.h>
 
 #include "wqueue/wqueue.h"
 
-#if defined(CONFIG_LIBC_USRWORK) && !defined(__KERNEL__)
+#if defined(CONFIG_LIB_USRWORK) && !defined(__KERNEL__)
 
 /****************************************************************************
  * Private Functions
@@ -46,11 +59,11 @@
  *
  * Description:
  *   Cancel previously queued work.  This removes work from the work queue.
- *   After work has been cancelled, it may be requeued by calling
- *   work_queue() again.
+ *   After work has been cancelled, it may be re-queue by calling work_queue()
+ *   again.
  *
  * Input Parameters:
- *   wqueue - The work queue
+ *   qid    - The work queue ID
  *   work   - The previously queue work structure to cancel
  *
  * Returned Value:
@@ -62,17 +75,15 @@
  *
  ****************************************************************************/
 
-static int work_qcancel(FAR struct usr_wqueue_s *wqueue,
-                        FAR struct work_s *work)
+static int work_qcancel(FAR struct usr_wqueue_s *wqueue, FAR struct work_s *work)
 {
   int ret = -ENOENT;
-  int semcount;
 
   DEBUGASSERT(work != NULL);
 
   /* Get exclusive access to the work queue */
 
-  while (nxmutex_lock(&wqueue->lock) < 0);
+  while (work_lock() < 0);
 
   /* Cancelling the work is simply a matter of removing the work structure
    * from the work queue.  This must be done with interrupts disabled because
@@ -81,28 +92,23 @@ static int work_qcancel(FAR struct usr_wqueue_s *wqueue,
 
   if (work->worker != NULL)
     {
-      bool is_head = list_is_head(&wqueue->q, &work->node);
+      /* A little test of the integrity of the work queue */
 
-      /* Now, remove the work from the work queue */
+      DEBUGASSERT(work->dq.flink != NULL ||
+                  (FAR dq_entry_t *)work == wqueue->q.tail);
+      DEBUGASSERT(work->dq.blink != NULL ||
+                  (FAR dq_entry_t *)work == wqueue->q.head);
 
-      list_delete(&work->node);
+      /* Remove the entry from the work queue and make sure that it is
+       * marked as available (i.e., the worker field is nullified).
+       */
 
-      if (is_head)
-        {
-          /* Remove the work at the head of the queue */
-
-          nxsem_get_value(&wqueue->wake, &semcount);
-          if (semcount < 1)
-            {
-              nxsem_post(&wqueue->wake);
-            }
-        }
-
+      dq_rem((FAR dq_entry_t *)work, &wqueue->q);
       work->worker = NULL;
       ret = OK;
     }
 
-  nxmutex_unlock(&wqueue->lock);
+  work_unlock();
   return ret;
 }
 
@@ -115,12 +121,12 @@ static int work_qcancel(FAR struct usr_wqueue_s *wqueue,
  *
  * Description:
  *   Cancel previously queued user-mode work.  This removes work from the
- *   user mode work queue.  After work has been cancelled, it may be
- *   requeued by calling work_queue() again.
+ *   user mode work queue.  After work has been cancelled, it may be re-queue
+ *   by calling work_queue() again.
  *
  * Input Parameters:
  *   qid    - The work queue ID (must be USRWORK)
- *   work   - The previously queued work structure to cancel
+ *   work   - The previously queue work structure to cancel
  *
  * Returned Value:
  *   Zero (OK) on success, a negated errno on failure.  This error may be
@@ -142,4 +148,4 @@ int work_cancel(int qid, FAR struct work_s *work)
     }
 }
 
-#endif /* CONFIG_LIBC_USRWORK && !__KERNEL__ */
+#endif /* CONFIG_LIB_USRWORK && !__KERNEL__ */

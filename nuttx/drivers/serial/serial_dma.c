@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/serial/serial_dma.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2018 Gregory Nutt. All rights reserved.
+ *   Author:  Max Neklyudov <macscomp@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,11 +39,9 @@
 
 #include <nuttx/config.h>
 
-#include <assert.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <debug.h>
-#include <nuttx/signal.h>
 
 #include <nuttx/serial/serial.h>
 
@@ -41,21 +52,64 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: uart_recvchars_check_special
+ * Name: uart_check_signo
+ *
+ * Description:
+ *   Check if the SIGINT or SIGSTP character is in the contiguous Rx DMA
+ *   buffer region.  The first signal associated with the first such
+ *   character is returned.
+ *
+ *   If there multiple such characters in the buffer, only the signal
+ *   associated with the first is returned (this a bug!)
+ *
+ * Returned Value:
+ *   0 if a signal-related character does not appear in the.  Otherwise,
+ *   SIGKILL or SIGSTP may be returned to indicate the appropriate signal
+ *   action.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGSTP)
+static int uart_check_signo(const char *buf, size_t size)
+{
+  size_t i;
+
+  for (i = 0; i < size; i++)
+    {
+#ifdef CONFIG_TTY_SIGINT
+      if (buf[i] == CONFIG_TTY_SIGINT_CHAR)
+        {
+          return SIGINT;
+        }
+#endif
+
+#ifdef CONFIG_TTY_SIGSTP
+      if (buf[i] == CONFIG_TTY_SIGSTP_CHAR)
+        {
+          return SIGSTP;
+        }
+#endif
+    }
+
+  return 0;
+}
+#endif
+
+/****************************************************************************
+ * Name: uart_recvchars_signo
  *
  * Description:
  *   Check if the SIGINT character is anywhere in the newly received DMA
  *   buffer.
  *
- *   REVISIT:  We must also remove the SIGINT/SIGTSTP character from the Rx
+ *   REVISIT:  We must also remove the SIGINT/SIGSTP character from the Rx
  *   buffer.  It should not be read as normal data by the caller.
  *
  ****************************************************************************/
 
 #if defined(CONFIG_SERIAL_RXDMA) && \
-   (defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP) || \
-    defined(CONFIG_TTY_FORCE_PANIC) || defined(CONFIG_TTY_LAUNCH))
-static int uart_recvchars_check_special(FAR uart_dev_t *dev)
+   (defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGSTP))
+static int uart_recvchars_signo(FAR uart_dev_t *dev)
 {
   FAR struct uart_dmaxfer_s *xfer = &dev->dmarx;
   int signo;
@@ -64,20 +118,19 @@ static int uart_recvchars_check_special(FAR uart_dev_t *dev)
 
   if (xfer->nbytes <= xfer->length)
     {
-      return uart_check_special(dev, xfer->buffer, xfer->nbytes);
+      return uart_check_signo(xfer->buffer, xfer->nbytes);
     }
   else
     {
       /* REVISIT:  Additional signals could be in the second region. */
 
-      signo = uart_check_special(dev, xfer->buffer, xfer->length);
+      signo = uart_check_signo(xfer->buffer, xfer->length);
       if (signo != 0)
         {
           return signo;
         }
 
-      return uart_check_special(dev, xfer->nbuffer,
-                                xfer->nbytes - xfer->length);
+      return uart_check_signo(xfer->nbuffer, xfer->nbytes - xfer->length);
     }
 }
 #endif
@@ -190,6 +243,14 @@ void uart_recvchars_dma(FAR uart_dev_t *dev)
   bool is_full;
   int nexthead;
 
+  /* If RX buffer is empty move tail and head to zero position */
+
+  if (rxbuf->head == rxbuf->tail)
+    {
+      rxbuf->head = 0;
+      rxbuf->tail = 0;
+    }
+
   /* Get the next head index and check if there is room to adding another
    * byte to the buffer.
    */
@@ -203,7 +264,7 @@ void uart_recvchars_dma(FAR uart_dev_t *dev)
   is_full = nexthead == rxbuf->tail;
 
 #ifdef CONFIG_SERIAL_IFLOWCONTROL_WATERMARKS
-  /* Pre-calculate the watermark level that we will need to test against. */
+  /* Pre-calcuate the watermark level that we will need to test against. */
 
   watermark = (CONFIG_SERIAL_IFLOWCONTROL_UPPER_WATERMARK * rxbuf->size) /
               100;
@@ -309,15 +370,15 @@ void uart_recvchars_done(FAR uart_dev_t *dev)
   FAR struct uart_dmaxfer_s *xfer = &dev->dmarx;
   FAR struct uart_buffer_s *rxbuf = &dev->recv;
   size_t nbytes = xfer->nbytes;
-#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP) || \
-    defined(CONFIG_TTY_FORCE_PANIC) || defined(CONFIG_TTY_LAUNCH)
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGSTP)
   int signo = 0;
 
-  /* Check if the SIGINT character is anywhere in the newly received DMA
-   * buffer.
-   */
+  /* Check if the SIGINT character is anywhere in the newly received DMA buffer. */
 
-  signo = uart_recvchars_check_special(dev);
+  if (dev->pid >= 0)
+    {
+      signo = uart_recvchars_signo(dev);
+    }
 #endif
 
   /* Move head for nbytes. */
@@ -330,31 +391,18 @@ void uart_recvchars_done(FAR uart_dev_t *dev)
    * incoming data available.
    */
 
-  if (rxbuf->head >= rxbuf->tail)
-    {
-      nbytes = rxbuf->head - rxbuf->tail;
-    }
-  else
-    {
-      nbytes = rxbuf->size - rxbuf->tail + rxbuf->head;
-    }
-
-#ifdef CONFIG_SERIAL_TERMIOS
-  if (nbytes >= dev->minrecv)
-#else
   if (nbytes)
-#endif
     {
       uart_datareceived(dev);
     }
 
-#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP) || \
-    defined(CONFIG_TTY_FORCE_PANIC) || defined(CONFIG_TTY_LAUNCH)
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGSTP)
   /* Send the signal if necessary */
 
   if (signo != 0)
     {
-      nxsig_tgkill(-1, dev->pid, signo);
+      kill(dev->pid, signo);
+      uart_reset_sem(dev);
     }
 #endif
 }

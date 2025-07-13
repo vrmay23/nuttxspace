@@ -1,31 +1,31 @@
-/****************************************************************************
- * arch/arm/src/efm32/hardware/efm32gg_memorymap.h
+/************************************************************************************
+ * arch/arm/src/efm32/chip/efm32gg_memorymap.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2014 Silicon Laboratories, Inc.
- * SPDX-FileCopyrightText: 2014 Pierre-noel Bouteville . All rights reserved.
- * SPDX-FileContributor: Pierre-noel Bouteville <pnb990@gmail.com>
+ *  Copyright 2014 Silicon Laboratories, Inc. http://www.silabs.com</b>
  *
  * Permission is granted to anyone to use this software for any purpose,
  * including commercial applications, and to alter it and redistribute it
  * freely, subject to the following restrictions:
  *
  * 1. The origin of this software must not be misrepresented; you must not
- *    claim that you wrote the original software.
+ *    claim that you wrote the original software.@n
  * 2. Altered source versions must be plainly marked as such, and must not be
- *    misrepresented as being the original software.
+ *    misrepresented as being the original software.@n
  * 3. This notice may not be removed or altered from any source distribution.
  *
  * DISCLAIMER OF WARRANTY/LIMITATION OF REMEDIES: Silicon Laboratories, Inc.
  * has no obligation to support this Software. Silicon Laboratories, Inc. is
- * providing the Software "AS IS", with no express or implied warranties of
- * any kind, including, but not limited to, any implied warranties of
- * merchantability or fitness for any particular purpose or warranties
- * against infringement of any proprietary rights of a third party.
+ * providing the Software "AS IS", with no express or implied warranties of any
+ * kind, including, but not limited to, any implied warranties of
+ * merchantability or fitness for any particular purpose or warranties against
+ * infringement of any proprietary rights of a third party.
  *
  * Silicon Laboratories, Inc. will not be liable for any consequential,
  * incidental, or special damages, or any other relief, or for any claim by
  * any third party, arising from your use of this Software.
+ *
+ *   Copyright (C) 2014 Pierre-noel Bouteville . All rights reserved.
+ *   Author: Pierre-noel Bouteville <pnb990@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -54,21 +54,21 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32GG_MEMORYMAP_H
-#define __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32GG_MEMORYMAP_H
+#ifndef __ARCH_ARM_SRC_EFM32_CHIP_EFM32GG_MEMORYMAP_H
+#define __ARCH_ARM_SRC_EFM32_CHIP_EFM32GG_MEMORYMAP_H
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
 /* Memory Base Addresses */
 
 #define EFM32_FLASH_MEM_BASE       0x00000000 /* FLASH base address */
 #  define EFM32_FLASH_MEM_BITS     0x00000028 /* FLASH used bits */
 #define EFM32_RAM_CODE_MEM_BASE    0x10000000 /* RAM_CODE base address */
-#  define EFM32_RAM_CODE_MEM_BITS  0x00000014 /* RAM_CODE used bits */
+# define EFM32_RAM_CODE_MEM_BITS   0x00000014 /* RAM_CODE used bits */
 #define EFM32_RAM_MEM_BASE         0x20000000 /* RAM base address */
 #  define EFM32_RAM_MEM_BITS       0x00000018 /* RAM used bits */
 #define EFM32_PER_MEM_BASE         0x40000000 /* PER base address */
@@ -140,4 +140,4 @@
 #define EFM32_USERDATA_SIZE     0x00000800 /* User data page size */
 #define EFM32_USERDATA_NPAGES            1 /* User data page number */
 
-#endif /* __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32GG_MEMORYMAP_H */
+#endif /* __ARCH_ARM_SRC_EFM32_CHIP_EFM32GG_MEMORYMAP_H */

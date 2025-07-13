@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/netutils/ftpc/ftpc_getfile.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,11 +40,9 @@
 #include "ftpc_config.h"
 
 #include <sys/stat.h>
-#include <inttypes.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -67,8 +78,7 @@
  *
  ****************************************************************************/
 
-static int ftpc_recvinit(struct ftpc_session_s *session,
-                         FAR const char *path,
+static int ftpc_recvinit(struct ftpc_session_s *session, FAR const char *path,
                          uint8_t xfrmode, off_t offset)
 {
   int ret;
@@ -98,7 +108,7 @@ static int ftpc_recvinit(struct ftpc_session_s *session,
        * transfer should start.  This must come after PORT or PASV commands.
        */
 
-      ret = ftpc_cmd(session, "REST %" PRIdOFF, offset);
+      ret = ftpc_cmd(session, "REST %ld", offset);
       if (ret < 0)
         {
           nwarn("WARNING: REST command failed: %d\n", errno);
@@ -170,12 +180,11 @@ static int ftpc_recvbinary(FAR struct ftpc_session_s *session,
 
   /* Loop until the entire file is received */
 
-  for (; ; )
+  for (;;)
     {
       /* Read the data from the socket */
 
-      nread = fread(session->buffer, sizeof(char), CONFIG_FTP_BUFSIZE,
-                    rinstream);
+      nread = fread(session->buffer, sizeof(char), CONFIG_FTP_BUFSIZE, rinstream);
       if (nread <= 0)
         {
           /* nread < 0 is an error */
@@ -204,7 +213,7 @@ static int ftpc_recvbinary(FAR struct ftpc_session_s *session,
            * What would a short write mean?
            */
 
-          return ERROR;
+         return ERROR;
         }
 
       /* Increment the size of the file written */
@@ -225,8 +234,7 @@ static int ftpc_recvbinary(FAR struct ftpc_session_s *session,
  *
  ****************************************************************************/
 
-int ftpc_getfile(SESSION handle, FAR const char *rname,
-                 FAR const char *lname,
+int ftpc_getfile(SESSION handle, FAR const char *rname, FAR const char *lname,
                  uint8_t how, uint8_t xfrmode)
 {
   FAR struct ftpc_session_s *session = (FAR struct ftpc_session_s *)handle;
@@ -254,11 +262,9 @@ int ftpc_getfile(SESSION handle, FAR const char *rname,
   abslpath = ftpc_abslpath(session, lname);
   if (!abslpath)
     {
-      nwarn("WARNING: ftpc_abslpath(%s) failed: %d\n", lname, errno);
+      nwarn("WARNING: ftpc_abslpath(%s) failed: %d\n", errno);
       goto errout;
     }
-
-  offset = 0;
 
   /* Get information about the local file */
 
@@ -272,25 +278,29 @@ int ftpc_getfile(SESSION handle, FAR const char *rname,
           nwarn("WARNING: '%s' is a directory\n", abslpath);
           goto errout_with_abspath;
         }
+    }
 
-      /* Is it write-able? */
+  /* Is it write-able? */
 
 #ifdef S_IWRITE
-      if (!(statbuf.st_mode & S_IWRITE))
-        {
-          nwarn("WARNING: '%s' permission denied\n", abslpath);
-          goto errout_with_abspath;
-        }
+  if (!(statbuf.st_mode & S_IWRITE))
+    {
+      nwarn("WARNING: '%s' permission denied\n", abslpath);
+      goto errout_with_abspath;
+    }
 #endif
 
-      /* Are we resuming the transfers?  Is so then the starting offset is
-       * the size of the existing, partial file.
-       */
+  /* Are we resuming the transfers?  Is so then the starting offset is the
+   * size of the existing, partial file.
+   */
 
-      if (how == FTPC_GET_RESUME)
-        {
-          offset = statbuf.st_size;
-        }
+  if (how == FTPC_GET_RESUME)
+    {
+      offset = statbuf.st_size;
+    }
+  else
+    {
+      offset = 0;
     }
 
   /* Setup to receive the file */
@@ -302,8 +312,7 @@ int ftpc_getfile(SESSION handle, FAR const char *rname,
       goto errout_with_abspath;
     }
 
-  loutstream = fopen(abslpath,
-                     (offset > 0 || (how == FTPC_GET_APPEND)) ? "a" : "w");
+  loutstream = fopen(abslpath, (offset > 0 || (how == FTPC_GET_APPEND)) ? "a" : "w");
   if (!loutstream)
     {
       nerr("ERROR: fopen failed: %d\n", errno);
@@ -401,18 +410,18 @@ int ftpc_recvtext(FAR struct ftpc_session_s *session,
             }
         }
 
-      /* Then write the character to the output file */
+    /* Then write the character to the output file */
 
-      if (fputc(ch, loutstream) == EOF)
-        {
-          ftpc_xfrabort(session, loutstream);
-          return ERROR;
-        }
+    if (fputc(ch, loutstream) == EOF)
+      {
+        ftpc_xfrabort(session, loutstream);
+        return ERROR;
+      }
 
-      /* Increase the actual size of the file by one */
+    /* Increase the actual size of the file by one */
 
-      session->size++;
-    }
+    session->size++;
+  }
 
   return OK;
 }

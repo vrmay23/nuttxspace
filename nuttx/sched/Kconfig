@@ -13,11 +13,20 @@ menuconfig DISABLE_OS_API
 		disable functions unless you want to restrict usage
 		of those APIs.
 
+		There are certain dependency relationships in these
+		features.
+
+		1) mq_notify logic depends on signals to awaken tasks
+		waiting for queues to become full or empty.
+		2) pthread_condtimedwait() depends on signals to wake
+		up waiting tasks.
+
 if DISABLE_OS_API
 
 config DISABLE_POSIX_TIMERS
 	bool "Disable POSIX timers"
-	default DEFAULT_SMALL
+	default y if DEFAULT_SMALL
+	default n if !DEFAULT_SMALL
 	---help---
 		Disable support for the the entire POSIX timer family
 		including timer_create(), timer_gettime(), timer_settime(),
@@ -28,30 +37,18 @@ config DISABLE_POSIX_TIMERS
 
 config DISABLE_PTHREAD
 	bool "Disable pthread support"
-	default DEFAULT_SMALL
+	default n
 
 config DISABLE_MQUEUE
 	bool "Disable POSIX message queue support"
-	default DEFAULT_SMALL
-
-config DISABLE_MQUEUE_SYSV
-	bool "Disable System V message queue support"
-	default DISABLE_MQUEUE
-	---help---
-		Disable System V message queue support
+	default n
 
 config DISABLE_ENVIRON
 	bool "Disable environment variable support"
-	default DEFAULT_SMALL
+	default y if DEFAULT_SMALL
+	default n if !DEFAULT_SMALL
 
 endif # DISABLE_OS_API
-
-config DISABLE_IDLE_LOOP
-	bool "Disable idle loop support"
-	default n
-	---help---
-		This option allows nx_start to return instead of
-		entering the idle loop.
 
 menu "Clocks and Timers"
 
@@ -65,33 +62,13 @@ config SCHED_TICKLESS
 	---help---
 		By default, system time is driven by a periodic timer interrupt.  An
 		alternative configurations is a tick-less configuration in which
-		there is no periodic timer interrupt.  Instead an interval timer is
+		there is no periodic timer interrupt.  Instead and interval timer is
 		used to schedule the next OS time event.  This option selects that
 		tick-less OS option.  If the tick-less OS is selected, then there are
 		additional platform specific interfaces that must be provided as
-		defined in include/nuttx/arch.h
+		defined include/nuttx/arch.h
 
 if SCHED_TICKLESS
-
-config SCHED_TICKLESS_TICK_ARGUMENT
-	bool "Scheduler use tick argument"
-	default n
-	---help---
-		Enables use of tick argument in scheduler. If enabled, then the
-		board-specific logic must provide the following functions:
-
-			int up_timer_gettick(FAR clock_t *ticks);
-
-		If SCHED_TICKLESS_ALARM is enabled, then these additional interfaces are
-		expected:
-
-			int up_alarm_tick_cancel(FAR clock_t *ticks);
-			int up_alarm_tick_start(clock_t ticks);
-
-		Otherwise, these additional interfaces are expected:
-
-			int up_timer_tick_cancel(FAR clock_t *ticks);
-			int up_timer_tick_start(FAR clock_t ticks);
 
 config SCHED_TICKLESS_ALARM
 	bool "Tickless alarm"
@@ -133,7 +110,7 @@ config USEC_PER_TICK
 		If SCHED_TICKLESS is selected, then there are no system timer
 		interrupts.  In this case, USEC_PER_TICK does not control any timer
 		rates.  Rather, it only determines the resolution of time reported
-		by clock_systime_ticks() and the resolution of times that can be set for
+		by clock_systimer() and the resolution of times that can be set for
 		certain delays including watchdog timers and delayed work.  In this
 		case there is a trade-off:  It is better to have the USEC_PER_TICK as
 		low as possible for higher timing resolution.  However, the time
@@ -149,16 +126,6 @@ config USEC_PER_TICK
 
 		This value should never be less than the underlying resolution of
 		the timer.  Error may ensue.
-
-config TIMER_ADJUST_USEC
-	int "System timer tick adjustment (microseconds)"
-	default 0
-	---help---
-		This value is added to the absolute tick set to the system timer.
-		This is used to compensate for interrupt latency in real-time
-		systems where the event required to be triggered on exact time.
-		The default value of 0 means that no adjustment is made. E.g.
-		5 means for each timer being set will be fired 5 microseconds earlier.
 
 if !SCHED_TICKLESS
 
@@ -201,46 +168,19 @@ config SYSTEM_TIME64
 		and/or if a very long "uptime" is required, then this option can be
 		selected to support a 64-bit wide timer.
 
-config ARCH_HAVE_ADJTIME
-	bool
+config CLOCK_MONOTONIC
+	bool "Support CLOCK_MONOTONIC"
 	default n
-
-config CLOCK_ADJTIME
-	bool "Support adjtime function"
-	default n
-	depends on ARCH_HAVE_ADJTIME || RTC_ADJTIME
 	---help---
-		Enables usage of adjtime() interface used to correct the system time
-		clock. This requires specific architecture support.
+		CLOCK_MONOTONIC is an optional standard POSIX clock.  Unlike
+		CLOCK_REALTIME which can move forward and backward when the
+		time-of-day changes, CLOCK_MONOTONIC is the elapsed time since some
+		arbitrary point in the post (the system start-up time for NuttX)
+		and, hence, is always monotonically increasing.  CLOCK_MONOTONIC
+		is, hence, the more appropriate clock for determining time
+		differences.
 
-		Adjustment can affect system timer period and/or high-resolution RTC.
-		These are implemented by interfaces up_adjtime() and up_rtc_adjtime().
-
-		This is not a POSIX interface but derives from 4.3BSD, System V.
-		It is also supported for Linux compatibility.
-
-if CLOCK_ADJTIME
-
-config CLOCK_ADJTIME_SLEWLIMIT_PPM
-	int "Adjtime slew limit"
-	default 20000
-	range 1 1000000
-	---help---
-		Set limit of adjtime() clock slewing as parts per million.
-
-		In real time systems we do not want the time to adjust too quickly.
-		For example CLOCK_ADJTIME_SLEWLIMIT=1000 will slow or speed the timer
-		tick period by at most 0.1 percent of the nominal value.
-
-config CLOCK_ADJTIME_PERIOD_MS
-	int "Adjtime period"
-	default 970
-	range 1 3600000
-	---help---
-		Define system clock adjustment period in milliseconds.
-		The adjustment commanded by adjtime() call is applied over this time period.
-
-endif
+		The value of the CLOCK_MONOTONIC clock cannot be set via clock_settime().
 
 config ARCH_HAVE_TIMEKEEPING
 	bool
@@ -249,7 +189,7 @@ config ARCH_HAVE_TIMEKEEPING
 config CLOCK_TIMEKEEPING
 	bool "Support timekeeping algorithms"
 	default n
-	depends on ARCH_HAVE_TIMEKEEPING
+	depends on EXPERIMENTAL && ARCH_HAVE_TIMEKEEPING
 	---help---
 		CLOCK_TIMEKEEPING enables experimental time management algorithms.
 
@@ -277,25 +217,41 @@ config START_DAY
 	default 1
 	range 1 31
 
+config MAX_WDOGPARMS
+	int "Maximum number of watchdog parameters"
+	default 4
+	---help---
+		Maximum number of parameters that can be passed to a watchdog handler
+
+config PREALLOC_WDOGS
+	int "Number of pre-allocated watchdog timers"
+	default 32
+	---help---
+		The number of pre-allocated watchdog structures.  The system manages
+		a pool of preallocated watchdog structures to minimize dynamic
+		allocations.  Dynamic allocations will still be made if this pool is
+		exhausted.  You will, however, get better performance and memory
+		usage if this value is tuned to minimize such allocations.
+
+config WDOG_INTRESERVE
+	int "Watchdog structures reserved for interrupt handlers"
+	default 4
+	---help---
+		Watchdog structures may be allocated from normal task and also from
+		interrupt handlers.  Interrupt handlers, however, can only use pre-
+		allocated watchdog timer.  So, in order to keep normal task
+		allocations from exhausting all watchdog structures, a small number
+		of pre-allocated watchdog timers must be reserved for exclusive use
+		by interrupt handler.  This setting determines that number of
+		reserved watchdogs.
+
 config PREALLOC_TIMERS
 	int "Number of pre-allocated POSIX timers"
-	default 4 if DEFAULT_SMALL
-	default 8 if !DEFAULT_SMALL
-	depends on !DISABLE_POSIX_TIMERS
+	default 8
 	---help---
 		The number of pre-allocated POSIX timer structures.  The system manages a
 		pool of preallocated timer structures to minimize dynamic allocations.  Set to
 		zero for all dynamic allocations.
-
-config PERF_OVERFLOW_CORRECTION
-	bool "Compensate perf count overflow"
-	depends on SYSTEM_TIME64 && (ALARM_ARCH || TIMER_ARCH || ARCH_PERF_EVENTS)
-	default n
-	---help---
-		If this option is enabled, then the perf event will be enabled
-		by default.
-		When enabled, it will always return an increasing count value to
-		avoid overflow on 32-bit platforms.
 
 endmenu # Clocks and Timers
 
@@ -304,6 +260,7 @@ menu "Tasks and Scheduling"
 config SPINLOCK
 	bool "Support Spinlocks"
 	default n
+	depends on ARCH_HAVE_TESTSET
 	---help---
 		Enables support for spinlocks.  Spinlocks are used primarily for
 		synchronization in SMP configurations but are available for general
@@ -312,23 +269,13 @@ config SPINLOCK
 		CONFIG_ARCH_HAVE_MULTICPU.  This permits the use of spinlocks in
 		other novel architectures.
 
-if SPINLOCK
-
-config TICKET_SPINLOCK
-	bool "Use ticket Spinlocks"
+config SPINLOCK_IRQ
+	bool "Support Spinlocks with IRQ control"
 	default n
+	depends on ARCH_GLOBAL_IRQDISABLE
 	---help---
-		Use ticket spinlock algorithm.
-
-config RW_SPINLOCK
-	bool "Support read-write Spinlocks"
-	default n
-	---help---
-		Spinlocks are spilit into read and write lock.
-		Reader can take read lock simultaneously and only one writer
-		can take write lock.
-
-endif # SPINLOCK
+		Enables support for spinlocks with IRQ control. This feature can be
+		used to protect data in SMP mode.
 
 config IRQCHAIN
 	bool "Enable multi handler sharing a IRQ"
@@ -340,8 +287,7 @@ if IRQCHAIN
 
 config PREALLOC_IRQCHAIN
 	int "Number of pre-allocated irq chains"
-	default 4 if DEFAULT_SMALL
-	default 8 if !DEFAULT_SMALL
+	default 8
 	---help---
 		The number of pre-allocated irq chain structures.  The system manages
 		a pool of preallocated irq chain structures to minimize dynamic
@@ -349,23 +295,6 @@ config PREALLOC_IRQCHAIN
 		usage if this value is tuned to minimize such allocations.
 
 endif # IRQCHAIN
-
-config IRQ_NWORKS
-	int "Max num of active irq wqueue"
-	default 8
-	---help---
-		The max num of active irq wqueue.
-
-config IRQ_WORK_SECTION
-	string "The section where irq stack is located"
-	---help---
-		The section where irq stack is located.
-
-config IRQ_WORK_STACKSIZE
-	int "The default stack size for isr wqueue"
-	default DEFAULT_TASK_STACKSIZE
-	---help---
-		The default stack size for isr wqueue.
 
 config IRQCOUNT
 	bool
@@ -375,31 +304,20 @@ config SMP
 	bool "Symmetric Multi-Processing (SMP)"
 	default n
 	depends on ARCH_HAVE_MULTICPU
-	depends on ARCH_HAVE_TESTSET
-	depends on ARCH_INTERRUPTSTACK != 0
 	select SPINLOCK
+	select SCHED_RESUMESCHEDULER
 	select IRQCOUNT
 	---help---
 		Enables support for Symmetric Multi-Processing (SMP) on a multi-CPU
 		platform.
-
-		N.B. SMP mode requires the use of ARCH_INTERRUPTSTACK:
-
-		CPU0 thread0  ->  IRQ enter -> add thread0 to block_list -> IRQ leave(crash)
-		                                                        ||
-		                                                        /\
-		                                                       /  \
-		CPU1 thread1  ->  block_task -> take thread0 from block_list -> run thread0
-
-		CPU0 IRQ handler use thread0's stack, but thread0 may switch to CPU1, that
-		will caused IRQ handler stack corruption.
 
 if SMP
 
 config SMP_NCPUS
 	int "Number of CPUs"
 	default 4
-	range 1 32
+	range 1 32 if DEBUG_FEATURES
+	range 2 32 if !DEBUG_FEATURES
 	---help---
 		This value identifies the number of CPUs supported by the processor
 		that will be used for SMP.
@@ -409,98 +327,68 @@ config SMP_NCPUS
 		SMP configuration.  However, running the SMP logic in a single CPU
 		configuration is useful during certain testing.
 
-config SMP_DEFAULT_CPUSET
-	hex "Default CPU bit set"
-	default 0xffffffff
+config SMP_IDLETHREAD_STACKSIZE
+	int "CPU IDLE stack size"
+	default DEFAULT_TASK_STACKSIZE
 	---help---
-		Set the Default CPU bits. The way to use the unset CPU is to call the
-		sched_setaffinity function to bind a task to the CPU. bit0 means CPU0.
+		Each CPU will have its own IDLE task.  System initialization occurs
+		on CPU0 and uses CONFIG_IDLETHREAD_STACKSIZE which will probably be
+		larger than is generally needed.  This setting provides the stack
+		size for the IDLE task on CPUS 1 through (CONFIG_SMP_NCPUS-1).
 
 endif # SMP
 
 choice
 	prompt "Initialization Task"
-	default INIT_ENTRY if !BUILD_KERNEL
-	default INIT_FILE if !BINFMT_DISABLE
-	default INIT_NONE if BINFMT_DISABLE
+	default INIT_ENTRYPOINT if !BUILD_KERNEL
+	default INIT_FILEPATH if BUILD_KERNEL && !BINFMT_DISABLE
+	default INIT_NONE if BUILD_KERNEL && BINFMT_DISABLE
 
 config INIT_NONE
 	bool "None"
 
-config INIT_ENTRY
-	bool "Via application entry"
+config INIT_ENTRYPOINT
+	bool "Via application entry point"
 	depends on !BUILD_KERNEL
 
-config INIT_FILE
+config INIT_FILEPATH
 	bool "Via executable file"
 	depends on !BINFMT_DISABLE
 
 endchoice # Initialization task
 
-config INIT_ARGS
-	string "Application argument list"
-	depends on !INIT_NONE
-	---help---
-		The argument list for user applications. e.g.:
-		  "\"arg1\",\"arg2\",\"arg3\""
-
-config INIT_STACKSIZE
-	int "Main thread stack size"
-	default DEFAULT_TASK_STACKSIZE
-	---help---
-		The size of the stack to allocate for the user initialization thread
-		that is started as soon as the OS completes its initialization.
-
-config INIT_PRIORITY
-	int "init thread priority"
-	default 100
-	---help---
-		The priority of the user initialization thread.
-
-if INIT_ENTRY
-config INIT_ENTRYPOINT
+if INIT_ENTRYPOINT
+config USER_ENTRYPOINT
 	string "Application entry point"
 	default "main"
 	---help---
 		The name of the entry point for user applications.  For the example
 		applications this is of the form 'app_main' where 'app' is the application
-		name. If not defined, INIT_ENTRYPOINT defaults to "main".
+		name. If not defined, USER_ENTRYPOINT defaults to "main".
 
-		Note that main must take "argc" and "argv" arguments:
+config USERMAIN_PRIORITY
+	int "init thread priority"
+	default 100
+	---help---
+		The priority of the user initialization thread.
 
-		int main(int argc, FAR char *argv[])
+endif # INIT_ENTRYPOINT
 
-		Otherwise, if using a signature such as "int main(void)" a compilation
-		error will result:
+if INIT_FILEPATH
 
-		> $ make
-		> CC:  CustomHello.c <command-line>: error: conflicting types for
-		> 'custom_hello_main'
-		> CustomHello.c:3:5: note: in expansion of macro 'main'
-		>     3 | int main(void)
-		>       |     ^~~~
-
-config INIT_ENTRYNAME
-	string "Application entry name"
-	default INIT_ENTRYPOINT
-
-endif # INIT_ENTRY
-
-if INIT_FILE
-
-config INIT_FILEPATH
+config USER_INITPATH
 	string "Application initialization path"
 	default "/bin/init"
 	---help---
 		The name of the entry point for user applications.  For the example
 		applications this is of the form 'app_main' where 'app' is the application
-		name. If not defined, INIT_ENTRYPOINT defaults to "main".
+		name. If not defined, USER_ENTRYPOINT defaults to "main".
 
 config INIT_SYMTAB
 	string "Symbol table"
 	default "NULL" if !EXECFUNCS_HAVE_SYMTAB
 	default EXECFUNCS_SYMTAB_ARRAY if EXECFUNCS_HAVE_SYMTAB
-	depends on BUILD_FLAT
+	depends on !BUILD_PROTECTED && !BUILD_KERNEL
 	---help---
 		The name of other global array that holds the exported symbol table.
 		The special string "NULL" may be provided if there is no symbol
@@ -514,7 +402,7 @@ config INIT_NEXPORTS
 	string "Symbol table size"
 	default "0" if !EXECFUNCS_HAVE_SYMTAB
 	default EXECFUNCS_NSYMBOLS_VAR if EXECFUNCS_HAVE_SYMTAB
-	depends on BUILD_FLAT
+	depends on !BUILD_PROTECTED && !BUILD_KERNEL
 	---help---
 		The size of the symbol table.  NOTE that is is logically a numeric
 		value but is represent by a string.  That allows you to put
@@ -560,87 +448,7 @@ config INIT_MOUNT_DATA
 	default ""
 
 endif # INIT_MOUNT
-endif # INIT_FILE
-
-menuconfig ETC_ROMFS
-	bool "Auto-mount etc baked-in ROMFS image"
-	default n
-	depends on !DISABLE_MOUNTPOINT && FS_ROMFS
-	---help---
-		Mount a ROMFS filesystem at /etc and provide a system init
-		script at /etc/init.d/rc.sysinit and a startup script
-		at /etc/init.d/rcS.  The default system init script will mount
-		a FAT FS RAMDISK at /tmp but the logic is easily extensible.
-
-if ETC_ROMFS
-
-config ETC_CROMFS
-	bool "Support CROMFS (compressed) start-up script"
-	default n
-	depends on FS_CROMFS
-	---help---
-		Mount a CROMFS filesystem at /etc and provide a compressed system
-		init script at /etc/init.d/rc.sysinit and a startup script
-		at /etc/init.d/rcS.
-
-config ETC_ROMFSMOUNTPT
-	string "Mountpoint of the etc romfs image"
-	default "/etc"
-
-config ETC_ROMFSDEVNO
-	int "ROMFS block device minor number"
-	default 0
-	---help---
-		This is the minor number of the ROMFS block device.  The default is
-		'0' corresponding to /dev/ram0.
-
-config ETC_ROMFSSECTSIZE
-	int "ROMFS sector size"
-	default 64
-	---help---
-		This is the sector size to use with the ROMFS volume.  Since the
-		default volume is very small, this defaults to 64 but should be
-		increased if the ROMFS volume were to be become large.  Any value
-		selected must be a power of 2.
-
-config ETC_FATDEVNO
-	int "FAT block device minor number"
-	default 1
-	depends on FS_FAT
-	---help---
-		When the default rcS file used when ETC_ROMFS is selected, it
-		will mount a FAT FS under /tmp. This is the minor number of the FAT
-		FS block device.  The default is '1' corresponding to /dev/ram1.
-
-config ETC_FATSECTSIZE
-	int "FAT sector size"
-	default 512
-	depends on FS_FAT
-	---help---
-		When the default rcS file used when ETC_ROMFS is selected, it
-		will mount a FAT FS under /tmp. This is the sector size use with the
-		FAT FS. Default is 512.
-
-config ETC_FATNSECTORS
-	int "FAT number of sectors"
-	default 1024
-	depends on FS_FAT
-	---help---
-		When the default rcS file used when ETC_ROMFS is selected, it
-		will mount a FAT FS under /tmp. This is the number of sectors to use
-		with the FAT FS.  Default is 1024.  The amount of memory used by the
-		FAT FS will be ETC_FATSECTSIZE * ETC_FATNSECTORS bytes.
-
-config ETC_FATMOUNTPT
-	string "FAT mount point"
-	default "/tmp"
-	depends on FS_FAT
-	---help---
-		When the default rcS file used when ETC_ROMFS is selected, it
-		will mount a FAT FS under /tmp. This is the location where the FAT
-		FS will be mounted.  Default is "/tmp".
-
-endif # ETC_ROMFS
+endif # INIT_FILEPATH
 
 config RR_INTERVAL
 	int "Round robin timeslice (MSEC)"
@@ -693,6 +501,13 @@ config TASK_NAME_SIZE
 		disable.  Excludes the NUL terminator; the actual allocated size
 		will be TASK_NAME_SIZE + 1.  The default of 31 then results in
 		a align-able 32-byte allocation.
+
+config MAX_TASKS
+	int "Max number of tasks"
+	default 32
+	---help---
+		The maximum number of simultaneously active tasks. This value must be
+		a power of two.
 
 config SCHED_HAVE_PARENT
 	bool "Support parent/child task relationships"
@@ -755,8 +570,11 @@ config PREALLOC_CHILDSTATUS
 		To prevent runaway child status allocations and to improve
 		allocation performance, child task exit status structures are pre-
 		allocated when the system boots.  This setting determines the number
-		of child status structures that will be pre-allocated.
+		of child status structures that will be pre-allocated.  If this
+		setting is not defined or if it is defined to be zero then a value
+		of 2*MAX_TASKS is used.
 
+		Note that there cannot be more than MAX_TASKS tasks in total.
 		However, the number of child status structures may need to be
 		significantly larger because this number includes the maximum number
 		of tasks that are running PLUS the number of tasks that have exit'ed
@@ -790,29 +608,25 @@ endif # SCHED_CHILD_STATUS
 config SCHED_WAITPID
 	bool "Enable waitpid() API"
 	default n
-	depends on SCHED_HAVE_PARENT || !BUILD_KERNEL
 	---help---
 		Enables the waitpid() interface in a default, non-standard mode
 		(non-standard in the sense that the waited for PID need not be child
 		of the caller).  If SCHED_HAVE_PARENT is also defined, then this
 		setting will modify the behavior or waitpid() (making more spec
 		compliant) and will enable the waitid() and wait() interfaces as
-		well. Note that SCHED_HAVE_PARENT must be defined in BUILD_KERNEL if
-		SCHED_WAITPID is needed.
+		well.
 
-config SCHED_DUMP_LEAK
-	bool "Enable catch task memory leak"
+config SCHED_EXIT_KILL_CHILDREN
+	bool "Enable kill all children when exit"
 	default n
+	depends on SCHED_HAVE_PARENT && SCHED_CHILD_STATUS
 	---help---
-		When this option is enabled, the task's outstanding memory allocations
-		are printed using syslog. This helps catch any memory allocated by the
-		task that remains unreleased when the task exits.
+		When a task exits, all of its child threads will be killed.
 
-config SCHED_DUMP_ON_EXIT
-	bool "Dump all tasks state on exit"
-	default n
-	---help---
-		Dump all tasks state on exit()
+		Caution:  This selection should not be used unless you are certain
+		of what you are doing.  Uninformed of this option can often lead to
+		memory leaks since, for example, memory allocations held by threads
+		are not automatically freed!
 
 config SCHED_USER_IDENTITY
 	bool "Support per-task User Identity"
@@ -825,18 +639,20 @@ config SCHED_USER_IDENTITY
 		Those can then be managed using the interfaces.  Child tasks will
 		inherit the UID and GID of its parent.
 
-config SCHED_THREAD_LOCAL
-	bool "Support __thread/thread_local keyword"
-	default n
-	depends on ARCH_HAVE_THREAD_LOCAL
-	---help---
-		This option enables architecture-specific TLS support (__thread/thread_local keyword)
-		Note: Toolchain must be compiled with '--enable-tls' enabled
-
 endmenu # Tasks and Scheduling
 
 menu "Pthread Options"
-	depends on !DISABLE_PTHREAD
+
+config NPTHREAD_KEYS
+	int "Maximum number of pthread keys"
+	default 4 if !DISABLE_PTHREAD
+	default 0 if DISABLE_PTHREAD
+	range 0 32
+	---help---
+		The number of items of thread-specific data that can be retained.
+		The value zero disables support for pthread-specific data.
+
+if !DISABLE_PTHREAD
 
 config PTHREAD_MUTEX_TYPES
 	bool "Enable mutex types"
@@ -887,31 +703,36 @@ config PTHREAD_MUTEX_DEFAULT_UNSAFE
 
 endchoice # Default NORMAL mutex robustness
 
-choice
-	prompt "Default pthread mutex protocol"
-	default PTHREAD_MUTEX_DEFAULT_PRIO_INHERIT
-
-config PTHREAD_MUTEX_DEFAULT_PRIO_NONE
-	bool "PTHREAD_PRIO_NONE default"
+config PTHREAD_CLEANUP
+	bool "pthread cleanup stack"
+	default n
 	---help---
-		By default, pthread mutexes utilize PTHREAD_PRIO_NONE protocol (standard).
+		Select to enable support for pthread exit cleanup stacks.  This
+		enables the interfaces pthread_cleanup_push() and
+		pthread_cleanup_pop().
 
-config PTHREAD_MUTEX_DEFAULT_PRIO_INHERIT
-	bool "PTHREAD_PRIO_INHERIT default"
-	depends on PRIORITY_INHERITANCE
+config PTHREAD_CLEANUP_STACKSIZE
+	int "pthread cleanup stack size"
+	default 1
+	range 1 32
+	depends on PTHREAD_CLEANUP
 	---help---
-		By default, pthread mutexes utilize PTHREAD_PRIO_INHERIT protocol
-		(POSIX non-standard but a reasonable choice for most real-time systems).
-
-endchoice # Default pthread mutex protocol
+		The maximum number of cleanup actions that may be pushed by
+		pthread_clean_push().  This setting will increase the size of EVERY
+		pthread task control block by about n * CONFIG_PTHREAD_CLEANUP_STACKSIZE
+		where n is the size of a pointer, 2* sizeof(uintptr_t), this would be
+		8 for a CPU with 32-bit addressing and 4 for a CPU with 16-bit
+		addressing.
 
 config CANCELLATION_POINTS
 	bool "Cancellation points"
 	default n
 	---help---
 		Enable POSIX cancellation points for pthread_cancel().  If selected,
-		cancellation points will also used with the task_delete() API even if
+		cancellation points will also used with the () task_delete() API even if
 		pthreads are not enabled.
+
+endif # !DISABLE_PTHREAD
 
 endmenu # Pthread Options
 
@@ -944,124 +765,61 @@ config SCHED_CRITMONITOR
 	---help---
 		Enables logic that monitors the duration of time that a thread keeps
 		interrupts or pre-emption disabled.  These global locks can have
-		negative consequences to real time performance:  Disabling interrupts
-		adds jitter in the time when an interrupt request is asserted until
-		the hardware can respond with the interrupt.  Disabling pre-emption
-		adds jitter in the time from when the event is posted in the
+		negative consequences to real timer performance:  Disabling interrupts
+		adds jitter in the time when a interrupt request is asserted until
+		the hardware can responds with the interrupt.  Disabling pre-emption
+		adds jitter in the timer from when the event is posted in the
 		interrupt handler until the task that responds to the event can run.
 
-if SCHED_CRITMONITOR
+		If this option is selected, then the following interfaces must be
+		provided by platform-specific logic:
 
-config SCHED_CRITMONITOR_MAXTIME_THREAD
-	int "THREAD max execution time"
-	default 0
-	---help---
-		Thread execution time should be smaller than
-		SCHED_CRITMONITOR_MAXTIME_THREAD, or system will give a warning.
-		For debugging system latency, 0 means disabled.
+			uint32_t up_critmon_gettime(void);
+			void up_critmon_convert(uint32_t elapsed, FAR struct timespec *ts);
 
-config SCHED_CRITMONITOR_MAXTIME_WQUEUE
-	int "WORK queue max execution time"
-	default -1
-	---help---
-		Worker execution time should be smaller than
-		SCHED_CRITMONITOR_MAXTIME_WQUEUE, or system will give a warning.
-		For debugging system latency, 0 means disabled.
+		The first interface simply provides the current time value in unknown
+		units.  NOTE:  This function may be called early before the timer has
+		been initialized.  In that event, the function should just return a
+		start time of zero.
 
-config SCHED_CRITMONITOR_MAXTIME_PREEMPTION
-	int "Pre-emption (sched_lock) max holding time"
-	default SCHED_CRITMONITOR_MAXTIME_WQUEUE
-	---help---
-		Pre-emption holding time should be smaller than
-		SCHED_CRITMONITOR_MAXTIME_PREEMPTION, or system will give a warning.
-		For debugging system latency, 0 means disabled.
+		Nothing is assumed about the units of this time value.  The following
+		are assumed, however: (1) The time is an unsigned integer value, (2)
+		the time is monotonically increasing, and (3) the elapsed time (also
+		in unknown units) can be obtained by subtracting a start time from
+		the current time.
 
-config SCHED_CRITMONITOR_MAXTIME_CSECTION
-	int "Csection (enter_critical_section) max holding time"
-	default SCHED_CRITMONITOR_MAXTIME_PREEMPTION
-	---help---
-		Csection holding time should be smaller than
-		SCHED_CRITMONITOR_MAXTIME_CSECTION, or system will give a warning.
-		For debugging system latency, 0 means disabled.
+		The second interface simple converts an elapsed time into well known
+		units for presentation by the ProcFS file system.
 
-config SCHED_CRITMONITOR_MAXTIME_IRQ
-	int "IRQ max execution time"
-	default SCHED_CRITMONITOR_MAXTIME_CSECTION
-	---help---
-		IRQ handler execution time should be smaller than
-		SCHED_CRITMONITOR_MAXTIME_IRQ, or system will give a warning.
-		For debugging system latency, 0 means disabled.
-
-config SCHED_CRITMONITOR_MAXTIME_WDOG
-	int "WDOG callback max execution time"
-	default SCHED_CRITMONITOR_MAXTIME_IRQ
-	---help---
-		Wdog callback execution time should be smaller than
-		SCHED_CRITMONITOR_MAXTIME_WDOG, or system will give a warning.
-		For debugging system latency, 0 means disabled.
-
-endif # SCHED_CRITMONITOR
-
-config SCHED_CRITMONITOR_MAXTIME_PANIC
-	bool "Monitor timeout panic"
-	depends on \
-		SCHED_CRITMONITOR_MAXTIME_THREAD > 0 || \
-		SCHED_CRITMONITOR_MAXTIME_WDOG > 0 || \
-		SCHED_CRITMONITOR_MAXTIME_WQUEUE > 0 || \
-		SCHED_CRITMONITOR_MAXTIME_PREEMPTION > 0 || \
-		SCHED_CRITMONITOR_MAXTIME_CSECTION > 0 || \
-		SCHED_CRITMONITOR_MAXTIME_IRQ > 0
+config SCHED_CPULOAD
+	bool "Enable CPU load monitoring"
 	default n
-	---help---
-		If this option is enabled, a panic will be triggered when
-		IRQ/WQUEUE/PREEMPTION execution time exceeds SCHED_CRITMONITOR_MAXTIME_xxx
-
-choice
-	prompt "Select CPU load clock source"
-	default SCHED_CPULOAD_NONE
+	select SCHED_CPULOAD_EXTCLK if SCHED_TICKLESS
 	---help---
 		If this option is selected, the timer interrupt handler will monitor
 		if the system is IDLE or busy at the time of that the timer interrupt
 		occurs.  This is a very coarse measurement, but over a period of time,
-		it can very accurately determine the percentage of the time that the
+		it can very accurately determined the percentage of the time that the
 		CPU is IDLE.
 
-		The statistics collected in this could be used, for example, in the
+		The statistics collected in this could be used, for example in the
 		PROCFS file system to provide CPU load measurements when read.
 
 		Note that in tickless mode of operation (SCHED_TICKLESS) there is
 		no system timer interrupt and CPU load measurements will not be
-		possible unless you provide an alternative clock to drive the
+		possible unless you provide an alternative clock to driver the
 		sampling and select SCHED_CPULOAD_EXTCLK.
 
-config SCHED_CPULOAD_NONE
-	bool "None CPU load clock source"
-	---help---
-		If this option is enabled, the system will not support CPU load
-		measurement.
-
-config SCHED_CPULOAD_SYSCLK
-	bool "Use system clock"
-	---help---
-		If this option is enabled, the system clock is used for cpu load
-		measurement by default.
-
-		There is a serious issue for the accuracy of measurements if the
-		system clock is used, however.  NuttX threads are often started at
-		the time of the system timer expiration.  Others may be stopped at
-		the time of the system timer expiration (if round-robin time-slicing
-		is enabled).  Such thread behavior occurs synchronously with the
-		system timer and, hence, is not randomly sampled.  As a consequence,
-		the CPU load attributed to these threads that run synchronously with
-		they system timer may be grossly in error.
-		The CPU load measurements are determined by sampling the active
-		tasks periodically at the occurrence to a timer expiration.
-		If tickless is enabled, SYSCLK should not be used. Its error will be
-		very large, and using it for analysis will lead to wrong conclusions.
+if SCHED_CPULOAD
 
 config SCHED_CPULOAD_EXTCLK
 	bool "Use external clock"
+	default n
 	---help---
+		The CPU load measurements are determined by sampling the active
+		tasks periodically at the occurrence to a timer expiration.  By
+		default, the system clock is used to do that sampling.
+
 		There is a serious issue for the accuracy of measurements if the
 		system clock is used, however.  NuttX threads are often started at
 		the time of the system timer expiration.  Others may be stopped at
@@ -1077,31 +835,21 @@ config SCHED_CPULOAD_EXTCLK
 		achieved.  This option enables use of such an "external" clock.  The
 		implementation of the clock must be provided by platform-specific
 		logic; that platform-specific logic must call the system function
-		nxsched_process_cpuload_ticks() at each timer expiration with interrupts
+		nxsched_process_cpuload() at each timer expiration with interrupts
 		disabled.
 
-config SCHED_CPULOAD_CRITMONITOR
-	bool "Use critical monitor"
-	depends on SCHED_CRITMONITOR_MAXTIME_THREAD >= 0
-	---help---
-		Use the perfcounter in the core of the chip as a counter, no need to
-		use an external timer. Need to depend on SCHED_CRITMONITOR.
-		When the task is suspended, call nxsched_critmon_cpuload_ticks to count
-		the recent running time of the task
-
-endchoice
+if SCHED_CPULOAD_EXTCLK
 
 config SCHED_CPULOAD_TICKSPERSEC
-	int "CPU load sampling clock frequency(HZ)"
+	int "External clock rate"
 	default 100
 	---help---
-		CPU load sampling clock frequency, in HZ. Use sysclk clock source,
-		use wdt, EXTCLK clock source, use an external timer.
-		The default value of 100 corresponds to a 100Hz clock.  NOTE:
+		If an external clock is used to drive the sampling for the CPU load
+		calculations, then this value must be provided.  This value provides
+		the rate of the external clock interrupts in units of ticks per
+		second.  The default value of 100 corresponds to a 100Hz clock.  NOTE:
 		that 100Hz is the default frequency of the system time and, hence,
 		the worst possible choice in most cases.
-
-if SCHED_CPULOAD_EXTCLK
 
 choice
 	prompt "Select CPU load timer"
@@ -1114,7 +862,7 @@ config CPULOAD_ONESHOT
 		oneshot timer must be configured by board specific logic which must
 		then call:
 
-			void nxsched_oneshot_extclk(FAR struct oneshot_lowerhalf_s *lower);
+			void sched_oneshot_extclk(FAR struct oneshot_lowerhalf_s *lower);
 
 		To start the CPU load measurement. See include/nuttx/clock.h
 
@@ -1132,7 +880,7 @@ config CPULOAD_PERIOD
 		period timer must be configured by board specific logic which must
 		then call:
 
-			void nxsched_period_extclk(FAR struct timer_lowerhalf_s *lower);
+			void sched_period_extclk(FAR struct timer_lowerhalf_s *lower);
 
 		To start the CPU load measurement. See include/nuttx/clock.h
 
@@ -1146,6 +894,7 @@ config CPULOAD_ENTROPY
 	int "Bits of entropy"
 	default 6
 	range 0 30
+	depends on CPULOAD_ONESHOT
 	---help---
 		This is the number of bits of entropy that will be applied. The
 		oneshot will be set to this interval:
@@ -1168,21 +917,15 @@ endif # SCHED_CPULOAD_EXTCLK
 
 config SCHED_CPULOAD_TIMECONSTANT
 	int "CPU load time constant"
-	depends on !SCHED_CPULOAD_NONE
 	default 2
 	---help---
 		The accumulated CPU count is divided by two when the accumulated
 		tick count exceeds this time constant.  This time constant is in
 		units of seconds.
 
-config SCHED_PROFILE_TICKSPERSEC
-	int "Profile sampling rate"
-	default 1000
-	---help---
-		This is the frequency at which the profil function will sample the
-		running program. The default is 1000Hz.
+endif # SCHED_CPULOAD
 
-menuconfig SCHED_INSTRUMENTATION
+config SCHED_INSTRUMENTATION
 	bool "System performance monitor hooks"
 	default n
 	select SCHED_SUSPENDSCHEDULER
@@ -1194,51 +937,6 @@ menuconfig SCHED_INSTRUMENTATION
 
 			void sched_note_start(FAR struct tcb_s *tcb);
 			void sched_note_stop(FAR struct tcb_s *tcb);
-
-		If CONFIG_SMP is enabled, then these additional interfaces are
-		expected:
-
-			void sched_note_cpu_start(FAR struct tcb_s *tcb, int cpu);
-			void sched_note_cpu_started(FAR struct tcb_s *tcb);
-
-if SCHED_INSTRUMENTATION
-
-config SCHED_INSTRUMENTATION_CPUSET
-	hex "CPU bit set"
-	default 0xffff
-	depends on SMP && SCHED_INSTRUMENTATION_FILTER
-	---help---
-		Monitor only CPUs in the bitset.  Bit 0=CPU0, Bit1=CPU1, etc.
-
-config SCHED_INSTRUMENTATION_FILTER
-	bool "Instrumentation filter"
-	default n
-	---help---
-		Enables the filter logic for the instrumentation. If this option
-		is enabled, the instrumentation data passed to sched_note_add()
-		can be filtered by syscall and IRQ number.
-		The filter logic can be configured by sched_note_filter APIs defined in
-		include/nuttx/sched_note.h.
-
-config SCHED_INSTRUMENTATION_FILTER_DEFAULT_MODE
-	hex "Default instrumentation filter mode"
-	depends on SCHED_INSTRUMENTATION_FILTER
-	default 0x3f
-	---help---
-		Default mode of the instrumentation filter logic.
-			Bit 0 = Enable instrumentation
-			Bit 1 = Enable switch instrumentation
-			Bit 2 = Enable syscall instrumentation
-			Bit 3 = Enable IRQ instrumentation
-			Bit 4 = Enable dump instrumentation
-			Bit 5 = Enable collecting syscall arguments
-
-config SCHED_INSTRUMENTATION_SWITCH
-	bool "Use note switch for instrumentation"
-	default n
-	---help---
-		Use note switch for instrumentation.
-
 			void sched_note_suspend(FAR struct tcb_s *tcb);
 			void sched_note_resume(FAR struct tcb_s *tcb);
 
@@ -1250,10 +948,21 @@ config SCHED_INSTRUMENTATION_SWITCH
 			void sched_note_cpu_resume(FAR struct tcb_s *tcb, int cpu);
 			void sched_note_cpu_resumed(FAR struct tcb_s *tcb);
 
-		NOTE: These are internal OS interfaces and are called at very
+		NOTE: These are internal OS interfaces and are called at at very
 		critical locations in the OS. There is very little that can be
 		done in these interfaces.  For example, normal devices may not be
 		used; syslog output cannot be performed.
+
+		An option is to use SCHED_INSTRUMENTATION_BUFFER below.
+
+if SCHED_INSTRUMENTATION
+
+config SCHED_INSTRUMENTATION_CPUSET
+	hex "CPU bit set"
+	default 0xffff
+	depends on SMP
+	---help---
+		Monitor only CPUs in the bitset.  Bit 0=CPU0, Bit1=CPU1, etc.
 
 config SCHED_INSTRUMENTATION_PREEMPTION
 	bool "Preemption monitor hooks"
@@ -1262,7 +971,7 @@ config SCHED_INSTRUMENTATION_PREEMPTION
 		Enables additional hooks for changes to pre-emption state.  Board-
 		specific logic must provide this additional logic.
 
-			void sched_note_preemption(FAR struct tcb_s *tcb, bool state);
+			void sched_note_premption(FAR struct tcb_s *tcb, bool state);
 
 config SCHED_INSTRUMENTATION_CSECTION
 	bool "Critical section monitor hooks"
@@ -1282,83 +991,66 @@ config SCHED_INSTRUMENTATION_SPINLOCKS
 		Enables additional hooks for spinlock state.  Board-specific logic
 		must provide this additional logic.
 
-		void sched_note_spinlock(FAR struct tcb_s *tcb, FAR volatile spinlock_t *spinlock, int type)
+			void sched_note_spinlock(FAR struct tcb_s *tcb, bool state);
+			void sched_note_spinlocked(FAR struct tcb_s *tcb, bool state);
+			void sched_note_spinunlock(FAR struct tcb_s *tcb, bool state);
+			void sched_note_spinabort(FAR struct tcb_s *tcb, bool state);
 
-config SCHED_INSTRUMENTATION_SYSCALL
-	bool "System call monitor hooks"
-	default n
-	depends on ARCH_HAVE_SYSCALL_HOOKS
-	---help---
-		Enables additional hooks for entry and exit from system call.
-		Board-specific logic must provide this additional logic.
-
-			void sched_note_syscall_enter(int nr, int argc, ...);
-			void sched_note_syscall_leave(int nr, uintptr_t result);
-
-config SCHED_INSTRUMENTATION_IRQHANDLER
-	bool "Interrupt handler monitor hooks"
+config SCHED_INSTRUMENTATION_BUFFER
+	bool "Buffer instrumentation data in memory"
 	default n
 	---help---
-		Enables additional hooks for interrupt handler. Board-specific logic
-		must provide this additional logic.
+		If this option is selected, then in-memory buffering logic is
+		enabled to capture scheduler instrumentation data.  This has
+		the advantage that (1) the platform logic does not have to provide
+		the sched_note_* interfaces described for the previous settings.
+		Instead, the buffering logic catches all of these.  It encodes
+		timestamps the scheduler note and adds the note to an in-memory,
+		circular buffer.  And (2) buffering the scheduler instrumentation
+		data (versus performing some output operation) minimizes the impact
+		of the instrumentation on the behavior of the system.
 
-			void sched_note_irqhandler(int irq, FAR void *handler, bool enter);
+		If the in-memory buffer becomes full, then older notes are
+		overwritten by newer notes.  The following interface is provided:
 
-config SCHED_INSTRUMENTATION_HEAP
-	bool "Heap monitor hooks"
-	default n
+			ssize_t sched_note_get(FAR uint8_t *buffer, size_t buflen);
+
+		Platform specific information must call this function and dispose
+		of it quickly so that overwriting of the tail of the circular buffer
+		does not occur.  See include/nuttx/sched_note.h for additional
+		information.
+
+if SCHED_INSTRUMENTATION_BUFFER
+
+config SCHED_NOTE_BUFSIZE
+	int "Instrumentation buffer size"
+	default 2048
 	---help---
-		Enables additional hooks for heap allocation.
+		The size of the in-memory, circular instrumentation buffer (in
+		bytes).
 
-			void sched_note_heap(uint8_t event, FAR void* heap, FAR void *mem, size_t size, size_t curused);
-
-config SCHED_INSTRUMENTATION_WDOG
-	bool "Watchdog timer monitor hooks"
+config SCHED_NOTE_GET
+	bool "Callable interface to get instrumentatin data"
 	default n
+	depends on !SCHED_INSTRUMENTATION_CSECTION && (!SCHED_INSTRUMENTATION_SPINLOCK || !SMP)
 	---help---
-		Enables additional hooks for watchdog timer.
+		Add support for interfaces to get the size of the next note and also
+		to extract the next note from the instrumentation buffer:
 
-			void sched_note_wdog(uint8_t event, FAR void *handler, FAR const void *arg);
+			ssize_t sched_note_get(FAR uint8_t *buffer, size_t buflen);
+			ssize_t sched_note_size(void);
 
-config SCHED_INSTRUMENTATION_DUMP
-	bool "Use note dump for instrumentation"
-	default n
-	---help---
-		Use note dump for instrumentation.
+		NOTE: This option is not available if critical sections are being
+		monitor (nor if spinlocks are being monitored in SMP configuration)
+		because there would be a logical error in the design in those cases.
+		That error is that these interfaces call enter_ and leave_critical_section
+		(and which us spinlocks in SMP mode).  That means that each call to
+		sched_note_get() causes several additional entries to be added from
+		the note buffer in order to remove one entry.
 
-			void sched_note_event_ip(uint32_t tag, uintptr_t ip, uint8_t event, FAR const void *buf, size_t len);
-			void sched_note_vprintf_ip(uint32_t tag, uintptr_t ip, FAR const char *fmt, uint32_t type, va_list va) printf_like(3, 0);
-			void sched_note_printf_ip(uint32_t tag, uintptr_t ip, FAR const char *fmt, uint32_t type, ...) printf_like(3, 5);
-
-config SCHED_INSTRUMENTATION_FUNCTION
-	bool "Enable function auto-tracing"
-	default n
-	---help---
-		After enabling this option, you can automatically trace the function instrumentation without adding tracepoint manually.
-		This is similar to the Function Trace effect of the linux kernel
-		Add CFLAGS += -finstrument-functions to the makefile to track the required modules.
-		The following compilation option can exclude files that do not want to be tracked in this module
-		CFLAGS += -finstrument-functions-exclude-file-list=xxx
-		The following compilation option can exclude functions that do not want to be tracked in this module
-		CFLAGS += -finstrument-functions-exclude-function-list=xxx
-		For a more detailed description of compilation options,
-		refer to the "Program Instrumentation Options" chapter in the gcc documentation
-
+endif # SCHED_INSTRUMENTATION_BUFFER
 endif # SCHED_INSTRUMENTATION
 endmenu # Performance Monitoring
-
-menu "System Auto Instrumentation"
-
-config SCHED_STACK_RECORD
-	int "Maximum stack backtrace to record"
-	default 0
-	---help---
-		Specifies the maximum number of stack backtrace to record in the
-		TCB.  Useful if scheduler instrumentation is selected.  Set to zero
-		to disable.Through instrumentation, record the backtrace at
-		the deepest point in the stack.
-
-endmenu
 
 menu "Files and I/O"
 
@@ -1397,23 +1089,43 @@ config FDCLONE_STDIO
 		all files/drivers will appear to be closed in the new task except
 		for stdin, stdout, and stderr.
 
-config NFILE_DESCRIPTORS_PER_BLOCK
-	int "The number of file descriptors per block"
-	default 8
+config SDCLONE_DISABLE
+	bool "Disable cloning of socket descriptors"
+	default n
+	---help---
+	Disable cloning of all socket
+	descriptors by task_create() when a new task is started. If
+	set, all sockets will appear to be closed in the new task.
+
+config NFILE_DESCRIPTORS
+	int "Maximum number of file descriptors per task"
+	default 16
 	range 3 99999
 	---help---
-		The number of file descriptors per block(one for each open)
+		The maximum number of file descriptors per task (one for each open)
 
-config FILE_STREAM
-	bool "Enable FILE stream"
-	default !DEFAULT_SMALL
+config NFILE_STREAMS
+	int "Maximum number of FILE streams"
+	default 16
 	---help---
-		Enable the standard buffered input/output support
+		The maximum number of streams that can be fopen'ed
+
+config NAME_MAX
+	int "Maximum size of a file name"
+	default 32
+	---help---
+		The maximum size of a file name.
+
+config PATH_MAX
+	int "Maximum size of path name"
+	default 256
+	---help---
+		The maximum size of path name.
 
 endmenu # Files and I/O
 
 menuconfig PRIORITY_INHERITANCE
-	bool "Enable priority inheritance"
+	bool "Enable priority inheritance "
 	default n
 	---help---
 		Set to enable support for priority inheritance on mutexes and semaphores.
@@ -1426,7 +1138,7 @@ menuconfig PRIORITY_INHERITANCE
 			int ret = sem_setprotocol(&sem, SEM_PRIO_NONE);
 
 		From applications, the functionally equivalent OS internal interface,
-		nxsem_set_protocol(), should be used within the OS
+		nxsem_setprotocol(), should be used within the OS
 
 		And for individual pthread mutexes by setting the protocol attribute
 		before initializing the mutex:
@@ -1437,8 +1149,7 @@ if PRIORITY_INHERITANCE
 
 config SEM_PREALLOCHOLDERS
 	int "Number of pre-allocated holders"
-	default 4 if DEFAULT_SMALL
-	default 8 if !DEFAULT_SMALL
+	default 16
 	---help---
 		This setting is only used if priority inheritance is enabled.
 		It defines the maximum number of different threads (minus one) that
@@ -1447,14 +1158,17 @@ config SEM_PREALLOCHOLDERS
 		are only using semaphores as mutexes (only one holder) OR if no more
 		than two threads participate using a counting semaphore.
 
-endif # PRIORITY_INHERITANCE
-
-config PRIORITY_PROTECT
-	bool "Enable priority protect"
-	default n
+config SEM_NNESTPRIO
+	int "Maximum number of higher priority threads"
+	default 16
 	---help---
-		When a thread locks a mutex it inherits the priority ceiling of the
-		mutex, which is defined by the application as a mutex attribute.
+		If priority inheritance is enabled, then this setting is the
+		maximum number of higher priority threads (minus 1) than can be
+		waiting for another thread to release a count on a semaphore.
+		This value may be set to zero if no more than one thread is
+		expected to wait for a semaphore.
+
+endif # PRIORITY_INHERITANCE
 
 menu "RTOS hooks"
 
@@ -1574,36 +1288,63 @@ config BOARD_INITTHREAD_PRIORITY
 
 endif # BOARD_LATE_INITIALIZE
 
+config SCHED_STARTHOOK
+	bool "Enable startup hook"
+	default n
+	---help---
+		Enable a non-standard, internal OS API call nxtask_starthook().
+		nxtask_starthook() registers a function that will be called on task
+		startup before that actual task entry point is called.  The
+		starthook is useful, for example, for setting up automatic
+		configuration of C++ constructors.
+
+config SCHED_ATEXIT
+	bool "Enable atexit() API"
+	default n
+	---help---
+		Enables the atexit() API
+
+config SCHED_ATEXIT_MAX
+	int "Max number of atexit() functions"
+	default 1
+	depends on SCHED_ATEXIT && !SCHED_ONEXIT
+	---help---
+		By default if SCHED_ATEXIT is selected, only a single atexit() function
+		is supported. That number can be increased by defined this setting to
+		the number that you require.
+
+		If both SCHED_ONEXIT and SCHED_ATEXIT are selected, then atexit() is built
+		on top of the on_exit() implementation.  In that case, SCHED_ONEXIT_MAX
+		determines the size of the combined number of atexit(0) and on_exit calls
+		and SCHED_ATEXIT_MAX is not used.
+
+config SCHED_ONEXIT
+	bool "Enable on_exit() API"
+	default n
+	---help---
+		Enables the on_exit() API
+
+config SCHED_ONEXIT_MAX
+	int "Max number of on_exit() functions"
+	default 1
+	depends on SCHED_ONEXIT
+	---help---
+		By default if SCHED_ONEXIT is selected, only a single on_exit() function
+		is supported. That number can be increased by defined this setting to the
+		number that you require.
+
+		If both SCHED_ONEXIT and SCHED_ATEXIT are selected, then atexit() is built
+		on top of the on_exit() implementation.  In that case, SCHED_ONEXIT_MAX
+		determines the size of the combined number of atexit(0) and on_exit calls.
+
 endmenu # RTOS hooks
 
 menu "Signal Configuration"
 
-config SIG_PREALLOC_ACTIONS
-	int "Number of pre-allocated sigactions"
-	default 4
-	---help---
-		The number of pre-allocated sigaction structures.
-
-config SIG_ALLOC_ACTIONS
-	int "Num of sigactions to allocate per time"
-	default 1
-	---help---
-		The number of sigactions to allocate per time. Note that
-		if this number is larger than 1, the allocation won't be
-		returned to the heap but kept in a free list for reuse.
-
-config SIG_PREALLOC_IRQ_ACTIONS
-	int "Number of pre-allocated irq actions"
-	default 4 if DEFAULT_SMALL
-	default 8 if !DEFAULT_SMALL
-	---help---
-		The number of pre-allocated irq action structures.
-
 config SIG_EVTHREAD
-	bool "Support SIGEV_THREAD"
+	bool "Support SIGEV_THHREAD"
 	default n
-	depends on !BUILD_KERNEL && SCHED_WORKQUEUE
-	select LIBC_USRWORK if BUILD_PROTECTED
+	depends on BUILD_FLAT && SCHED_WORKQUEUE
 	---help---
 		Built in support for the SIGEV_THREAD signal deliver method.
 
@@ -1615,9 +1356,9 @@ config SIG_EVTHREAD
 config SIG_EVTHREAD_HPWORK
 	bool "SIGEV_EVTHREAD use HPWORK"
 	default n
-	depends on SIG_EVTHREAD && SCHED_HPWORK
+	depends on SIG_EVTHREAD && CONFIG_SCHED_HPWORK
 	---help---
-		if selected, SIGEV_THREAD will use the high priority work queue.
+		if selected, SIGEV_THHREAD will use the high priority work queue.
 		If not, it will use the low priority work queue (if available).
 
 		REVISIT:  This solution is non-optimal.  Some notifications should
@@ -1634,14 +1375,6 @@ menuconfig SIG_DEFAULT
 if SIG_DEFAULT
 
 comment "Per-signal Default Actions"
-
-config SIG_SIGKILL_ACTION
-	bool "Enable all SIGKILL signals"
-	default y
-	---help---
-		Enable the default action for SIGHUP SIGILL SIGTRAP SIGABRT SIGBUS
-		SIGFPE SIGINT SIGKILL SIGSEGV SIGQUIT SIGTERM SIGXCPU  SIGXFSZ and
-		SIGSYS (terminate the task).
 
 config SIG_SIGUSR1_ACTION
 	bool "SIGUSR1"
@@ -1661,36 +1394,14 @@ config SIG_SIGUSR2_ACTION
 		Backward compatible behavior would require that the application use
 		sigaction() to ignore SIGUSR2.
 
-config SIG_SIGPIPE_ACTION
-	bool "SIGPIPE"
-	default n
-	---help---
-		Enable the default action for SIGPIPE (terminate the task).
-
 config SIG_SIGALRM_ACTION
-	bool "SIGALRM SIGVTALRM"
+	bool "SIGALRM"
 	default n
 	---help---
-		Enable the default action for SIGALRM AND SIGVTALRM(terminate the task)
+		Enable the default action for SIGALRM (terminate the task)
 		Make sure that your applications are expecting this POSIX behavior.
 		Backward compatible behavior would require that the application use
 		sigaction() to ignore SIGALRM.
-
-config SIG_SIGSTOP_ACTION
-	bool "SIGSTOP SIGTSTP SIGCONT SIGTTIN SIGTTOU"
-	default y
-	---help---
-		Enable the default action for SIGSTOP SIGTSTP SIGCONT SIGTTIN SIGTTOU
-		(suspend the task) and SIGCONT (resume the task).
-
-config SIG_SIGPROF_ACTION
-	bool "SIGPROF"
-	default n
-	---help---
-		Enable the default action for SIGPROF (nxsig_abnormal_termination)
-		Make sure that your applications are expecting this POSIX behavior.
-		Backward compatible behavior would require that the application use
-		sigaction() to ignore SIGPROF.
 
 config SIG_SIGPOLL_ACTION
 	bool "SIGPOLL"
@@ -1702,27 +1413,151 @@ config SIG_SIGPOLL_ACTION
 		Backward compatible behavior would require that the application use
 		sigaction() to ignore SIGPOLL.
 
+config SIG_SIGSTOP_ACTION
+	bool "SIGSTOP SIGSTP, and SIGCONT"
+	default y
+	---help---
+		Enable the default action for SIGSTOP and SIGSTP (suspend the
+		task) and SIGCONT (resume the task).
+
+config SIG_SIGKILL_ACTION
+	bool "SIGINT and SIGKILL"
+	default y
+	---help---
+		Enable the default action for SIGINT and SIGKILL (terminate the
+		task).
+
+config SIG_SIGPIPE_ACTION
+	bool "SIGPIPE"
+	default y
+	---help---
+		Enable the default action for SIGPIPE (terminate the task).
+
 endif # SIG_DEFAULT
 
+menu "Signal Numbers"
+
+comment "Standard Signal Numbers"
+
+config SIG_SIGUSR1
+	int "SIGUSR1"
+	default 1
+	---help---
+		Value of standard user signal 1 (SIGUSR1). Default: 1
+
+config SIG_SIGUSR2
+	int "SIGUSR2"
+	default 2
+	---help---
+		Value of standard user signal 2 (SIGUSR2). Default: 2
+
+config SIG_SIGALRM
+	int "SIGALRM"
+	default 3
+	---help---
+		Default the signal number used with POSIX timers (SIGALRM).
+		Default: 3
+
+config SIG_SIGCHLD
+	int "SIGCHLD"
+	default 4
+	depends on SCHED_HAVE_PARENT
+	---help---
+		The SIGCHLD signal is sent to the parent of a child process when it
+		exits, is interrupted (stopped), or resumes after being interrupted.
+		Default: 4
+
+config SIG_POLL
+	int "SIGPOLL"
+	default 5
+	depends on FS_AIO
+	---help---
+		The SIGPOLL signal is sent to a process when an asynchronous I/O
+		event occurs (meaning it has been polled).  Default: 5
+
+if SIG_DEFAULT
+
+config SIG_STOP
+	int "SIGSTOP"
+	default 6
+	depends on SIG_SIGSTOP_ACTION
+	---help---
+		Suspend/pause a task.  SIGSTOP may not be caught or ignored.
+
+config SIG_STP
+	int "SIGSTP"
+	default 7
+	depends on SIG_SIGSTOP_ACTION
+	---help---
+		Suspend/pause a task.  Unlike SIGSTOP, this signal can be caught or
+		ignored.
+
+config SIG_CONT
+	int "SIGCONT"
+	default 8
+	depends on SIG_SIGSTOP_ACTION
+	---help---
+		Resume a suspended/paused task.  SIGSTOP only has an action when
+		send to a stopped task.  SIGCONT is ignored by other task.  SIGCONT
+		may not be caught or ignored by a stopped task.
+
+config SIG_KILL
+	int "SIGKILL"
+	default 9
+	depends on SIG_SIGKILL_ACTION
+	---help---
+		The SIGKILL signal is sent to cause a task termination event.
+		SIGKILL may not be caught or ignored.
+
+config SIG_INT
+	int "SIGINT"
+	default 10
+	depends on SIG_SIGKILL_ACTION
+	---help---
+		The SIGINT signal is sent to cause a task termination event.
+		SIGINT may be ignored or caught by the receiving task.
+
+endif # SIG_DEFAULT
+
+config SIG_PIPE
+	int "SIGPIPE"
+	default 11
+	---help---
+		The SIGPIPE signal is sent to a task termination event.
+		This signal is generated when write on a pipe with no one to read it.
+		SIGPIPE may be ignored.
+
+comment "Non-standard Signal Numbers"
+
+config SIG_SIGCONDTIMEDOUT
+	int "SIGCONDTIMEDOUT"
+	default 16
+	depends on !DISABLE_PTHREAD
+	---help---
+		This non-standard signal number is used the implementation of
+		pthread_cond_timedwait(). Default 16.
+
+config SIG_SIGWORK
+	int "SIGWORK"
+	default 17
+	depends on SCHED_WORKQUEUE || LIB_USRWORK
+	---help---
+		SIGWORK is a non-standard signal used to wake up the internal NuttX
+		worker thread.  This setting specifies the signal number that will be
+		used for SIGWORK.  Default: 17
+
+endmenu # Signal Numbers
 endmenu # Signal Configuration
 
-menu "Message Queue Options"
-	depends on !DISABLE_MQUEUE || !DISABLE_MQUEUE_SYSV
+menu "POSIX Message Queue Options"
+	depends on !DISABLE_MQUEUE
 
 config PREALLOC_MQ_MSGS
 	int "Number of pre-allocated messages"
-	default 4 if DEFAULT_SMALL
-	default 8 if !DEFAULT_SMALL
+	default 32
 	---help---
 		The number of pre-allocated message structures.  The system manages
 		a pool of preallocated message structures to minimize dynamic allocations
-
-config PREALLOC_MQ_IRQ_MSGS
-	int "Number of pre-allocated irq messages"
-	default 4 if DEFAULT_SMALL
-	default 8 if !DEFAULT_SMALL
-	---help---
-		The number of pre-allocated irq message structures.
 
 config MQ_MAXMSGSIZE
 	int "Maximum message size"
@@ -1731,25 +1566,21 @@ config MQ_MAXMSGSIZE
 		Message structures are allocated with a fixed payload size given by this
 		setting (does not include other message structure overhead.
 
-config DISABLE_MQUEUE_NOTIFICATION
-	bool "Disable POSIX message queue notification"
-	default DEFAULT_SMALL
-	---help---
-		Disable POSIX message queue notification
-
 endmenu # POSIX Message Queue Options
 
 config MODULE
 	bool "Enable loadable OS modules"
 	default n
-	select LIBC_ELF
+	select LIBC_MODLIB
+	select ARCH_USE_MODULE_TEXT if ARCH_HAVE_MODULE_TEXT
 	---help---
 		Enable support for loadable OS modules.  Default: n
 
 menu "Work queue support"
 
 config SCHED_WORKQUEUE
-	bool "Enable worker thread"
+#	bool "Enable worker thread"
+	bool
 	default n
 	---help---
 		Create dedicated "worker" threads to handle delayed or asynchronous
@@ -1933,12 +1764,6 @@ endmenu # Work Queue Support
 
 menu "Stack and heap information"
 
-config DEFAULT_TASK_STACKSIZE
-	int "The default stack size for tasks"
-	default 2048
-	---help---
-		The default stack size for tasks.
-
 config IDLETHREAD_STACKSIZE
 	int "Idle thread stack size"
 	default 1024
@@ -1947,6 +1772,13 @@ config IDLETHREAD_STACKSIZE
 		is the thread that (1) performs the initial boot of the system up to the
 		point where start-up application is spawned, and (2) there after is the
 		IDLE thread that executes only when there is no other thread ready to run.
+
+config USERMAIN_STACKSIZE
+	int "Main thread stack size"
+	default DEFAULT_TASK_STACKSIZE
+	---help---
+		The size of the stack to allocate for the user initialization thread
+		that is started as soon as the OS completes its initialization.
 
 config PTHREAD_STACK_MIN
 	int "Minimum pthread stack size"
@@ -1961,61 +1793,3 @@ config PTHREAD_STACK_DEFAULT
 		Default pthread stack size
 
 endmenu # Stack and heap information
-
-config SCHED_BACKTRACE
-	bool "Stack BackTrace"
-	default "n"
-	---help---
-		This option enables stack backtrace support in the NuttX
-		using the information automatically generated by the
-		compiler or architecture specific approach when ARCH_HAVE_BACKTRACE
-		is selected
-
-config GROUP_KILL_CHILDREN_TIMEOUT_MS
-	int "Group kill children timeout"
-	default -1
-	depends on !DISABLE_PTHREAD && SIG_SIGKILL_ACTION
-	---help---
-		Kill children a SIGQUIT signal before cancel them,
-		< 0 means wait until all the child thread exit
-		> 0 means wait timeout
-		= 0 means don't do kill signal
-
-config PID_INITIAL_COUNT
-	int "Initial length of pid table"
-	default 8 if DEFAULT_SMALL
-	default 16 if !DEFAULT_SMALL
-	---help---
-		This is the initial length of pid table, which the system
-		can still expand when needed. It is rounded up to power of
-		two by current implementation. If the number of threads in
-		your system is known at design time, setting this to it.
-
-config SCHED_EVENTS
-	bool "Schedule Event objects"
-	default n
-	---help---
-		This option enables event objects. Threads may wait on event
-		objects for specific events, but both threads and ISRs may deliver
-		events to event objects.
-
-config ASSERT_PAUSE_CPU_TIMEOUT
-	int "Timeout in millisecond to pause another CPU when assert"
-	default 2000
-	depends on SMP
-	---help---
-		Timeout in millisecond to pause another CPU when assert. Only available
-		when SMP is enabled.
-		Enable to support perf events.
-
-config COREDUMP
-	bool "Coredump support"
-	depends on ARCH_HAVE_TCBINFO
-	select LIBC_ARCH_ELF
-	default n
-	---help---
-		Generate ELF core dump to provide information about the CPU state and the
-		memory state of program.
-		The memory state embeds a snapshot of all segments mapped in the
-		memory space of the program. The CPU state contains register values
-		when the core dump has been generated.

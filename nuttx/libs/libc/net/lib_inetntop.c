@@ -1,11 +1,14 @@
 /****************************************************************************
  * libs/libc/net/lib_inetntop.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2012, 2015 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: HWPORT.COM. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: JAEHYUK CHO <mailto:minzkn@minzkn.com>
+ *   Copyright (C) 2012, 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Includes some logic extracted from hwport_ftpd, written by Jaehyuk Cho
+ * <minzkn@minzkn.com> which was released under the BSD license.
+ *
+ *   Copyright (C) HWPORT.COM. All rights reserved.
+ *   Author: JAEHYUK CHO <mailto:minzkn@minzkn.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,7 +49,6 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 
 #include <arpa/inet.h>
@@ -96,8 +98,7 @@
  ****************************************************************************/
 
 #if defined(CONFIG_NET_IPv4) || defined(CONFIG_LIBC_IPv4_ADDRCONV)
-static int inet_ipv4_ntop(FAR const void *src, FAR char *dest,
-                          socklen_t size)
+static int inet_ipv4_ntop(FAR const void *src, FAR char *dest, socklen_t size)
 {
   FAR uint8_t *ptr;
 
@@ -107,33 +108,8 @@ static int inet_ipv4_ntop(FAR const void *src, FAR char *dest,
     }
 
   ptr = (FAR uint8_t *)src;
-
-  /* Data is in network order.  However, indexed access is the same in both
-   * big and little endian cases:
-   *
-   * Big Endian:
-   *                  +---+---+---+---+
-   *   Network Order: | 0 | 1 | 2 | 3 |  n=Network byte order
-   *                  |192|168| 1 | 2 |  Example
-   *                  +---+---+---+---+
-   *   Host Index:    | 0 | 1 | 2 | 3 |  n=Host Index
-   *                  |192|168| 1 | 2 |  Example
-   *                  +---+---+---+---+
-   *
-   * Little Endian:
-   *
-   *                +---+---+---+---+
-   * Network Order: | 0 | 1 | 2 | 3 |  n=Network byte order
-   *                |192|168| 1 | 2 |  Example
-   *                +---+---+---+---+
-   * Host Index:    | 3 | 2 | 1 | 0 |  n=Host Index
-   *                | 2 | 1 |168|192|  Example
-   *                +---+---+---+---+
-   */
-
   snprintf(dest, INET_ADDRSTRLEN, "%u.%u.%u.%u",
            ptr[0], ptr[1], ptr[2], ptr[3]);
-
   return OK;
 }
 #endif
@@ -167,8 +143,7 @@ static int inet_ipv4_ntop(FAR const void *src, FAR char *dest,
  ****************************************************************************/
 
 #if defined(CONFIG_NET_IPv6) || defined(CONFIG_LIBC_IPv6_ADDRCONV)
-static int inet_ipv6_ntop(FAR const void *src, FAR char *dest,
-                          socklen_t size)
+static int inet_ipv6_ntop(FAR const void *src, FAR char *dest, socklen_t size)
 {
   FAR const struct in6_addr *in6_addr;
   uint16_t warray[8];
@@ -191,7 +166,7 @@ static int inet_ipv6_ntop(FAR const void *src, FAR char *dest,
 
   while (offset < 8)
     {
-      warray[offset] = NTOHS(in6_addr->s6_addr16[offset]);
+      warray[offset] = ntohs(in6_addr->s6_addr16[offset]);
       if (warray[offset] == 0)
         {
           entry = offset;
@@ -200,12 +175,11 @@ static int inet_ipv6_ntop(FAR const void *src, FAR char *dest,
 
           while (offset < 8)
             {
-              warray[offset] = NTOHS(in6_addr->s6_addr16[offset]);
+              warray[offset] = ntohs(in6_addr->s6_addr16[offset]);
               if (warray[offset] != 0)
                 {
                   break;
                 }
-
               offset++;
               count++;
             }
@@ -216,7 +190,6 @@ static int inet_ipv6_ntop(FAR const void *src, FAR char *dest,
               maxcount = count;
             }
         }
-
       offset++;
     }
 
@@ -287,7 +260,7 @@ FAR const char *inet_ntop(int af, FAR const void *src, FAR char *dest,
 {
   int ret;
 
-  DEBUGASSERT(src != NULL && dest != NULL);
+  DEBUGASSERT(src && dest);
 
   /* Do the conversion according to the IP version */
 

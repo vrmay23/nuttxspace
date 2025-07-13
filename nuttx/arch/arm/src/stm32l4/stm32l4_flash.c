@@ -1,22 +1,37 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_flash.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011 Uros Platise. All rights reserved.
+ *   Copyright (C) 2017 Haltian Ltd. All rights reserved.
+ *   Authors: Uros Platise <uros.platise@isotel.eu>
+ *            Juha Niskanen <juha.niskanen@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,19 +51,17 @@
 #include <nuttx/config.h>
 #include <nuttx/arch.h>
 #include <nuttx/progmem.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 
 #include <assert.h>
-#include <debug.h>
 #include <errno.h>
-#include <inttypes.h>
 #include <string.h>
-#include <sys/param.h>
 
 #include "stm32l4_rcc.h"
 #include "stm32l4_waste.h"
 #include "stm32l4_flash.h"
-#include "arm_internal.h"
+
+#include "up_arch.h"
 
 #if !(defined(CONFIG_STM32L4_STM32L4X3) || defined(CONFIG_STM32L4_STM32L4X5) || \
       defined(CONFIG_STM32L4_STM32L4X6) || defined(CONFIG_STM32L4_STM32L4XR))
@@ -65,7 +78,6 @@
 
 #define FLASH_KEY1         0x45670123
 #define FLASH_KEY2         0xCDEF89AB
-#define FLASH_ERASEDVALUE  0xffu
 
 #define OPTBYTES_KEY1      0x08192A3B
 #define OPTBYTES_KEY2      0x4C5D6E7F
@@ -75,8 +87,8 @@
 #define FLASH_PAGE_MASK    (FLASH_PAGE_SIZE - 1)
 #if FLASH_PAGE_SIZE == 2048
 #  define FLASH_PAGE_SHIFT   (11)    /* 2**11  = 2048B */
-#elif FLASH_PAGE_SIZE == 4096
-#  define FLASH_PAGE_SHIFT   (12)    /* 2**12  = 4096B */
+#elif FLASH_PAGE_SIZE == 8192
+#  define FLASH_PAGE_SHIFT   (13)    /* 2**13  = 8192B */
 #else
 #  error Unsupported STM32L4_FLASH_PAGESIZE
 #endif
@@ -91,22 +103,36 @@
                             FLASH_SR_PGAERR | FLASH_SR_WRPERR | \
                             FLASH_SR_PROGERR)
 
+#ifndef MIN
+#  define MIN(a, b)        ((a) < (b) ? (a) : (b))
+#endif
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static mutex_t g_lock = NXMUTEX_INITIALIZER;
+static sem_t g_sem = SEM_INITIALIZER(1);
 static uint32_t g_page_buffer[FLASH_PAGE_WORDS];
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
+static inline int sem_lock(void)
+{
+  return nxsem_wait_uninterruptible(&g_sem);
+}
+
+static inline void sem_unlock(void)
+{
+  nxsem_post(&g_sem);
+}
+
 static void flash_unlock(void)
 {
   while (getreg32(STM32L4_FLASH_SR) & FLASH_SR_BSY)
     {
-      stm32l4_waste();
+      up_waste();
     }
 
   if (getreg32(STM32L4_FLASH_CR) & FLASH_CR_LOCK)
@@ -158,14 +184,10 @@ static inline void flash_erase(size_t page)
     defined(CONFIG_STM32L4_STM32L4XR)
   if (page <= 0xff)
     {
-      /* Select bank 1 */
-
       modifyreg32(STM32L4_FLASH_CR, FLASH_CR_BKER, 0);
     }
   else
     {
-      /* Select bank 2 */
-
       modifyreg32(STM32L4_FLASH_CR, 0, FLASH_CR_BKER);
     }
 #endif
@@ -174,7 +196,7 @@ static inline void flash_erase(size_t page)
 
   while (getreg32(STM32L4_FLASH_SR) & FLASH_SR_BSY)
     {
-      stm32l4_waste();
+      up_waste();
     }
 
   modifyreg32(STM32L4_FLASH_CR, FLASH_CR_PAGE_ERASE, 0);
@@ -206,14 +228,14 @@ int stm32l4_flash_unlock(void)
 {
   int ret;
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return ret;
     }
 
   flash_unlock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   return ret;
 }
@@ -222,14 +244,14 @@ int stm32l4_flash_lock(void)
 {
   int ret;
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return ret;
     }
 
   flash_lock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   return ret;
 }
@@ -264,7 +286,7 @@ uint32_t stm32l4_flash_user_optbytes(uint32_t clrbits, uint32_t setbits)
   DEBUGASSERT((clrbits & FLASH_OPTCR_RDP_MASK) == 0);
   DEBUGASSERT((setbits & FLASH_OPTCR_RDP_MASK) == 0);
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return 0;
@@ -276,12 +298,12 @@ uint32_t stm32l4_flash_user_optbytes(uint32_t clrbits, uint32_t setbits)
 
   regval = getreg32(STM32L4_FLASH_OPTR);
 
-  finfo("Flash option bytes before: 0x%" PRIx32 "\n", regval);
+  finfo("Flash option bytes before: 0x%x\n", regval);
 
   regval = (regval & ~clrbits) | setbits;
   putreg32(regval, STM32L4_FLASH_OPTR);
 
-  finfo("Flash option bytes after:  0x%" PRIx32 "\n", regval);
+  finfo("Flash option bytes after:  0x%x\n", regval);
 
   /* Start Option Bytes programming and wait for completion. */
 
@@ -289,11 +311,11 @@ uint32_t stm32l4_flash_user_optbytes(uint32_t clrbits, uint32_t setbits)
 
   while (getreg32(STM32L4_FLASH_SR) & FLASH_SR_BSY)
     {
-      stm32l4_waste();
+      up_waste();
     }
 
   flash_optbytes_lock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   return regval;
 }
@@ -354,7 +376,7 @@ ssize_t up_progmem_eraseblock(size_t block)
 
   /* Erase single block */
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -365,7 +387,7 @@ ssize_t up_progmem_eraseblock(size_t block)
   flash_erase(block);
 
   flash_lock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   /* Verify */
 
@@ -395,7 +417,7 @@ ssize_t up_progmem_ispageerased(size_t page)
   for (addr = up_progmem_getaddress(page), count = up_progmem_pagesize(page);
        count; count--, addr++)
     {
-      if (getreg8(addr) != FLASH_ERASEDVALUE)
+      if (getreg8(addr) != 0xff)
         {
           bwritten++;
         }
@@ -439,7 +461,7 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t buflen)
   dest = (uint32_t *)((uint8_t *)addr - offset);
   written = 0;
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -508,7 +530,7 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t buflen)
 
           while (getreg32(STM32L4_FLASH_SR) & FLASH_SR_BSY)
             {
-              stm32l4_waste();
+              up_waste();
             }
 
           /* Verify */
@@ -559,18 +581,13 @@ out:
 
   if (ret != OK)
     {
-      ferr("flash write error: %d, status: 0x%" PRIx32 "\n",
+      ferr("flash write error: %d, status: 0x%x\n",
            ret, getreg32(STM32L4_FLASH_SR));
 
       modifyreg32(STM32L4_FLASH_SR, 0, FLASH_SR_ALLERRS);
     }
 
   flash_lock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
   return (ret == OK) ? written : ret;
-}
-
-uint8_t up_progmem_erasestate(void)
-{
-  return FLASH_ERASEDVALUE;
 }

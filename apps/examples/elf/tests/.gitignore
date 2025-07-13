@@ -1,8 +1,8 @@
 /romfs
-/romfs.c
+/romfs.h
 /romfs.img
 /cromfs
-/cromfs.c
-/dirlist.c
-/extfs
+/cromfs.h
+/dirlist.h
 /symtab.c
+/varlist.tmp

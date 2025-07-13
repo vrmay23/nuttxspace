@@ -1,22 +1,35 @@
 /****************************************************************************
- * fs/mmap/fs_rammap.c
+ * fs/mmap/fs_rammmap.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,189 +38,57 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <sys/types.h>
-#include <sys/ioctl.h>
 
-#include <assert.h>
-#include <debug.h>
-#include <errno.h>
-#include <inttypes.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <debug.h>
 
 #include <nuttx/fs/fs.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/sched.h>
 
+#include "inode/inode.h"
 #include "fs_rammap.h"
-#include "sched/sched.h"
-#include "fs_heap.h"
+
+#ifdef CONFIG_FS_RAMMAP
 
 /****************************************************************************
  * Public Data
  ****************************************************************************/
 
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
+/* This is the list of all mapped files */
 
-/****************************************************************************
- * Name: msync_rammap
- ****************************************************************************/
-
-static int msync_rammap(FAR struct mm_map_entry_s *entry, FAR void *start,
-                        size_t length, int flags)
-{
-  FAR struct file *filep = (FAR void *)((uintptr_t)entry->priv.p & ~3);
-  FAR uint8_t *wrbuffer = start;
-  ssize_t nwrite = 0;
-  off_t offset;
-  off_t fpos;
-  off_t opos;
-
-  offset = (uintptr_t)start - (uintptr_t)entry->vaddr;
-  if (length > entry->length - offset)
-    {
-      length = entry->length - offset;
-    }
-
-  opos = file_seek(filep, 0, SEEK_CUR);
-  if (opos < 0)
-    {
-      ferr("ERROR: Get current position failed\n");
-      return opos;
-    }
-
-  fpos = file_seek(filep, entry->offset + offset, SEEK_SET);
-  if (fpos < 0)
-    {
-      ferr("ERROR: Seek to position %"PRIdOFF" failed\n", fpos);
-      return fpos;
-    }
-
-  while (length > 0)
-    {
-      nwrite = file_write(filep, wrbuffer, length);
-      if (nwrite < 0)
-        {
-          /* Handle the special case where the write was interrupted by a
-           * signal.
-           */
-
-          if (nwrite != -EINTR)
-            {
-              /* All other write errors are bad. */
-
-              ferr("ERROR: Write failed: offset=%"PRIdOFF" nwrite=%zd\n",
-                   entry->offset, nwrite);
-              break;
-            }
-        }
-
-      /* Increment number of bytes written */
-
-      wrbuffer += nwrite;
-      length   -= nwrite;
-    }
-
-  /* Restore file pos */
-
-  fpos = file_seek(filep, opos, SEEK_SET);
-  if (fpos < 0)
-    {
-      /* Ensure that we finally seek back to the current file pos */
-
-      ferr("ERROR: Seek back to position %"PRIdOFF" failed\n", fpos);
-      return fpos;
-    }
-
-  return nwrite >= 0 ? 0 : nwrite;
-}
-
-/****************************************************************************
- * Name: unmap_rammap
- ****************************************************************************/
-
-static int unmap_rammap(FAR struct task_group_s *group,
-                        FAR struct mm_map_entry_s *entry,
-                        FAR void *start,
-                        size_t length)
-{
-  FAR struct file *filep = (FAR void *)((uintptr_t)entry->priv.p & ~3);
-  enum mm_map_type_e type =
-                    (enum mm_map_type_e)((uintptr_t)entry->priv.p & 3);
-  FAR void *newaddr = NULL;
-  off_t offset;
-  int ret = OK;
-
-  /* Get the offset from the beginning of the region and the actual number
-   * of bytes to "unmap".  All mappings must extend to the end of the region.
-   * There is no support for freeing a block of memory but leaving a block of
-   * memory at the end.  This is a consequence of using kumm_realloc() to
-   * simulate the unmapping.
-   */
-
-  offset = (uintptr_t)start - (uintptr_t)entry->vaddr;
-  if (offset + length < entry->length)
-    {
-      ferr("ERROR: Cannot umap without unmapping to the end\n");
-      return -ENOSYS;
-    }
-
-  /* Okay.. the region is being unmapped to the end.  Make sure the length
-   * indicates that.
-   */
-
-  length = entry->length - offset;
-
-  /* Are we unmapping the entire region (offset == 0)? */
-
-  if (length >= entry->length)
-    {
-      /* Free the region */
-
-      if (type == MAP_KERNEL)
-        {
-          fs_heap_free(entry->vaddr);
-        }
-      else if (type == MAP_USER)
-        {
-          kumm_free(entry->vaddr);
-        }
-
-      file_put(filep);
-
-      /* Then remove the mapping from the list */
-
-      ret = mm_map_remove(get_group_mm(group), entry);
-    }
-
-  /* No.. We have been asked to "unmap' only a portion of the memory
-   * (offset > 0).
-   */
-
-  else
-    {
-      if (type == MAP_KERNEL)
-        {
-          newaddr = fs_heap_realloc(entry->vaddr, length);
-        }
-      else if (type == MAP_USER)
-        {
-          newaddr = kumm_realloc(entry->vaddr, length);
-        }
-
-      DEBUGASSERT(newaddr == entry->vaddr);
-      entry->vaddr = newaddr;
-      entry->length = length;
-    }
-
-  return ret;
-}
+struct fs_allmaps_s g_rammaps;
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: rammap_initialize
+ *
+ * Description:
+ *   Verified that this capability has been initialized.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void rammap_initialize(void)
+{
+  if (!g_rammaps.initialized)
+    {
+      nxsem_init(&g_rammaps.exclsem, 0, 1);
+      g_rammaps.initialized = true;
+    }
+}
 
 /****************************************************************************
  * Name: rammmap
@@ -216,14 +97,14 @@ static int unmap_rammap(FAR struct task_group_s *group,
  *   Support simulation of memory mapped files by copying files into RAM.
  *
  * Input Parameters:
- *   filep   file descriptor of the backing file -- required.
- *   entry   mmap entry information.
- *           field offset and length must be initialized correctly.
- *   type    fs_heap_zalloc or kumm_zalloc or xip_base
+ *   fd      file descriptor of the backing file -- required.
+ *   length  The length of the mapping.  For exception #1 above, this length
+ *           ignored:  The entire underlying media is always accessible.
+ *   offset  The offset into the file to map
  *
  * Returned Value:
- *  On success, rammap returns 0 and entry->vaddr points to memory mapped.
- *     Otherwise errno is returned appropriately.
+ *   On success, rammmap() returns a pointer to the mapped area. On error, the
+ *   value MAP_FAILED is returned, and errno is set  appropriately.
  *
  *     EBADF
  *      'fd' is not a valid file descriptor.
@@ -234,21 +115,15 @@ static int unmap_rammap(FAR struct task_group_s *group,
  *
  ****************************************************************************/
 
-int rammap(FAR struct file *filep, FAR struct mm_map_entry_s *entry,
-           enum mm_map_type_e type)
+FAR void *rammap(int fd, size_t length, off_t offset)
 {
+  FAR struct fs_rammap_s *map;
+  FAR uint8_t *alloc;
   FAR uint8_t *rdbuffer;
   ssize_t nread;
   off_t fpos;
+  int errcode;
   int ret;
-  size_t length = entry->length;
-
-  ret = file_ioctl(filep, BIOC_XIPBASE, (unsigned long)&entry->vaddr);
-  if (ret == OK)
-    {
-      type = MAP_XIP;
-      goto out;
-    }
 
   /* There is a major design flaw that I have not yet thought of fix for:
    * The goal is to have a single region of memory that represents a single
@@ -265,35 +140,42 @@ int rammap(FAR struct file *filep, FAR struct mm_map_entry_s *entry,
 
   /* Allocate a region of memory of the specified size */
 
-  rdbuffer = type == MAP_KERNEL ? fs_heap_malloc(length)
-                                : kumm_malloc(length);
-  if (!rdbuffer)
+  alloc = (FAR uint8_t *)kumm_malloc(sizeof(struct fs_rammap_s) + length);
+  if (!alloc)
     {
-      ferr("ERROR: Region allocation failed, length: %zu\n", length);
-      return -ENOMEM;
+      ferr("ERROR: Region allocation failed, length: %d\n", (int)length);
+      errcode = ENOMEM;
+      goto errout;
     }
 
-  entry->vaddr = rdbuffer; /* save the buffer firstly */
+  /* Initialize the region */
+
+  map         = (FAR struct fs_rammap_s *)alloc;
+  memset(map, 0, sizeof(struct fs_rammap_s));
+  map->addr   = alloc + sizeof(struct fs_rammap_s);
+  map->length = length;
+  map->offset = offset;
 
   /* Seek to the specified file offset */
 
-  fpos = file_seek(filep, entry->offset, SEEK_SET);
-  if (fpos < 0)
+  fpos = lseek(fd, offset,  SEEK_SET);
+  if (fpos == (off_t)-1)
     {
       /* Seek failed... errno has already been set, but EINVAL is probably
        * the correct response.
        */
 
-      ferr("ERROR: Seek to position %zu failed\n", (size_t)entry->offset);
-      ret = fpos;
+      ferr("ERROR: Seek to position %d failed\n", (int)offset);
+      errcode = EINVAL;
       goto errout_with_region;
     }
 
   /* Read the file data into the memory region */
 
+  rdbuffer = map->addr;
   while (length > 0)
     {
-      nread = file_read(filep, rdbuffer, length);
+      nread = nx_read(fd, rdbuffer, length);
       if (nread < 0)
         {
           /* Handle the special case where the read was interrupted by a
@@ -304,10 +186,10 @@ int rammap(FAR struct file *filep, FAR struct mm_map_entry_s *entry,
             {
               /* All other read errors are bad. */
 
-              ferr("ERROR: Read failed: offset=%zu ret=%zd\n",
-                   (size_t)entry->offset, nread);
+              ferr("ERROR: Read failed: offset=%d errno=%d\n",
+                   (int)offset, (int)nread);
 
-              ret = nread;
+              errcode = (int)-nread;
               goto errout_with_region;
             }
         }
@@ -331,29 +213,26 @@ int rammap(FAR struct file *filep, FAR struct mm_map_entry_s *entry,
 
   /* Add the buffer to the list of regions */
 
-out:
-  file_ref(filep);
-  entry->priv.p = (FAR void *)((uintptr_t)filep | type);
-  entry->munmap = unmap_rammap;
-  entry->msync = msync_rammap;
-
-  ret = mm_map_add(get_current_mm(), entry);
+  rammap_initialize();
+  ret = nxsem_wait(&g_rammaps.exclsem);
   if (ret < 0)
     {
+      errcode = -ret;
       goto errout_with_region;
     }
 
-  return OK;
+  map->flink  = g_rammaps.head;
+  g_rammaps.head = map;
+
+  nxsem_post(&g_rammaps.exclsem);
+  return map->addr;
 
 errout_with_region:
-  if (type == MAP_KERNEL)
-    {
-      fs_heap_free(entry->vaddr);
-    }
-  else if (type == MAP_USER)
-    {
-      kumm_free(entry->vaddr);
-    }
+  kumm_free(alloc);
 
-  return ret;
+errout:
+  set_errno(errcode);
+  return MAP_FAILED;
 }
+
+#endif /* CONFIG_FS_RAMMAP */

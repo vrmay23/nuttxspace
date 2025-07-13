@@ -1,11 +1,14 @@
 /****************************************************************************
  * libs/libc/net/lib_inetpton.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2012 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: HWPORT.COM. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: JAEHYUK CHO <mailto:minzkn@minzkn.com>
+ *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Includes some logic extracted from hwport_ftpd, written by Jaehyuk Cho
+ * <minzkn@minzkn.com> which was released under the BSD license.
+ *
+ *   Copyright (C) HWPORT.COM. All rights reserved.
+ *   Author: JAEHYUK CHO <mailto:minzkn@minzkn.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,7 +50,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 
 #include <arpa/inet.h>
@@ -81,9 +83,9 @@
  *
  * Input Parameters:
  *   src  - The src argument points to the string being passed in.
- *   dest - The dest argument points to a numstr into which the function
- *          stores the numeric address; this must be large enough to hold the
- *          numeric address (32 bits for AF_INET, 128 bits for AF_INET6).
+ *   dest - The dest argument points to a numstr into which the function stores
+ *          the numeric address; this must be large enough to hold the numeric
+ *          address (32 bits for AF_INET, 128 bits for AF_INET6).
  *
  * Returned Value:
  *   inet_ipv4_pton() will returns 1 if the conversion succeeds. It will
@@ -104,7 +106,7 @@ static int inet_ipv4_pton(FAR const char *src, FAR void *dest)
 
   memset(dest, 0, sizeof(struct in_addr));
 
-  ip        = (FAR uint8_t *)dest;
+  ip        = (uint8_t *)dest;
   srcoffset = 0;
   numoffset = 0;
   ndots     = 0;
@@ -191,9 +193,9 @@ static int inet_ipv4_pton(FAR const char *src, FAR void *dest)
  *
  * Input Parameters:
  *   src  - The src argument points to the string being passed in.
- *   dest - The dest argument points to a numstr into which the function
- *          stores the numeric address; this must be large enough to hold the
- *          numeric address (32 bits for AF_INET, 128 bits for AF_INET6).
+ *   dest - The dest argument points to a numstr into which the function stores
+ *          the numeric address; this must be large enough to hold the numeric
+ *          address (32 bits for AF_INET, 128 bits for AF_INET6).
  *
  * Returned Value:
  *   inet_ipv6_pton() will returns 1 if the conversion succeeds. It will
@@ -294,8 +296,7 @@ static int inet_ipv6_pton(FAR const char *src, FAR void *dest)
 
               if (nrsep > 0)
                 {
-                  memcpy((FAR uint8_t *)dest +
-                         (16 - (nrsep << 1)), &rip[0], nrsep << 1);
+                  memcpy(dest + (16 - (nrsep << 1)), &rip[0], nrsep << 1);
                 }
 
               /* Return 1 if the conversion succeeds */
@@ -322,6 +323,7 @@ static int inet_ipv6_pton(FAR const char *src, FAR void *dest)
           break;
         }
     }
+
 
   /* Return zero if there is any problem parsing the input */
 
@@ -371,15 +373,15 @@ static int inet_ipv6_pton(FAR const char *src, FAR void *dest)
  *          AF_INET or AF_INET6.
  *   src  - The src argument points to the string being passed in.
  *   dest - The dest argument points to memory into which the function stores
- *          the numeric address; this must be large enough to hold the
- *          numeric address (32 bits for AF_INET, 128 bits for AF_INET6).
+ *          the numeric address; this must be large enough to hold the numeric
+ *          address (32 bits for AF_INET, 128 bits for AF_INET6).
  *
  * Returned Value:
  *   The inet_pton() function returns 1 if the conversion succeeds, with the
- *   address pointed to by dest in network byte order. It will return 0 if
- *   the input is not a valid IPv4 dotted-decimal string or a valid IPv6
- *   address string, or -1 with errno set to EAFNOSUPPORT if the af argument
- *   is unknown.
+ *   address pointed to by dest in network byte order. It will return 0 if the
+ *   input is not a valid IPv4 dotted-decimal string or a valid IPv6 address
+ *   string, or -1 with errno set to EAFNOSUPPORT if the af argument is
+ *   unknown.
  *
  ****************************************************************************/
 

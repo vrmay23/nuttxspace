@@ -1,22 +1,35 @@
 /****************************************************************************
- * net/ieee802154/ieee802154_sockif.c
+ * net/socket/ieee802154_sockif.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -48,7 +61,7 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-static int        ieee802154_setup(FAR struct socket *psock);
+static int        ieee802154_setup(FAR struct socket *psock, int protocol);
 static sockcaps_t ieee802154_sockcaps(FAR struct socket *psock);
 static void       ieee802154_addref(FAR struct socket *psock);
 static int        ieee802154_bind(FAR struct socket *psock,
@@ -57,8 +70,19 @@ static int        ieee802154_getsockname(FAR struct socket *psock,
                     FAR struct sockaddr *addr, FAR socklen_t *addrlen);
 static int        ieee802154_getpeername(FAR struct socket *psock,
                     FAR struct sockaddr *addr, FAR socklen_t *addrlen);
+static int        ieee802154_listen(FAR struct socket *psock, int backlog);
 static int        ieee802154_connect(FAR struct socket *psock,
                     FAR const struct sockaddr *addr, socklen_t addrlen);
+static int        ieee802154_accept(FAR struct socket *psock,
+                    FAR struct sockaddr *addr, FAR socklen_t *addrlen,
+                    FAR struct socket *newsock);
+static int        ieee802154_poll_local(FAR struct socket *psock,
+                    FAR struct pollfd *fds, bool setup);
+static ssize_t    ieee802154_send(FAR struct socket *psock,
+                   FAR const void *buf, size_t len, int flags);
+static ssize_t    ieee802154_sendto(FAR struct socket *psock,
+                   FAR const void *buf, size_t len, int flags,
+                   FAR const struct sockaddr *to, socklen_t tolen);
 static int        ieee802154_close(FAR struct socket *psock);
 
 /****************************************************************************
@@ -73,12 +97,16 @@ const struct sock_intf_s g_ieee802154_sockif =
   ieee802154_bind,        /* si_bind */
   ieee802154_getsockname, /* si_getsockname */
   ieee802154_getpeername, /* si_getpeername */
-  NULL,                   /* si_listen */
+  ieee802154_listen,      /* si_listen */
   ieee802154_connect,     /* si_connect */
-  NULL,                   /* si_accept */
-  NULL,                   /* si_poll */
-  ieee802154_sendmsg,     /* si_sendmsg */
-  ieee802154_recvmsg,     /* si_recvmsg */
+  ieee802154_accept,      /* si_accept */
+  ieee802154_poll_local,  /* si_poll */
+  ieee802154_send,        /* si_send */
+  ieee802154_sendto,      /* si_sendto */
+#ifdef CONFIG_NET_SENDFILE
+  NULL,                   /* si_sendfile */
+#endif
+  ieee802154_recvfrom,    /* si_recvfrom */
   ieee802154_close        /* si_close */
 };
 
@@ -135,6 +163,7 @@ static int ieee802154_sockif_alloc(FAR struct socket *psock)
  * Input Parameters:
  *   psock    A pointer to a user allocated socket structure to be
  *            initialized.
+ *   protocol (see sys/socket.h)
  *
  * Returned Value:
  *   Zero (OK) is returned on success.  Otherwise, a negated errno value is
@@ -142,17 +171,16 @@ static int ieee802154_sockif_alloc(FAR struct socket *psock)
  *
  ****************************************************************************/
 
-static int ieee802154_setup(FAR struct socket *psock)
+static int ieee802154_setup(FAR struct socket *psock, int protocol)
 {
   /* Allocate the appropriate connection structure.  This reserves the
-   * connection structure, it is unallocated at this point.  It will not
-   * actually be initialized until the socket is connected.
+   * the connection structure is is unallocated at this point.  It will
+   * not actually be initialized until the socket is connected.
    *
-   * SOCK_DGRAM and SOCK_CTRL are supported
-   * (since the MAC header is stripped)
+   * Only SOCK_DGRAM is supported (since the MAC header is stripped)
    */
 
-  if (psock->s_type == SOCK_DGRAM || psock->s_type == SOCK_CTRL)
+  if (psock->s_type == SOCK_DGRAM)
     {
       return ieee802154_sockif_alloc(psock);
     }
@@ -173,7 +201,7 @@ static int ieee802154_setup(FAR struct socket *psock)
  *           queried.
  *
  * Returned Value:
- *   The set of socket capabilities is returned.
+ *   The set of socket cababilities is returned.
  *
  ****************************************************************************/
 
@@ -201,9 +229,10 @@ static void ieee802154_addref(FAR struct socket *psock)
 {
   FAR struct ieee802154_conn_s *conn;
 
-  DEBUGASSERT(psock->s_type == SOCK_DGRAM || psock->s_type == SOCK_CTRL);
+  DEBUGASSERT(psock != NULL && psock->s_conn != NULL &&
+              psock->s_type == SOCK_DGRAM);
 
-  conn = psock->s_conn;
+  conn = (FAR struct ieee802154_conn_s *)psock->s_conn;
   DEBUGASSERT(conn->crefs > 0 && conn->crefs < 255);
   conn->crefs++;
 }
@@ -212,10 +241,10 @@ static void ieee802154_addref(FAR struct socket *psock)
  * Name: ieee802154_connect
  *
  * Description:
- *   ieee802154_connect() connects the local socket referred to by the
- *   structure 'psock' to the address specified by 'addr'. The addrlen
- *   argument specifies the size of 'addr'.  The format of the address in
- *   'addr' is determined by the address space of the socket 'psock'.
+ *   ieee802154_connect() connects the local socket referred to by the structure
+ *   'psock' to the address specified by 'addr'. The addrlen argument
+ *   specifies the size of 'addr'.  The format of the address in 'addr' is
+ *   determined by the address space of the socket 'psock'.
  *
  *   If the socket 'psock' is of type SOCK_DGRAM then 'addr' is the address
  *   to which datagrams are sent by default, and the only address from which
@@ -248,7 +277,9 @@ static int ieee802154_connect(FAR struct socket *psock,
   FAR struct sockaddr_ieee802154_s *ieeeaddr;
   int ret = OK;
 
-  conn = psock->s_conn;
+  DEBUGASSERT(psock != NULL || addr != NULL);
+  conn = (FAR struct ieee802154_conn_s *)psock->s_conn;
+  DEBUGASSERT(conn != NULL);
 
   /* Verify the address family */
 
@@ -273,6 +304,57 @@ static int ieee802154_connect(FAR struct socket *psock,
 }
 
 /****************************************************************************
+ * Name: ieee802154_accept
+ *
+ * Description:
+ *   The ieee802154_accept function is used with connection-based socket types
+ *   (SOCK_STREAM, SOCK_SEQPACKET and SOCK_RDM). It extracts the first
+ *   connection request on the queue of pending connections, creates a new
+ *   connected socket with mostly the same properties as 'sockfd', and
+ *   allocates a new socket descriptor for the socket, which is returned. The
+ *   newly created socket is no longer in the listening state. The original
+ *   socket 'sockfd' is unaffected by this call.  Per file descriptor flags
+ *   are not inherited across an ieee802154_accept.
+ *
+ *   The 'sockfd' argument is a socket descriptor that has been created with
+ *   socket(), bound to a local address with bind(), and is listening for
+ *   connections after a call to listen().
+ *
+ *   On return, the 'addr' structure is filled in with the address of the
+ *   connecting entity. The 'addrlen' argument initially contains the size
+ *   of the structure pointed to by 'addr'; on return it will contain the
+ *   actual length of the address returned.
+ *
+ *   If no pending connections are present on the queue, and the socket is
+ *   not marked as non-blocking, ieee802154_accept blocks the caller until a
+ *   connection is present. If the socket is marked non-blocking and no
+ *   pending connections are present on the queue, ieee802154_accept returns
+ *   EAGAIN.
+ *
+ * Input Parameters:
+ *   psock    Reference to the listening socket structure
+ *   addr     Receives the address of the connecting client
+ *   addrlen  Input: allocated size of 'addr', Return: returned size of 'addr'
+ *   newsock  Location to return the accepted socket information.
+ *
+ * Returned Value:
+ *   Returns 0 (OK) on success.  On failure, it returns a negated errno
+ *   value.  See accept() for a desrciption of the appropriate error value.
+ *
+ * Assumptions:
+ *   The network is locked.
+ *
+ ****************************************************************************/
+
+static int ieee802154_accept(FAR struct socket *psock,
+                             FAR struct sockaddr *addr,
+                             FAR socklen_t *addrlen,
+                             FAR struct socket *newsock)
+{
+  return -EAFNOSUPPORT;
+}
+
+/****************************************************************************
  * Name: ieee802154_bind
  *
  * Description:
@@ -294,30 +376,27 @@ static int ieee802154_connect(FAR struct socket *psock,
  ****************************************************************************/
 
 static int ieee802154_bind(FAR struct socket *psock,
-                           FAR const struct sockaddr *addr,
-                           socklen_t addrlen)
+                           FAR const struct sockaddr *addr, socklen_t addrlen)
 {
   FAR const struct sockaddr_ieee802154_s *iaddr;
-  FAR struct ieee802154_conn_s *conn;
   FAR struct radio_driver_s *radio;
+  FAR struct ieee802154_conn_s *conn;
+
+  DEBUGASSERT(psock != NULL && addr != NULL);
 
   /* Verify that a valid address has been provided */
 
   if (addr->sa_family != AF_IEEE802154 ||
       addrlen < sizeof(struct sockaddr_ieee802154_s))
     {
-      nerr("ERROR: Invalid family: %u or address length: %zu < %zu\n",
-           addr->sa_family, (size_t)addrlen,
-           sizeof(struct sockaddr_ieee802154_s));
+      nerr("ERROR: Invalid family: %u or address length: %d < %d\n",
+           addr->sa_family, addrlen, sizeof(struct sockaddr_ieee802154_s));
       return -EBADF;
     }
 
-  conn = psock->s_conn;
-
   /* Bind a PF_IEEE802154 socket to an network device. */
 
-  if (conn == NULL ||
-      (psock->s_type != SOCK_DGRAM && psock->s_type != SOCK_CTRL))
+  if (psock->s_type != SOCK_DGRAM)
     {
       nerr("ERROR: Invalid socket type: %u\n", psock->s_type);
       return -EBADF;
@@ -325,7 +404,7 @@ static int ieee802154_bind(FAR struct socket *psock,
 
   /* Verify that the socket is not already bound. */
 
-  if (_SS_ISBOUND(conn->sconn.s_flags))
+  if (_SS_ISBOUND(psock->s_flags))
     {
       nerr("ERROR: Already bound\n");
       return -EINVAL;
@@ -344,6 +423,8 @@ static int ieee802154_bind(FAR struct socket *psock,
       nerr("ERROR: No address provided\n");
       return -EADDRNOTAVAIL;
     }
+
+  conn = (FAR struct ieee802154_conn_s *)psock->s_conn;
 
   /* Find the device associated with the requested address */
 
@@ -365,10 +446,10 @@ static int ieee802154_bind(FAR struct socket *psock,
  * Name: ieee802154_getsockname
  *
  * Description:
- *   The ieee802154_getsockname() function retrieves the locally-bound name
- *   of the specified packet socket, stores this address in the sockaddr
- *   structure pointed to by the 'addr' argument, and stores the length of
- *   this address in the object pointed to by the 'addrlen' argument.
+ *   The ieee802154_getsockname() function retrieves the locally-bound name of the
+ *   specified packet socket, stores this address in the sockaddr structure
+ *   pointed to by the 'addr' argument, and stores the length of this
+ *   address in the object pointed to by the 'addrlen' argument.
  *
  *   If the actual length of the address is greater than the length of the
  *   supplied sockaddr structure, the stored address will be truncated.
@@ -397,7 +478,10 @@ static int ieee802154_getsockname(FAR struct socket *psock,
   FAR struct sockaddr_ieee802154_s tmp;
   socklen_t copylen;
 
-  conn = psock->s_conn;
+  DEBUGASSERT(psock != NULL && addr != NULL && addrlen != NULL);
+
+  conn = (FAR struct ieee802154_conn_s *)psock->s_conn;
+  DEBUGASSERT(conn != NULL);
 
   /* Create a copy of the full address on the stack */
 
@@ -424,10 +508,10 @@ static int ieee802154_getsockname(FAR struct socket *psock,
  * Name: ieee802154_getpeername
  *
  * Description:
- *   The ieee802154_getpeername() function retrieves the remote-connectd name
- *   of the specified packet socket, stores this address in the sockaddr
- *   structure pointed to by the 'addr' argument, and stores the length of
- *   this address in the object pointed to by the 'addrlen' argument.
+ *   The ieee802154_getpeername() function retrieves the remote-connectd name of the
+ *   specified packet socket, stores this address in the sockaddr structure
+ *   pointed to by the 'addr' argument, and stores the length of this
+ *   address in the object pointed to by the 'addrlen' argument.
  *
  *   If the actual length of the address is greater than the length of the
  *   supplied sockaddr structure, the stored address will be truncated.
@@ -456,7 +540,10 @@ static int ieee802154_getpeername(FAR struct socket *psock,
   FAR struct sockaddr_ieee802154_s tmp;
   socklen_t copylen;
 
-  conn = psock->s_conn;
+  DEBUGASSERT(psock != NULL && addr != NULL && addrlen != NULL);
+
+  conn = (FAR struct ieee802154_conn_s *)psock->s_conn;
+  DEBUGASSERT(conn != NULL);
 
   /* Create a copy of the full address on the stack */
 
@@ -477,6 +564,179 @@ static int ieee802154_getpeername(FAR struct socket *psock,
 
   *addrlen = copylen;
   return OK;
+}
+
+/****************************************************************************
+ * Name: ieee802154_listen
+ *
+ * Description:
+ *   To accept connections, a socket is first created with psock_socket(), a
+ *   willingness to accept incoming connections and a queue limit for
+ *   incoming connections are specified with psock_listen(), and then the
+ *   connections are accepted with psock_accept().  For the case of
+ *   PF_IEEE802154 sockets, psock_listen() calls this function.  The listen()
+ *   call does not apply only to PF_IEEE802154 sockets.
+ *
+ * Input Parameters:
+ *   psock    Reference to an internal, boound socket structure.
+ *   backlog  The maximum length the queue of pending connections may grow.
+ *            If a connection request arrives with the queue full, the client
+ *            may receive an error with an indication of ECONNREFUSED or,
+ *            if the underlying protocol supports retransmission, the request
+ *            may be ignored so that retries succeed.
+ *
+ * Returned Value:
+ *   On success, zero is returned. On error, a negated errno value is
+ *   returned.  See list() for the set of appropriate error values.
+ *
+ ****************************************************************************/
+
+int ieee802154_listen(FAR struct socket *psock, int backlog)
+{
+  return -EOPNOTSUPP;
+}
+
+/****************************************************************************
+ * Name: ieee802154_poll
+ *
+ * Description:
+ *   The standard poll() operation redirects operations on socket descriptors
+ *   to net_poll which, indiectly, calls to function.
+ *
+ * Input Parameters:
+ *   psock - An instance of the internal socket structure.
+ *   fds   - The structure describing the events to be monitored, OR NULL if
+ *           this is a request to stop monitoring events.
+ *   setup - true: Setup up the poll; false: Teardown the poll
+ *
+ * Returned Value:
+ *  0: Success; Negated errno on failure
+ *
+ ****************************************************************************/
+
+static int ieee802154_poll_local(FAR struct socket *psock,
+                                 FAR struct pollfd *fds, bool setup)
+{
+  /* We should need to support some kind of write ahead buffering for this
+   * feature.
+   */
+
+#warning Missing logic
+  return -ENOSYS;
+}
+
+/****************************************************************************
+ * Name: ieee802154_send
+ *
+ * Description:
+ *   Socket send() method for the PF_IEEE802154 socket.
+ *
+ * Input Parameters:
+ *   psock    An instance of the internal socket structure.
+ *   buf      Data to send
+ *   len      Length of data to send
+ *   flags    Send flags
+ *
+ * Returned Value:
+ *   On success, returns the number of characters sent.  On  error, a negated
+ *   errno value is returned (see send() for the list of appropriate error
+ *   values.
+ *
+ ****************************************************************************/
+
+static ssize_t ieee802154_send(FAR struct socket *psock, FAR const void *buf,
+                               size_t len, int flags)
+{
+  struct sockaddr_ieee802154_s to;
+  FAR struct ieee802154_conn_s *conn;
+  ssize_t ret;
+
+  DEBUGASSERT(psock != NULL || buf != NULL);
+  conn = (FAR struct ieee802154_conn_s *)psock->s_conn;
+  DEBUGASSERT(conn != NULL);
+
+  /* Only SOCK_DGRAM is supported (because the MAC header is stripped) */
+
+  if (psock->s_type == SOCK_DGRAM)
+    {
+      /* send() may be used only if the socket has been connected. */
+
+      if (!_SS_ISCONNECTED(psock->s_flags) ||
+          conn->raddr.s_mode == IEEE802154_ADDRMODE_NONE)
+        {
+          ret = -ENOTCONN;
+        }
+      else
+        {
+          to.sa_family = AF_IEEE802154;
+          memcpy(&to.sa_addr, &conn->raddr,
+                 sizeof(struct ieee802154_saddr_s));
+
+          /* Then perform the send() as sendto() */
+
+          ret = psock_ieee802154_sendto(psock, buf, len, flags,
+                                        (FAR const struct sockaddr *)&to,
+                                        sizeof(struct sockaddr_ieee802154_s));
+        }
+    }
+  else
+    {
+      /* EDESTADDRREQ.  Signifies that the socket is not connection-mode and
+       * no peer address is set.
+       */
+
+      ret = -EDESTADDRREQ;
+    }
+
+  return ret;
+}
+
+/****************************************************************************
+ * Name: ieee802154_sendto
+ *
+ * Description:
+ *   Implements the sendto() operation for the case of the PF_IEEE802154
+ *   socket.
+ *
+ * Input Parameters:
+ *   psock    A pointer to a NuttX-specific, internal socket structure
+ *   buf      Data to send
+ *   len      Length of data to send
+ *   flags    Send flags
+ *   to       Address of recipient
+ *   tolen    The length of the address structure
+ *
+ * Returned Value:
+ *   On success, returns the number of characters sent.  On  error, a negated
+ *   errno value is returned (see send_to() for the list of appropriate error
+ *   values.
+ *
+ ****************************************************************************/
+
+static ssize_t ieee802154_sendto(FAR struct socket *psock, FAR const void *buf,
+                                 size_t len, int flags,
+                                 FAR const struct sockaddr *to, socklen_t tolen)
+{
+  ssize_t ret;
+
+  /* Only SOCK_DGRAM is supported (because the MAC header is stripped) */
+
+  if (psock->s_type == SOCK_DGRAM)
+    {
+      /* Raw packet send */
+
+      ret = psock_ieee802154_sendto(psock, buf, len, flags, to, tolen);
+    }
+  else
+    {
+      /* EDESTADDRREQ.  Signifies that the socket is not connection-mode and
+       * no peer address is set.
+       */
+
+      ret = -EDESTADDRREQ;
+    }
+
+  return ret;
 }
 
 /****************************************************************************
@@ -502,7 +762,6 @@ static int ieee802154_close(FAR struct socket *psock)
   switch (psock->s_type)
     {
       case SOCK_DGRAM:
-      case SOCK_CTRL:
         {
           FAR struct ieee802154_conn_s *conn = psock->s_conn;
 
@@ -514,7 +773,7 @@ static int ieee802154_close(FAR struct socket *psock)
             {
               /* Yes... free the connection structure */
 
-              conn->crefs = 0;                      /* No more references on the connection */
+              conn->crefs = 0;          /* No more references on the connection */
               ieee802154_conn_free(psock->s_conn);  /* Free network resources */
             }
           else

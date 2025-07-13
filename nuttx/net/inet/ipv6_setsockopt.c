@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/inet/ipv6_setsockopt.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,14 +47,10 @@
 
 #include <nuttx/net/net.h>
 
-#include "netdev/netdev.h"
-#include "netfilter/iptables.h"
 #include "mld/mld.h"
 #include "inet/inet.h"
-#include "socket/socket.h"
-#include "udp/udp.h"
 
-#if defined(CONFIG_NET_IPv6) && defined(CONFIG_NET_SOCKOPTS)
+#ifdef CONFIG_NET_IPv6
 
 /****************************************************************************
  * Public Functions
@@ -74,156 +83,61 @@
 int ipv6_setsockopt(FAR struct socket *psock, int option,
                     FAR const void *value, socklen_t value_len)
 {
+#ifdef CONFIG_NET_MLD
   int ret;
 
   ninfo("option: %d\n", option);
 
-  if (value == NULL || value_len == 0)
-    {
-      return -EINVAL;
-    }
+  /* Handle MLD-related socket options */
 
   net_lock();
   switch (option)
     {
-#ifdef CONFIG_NET_MLD
-
-      /* Handle MLD-related socket options */
-
       case IPV6_JOIN_GROUP:       /* Join a multicast group */
-        ret = mld_joingroup(value);
-        break;
-
-      case IPV6_LEAVE_GROUP:      /* Quit a multicast group */
-        ret = mld_leavegroup(value);
-        break;
-
-      case IPV6_MULTICAST_HOPS:   /* Multicast hop limit */
         {
-          FAR struct socket_conn_s *conn = psock->s_conn;
+          FAR const struct ipv6_mreq *mrec ;
 
-          conn->s_ttl = (value_len >= sizeof(int)) ?
-                        *(FAR int *)value : (int)*(FAR unsigned char *)value;
-          ret = OK;
+          mrec = (FAR const struct ipv6_mreq *)value;
+          if (mrec == NULL)
+            {
+              ret = -EINVAL;
+            }
+          else
+            {
+              ret = mld_joingroup(mrec);
+            }
         }
         break;
 
-      case IPV6_MULTICAST_IF:     /* Interface to use for outgoing multicast
-                                   * packets */
-#ifdef NET_UDP_HAVE_STACK
-      {
-        FAR struct net_driver_s *dev;
-        FAR struct udp_conn_s *conn = psock->s_conn;
-        int ifindex = *(FAR int *)value;
+      case IPV6_LEAVE_GROUP:      /* Quit a multicast group */
+        {
+          FAR const struct ipv6_mreq *mrec ;
 
-        if (ifindex > 0)
-          {
-            dev = netdev_findbyindex(ifindex);
-            if (dev == NULL)
-              {
-                ret = -ENODEV;
-                break;
-              }
-
-#ifdef CONFIG_NET_BINDTODEVICE
-            if (conn->sconn.s_boundto &&
-                ifindex != conn->sconn.s_boundto)
-              {
-                ret = -EINVAL;
-                break;
-              }
-#endif
-          }
-
-        conn->mreq.imr_ifindex = ifindex;
-
-        ret = OK;
+          mrec = (FAR const struct ipv6_mreq *)value;
+          if (mrec == NULL)
+            {
+              ret = -EINVAL;
+            }
+          else
+            {
+              ret = mld_leavegroup(mrec);
+            }
+        }
         break;
-      }
-#endif /* NET_UDP_HAVE_STACK */
-#endif /* CONFIG_NET_MLD */
 
       /* The following IPv6 socket options are defined, but not implemented */
 
+      case IPV6_MULTICAST_HOPS:   /* Multicast hop limit */
+      case IPV6_MULTICAST_IF:     /* Interface to use for outgoing multicast
+                                   * packets */
+      case IPV6_MULTICAST_LOOP:   /* Multicast packets are delivered back to
+                                   * the local application */
+      case IPV6_UNICAST_HOPS:     /* Unicast hop limit */
       case IPV6_V6ONLY:           /* Restrict AF_INET6 socket to IPv6
                                    * communications only */
         nwarn("WARNING: Unimplemented IPv6 option: %d\n", option);
         ret = -ENOSYS;
         break;
-
-      case IPV6_UNICAST_HOPS:     /* Unicast hop limit */
-        {
-          FAR struct socket_conn_s *conn = psock->s_conn;
-
-          conn->s_ttl = (value_len >= sizeof(int)) ?
-                        *(FAR int *)value : (int)*(FAR unsigned char *)value;
-          ret = OK;
-        }
-        break;
-
-#ifdef CONFIG_NET_MLD
-      case IPV6_MULTICAST_LOOP:   /* Multicast packets are delivered back to
-                                   * the local application */
-#endif
-      case IPV6_RECVPKTINFO:
-      case IPV6_RECVHOPLIMIT:
-        {
-          FAR struct socket_conn_s *conn = psock->s_conn;
-          int enable = (value_len >= sizeof(int)) ?
-                       *(FAR int *)value : (int)*(FAR unsigned char *)value;
-
-          if (enable)
-            {
-              _SO_SETOPT(conn->s_options, option);
-            }
-          else
-            {
-              _SO_CLROPT(conn->s_options, option);
-            }
-
-          ret = OK;
-        }
-        break;
-
-      case IPV6_TCLASS:
-        {
-          FAR struct socket_conn_s *conn = psock->s_conn;
-          int tclass = (value_len >= sizeof(int)) ?
-                       *(FAR int *)value : (int)*(FAR unsigned char *)value;
-
-          /* According to RFC3542 6.5, the interpretation of the integer
-           * traffic class value is:
-           *   x < -1:        return an error of EINVAL
-           *   x == -1:       use kernel default
-           *   0 <= x <= 255: use x
-           *   x >= 256:      return an error of EINVAL
-           */
-
-          if (tclass < -1 || tclass > 0xff)
-            {
-              nerr("ERROR: invalid tclass:%d\n", tclass);
-              ret = -EINVAL;
-            }
-          else
-            {
-              if (tclass == -1)
-                {
-                  /* Default value is 0 */
-
-                  tclass = 0;
-                }
-
-              conn->s_tclass = tclass;
-              ret = OK;
-            }
-        }
-        break;
-
-#ifdef CONFIG_NET_IPTABLES
-      case IP6T_SO_SET_REPLACE:
-        ret = ip6t_setsockopt(psock, option, value, value_len);
-        break;
-#endif
 
       default:
         nerr("ERROR: Unrecognized IPv6 option: %d\n", option);
@@ -233,6 +147,9 @@ int ipv6_setsockopt(FAR struct socket *psock, int option,
 
   net_unlock();
   return ret;
+#else
+  return -ENOPROTOOPT;
+#endif
 }
 
 #endif /* CONFIG_NET_IPv6 */

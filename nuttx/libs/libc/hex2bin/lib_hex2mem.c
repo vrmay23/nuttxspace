@@ -1,7 +1,5 @@
 /****************************************************************************
- * libs/libc/hex2bin/lib_hex2mem.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * libs/libc/hex2bin/hex2mem.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -32,7 +30,7 @@
 
 #include <nuttx/streams.h>
 
-#ifdef CONFIG_LIBC_HEX2BIN
+#ifdef CONFIG_LIB_HEX2BIN
 
 /****************************************************************************
  * Public Functions
@@ -62,7 +60,7 @@
  *
  ****************************************************************************/
 
-int hex2mem(int fd, unsigned long baseaddr, unsigned long endpaddr,
+int hex2mem(int fd, uint32_t baseaddr, uint32_t endpaddr,
             enum hex2bin_swap_e swap)
 {
   struct lib_rawinstream_s rawinstream;
@@ -82,9 +80,9 @@ int hex2mem(int fd, unsigned long baseaddr, unsigned long endpaddr,
 
   /* And do the deed */
 
-  return hex2bin(&rawinstream.common, &memoutstream.common,
-                 (unsigned long)baseaddr, (unsigned long)endpaddr,
+  return hex2bin(&rawinstream.public, &memoutstream.public,
+                 (uint32_t)baseaddr, (uint32_t)endpaddr,
                  (enum hex2bin_swap_e)swap);
 }
 
-#endif /* CONFIG_LIBC_HEX2BIN */
+#endif /* CONFIG_LIB_HEX2BIN */

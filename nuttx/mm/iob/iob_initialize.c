@@ -1,22 +1,35 @@
 /****************************************************************************
  * mm/iob/iob_initialize.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
 
 #include <stdbool.h>
 
-#include <nuttx/nuttx.h>
 #include <nuttx/mm/iob.h>
 
 #include "iob.h"
@@ -37,36 +49,18 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Fix the I/O Buffer size with specified alignment size */
-
-#ifdef CONFIG_IOB_ALLOC
-#  define IOB_ALIGN_SIZE  ALIGN_UP(sizeof(struct iob_s) + CONFIG_IOB_BUFSIZE, \
-                                   CONFIG_IOB_ALIGNMENT)
-#else
-#  define IOB_ALIGN_SIZE  ALIGN_UP(sizeof(struct iob_s), CONFIG_IOB_ALIGNMENT)
+#ifndef NULL
+#  define NULL ((FAR void *)0)
 #endif
-
-#define IOB_BUFFER_SIZE   (IOB_ALIGN_SIZE * CONFIG_IOB_NBUFFERS + \
-                           CONFIG_IOB_ALIGNMENT - 1)
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-/* Following raw buffer will be divided into iob_s instances, the initial
- * procedure will ensure that the member io_data of each iob_s is aligned
- * to the CONFIG_IOB_ALIGNMENT memory boundary.
- */
+/* This is a pool of pre-allocated I/O buffers */
 
-#ifdef IOB_SECTION
-static uint8_t g_iob_buffer[IOB_BUFFER_SIZE] locate_data(IOB_SECTION);
-#else
-static uint8_t g_iob_buffer[IOB_BUFFER_SIZE];
-#endif
-
+static struct iob_s        g_iob_pool[CONFIG_IOB_NBUFFERS];
 #if CONFIG_IOB_NCHAINS > 0
-/* This is a pool of pre-allocated iob_qentry_s buffers */
-
 static struct iob_qentry_s g_iob_qpool[CONFIG_IOB_NCHAINS];
 #endif
 
@@ -92,30 +86,15 @@ FAR struct iob_qentry_s *g_iob_freeqlist;
 FAR struct iob_qentry_s *g_iob_qcommitted;
 #endif
 
-sem_t g_iob_sem = SEM_INITIALIZER(0);
+/* Counting semaphores that tracks the number of free IOBs/qentries */
 
-/* Counting that tracks the number of free IOBs/qentries */
-
-int16_t g_iob_count = CONFIG_IOB_NBUFFERS;
-
+sem_t g_iob_sem;            /* Counts free I/O buffers */
 #if CONFIG_IOB_THROTTLE > 0
-
-sem_t g_throttle_sem = SEM_INITIALIZER(0);
-
-/* Wait Counts for throttle */
-
-int16_t g_throttle_wait = 0;
+sem_t g_throttle_sem;       /* Counts available I/O buffers when throttled */
 #endif
-
 #if CONFIG_IOB_NCHAINS > 0
-sem_t g_qentry_sem = SEM_INITIALIZER(0);
-
-/* Wait Counts for qentry */
-
-int16_t g_qentry_wait = 0;
+sem_t g_qentry_sem;         /* Counts free I/O buffer queue containers */
 #endif
-
-volatile spinlock_t g_iob_lock = SP_UNLOCKED;
 
 /****************************************************************************
  * Public Functions
@@ -131,47 +110,50 @@ volatile spinlock_t g_iob_lock = SP_UNLOCKED;
 
 void iob_initialize(void)
 {
+  static bool initialized = false;
   int i;
-  uintptr_t buf;
 
-  /* Get a start address which plus offsetof(struct iob_s, io_data) is
-   * aligned to the CONFIG_IOB_ALIGNMENT memory boundary
-   */
+  /* Perform one-time initialization */
 
-  buf = ALIGN_UP((uintptr_t)g_iob_buffer + offsetof(struct iob_s, io_data),
-                 CONFIG_IOB_ALIGNMENT) - offsetof(struct iob_s, io_data);
-
-  /* Get I/O buffer instance from the start address and add each I/O buffer
-   * to the free list
-   */
-
-  for (i = 0; i < CONFIG_IOB_NBUFFERS; i++)
+  if (!initialized)
     {
-      FAR struct iob_s *iob = (FAR struct iob_s *)(buf + i * IOB_ALIGN_SIZE);
+      /* Add each I/O buffer to the free list */
 
-      /* Add the pre-allocate I/O buffer to the head of the free list */
+      for (i = 0; i < CONFIG_IOB_NBUFFERS; i++)
+        {
+          FAR struct iob_s *iob = &g_iob_pool[i];
 
-      iob->io_flink   = g_iob_freelist;
-#ifdef CONFIG_IOB_ALLOC
-      iob->io_bufsize = CONFIG_IOB_BUFSIZE;
-      iob->io_data    = (FAR uint8_t *)(iob + 1);
+          /* Add the pre-allocate I/O buffer to the head of the free list */
+
+          iob->io_flink  = g_iob_freelist;
+          g_iob_freelist = iob;
+        }
+
+      g_iob_committed = NULL;
+
+      nxsem_init(&g_iob_sem, 0, CONFIG_IOB_NBUFFERS);
+#if CONFIG_IOB_THROTTLE > 0
+      nxsem_init(&g_throttle_sem, 0, CONFIG_IOB_NBUFFERS - CONFIG_IOB_THROTTLE);
 #endif
-      g_iob_freelist  = iob;
-    }
 
 #if CONFIG_IOB_NCHAINS > 0
-  /* Add each I/O buffer chain queue container to the free list */
+      /* Add each I/O buffer chain queue container to the free list */
 
-  for (i = 0; i < CONFIG_IOB_NCHAINS; i++)
-    {
-      FAR struct iob_qentry_s *iobq = &g_iob_qpool[i];
+      for (i = 0; i < CONFIG_IOB_NCHAINS; i++)
+        {
+          FAR struct iob_qentry_s *iobq = &g_iob_qpool[i];
 
-      /* Add the pre-allocate buffer container to the head of the free
-       * list
-       */
+          /* Add the pre-allocate buffer container to the head of the free list */
 
-      iobq->qe_flink  = g_iob_freeqlist;
-      g_iob_freeqlist = iobq;
-    }
+          iobq->qe_flink  = g_iob_freeqlist;
+          g_iob_freeqlist = iobq;
+        }
+
+      g_iob_qcommitted = NULL;
+
+      nxsem_init(&g_qentry_sem, 0, CONFIG_IOB_NCHAINS);
 #endif
+
+      initialized = true;
+    }
 }

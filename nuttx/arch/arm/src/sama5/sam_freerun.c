@@ -1,10 +1,18 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_freerun.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2014 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2011 Atmel Corporation
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.orgr>
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * References:
+ *
+ *   SAMA5D3 Series Data Sheet
+ *   Atmel NoOS sample code.
+ *
+ * The Atmel sample code has a BSD compatible license that requires this
+ * copyright notice:
+ *
+ *   Copyright (c) 2011, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,12 +42,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
-/* References:
- *
- *   SAMA5D3 Series Data Sheet
- *   Atmel NoOS sample code.
- */
 
 /****************************************************************************
  * Included Files
@@ -181,6 +183,7 @@ int sam_freerun_initialize(struct sam_freerun_s *freerun, int chan,
    */
 
   freerun->chan     = chan;
+  freerun->running  = false;
   freerun->overflow = 0;
 
   /* Set up to receive the callback when the counter overflow occurs */
@@ -225,9 +228,8 @@ int sam_freerun_counter(struct sam_freerun_s *freerun, struct timespec *ts)
 
   DEBUGASSERT(freerun && freerun->tch && ts);
 
-  /* Temporarily disable the overflow counter.
-   * NOTE that we have to be careful here because  sam_tc_getpending() will
-   * reset the pending interrupt status.
+  /* Temporarily disable the overflow counter.  NOTE that we have to be careful
+   * here because  sam_tc_getpending() will reset the pending interrupt status.
    * If we do not handle the overflow here then, it will be lost.
    */
 
@@ -306,7 +308,7 @@ int sam_freerun_uninitialize(struct sam_freerun_s *freerun)
 
   /* Now we can disable the timer interrupt and disable the timer. */
 
-  sam_tc_detach(freerun->tch);
+  sam_tc_attach(freerun->tch, NULL, NULL, 0);
   sam_tc_stop(freerun->tch);
 
   /* Free the timer */

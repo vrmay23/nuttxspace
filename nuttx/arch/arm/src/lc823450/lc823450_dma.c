@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_dma.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2014,2015,2017 Sony Video & Sound Products Inc.
+ *   Author: Masatoshi Tateishi <Masatoshi.Tateishi@jp.sony.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/semaphore.h>
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -38,10 +50,8 @@
 #include <stdlib.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/spinlock.h>
-#include <nuttx/mutex.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "lc823450_dma.h"
 #include "lc823450_syscontrol.h"
 #include <arch/chip/clk.h>
@@ -78,6 +88,10 @@
 #define DMACCFG_SRCPERI_SHIFT           1
 #define DMACCFG_E                       (1 << 0)
 
+#ifndef MIN
+#  define MIN(a, b) ((a) > (b) ? (b) : (a))
+#endif /* MIN */
+
 #define LC823450_DMA_EN                 (1 << 26)
 
 /****************************************************************************
@@ -106,10 +120,9 @@ struct lc823450_dmach_s
 
 struct lc823450_dma_s
 {
-  spinlock_t lock;            /* For exclusive access to the DMA channel list */
+  sem_t exclsem;           /* For exclusive access to the DMA channel list */
 
   /* This is the state of each DMA channel */
-
   int count;
   struct lc823450_phydmach_s phydmach[DMA_CHANNEL_NUM];
   uint32_t reqline_use;
@@ -121,10 +134,7 @@ static int phydmastart(struct lc823450_phydmach_s *pdmach);
  * Private Data
  ****************************************************************************/
 
-static struct lc823450_dma_s g_dma =
-{
-  .lock = SP_UNLOCKED,
-};
+static struct lc823450_dma_s g_dma;
 volatile uint8_t g_dma_inprogress;
 
 /****************************************************************************
@@ -144,7 +154,7 @@ static int dma_interrupt_core(void *context)
 
   pdmach = (struct lc823450_phydmach_s *)context;
 
-  flags = spin_lock_irqsave(&g_dma.lock);
+  flags = spin_lock_irqsave();
   q_ent = pdmach->req_q.tail;
   DEBUGASSERT(q_ent != NULL);
   dmach = (struct lc823450_dmach_s *)q_ent;
@@ -154,20 +164,18 @@ static int dma_interrupt_core(void *context)
       /* finish one transfer */
 
       sq_remlast(&pdmach->req_q);
-      spin_unlock_irqrestore(&g_dma.lock, flags);
+      spin_unlock_irqrestore(flags);
 
       if (dmach->callback)
         dmach->callback((DMA_HANDLE)dmach, dmach->arg, 0);
     }
   else
     {
-      spin_unlock_irqrestore(&g_dma.lock, flags);
+      spin_unlock_irqrestore(flags);
     }
 
   up_disable_clk(LC823450_CLOCK_DMA);
-  flags = spin_lock_irqsave(&g_dma.lock);
   phydmastart(pdmach);
-  spin_unlock_irqrestore(&g_dma.lock, flags);
 
   return OK;
 }
@@ -176,11 +184,10 @@ static int dma_interrupt_core(void *context)
  * Name: dma_interrupt
  ****************************************************************************/
 
-static int dma_interrupt(int irq, void *context, void *arg)
+static int dma_interrupt(int irq, FAR void *context, FAR void *arg)
 {
   int i;
-  uint32_t stat;
-  uint32_t err;
+  uint32_t stat, err;
 
   up_enable_clk(LC823450_CLOCK_DMA);
 
@@ -196,7 +203,6 @@ static int dma_interrupt(int irq, void *context, void *arg)
         {
           dma_interrupt_core((void *)&g_dma.phydmach[i]);
         }
-
       if (err & (1 << i))
         {
           dmaerr("ERROR %d\n", i);
@@ -214,16 +220,20 @@ static int dma_interrupt(int irq, void *context, void *arg)
 
 static int phydmastart(struct lc823450_phydmach_s *pdmach)
 {
+  irqstate_t flags;
   int trnum;
 
   struct lc823450_dmach_s *dmach;
   sq_entry_t *q_ent;
+
+  flags = spin_lock_irqsave();
 
   q_ent = pdmach->req_q.tail;
 
   if (!q_ent)
     {
       pdmach->inprogress = 0;
+      spin_unlock_irqrestore(flags);
       return 0;
     }
 
@@ -286,6 +296,7 @@ static int phydmastart(struct lc823450_phydmach_s *pdmach)
 
   modifyreg32(DMACCFG(dmach->chn), 0, DMACCFG_ITC | DMACCFG_E);
 
+  spin_unlock_irqrestore(flags);
   return 0;
 }
 
@@ -302,7 +313,7 @@ static void dma_done(DMA_HANDLE handle, void *arg, int result)
   test_done = 1;
 }
 
-void lc823450_dma_test(void)
+void lc823450_dma_test()
 {
   int i;
   for (i = 0; i < 256; i++)
@@ -328,10 +339,10 @@ void lc823450_dma_test(void)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_dma_initialize
+ * Name: up_dma_initialize
  ****************************************************************************/
 
-void arm_dma_initialize(void)
+void up_dma_initialize(void)
 {
   int i;
 
@@ -341,11 +352,12 @@ void arm_dma_initialize(void)
       sq_init(&g_dma.phydmach[i].req_q);
     }
 
+  nxsem_init(&g_dma.exclsem, 0, 1);
+
   if (irq_attach(LC823450_IRQ_DMAC, dma_interrupt, NULL) != 0)
     {
       return;
     }
-
   up_enable_irq(LC823450_IRQ_DMAC);
 
   /* Clock & Reset */
@@ -380,6 +392,7 @@ void arm_dma_initialize(void)
 
 void lc823450_dmaconfigure(uint8_t dmarequest, bool alternate)
 {
+  return;
 }
 
 /****************************************************************************
@@ -408,7 +421,6 @@ void lc823450_dmarequest(DMA_HANDLE handle, uint8_t dmarequest)
           break;
         }
     }
-
   DEBUGASSERT(req_line != 16);
 
   up_enable_clk(LC823450_CLOCK_DMA);
@@ -448,12 +460,14 @@ void lc823450_dmarequest(DMA_HANDLE handle, uint8_t dmarequest)
         val |= DMACCFG_FLOWCTRL_M2P_DMA;
         break;
       default:
-        dmaerr("ERROR: Not implemented\n");
+        dmaerr("ERROR: Not implemetned\n");
         DEBUGPANIC();
     }
 
   putreg32(val, DMACCFG(dmach->chn));
   up_disable_clk(LC823450_CLOCK_DMA);
+
+  return;
 }
 
 /****************************************************************************
@@ -491,9 +505,9 @@ void lc823450_dmareauest_dir(DMA_HANDLE handle, uint8_t dmarequest, int m2p)
  *   gives the caller exclusive access to the DMA channel.
  *
  * Returned Value:
- *   On success, this function returns a non-NULL, void* DMA channel handle.
- *   NULL is returned on any failure.  This function can fail only if no DMA
- *   channel is available.
+ *   One success, this function returns a non-NULL, void* DMA channel
+ *   handle.  NULL is returned on any failure.  This function can fail only
+ *   if no DMA channel is available.
  *
  ****************************************************************************/
 
@@ -519,8 +533,8 @@ DMA_HANDLE lc823450_dmachannel(int ch)
  *
  * Description:
  *   Release a DMA channel.  NOTE:  The 'handle' used in this argument must
- *   NEVER be used again until lc823450_dmachannel() is called again to
- *   re-gain a valid handle.
+ *   NEVER be used again until lc823450_dmachannel() is called again to re-gain
+ *   a valid handle.
  *
  * Returned Value:
  *   None
@@ -570,8 +584,7 @@ int lc823450_dmasetup(DMA_HANDLE handle, uint32_t control,
 }
 
 int lc823450_dmallsetup(DMA_HANDLE handle, uint32_t control,
-                        uint32_t srcaddr, uint32_t destaddr,
-                        size_t nxfrs, uint32_t llist)
+                   uint32_t srcaddr, uint32_t destaddr, size_t nxfrs, uint32_t llist)
 {
   struct lc823450_dmach_s *dmach = (DMA_HANDLE)handle;
 
@@ -610,7 +623,7 @@ int lc823450_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg)
 
   /* select physical channel */
 
-  flags = spin_lock_irqsave(&g_dma.lock);
+  flags = spin_lock_irqsave();
 
   sq_addfirst(&dmach->q_ent, &g_dma.phydmach[dmach->chn].req_q);
 
@@ -624,7 +637,7 @@ int lc823450_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg)
       phydmastart(&g_dma.phydmach[dmach->chn]);
     }
 
-  spin_unlock_irqrestore(&g_dma.lock, flags);
+  spin_unlock_irqrestore(flags);
 
   return OK;
 }
@@ -641,7 +654,7 @@ void lc823450_dmastop(DMA_HANDLE handle)
 
   DEBUGASSERT(dmach != NULL);
 
-  flags = spin_lock_irqsave(&g_dma.lock);
+  flags = spin_lock_irqsave();
 
   modifyreg32(DMACCFG(dmach->chn), DMACCFG_ITC | DMACCFG_E, 0);
 
@@ -652,10 +665,10 @@ void lc823450_dmastop(DMA_HANDLE handle)
         {
           up_disable_clk(LC823450_CLOCK_DMA);
         }
-
       pdmach->inprogress = 0;
       sq_rem(&dmach->q_ent, &pdmach->req_q);
     }
 
-  spin_unlock_irqrestore(&g_dma.lock, flags);
+  spin_unlock_irqrestore(flags);
+  return;
 }

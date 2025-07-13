@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/netutils/ftpc/ftpc_putfile.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,13 +40,10 @@
 #include "ftpc_config.h"
 
 #include <sys/stat.h>
-#include <sys/sendfile.h>
-#include <inttypes.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <libgen.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -69,69 +79,19 @@
  *
  ****************************************************************************/
 
-#ifdef CONFIG_FTPC_OVER_SENDFILE
 static int ftpc_sendbinary(FAR struct ftpc_session_s *session,
-                           FAR FILE *linstream)
-{
-  struct stat stat_buf;
-  off_t offset = session->offset;
-  ssize_t result;
-  ssize_t len;
-  int linfd = fileno(linstream);
-
-  if (linfd == -1 || fstat(linfd, &stat_buf) == -1)
-    {
-      ftpc_xfrabort(session, NULL);
-      return ERROR;
-    }
-
-  /* Loop until the entire file is sent */
-
-  len = stat_buf.st_size - offset;
-
-  while (len > 0)
-    {
-      result = sendfile(session->data.sd, linfd, &offset, len);
-
-      if (result == -1 && errno == EAGAIN)
-        {
-          continue;
-        }
-      else if (result == -1)
-        {
-          ftpc_xfrabort(session, NULL);
-          return ERROR;
-        }
-
-      len -= result;
-
-      /* Increment the size of the file sent */
-
-      session->size += result;
-    }
-
-  /* Return success */
-
-  return OK;
-}
-
-#else
-
-static int ftpc_sendbinary(FAR struct ftpc_session_s *session,
-                           FAR FILE *linstream)
+                           FAR FILE *linstream, FILE *routstream)
 {
   ssize_t nread;
   ssize_t nwritten;
-  FILE *routstream = session->data.outstream;
 
   /* Loop until the entire file is sent */
 
-  for (; ; )
+  for (;;)
     {
       /* Read data from the file */
 
-      nread = fread(session->buffer, sizeof(char), CONFIG_FTP_BUFSIZE,
-                    linstream);
+      nread = fread(session->buffer, sizeof(char), CONFIG_FTP_BUFSIZE, linstream);
       if (nread <= 0)
         {
           /* nread == 0 is just EOF */
@@ -164,7 +124,6 @@ static int ftpc_sendbinary(FAR struct ftpc_session_s *session,
       session->size += nread;
     }
 }
-#endif
 
 /****************************************************************************
  * Name: ftpc_sendtext
@@ -175,11 +134,10 @@ static int ftpc_sendbinary(FAR struct ftpc_session_s *session,
  ****************************************************************************/
 
 static int ftpc_sendtext(FAR struct ftpc_session_s *session,
-                         FAR FILE *linstream)
+                         FAR FILE *linstream, FAR FILE *routstream)
 {
   int ch;
   int ret = OK;
-  FILE *routstream = session->data.outstream;
 
   /* Write characters one at a time. */
 
@@ -229,12 +187,15 @@ static int ftpc_sendtext(FAR struct ftpc_session_s *session,
 static int ftpc_sendfile(struct ftpc_session_s *session, const char *path,
                          FILE *stream, uint8_t how, uint8_t xfrmode)
 {
+  long offset = session->offset;
 #ifdef CONFIG_DEBUG_FEATURES
   FAR char *rname;
   FAR char *str;
   int len;
 #endif
   int ret;
+
+  session->offset = 0;
 
   /* Were we asked to store a file uniquely?  Does the host support the STOU
    * command?
@@ -264,10 +225,10 @@ static int ftpc_sendfile(struct ftpc_session_s *session, const char *path,
    * allow REST immediately before STOR for binary files.
    */
 
-  if (session->offset > 0)
+  if (offset > 0)
     {
-      ret = ftpc_cmd(session, "REST %" PRIdOFF, session->offset);
-      session->size = session->offset;
+      ret = ftpc_cmd(session, "REST %ld", offset);
+      session->size = offset;
     }
 
   /* Send the file using STOR, STOU, or APPE:
@@ -310,14 +271,13 @@ static int ftpc_sendfile(struct ftpc_session_s *session, const char *path,
               {
                 if (*str == '\'')
                   {
-                    rname = strndup(str + 1, len - 3);
+                    rname = strndup(str+1, len-3);
                   }
                 else
                   {
-                    rname = strndup(str, len - 1);
+                    rname = strndup(str, len-1);
                     ninfo("Unique filename is: %s\n",  rname);
                   }
-
                 free(rname);
               }
           }
@@ -383,11 +343,11 @@ static int ftpc_sendfile(struct ftpc_session_s *session, const char *path,
 
   if (xfrmode == FTPC_XFRMODE_ASCII)
     {
-      ret = ftpc_sendtext(session, stream);
+      ret = ftpc_sendtext(session, stream, session->data.outstream);
     }
   else
     {
-      ret = ftpc_sendbinary(session, stream);
+      ret = ftpc_sendbinary(session, stream, session->data.outstream);
     }
 
   ftpc_sockflush(&session->data);
@@ -440,7 +400,7 @@ int ftp_putfile(SESSION handle, const char *lname, const char *rname,
   abslpath = ftpc_abslpath(session, lname);
   if (!abslpath)
     {
-      nwarn("WARNING: ftpc_abslpath(%s) failed: %d\n", lname, errno);
+      nwarn("WARNING: ftpc_abslpath(%s) failed: %d\n", errno);
       goto errout;
     }
 
@@ -449,7 +409,7 @@ int ftp_putfile(SESSION handle, const char *lname, const char *rname,
   ret = stat(abslpath, &statbuf);
   if (ret != OK)
     {
-      nwarn("WARNING: stat(%s) failed: %d\n", abslpath, errno);
+      nwarn("WARNING: stat(%s) failed: %d\n", errno);
       goto errout_with_abspath;
     }
 

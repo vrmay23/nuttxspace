@@ -1,29 +1,42 @@
 /****************************************************************************
  * apps/wireless/bluetooth/btsak/btsak_main.c
+ * Bluetooth Swiss Army Knife
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author:  Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Based loosely on the i8sak IEEE 802.15.4 program by Anthony Merlino and
+ * Sebastien Lorquet.  Commands inspired for btshell example in the
+ * Intel/Zephyr Arduino 101 package (BSD license).
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
-/* Based loosely on the i8sak IEEE 802.15.4 program by Anthony Merlino and
- * Sebastien Lorquet.  Commands inspired from btshell example in the
- * Intel/Zephyr Arduino 101 package (BSD license).
- */
 
 /****************************************************************************
  * Included Files
@@ -33,7 +46,6 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <errno.h>
-#include <sys/param.h>
 
 #include <nuttx/wireless/bluetooth/bt_core.h>
 #include <nuttx/net/bluetooth.h>
@@ -49,8 +61,7 @@
 struct btsak_command_s
 {
   FAR const char *name;
-  CODE void (*handler)(FAR struct btsak_s *btsak, int argc,
-                       FAR char *argv[]);
+  CODE void (*handler)(FAR struct btsak_s *btsak, int argc, FAR char *argv[]);
   FAR const char *help;
 };
 
@@ -71,93 +82,89 @@ static const struct btsak_command_s g_btsak_commands[] =
 {
   {
     "help",
-    btsak_cmd_help,
+    (CODE void *)btsak_cmd_help,
     NULL
   },
-  {
-    "info",
-    btsak_cmd_info,
+  {"info",
+    (CODE void *)btsak_cmd_info,
     "[-h]"
   },
-  {
-    "features",
-    btsak_cmd_features,
+  {"features",
+    (CODE void *)btsak_cmd_features,
     "[-h] [le]"
   },
-  {
-    "scan",
-    btsak_cmd_scan,
+  {"scan",
+    (CODE void *)btsak_cmd_scan,
     "[-h] <start [-d]|get|stop>"
   },
   {
     "advertise",
-    btsak_cmd_advertise,
+    (CODE void *)btsak_cmd_advertise,
     "[-h] <start|stop>"
   },
   {
     "security",
-    btsak_cmd_security,
-    "[-h] <addr> public|random <level>"
+    (CODE void *)btsak_cmd_security,
+    "[-h] <addr> public|private <level>"
   },
   {
     "gatt",
-    btsak_cmd_gatt,
+    (CODE void *)btsak_cmd_gatt,
     "[-h] <cmd> [option [option [option...]]]"
   }
 };
 
-#define NCOMMANDS nitems(g_btsak_commands)
+#define NCOMMANDS (sizeof(g_btsak_commands) / sizeof(struct btsak_command_s))
 
 static const struct btsak_command_s g_btsak_gatt_commands[] =
 {
-  {
-    "exchange-mtu",
-    btsak_cmd_gatt_exchange_mtu,
-    "[-h] <addr> public|random"
+  {"exchange-mtu",
+    (CODE void *)btsak_cmd_gatt_exchange_mtu,
+    "[-h] <addr> public|private"
   },
   {
     "connect",
-    btsak_cmd_connect,
-    "[-h] <addr> public|random"
+    (CODE void *)btsak_cmd_connect,
+    "[-h] <addr> public|private"
   },
   {
     "disconnect",
-    btsak_cmd_disconnect,
-    "[-h] <addr> public|random"
+    (CODE void *)btsak_cmd_disconnect,
+    "[-h] <addr> public|private"
   },
   {
     "discover",
-    btsak_cmd_discover,
-    "[-h] <addr> public|random <uuid16> [<start> [<end>]]"
+    (CODE void *)btsak_cmd_discover,
+    "[-h] <addr> public|private <uuid16> [<start> [<end>]]"
   },
   {
     "characteristic",
-    btsak_cmd_gatt_discover_characteristic,
-    "[-h] <addr> public|random [<start> [<end>]]"
+    (CODE void *)btsak_cmd_gatt_discover_characteristic,
+    "[-h] <addr> public|private [<start> [<end>]]"
   },
   {
     "descriptor",
-    btsak_cmd_gatt_discover_descriptor,
-    "[-h] <addr> public|random [<start> [<end>]]"
+    (CODE void *)btsak_cmd_gatt_discover_descriptor,
+    "[-h] <addr> public|private [<start> [<end>]]"
   },
   {
     "read",
-    btsak_cmd_gatt_read,
-    "[-h] <addr> public|random <handle> [<offset>]"
+    (CODE void *)btsak_cmd_gatt_read,
+    "[-h] <addr> public|private <handle> [<offset>]"
   },
   {
     "read-multiple",
-    btsak_cmd_gatt_read_multiple,
-    "[-h] <addr> public|random <handle> [<handle> [<handle>]..]"
+    (CODE void *)btsak_cmd_gatt_read_multiple,
+    "[-h] <addr> public|private <handle> [<handle> [<handle>]..]"
   },
   {
     "write",
-    btsak_cmd_gatt_write,
-    "[-h] <addr> public|random <handle> <byte> [<byte> [<byte>]..]"
+    (CODE void *)btsak_cmd_gatt_write,
+    "[-h] <addr> public|private <handle> <byte> [<byte> [<byte>]..]"
   }
 };
 
-#define GATT_NCOMMANDS nitems(g_btsak_gatt_commands)
+#define GATT_NCOMMANDS (sizeof(g_btsak_gatt_commands) / sizeof(struct btsak_command_s))
 
 static const bt_addr_t g_default_epaddr =
 {
@@ -226,8 +233,7 @@ void btsak_cmd_gatt(FAR struct btsak_s *btsak, int argc, FAR char *argv[])
 
   if (cmd == NULL)
     {
-      fprintf(stderr, "ERROR: Unrecognized gatt command: %s\n",
-              argv[argind]);
+      fprintf(stderr, "ERROR: Unrecognized gatt command: %s\n", argv[argind]);
       btsak_gatt_showusage(btsak->progname, argv[0], EXIT_SUCCESS);
     }
 
@@ -546,7 +552,7 @@ int btsak_str2addr(FAR const char *str, FAR uint8_t *addr)
  *
  * Description:
  *   Convert a string to an address type.  String options are "public" or
- *   "random".
+ *   "private".
  *
  ****************************************************************************/
 
@@ -620,9 +626,9 @@ int btsak_socket(FAR struct btsak_s *btsak)
   BLUETOOTH_ADDRCOPY(btsak->ep_btaddr.val, g_default_epaddr.val);
 
 #if defined(CONFIG_NET_BLUETOOTH)
-  btsak->ep_sockaddr.l2_family  = AF_BLUETOOTH;
-  btsak->ep_sockaddr.l2_cid     = 0;  /* REVISIT */
-  BLUETOOTH_ADDRCOPY(btsak->ep_sockaddr.l2_bdaddr.val, btsak->ep_btaddr.val);
+  btsak->ep_sockaddr.bt_family   = AF_BLUETOOTH;
+  btsak->ep_sockaddr.bt_channel  = 0;  /* REVISIT */
+  BLUETOOTH_ADDRCOPY(btsak->ep_sockaddr.bt_bdaddr.val, btsak->ep_btaddr.val);
 
   sockfd = socket(PF_BLUETOOTH, SOCK_RAW, BTPROTO_L2CAP);
 
@@ -658,8 +664,7 @@ void btsak_showusage(FAR const char *progname, int exitcode)
   fprintf(stderr, "\nUsage:\n\n");
   fprintf(stderr, "\t%s <ifname> <cmd> [option [option [option...]]]\n",
           progname);
-  fprintf(stderr,
-          "\nWhere <cmd> [option [option [option...]]] is one of:\n\n");
+  fprintf(stderr, "\nWhere <cmd> [option [option [option...]]] is one of:\n\n");
 
   for (i = 0; i < NCOMMANDS; i++)
     {
@@ -693,11 +698,9 @@ void btsak_gatt_showusage(FAR const char *progname, FAR const char *cmd,
 
   fprintf(stderr, "%s:  Generic Attribute (GATT) commands:\n", cmd);
   fprintf(stderr, "Usage:\n\n");
-  fprintf(stderr,
-          "\t%s <ifname> %s [-h] <cmd> [option [option [option...]]]\n",
+  fprintf(stderr, "\t%s <ifname> %s [-h] <cmd> [option [option [option...]]]\n",
           progname, cmd);
-  fprintf(stderr,
-          "\nWhere <cmd> [option [option [option...]]] is one of:\n\n");
+  fprintf(stderr, "\nWhere <cmd> [option [option [option...]]] is one of:\n\n");
 
   for (i = 0; i < GATT_NCOMMANDS; i++)
     {

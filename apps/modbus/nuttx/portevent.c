@@ -1,8 +1,9 @@
 /****************************************************************************
  * apps/modbus/nuttx/portevent.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2006 Christian Walter <wolti@sil.at>
+ * FreeModbus Library: NuttX Port
+ * Copyright (c) 2006 Christian Walter <wolti@sil.at>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions

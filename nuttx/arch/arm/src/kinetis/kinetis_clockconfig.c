@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/arm/src/kinetis/kinetis_clockconfig.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            David Sidrane<david_s5@nscdg.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,7 +40,8 @@
 
 #include <nuttx/config.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "kinetis.h"
 #include "hardware/kinetis_mcg.h"
 #include "hardware/kinetis_sim.h"
@@ -70,15 +85,15 @@
 
 /* A board may provide BOARD_EXTAL_LP to not choose MCG_C2_HGO */
 
-#  if defined(BOARD_EXTAL_LP)
-#    define BOARD_MGC_C2_HGO        0  /* Do not use MCG_C2_HGO */
-#  else
-#    if !defined(KINETIS_MCG_HAS_C2_HGO)
-#      error BOARD_EXTAL_LP is not defined and MCG_C2_HGO is not supported on this SoC!
-#    else
-#      define BOARD_MGC_C2_HGO      MCG_C2_HGO
-#    endif
-#  endif
+# if defined(BOARD_EXTAL_LP)
+#   define BOARD_MGC_C2_HGO        0  /* Do not use MCG_C2_HGO */
+# else
+#   if !defined(KINETIS_MCG_HAS_C2_HGO)
+#     error BOARD_EXTAL_LP is not defined and MCG_C2_HGO is not supported on this SoC!
+#   else
+#     define BOARD_MGC_C2_HGO      MCG_C2_HGO
+#   endif
+# endif
 
 /* A board must provide BOARD_MCG_C2_FCFTRIM when SoC has the setting */
 
@@ -99,11 +114,11 @@
 /* A board must provide BOARD_MCG_C2_LOCRE0 when SoC has the setting */
 
 #  if defined(KINETIS_MCG_HAS_C2_LOCRE0) && !defined(BOARD_MCG_C2_LOCRE0)
-#    error MCG_C2_LOCRE0 is supported on this SoC and BOARD_MCG_C2_LOCRE0 is not defined!
+#      error MCG_C2_LOCRE0 is supported on this SoC and BOARD_MCG_C2_LOCRE0 is not defined!
 #  endif
 
 #  if !defined(KINETIS_MCG_HAS_C2_LOCRE0) && defined(BOARD_MCG_C2_LOCRE0)
-#    error BOARD_MCG_C2_LOCRE0 is defined but MCG_C2_LOCRE0 is not supported on this SoC!
+#      error BOARD_MCG_C2_LOCRE0 is defined but MCG_C2_LOCRE0 is not supported on this SoC!
 #  endif
 
 /* Provide the 0 default */
@@ -142,8 +157,7 @@
  ****************************************************************************/
 
 void __ramfunc__
-kinesis_setdividers(uint32_t div1, uint32_t div2,
-                    uint32_t div3, uint32_t div4);
+kinesis_setdividers(uint32_t div1, uint32_t div2, uint32_t div3, uint32_t div4);
 
 /****************************************************************************
  * Private Functions
@@ -312,8 +326,7 @@ void kinetis_pllconfig(void)
    * Flash clock = MCG / BOARD_OUTDIV4
    */
 
-  kinesis_setdividers(BOARD_OUTDIV1, BOARD_OUTDIV2,
-                      BOARD_OUTDIV3, BOARD_OUTDIV4);
+  kinesis_setdividers(BOARD_OUTDIV1, BOARD_OUTDIV2, BOARD_OUTDIV3, BOARD_OUTDIV4);
 
   /* Set the VCO divider, VDIV, is defined in the board.h file.  VDIV
    * selects the amount to divide the VCO output of the PLL. The VDIV bits
@@ -394,9 +407,7 @@ static inline void kinetis_traceconfig(void)
 {
   uint32_t regval;
 
-  /* Set the trace clock to the core clock frequency in the SIM SOPT2
-   * register
-   */
+  /* Set the trace clock to the core clock frequency in the SIM SOPT2 register */
 
   regval  = getreg32(KINETIS_SIM_SOPT2);
   regval |= SIM_SOPT2_TRACECLKSEL;
@@ -485,8 +496,7 @@ void kinetis_clockconfig(void)
  ****************************************************************************/
 
 void __ramfunc__
-kinesis_setdividers(uint32_t div1, uint32_t div2,
-                    uint32_t div3, uint32_t div4)
+kinesis_setdividers(uint32_t div1, uint32_t div2, uint32_t div3, uint32_t div4)
 {
   uint32_t regval;
   volatile int i;

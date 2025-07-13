@@ -1,8 +1,6 @@
 /****************************************************************************
  * include/nuttx/signal.h
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -34,7 +32,6 @@
 #include <signal.h>
 
 #include <nuttx/wqueue.h>
-#include <nuttx/sched.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -46,19 +43,6 @@
   #define sigwork_init(work) (void)(work)
 #endif
 
-/* Internal signal set definitions */
-
-#define _NO_SIGNALS     ((uint32_t)0x00000000)
-#define _ALL_SIGNALS    ((uint32_t)0xffffffff)
-#define _SIGSET_NDX(s)  ((s) >> 5)    /* Get array index from signal number */
-#define _SIGSET_BIT(s)  ((s) & 0x1f)  /* Get bit number from signal number */
-#define _SIGNO2SET(s)   ((uint32_t)1 << _SIGSET_BIT(s))
-
-/* Helper macros for printing signal sets. */
-
-#define SIGSET_FMT     "%08" PRIx32 "%08" PRIx32
-#define SIGSET_ELEM(s) (s)->_elem[1], (s)->_elem[0]
-
 /****************************************************************************
  * Public Type Definitions
  ****************************************************************************/
@@ -69,11 +53,6 @@ struct sigwork_s
   union sigval value;           /* Data passed with notification */
   sigev_notify_function_t func; /* Notification function */
 };
-
-#ifdef __cplusplus
-extern "C"
-{
-#endif
 
 /****************************************************************************
  * Public Function Prototypes
@@ -87,7 +66,7 @@ extern "C"
  *
  * This is only important when compiling libraries (libc or libnx) that are
  * used both by the OS (libkc.a and libknx.a) or by the applications
- * (libc.a and libnx.a).  In that case, the correct interface must be
+ * (libuc.a and libunx.a).  In that case, the correct interface must be
  * used for the build context.
  *
  * REVISIT:  In the flat build, the same functions must be used both by
@@ -107,7 +86,7 @@ extern "C"
 #  define _SIG_PROCMASK(h,s,o)  nxsig_procmask(h,s,o)
 #  define _SIG_SIGACTION(s,a,o) nxsig_action(s,a,o,false)
 #  define _SIG_QUEUE(p,s,v)     nxsig_queue(p,s,v)
-#  define _SIG_KILL(p,s)        nxsig_kill(p,s)
+#  define _SIG_KILL(p,s)        nxsig_kill(p,s);
 #  define _SIG_WAITINFO(s,i)    nxsig_timedwait(s,i,NULL)
 #  define _SIG_NANOSLEEP(r,a)   nxsig_nanosleep(r,a)
 #  define _SIG_SLEEP(s)         nxsig_sleep(s)
@@ -118,7 +97,7 @@ extern "C"
 #  define _SIG_PROCMASK(h,s,o)  sigprocmask(h,s,o)
 #  define _SIG_SIGACTION(s,a,o) sigaction(s,a,o)
 #  define _SIG_QUEUE(p,s,v)     sigqueue(p,s,v)
-#  define _SIG_KILL(p,s)        kill(p,s)
+#  define _SIG_KILL(p,s)        kill(p,s);
 #  define _SIG_WAITINFO(s,i)    sigwaitinfo(s,i)
 #  define _SIG_NANOSLEEP(r,a)   nanosleep(r,a)
 #  define _SIG_SLEEP(s)         sleep(s)
@@ -132,145 +111,6 @@ extern "C"
  ****************************************************************************/
 
 struct timespec;  /* Forward reference */
-
-/****************************************************************************
- * Name: nxsig_ismember
- *
- * Description:
- *   This function tests whether the signal specified by signo is a member
- *   of the set specified by set.
- *
- * Input Parameters:
- *   set - Signal set to test
- *   signo - Signal to test for
- *
- * Returned Value:
- *   This is an internal OS interface and should not be used by applications.
- *   On success, it returns 0 if the signal is not a member, 1 if the signal
- *   is a member of the set.
- *   A negated errno value is returned on failure.
- *
- *    EINVAL - The signo argument is invalid.
- *
- * Assumptions:
- *
- ****************************************************************************/
-
-int nxsig_ismember(FAR const sigset_t *set, int signo);
-
-/****************************************************************************
- * Name: nxsig_addset
- *
- * Description:
- *   This function adds the signal specified by signo to the signal set
- *   specified by set.
- *
- * Input Parameters:
- *   set - Signal set to add signal to
- *   signo - Signal to add
- *
- * Returned Value:
- *   This is an internal OS interface and should not be used by applications.
- *   It follows the NuttX internal error return policy:  Zero (OK) is
- *   returned on success.  A negated errno value is returned on failure.
- *
- *    EINVAL - The signo argument is invalid.
- *
- * Assumptions:
- *
- ****************************************************************************/
-
-int nxsig_addset(FAR sigset_t *set, int signo);
-
-/****************************************************************************
- * Name: nxsig_delset
- *
- * Description:
- *   This function deletes the signal specified by signo from the signal
- *   set specified by the 'set' argument.
- *
- * Input Parameters:
- *   set   - Signal set to delete the signal from
- *   signo - Signal to delete
- *
- * Returned Value:
- *   This is an internal OS interface and should not be used by applications.
- *   It follows the NuttX internal error return policy:  Zero (OK) is
- *   returned on success.  A negated errno value is returned on failure.
- *
- *    EINVAL - The signo argument is invalid.
- *
- * Assumptions:
- *
- ****************************************************************************/
-
-int nxsig_delset(FAR sigset_t *set, int signo);
-
-/****************************************************************************
- * Name: nxsig_nandset
- *
- * Description:
- *   This function returns the intersection of the left set and the
- *   complement of the right set in dest.
- *
- * Input Parameters:
- *   dest  - The location to store the result
- *   left  - The uncomplemented set used in the intersection
- *   right - The set that will be complemented and used in the intersection
- *
- * Returned Value:
- *   This is an internal OS interface and should not be used by applications.
- *   It follows the NuttX internal error return policy:  Zero (OK) is
- *   returned on success.  A negated errno value is returned on failure.
- *
- * Assumptions:
- *
- ****************************************************************************/
-
-int nxsig_nandset(FAR sigset_t *dest, FAR const sigset_t *left,
-                  FAR const sigset_t *right);
-
-/****************************************************************************
- * Name: nxsig_xorset
- *
- * Description:
- *   This function returns the xor of right and left in dest.
- *
- * Input Parameters:
- *   dest        - Location to return the union
- *   left, right - The two sets to use in the union
- *
- * Returned Value:
- *   This is an internal OS interface and should not be used by applications.
- *   It follows the NuttX internal error return policy:  Zero (OK) is
- *   returned on success.  A negated errno value is returned on failure.
- *
- *     0 on success or -1 on failure
- *
- * Assumptions:
- *
- ****************************************************************************/
-
-int nxsig_xorset(FAR sigset_t *dest, FAR const sigset_t *left,
-                 FAR const sigset_t *right);
-
-/****************************************************************************
- * Name: nxsig_pendingset
- *
- * Description:
- *   Convert the list of pending signals into a signal set
- *
- * Input Parameters:
- *   stcb - The specific tcb of return pending set.
- *
- * Returned Value:
- *   Return the pending signal set.
- *
- * Assumptions:
- *
- ****************************************************************************/
-
-sigset_t nxsig_pendingset(FAR struct tcb_s *stcb);
 
 /****************************************************************************
  * Name: nxsig_procmask
@@ -292,7 +132,7 @@ sigset_t nxsig_pendingset(FAR struct tcb_s *stcb);
  *   sigprocmask() except that it does not modify the errno value.
  *
  * Input Parameters:
- *   how - How the signal mask will be changed:
+ *   how - How the signal mast will be changed:
  *         SIG_BLOCK   - The resulting set is the union of the current set
  *                       and the signal set pointed to by 'set'.
  *         SIG_UNBLOCK - The resulting set is the intersection of the current
@@ -414,36 +254,6 @@ int nxsig_queue(int pid, int signo, union sigval value);
 int nxsig_kill(pid_t pid, int signo);
 
 /****************************************************************************
- * Name: nxsig_tgkill
- *
- * Description:
- *   The tgkill() system call can be used to send any signal to a thread.
- *   See kill() for further information as this is just a simple wrapper
- *   around the kill() function.
- *
- * Input Parameters:
- *   gid   - The id of the task to receive the signal.
- *   tid   - The id of the thread to receive the signal. Only positive,
- *           non-zero values of 'tid' are supported.
- *   signo - The signal number to send.  If 'signo' is zero, no signal is
- *           sent, but all error checking is performed.
- *
- * Returned Value:
- *    On success the signal was send and zero is returned. On error -1 is
- *    returned, and errno is set one of the following error numbers:
- *
- *    EINVAL An invalid signal was specified.
- *    EPERM  The thread does not have permission to send the
- *           signal to the target thread.
- *    ESRCH  No thread could be found corresponding to that
- *           specified by the given thread ID
- *    ENOSYS Do not support sending signals to process groups.
- *
- ****************************************************************************/
-
-int nxsig_tgkill(pid_t pid, pid_t tid, int signo);
-
-/****************************************************************************
  * Name: nxsig_waitinfo
  *
  * Description:
@@ -470,55 +280,6 @@ int nxsig_tgkill(pid_t pid, pid_t tid, int signo);
 #define nxsig_waitinfo(s,i) nxsig_timedwait(s,i,NULL)
 
 /****************************************************************************
- * Name: nxsig_clockwait
- *
- * Description:
- *   This function selects the pending signal set specified by the argument
- *   set.  If multiple signals are pending in set, it will remove and return
- *   the lowest numbered one.  If no signals in set are pending at the time
- *   of the call, the calling process will be suspended until one of the
- *   signals in set becomes pending, OR until the process is interrupted by
- *   an unblocked signal, OR until the time interval specified by timeout
- *   (if any), has expired. If timeout is NULL, then the timeout interval
- *   is forever.
- *
- *   If the info argument is non-NULL, the selected signal number is stored
- *   in the si_signo member and the cause of the signal is stored in the
- *   si_code member.  The content of si_value is only meaningful if the
- *   signal was generated by sigqueue() (or nxsig_queue).
- *
- *   This is an internal OS interface.  It is functionally equivalent to
- *   sigtimedwait() except that:
- *
- *   - It is not a cancellation point, and
- *   - It does not modify the errno value.
- *
- * Input Parameters:
- *   clockid - The ID of the clock to be used to measure the timeout.
- *   flags   - Open flags.  TIMER_ABSTIME  is the only supported flag.
- *   rqtp - The amount of time to be suspended from execution.
- *   rmtp - If the rmtp argument is non-NULL, the timespec structure
- *          referenced by it is updated to contain the amount of time
- *          remaining in the interval (the requested time minus the time
- *          actually slept)
- *
- * Returned Value:
- *   This is an internal OS interface and should not be used by applications.
- *   A negated errno value is returned on failure.
- *
- *   EAGAIN - wait time is zero.
- *   EINTR  - The wait was interrupted by an unblocked, caught signal.
- *
- * Notes:
- *  This function should be called with critical section set.
- *
- ****************************************************************************/
-
-int nxsig_clockwait(int clockid, int flags,
-                    FAR const struct timespec *rqtp,
-                    FAR struct timespec *rmtp);
-
-/****************************************************************************
  * Name: nxsig_timedwait
  *
  * Description:
@@ -532,7 +293,7 @@ int nxsig_clockwait(int clockid, int flags,
  *   is forever.
  *
  *   If the info argument is non-NULL, the selected signal number is stored
- *   in the si_signo member and the cause of the signal is stored in the
+ *   in the si_signo member and the cause of the signal is store din the
  *   si_code member.  The content of si_value is only meaningful if the
  *   signal was generated by sigqueue().
  *
@@ -719,11 +480,7 @@ int nxsig_notification(pid_t pid, FAR struct sigevent *event,
 #ifdef CONFIG_SIG_EVTHREAD
 void nxsig_cancel_notification(FAR struct sigwork_s *work);
 #else
-#  define nxsig_cancel_notification(work)
-#endif
-
-#ifdef __cplusplus
-}
+  #define nxsig_cancel_notification(work) (void)(work)
 #endif
 
 #endif /* __INCLUDE_NUTTX_SIGNAL_H */

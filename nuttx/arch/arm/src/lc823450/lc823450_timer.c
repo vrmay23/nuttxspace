@@ -1,22 +1,37 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_timer.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2014,2015,2016,2017,2018 Sony Video & Sound Products Inc.
+ *   Author: Masatoshi Tateishi <Masatoshi.Tateishi@jp.sony.com>
+ *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
+ *   Author: Asumi Noguchi <Asumi.Noguchi@jp.sony.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,16 +44,15 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <time.h>
-#include <assert.h>
 #include <debug.h>
-#include <nuttx/nuttx.h>
 #include <nuttx/arch.h>
-#include <nuttx/spinlock.h>
 #include <arch/board/board.h>
 
 #include "nvic.h"
 #include "clock/clock.h"
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 #include "lc823450_gpio.h"
 #ifdef CONFIG_LC823450_MTM0_TICK
@@ -70,48 +84,48 @@
 /* #define CHECK_INTERVAL */
 
 #ifdef CONFIG_LC823450_MTM0_TICK
-#  define MT00STS  (LC823450_MTM0_REGBASE + LC823450_MTM_0STS)
-#  define MT00A    (LC823450_MTM0_REGBASE + LC823450_MTM_0A)
-#  define MT00B    (LC823450_MTM0_REGBASE + LC823450_MTM_0B)
-#  define MT00CTL  (LC823450_MTM0_REGBASE + LC823450_MTM_0CTL)
-#  define MT00PSCL (LC823450_MTM0_REGBASE + LC823450_MTM_0PSCL)
-#  define MT00TIER (LC823450_MTM0_REGBASE + LC823450_MTM_0TIER)
-#  define MT00OPR  (LC823450_MTM0_REGBASE + LC823450_MTM_OPR)
-#  define MT00CNT  (LC823450_MTM0_REGBASE + LC823450_MTM_0CNT)
+#  define rMT00STS  (LC823450_MTM0_REGBASE + LC823450_MTM_0STS)
+#  define rMT00A    (LC823450_MTM0_REGBASE + LC823450_MTM_0A)
+#  define rMT00B    (LC823450_MTM0_REGBASE + LC823450_MTM_0B)
+#  define rMT00CTL  (LC823450_MTM0_REGBASE + LC823450_MTM_0CTL)
+#  define rMT00PSCL (LC823450_MTM0_REGBASE + LC823450_MTM_0PSCL)
+#  define rMT00TIER (LC823450_MTM0_REGBASE + LC823450_MTM_0TIER)
+#  define rMT00OPR  (LC823450_MTM0_REGBASE + LC823450_MTM_OPR)
+#  define rMT00CNT  (LC823450_MTM0_REGBASE + LC823450_MTM_0CNT)
 #  define MTM_RELOAD (XT1OSC_CLK / (CLK_TCK * 10))
 #endif
 
 #ifdef CONFIG_HRT_TIMER
 #  define LC823450_MTM2_REGBASE 0x40045000
-#  define MT20STS  (LC823450_MTM2_REGBASE + LC823450_MTM_0STS)
-#  define MT20A    (LC823450_MTM2_REGBASE + LC823450_MTM_0A)
-#  define MT20PSCL (LC823450_MTM2_REGBASE + LC823450_MTM_0PSCL)
-#  define MT20TIER (LC823450_MTM2_REGBASE + LC823450_MTM_0TIER)
-#  define MT2OPR   (LC823450_MTM2_REGBASE + LC823450_MTM_OPR)
-#  define MT20CNT  (LC823450_MTM2_REGBASE + LC823450_MTM_0CNT)
+#  define rMT20STS  (LC823450_MTM2_REGBASE + LC823450_MTM_0STS)
+#  define rMT20A    (LC823450_MTM2_REGBASE + LC823450_MTM_0A)
+#  define rMT20PSCL (LC823450_MTM2_REGBASE + LC823450_MTM_0PSCL)
+#  define rMT20TIER (LC823450_MTM2_REGBASE + LC823450_MTM_0TIER)
+#  define rMT2OPR   (LC823450_MTM2_REGBASE + LC823450_MTM_OPR)
+#  define rMT20CNT  (LC823450_MTM2_REGBASE + LC823450_MTM_0CNT)
 #endif /* CONFIG_HRT_TIMER */
 
 #ifdef CONFIG_PROFILE
 #  define LC823450_MTM3_REGBASE 0x40046000
-#  define MT30STS  (LC823450_MTM3_REGBASE + LC823450_MTM_0STS)
-#  define MT30A    (LC823450_MTM3_REGBASE + LC823450_MTM_0A)
-#  define MT30B    (LC823450_MTM3_REGBASE + LC823450_MTM_0B)
-#  define MT30CTL  (LC823450_MTM3_REGBASE + LC823450_MTM_0CTL)
-#  define MT30PSCL (LC823450_MTM3_REGBASE + LC823450_MTM_0PSCL)
-#  define MT30TIER (LC823450_MTM3_REGBASE + LC823450_MTM_0TIER)
-#  define MT30OPR  (LC823450_MTM3_REGBASE + LC823450_MTM_OPR)
-#  define MT30CNT  (LC823450_MTM3_REGBASE + LC823450_MTM_0CNT)
+#  define rMT30STS  (LC823450_MTM3_REGBASE + LC823450_MTM_0STS)
+#  define rMT30A    (LC823450_MTM3_REGBASE + LC823450_MTM_0A)
+#  define rMT30B    (LC823450_MTM3_REGBASE + LC823450_MTM_0B)
+#  define rMT30CTL  (LC823450_MTM3_REGBASE + LC823450_MTM_0CTL)
+#  define rMT30PSCL (LC823450_MTM3_REGBASE + LC823450_MTM_0PSCL)
+#  define rMT30TIER (LC823450_MTM3_REGBASE + LC823450_MTM_0TIER)
+#  define rMT30OPR  (LC823450_MTM3_REGBASE + LC823450_MTM_OPR)
+#  define rMT30CNT  (LC823450_MTM3_REGBASE + LC823450_MTM_0CNT)
 #endif /* CONFIG_PROFILE */
 
 #ifdef CONFIG_DVFS
-#  define MT01STS  (LC823450_MTM0_REGBASE + LC823450_MTM_1STS)
-#  define MT01A    (LC823450_MTM0_REGBASE + LC823450_MTM_1A)
-#  define MT01B    (LC823450_MTM0_REGBASE + LC823450_MTM_1B)
-#  define MT01CTL  (LC823450_MTM0_REGBASE + LC823450_MTM_1CTL)
-#  define MT01PSCL (LC823450_MTM0_REGBASE + LC823450_MTM_1PSCL)
-#  define MT01TIER (LC823450_MTM0_REGBASE + LC823450_MTM_1TIER)
-#  define MT01CNT  (LC823450_MTM0_REGBASE + LC823450_MTM_1CNT)
-#  define MT0OPR   (LC823450_MTM0_REGBASE + LC823450_MTM_OPR)
+#  define rMT01STS  (LC823450_MTM0_REGBASE + LC823450_MTM_1STS)
+#  define rMT01A    (LC823450_MTM0_REGBASE + LC823450_MTM_1A)
+#  define rMT01B    (LC823450_MTM0_REGBASE + LC823450_MTM_1B)
+#  define rMT01CTL  (LC823450_MTM0_REGBASE + LC823450_MTM_1CTL)
+#  define rMT01PSCL (LC823450_MTM0_REGBASE + LC823450_MTM_1PSCL)
+#  define rMT01TIER (LC823450_MTM0_REGBASE + LC823450_MTM_1TIER)
+#  define rMT01CNT  (LC823450_MTM0_REGBASE + LC823450_MTM_1CNT)
+#  define rMT0OPR   (LC823450_MTM0_REGBASE + LC823450_MTM_OPR)
 #endif
 
 #ifndef container_of
@@ -140,15 +154,13 @@ struct hrt_s
 static dq_queue_t hrt_timer_queue;
 static void hrt_queue_refresh(void);
 static void hrt_usleep_setup(void);
-static int hrt_interrupt(int irq, void *context, void *arg);
+static int hrt_interrupt(int irq, FAR void *context, FAR void *arg);
 static void hrt_usleep_add(struct hrt_s *phrt);
 #endif
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-static spinlock_t g_hrt_timer_queue_lock = SP_UNLOCKED;
 
 #ifdef CHECK_INTERVAL
 static bool _timer_val = true;
@@ -187,8 +199,8 @@ static void hrt_queue_refresh(void)
   struct hrt_s *tmp;
   irqstate_t flags;
 
-  flags = spin_lock_irqsave(&g_hrt_timer_queue_lock);
-  elapsed = (uint64_t)getreg32(MT20CNT) * (1000 * 1000) * 10 / XT1OSC_CLK;
+  flags = spin_lock_irqsave();
+  elapsed = (uint64_t)getreg32(rMT20CNT) * (1000 * 1000) * 10 / XT1OSC_CLK;
 
   for (pent = hrt_timer_queue.head; pent; pent = dq_next(pent))
     {
@@ -197,8 +209,7 @@ static void hrt_queue_refresh(void)
     }
 
 cont:
-
-  /* search for expired */
+  /* serch for expired */
 
   for (pent = hrt_timer_queue.head; pent; pent = dq_next(pent))
     {
@@ -206,9 +217,9 @@ cont:
       if (tmp->usec <= 0)
         {
           dq_rem(pent, &hrt_timer_queue);
-          spin_unlock_irqrestore(&g_hrt_timer_queue_lock, flags);
+          spin_unlock_irqrestore(flags);
           nxsem_post(&tmp->sem);
-          flags = spin_lock_irqsave(&g_hrt_timer_queue_lock);
+          flags = spin_lock_irqsave();
           goto cont;
         }
       else
@@ -217,7 +228,7 @@ cont:
         }
     }
 
-  spin_unlock_irqrestore(&g_hrt_timer_queue_lock, flags);
+  spin_unlock_irqrestore(flags);
 }
 #endif
 
@@ -232,7 +243,7 @@ static void hrt_usleep_setup(void)
   struct hrt_s *head;
   irqstate_t flags;
 
-  flags = spin_lock_irqsave(&g_hrt_timer_queue_lock);
+  flags = spin_lock_irqsave();
   head = container_of(hrt_timer_queue.head, struct hrt_s, ent);
   if (head == NULL)
     {
@@ -240,7 +251,7 @@ static void hrt_usleep_setup(void)
 
       modifyreg32(MCLKCNTEXT1, MCLKCNTEXT1_MTM2C_CLKEN, 0x0);
       modifyreg32(MCLKCNTEXT1, MCLKCNTEXT1_MTM2_CLKEN, 0x0);
-      spin_unlock_irqrestore(&g_hrt_timer_queue_lock, flags);
+      spin_unlock_irqrestore(flags);
       return;
     }
 
@@ -256,13 +267,13 @@ static void hrt_usleep_setup(void)
       count = 0x7fff;
     }
 
-  putreg32(0, MT20CNT);   /* counter */
-  putreg32(count, MT20A); /* AEVT counter */
+  putreg32(0, rMT20CNT);   /* counter */
+  putreg32(count, rMT20A); /* AEVT counter */
 
   /* Enable MTM2-Ch0 */
 
-  putreg32(1, MT2OPR);
-  spin_unlock_irqrestore(&g_hrt_timer_queue_lock, flags);
+  putreg32(1, rMT2OPR);
+  spin_unlock_irqrestore(flags);
 }
 #endif
 
@@ -271,15 +282,15 @@ static void hrt_usleep_setup(void)
  ****************************************************************************/
 
 #ifdef CONFIG_HRT_TIMER
-static int hrt_interrupt(int irq, void *context, void *arg)
+static int hrt_interrupt(int irq, FAR void *context, FAR void *arg)
 {
   /* Disable MTM2-Ch0 */
 
-  putreg32(0, MT2OPR);
+  putreg32(0, rMT2OPR);
 
   /* clear AEVT Interrupt */
 
-  putreg32(1 << 0, MT20STS);
+  putreg32(1 << 0, rMT20STS);
 
   hrt_queue_refresh();
   hrt_usleep_setup();
@@ -297,11 +308,11 @@ static void hrt_usleep_add(struct hrt_s *phrt)
 
   /* Disable MTM2-Ch0 */
 
-  putreg32(0, MT2OPR);
+  putreg32(0, rMT2OPR);
 
   hrt_queue_refresh();
 
-  flags = spin_lock_irqsave(&g_hrt_timer_queue_lock);
+  flags = spin_lock_irqsave();
 
   /* add phrt to hrt_timer_queue */
 
@@ -313,7 +324,6 @@ static void hrt_usleep_add(struct hrt_s *phrt)
           break;
         }
     }
-
   if (pent)
     {
       dq_addbefore(pent, &phrt->ent, &hrt_timer_queue);
@@ -323,7 +333,7 @@ static void hrt_usleep_add(struct hrt_s *phrt)
       dq_addlast(&phrt->ent, &hrt_timer_queue);
     }
 
-  spin_unlock_irqrestore(&g_hrt_timer_queue_lock, flags);
+  spin_unlock_irqrestore(flags);
 
   hrt_usleep_setup();
 }
@@ -338,23 +348,23 @@ static void hrt_usleep_add(struct hrt_s *phrt)
  ****************************************************************************/
 
 #ifdef CONFIG_PROFILE
-int up_proftimerisr(int irq, uint32_t *regs, void *arg)
+int up_proftimerisr(int irq, uint32_t *regs, FAR void *arg)
 {
-  putreg32(1 << 1, MT30STS);
+  putreg32(1 << 1, rMT30STS);
   if (profile_en)
     {
       if (profile_ptr != CONFIG_PROFILE_SAMPLES)
         {
-          DEBUGASSERT(regs);
-          profile_data[profile_ptr++] = regs[REG_R15];
+          DEBUGASSERT(current_regs);
+          profile_data[profile_ptr++] = current_regs[REG_R15];
         }
       else
         {
           profile_en = 0;
           tmrinfo("PROFILING DONE\n");
         }
-    }
 
+    }
   return 0;
 }
 #endif /* CONFIG_PROFILE */
@@ -363,9 +373,9 @@ int up_proftimerisr(int irq, uint32_t *regs, void *arg)
  * Name:  up_timerisr
  ****************************************************************************/
 
-int up_timerisr(int irq, uint32_t *regs, void *arg)
+int up_timerisr(int irq, uint32_t *regs, FAR void *arg)
 {
-  /* Process timer interrupt */
+   /* Process timer interrupt */
 
 #ifdef CONFIG_DVFS
   lc823450_dvfs_tick_callback();
@@ -374,7 +384,7 @@ int up_timerisr(int irq, uint32_t *regs, void *arg)
 #ifdef CONFIG_LC823450_MTM0_TICK
   /* Clear the interrupt (BEVT) */
 
-  putreg32(1 << 1, MT00STS);
+  putreg32(1 << 1, rMT00STS);
 #endif
 
   nxsched_process_timer();
@@ -426,11 +436,11 @@ static uint64_t up_get_timer_fraction(void)
 
   /* read the counter */
 
-  regval  = getreg32(MT00CNT);
+  regval  = getreg32(rMT00CNT);
 
   /* check if the timer interrupt is underway */
 
-  if (getreg32(MT00STS) & 0x2 && regval < (MTM_RELOAD / 10))
+  if (getreg32(rMT00STS) & 0x2 && regval < (MTM_RELOAD/10))
     {
       return NSEC_PER_TICK;
     }
@@ -447,9 +457,9 @@ static uint64_t up_get_timer_fraction(void)
 
   /* check if the systick interrupt is pending or active */
 
-  if ((getreg32(0xe000ed04) & (1 << 26) ||
-       getreg32(0xe000ed24) & (1 << 11))
-      && (SYSTICK_RELOAD - cur) < (SYSTICK_RELOAD / 10))
+  if ((getreg32(0xE000ED04) & (1 << 26) ||
+       getreg32(0xE000ED24) & (1 << 11))
+      && (SYSTICK_RELOAD - cur) < (SYSTICK_RELOAD/10))
     {
       return NSEC_PER_TICK;
     }
@@ -481,11 +491,11 @@ void up_timer_initialize(void)
 
   /* Enable AEVT Interrupt */
 
-  putreg32(1 << 0, MT20TIER);
+  putreg32(1 << 0, rMT20TIER);
 
   /* Set prescaler to (1/10) */
 
-  putreg32(10 - 1, MT20PSCL);
+  putreg32(10 - 1, rMT20PSCL);
 
   modifyreg32(MCLKCNTEXT1, MCLKCNTEXT1_MTM2C_CLKEN, 0);
   modifyreg32(MCLKCNTEXT1, MCLKCNTEXT1_MTM2_CLKEN, 0);
@@ -505,29 +515,28 @@ void up_timer_initialize(void)
 
   modifyreg32(MRSTCNTEXT1, 0x0, MRSTCNTEXT1_MTM3_RSTB);
 
-  /* Input clock for the MTM3 is XT1 (i.e. 24M or 20M)
-   * then the clock will be set to 1/10 by the internal divider
-   * To implement 10ms timer, ADT=0, BDT=MTM_RELOAD
-   */
+  /* Input clock for the MTM3 is XT1 (i.e. 24M or 20M) */
+  /* then the clock will be set to 1/10 by the internal divider */
+  /* To implement 10ms timer, ADT=0, BDT=MTM_RELOAD */
 
-  putreg32(0, MT30A);                       /* AEVT counter */
-  putreg32((XT1OSC_CLK / 1010) - 1, MT30B); /* BEVT counter */
+  putreg32(0, rMT30A); /* AEVT counter */
+  putreg32((XT1OSC_CLK / 1010) - 1, rMT30B); /* BEVT counter */
 
   /* Clear the counter by BEVT */
 
-  putreg32(0x80, MT30CTL);
+  putreg32(0x80, rMT30CTL);
 
   /* Set prescaler to 9 : (1/10) */
 
-  putreg32(9, MT30PSCL);
+  putreg32(9, rMT30PSCL);
 
   /* Enable BEVT Interrupt */
 
-  putreg32(1 << 1, MT30TIER);
+  putreg32(1 << 1, rMT30TIER);
 
   /* Enable MTM3-Ch0 */
 
-  putreg32(1, MT30OPR);
+  putreg32(1, rMT30OPR);
 
   /* Attach the timer interrupt vector */
 
@@ -550,29 +559,28 @@ void up_timer_initialize(void)
 
   modifyreg32(MRSTCNTEXT1, 0x0, MRSTCNTEXT1_MTM0_RSTB);
 
-  /* Input clock for the MTM0 is XT1 (i.e. 24M or 20M)
-   * then the clock will be set to 1/10 by the internal divider
-   * To implement the tick timer, ADT=0, BDT=MTM_RELOAD-1
-   */
+  /* Input clock for the MTM0 is XT1 (i.e. 24M or 20M) */
+  /* then the clock will be set to 1/10 by the internal divider */
+  /* To implement the tick timer, ADT=0, BDT=MTM_RELOAD-1 */
 
-  putreg32(0, MT00A);              /* AEVT counter */
-  putreg32(MTM_RELOAD - 1, MT00B); /* BEVT counter */
+  putreg32(0, rMT00A); /* AEVT counter */
+  putreg32(MTM_RELOAD - 1, rMT00B); /* BEVT counter */
 
   /* Clear the counter by BEVT */
 
-  putreg32(0x80, MT00CTL);
+  putreg32(0x80, rMT00CTL);
 
   /* Set prescaler to 9 : (1/10) */
 
-  putreg32(9, MT00PSCL);
+  putreg32(9, rMT00PSCL);
 
   /* Enable BEVT Interrupt */
 
-  putreg32(1 << 1, MT00TIER);
+  putreg32(1 << 1, rMT00TIER);
 
   /* Enable MTM0-Ch0 */
 
-  putreg32(1, MT00OPR);
+  putreg32(1, rMT00OPR);
 
   /* Attach the timer interrupt vector */
 
@@ -647,24 +655,25 @@ void lc823450_mtm_start_oneshot(int msec)
   r /= 10;   /* 1ms */
   r *= msec;
 
-  putreg32(0, MT01A);     /* AEVT counter */
-  putreg32(r - 1, MT01B); /* BEVT counter */
+  putreg32(0, rMT01A); /* AEVT counter */
+  putreg32(r - 1, rMT01B); /* BEVT counter */
 
   /* Clear the counter by BEVT */
 
-  putreg32(0x80, MT01CTL);
+  putreg32(0x80, rMT01CTL);
 
   /* Set prescaler to 9 : (1/10) */
 
-  putreg32(9, MT01PSCL);
+  putreg32(9, rMT01PSCL);
 
   /* Enable BEVT Interrupt */
 
-  putreg32(1 << 1, MT01TIER);
+  putreg32(1 << 1, rMT01TIER);
+
 
   /* Enable MTM0-ch1 */
 
-  modifyreg32(MT0OPR, 0, 1 << 1);
+  modifyreg32(rMT0OPR, 0, 1 << 1);
 }
 #endif
 
@@ -677,11 +686,11 @@ void lc823450_mtm_stop_oneshot(void)
 {
   /* Clear the interrupt (BEVT) */
 
-  putreg32(1 << 1, MT01STS);
+  putreg32(1 << 1, rMT01STS);
 
   /* Disable MTM0-ch1 */
 
-  modifyreg32(MT0OPR, 1 << 1, 0);
+  modifyreg32(rMT0OPR, 1 << 1, 0);
 }
 #endif
 
@@ -693,7 +702,7 @@ void lc823450_mtm_stop_oneshot(void)
  *
  ****************************************************************************/
 
-int up_rtc_gettime(struct timespec *tp)
+int up_rtc_gettime(FAR struct timespec *tp)
 {
   uint64_t secs;
   uint64_t nsecs;
@@ -701,20 +710,20 @@ int up_rtc_gettime(struct timespec *tp)
   irqstate_t   flags;
   uint64_t f;
 
-  flags = spin_lock_irqsave(&g_hrt_timer_queue_lock);
+  flags = spin_lock_irqsave();
 
   /* Get the elapsed time */
 
-  elapsed = NSEC_PER_TICK * (uint64_t)g_system_ticks;
+  elapsed = NSEC_PER_TICK * (uint64_t)g_system_timer;
 
-  /* Add the timer fraction in nanoseconds */
+  /* Add the tiemr fraction in nanoseconds */
 
   f = up_get_timer_fraction();
   elapsed += f;
 
-  spin_unlock_irqrestore(&g_hrt_timer_queue_lock, flags);
+  spin_unlock_irqrestore(flags);
 
-  tmrinfo("elapsed = %lld\n", elapsed);
+  tmrinfo("elapsed = %lld \n", elapsed);
 
   /* Convert the elapsed time in seconds and nanoseconds. */
 

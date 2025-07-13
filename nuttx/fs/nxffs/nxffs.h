@@ -1,22 +1,38 @@
 /****************************************************************************
  * fs/nxffs/nxffs.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011, 2013, 2015, 2017-2018 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References: Linux/Documentation/filesystems/romfs.txt
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,28 +45,24 @@
 
 #include <nuttx/config.h>
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
 
 #include <nuttx/mtd/mtd.h>
 #include <nuttx/fs/nxffs.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* NXFFS Definitions ********************************************************/
-
 /* General NXFFS organization.  The following example assumes 4 logical
  * blocks per FLASH erase block.  The actual relationship is determined by
  * the FLASH geometry reported by the MTD driver.
  *
- * ERASE LOGICAL                   Inodes begin with a inode header which may
- * BLOCK BLOCK       CONTENTS      be marked as deleted, pending re-packing.
+ * ERASE LOGICAL                   Inodes begin with a inode header.  inode may
+ * BLOCK BLOCK       CONTENTS      be marked as "deleted," pending re-packing.
  *   n   4*n     --+--------------+
  *                 |BBBBBBBBBBBBBB| Logic block header
  *                 |IIIIIIIIIIIIII| Inodes begin with a inode header
@@ -58,10 +70,10 @@
  *                 | (Inode Data) |
  *       4*n+1   --+--------------+
  *                 |BBBBBBBBBBBBBB| Logic block header
- *                 |DDDDDDDDDDDDDD| Inodes may consist multiple data blocks
+ *                 |DDDDDDDDDDDDDD| Inodes may consist of multiple data blocks
  *                 | (Inode Data) |
  *                 |IIIIIIIIIIIIII| Next inode header
- *                 |              | Possibly unused bytes at the end of block
+ *                 |              | Possibly a few unused bytes at the end of a block
  *       4*n+2   --+--------------+
  *                 |BBBBBBBBBBBBBB| Logic block header
  *                 |DDDDDDDDDDDDDD|
@@ -73,8 +85,8 @@
  *                 | (Inode Data) |
  *  n+1  4*(n+1) --+--------------+
  *                 |BBBBBBBBBBBBBB| Logic block header
- *                 |              | All FLASH is unused after the end of the
- *                 |              | final inode.
+ *                 |              | All FLASH is unused after the end of the final
+ *                 |              | inode.
  *               --+--------------+
  *
  * General operation:
@@ -94,9 +106,9 @@
  *   formatted and also indicates bad blocks which should never be used.
  *
  * INODE HEADER:
- *   Each inode begins with an inode header that contains, among other
- *   things, the name of the inode, the offset to the first data block,
- *   and the length of the inode data.
+ *   Each inode begins with an inode header that contains, among other things,
+ *   the name of the inode, the offset to the first data block, and the
+ *   length of the inode data.
  *
  *   At present, the only kind of inode support is a file.  So for now, the
  *   term file and inode are interchangeable.
@@ -117,8 +129,8 @@
  *    writing will not work.
  * 4. There are no directories, however, '/' may be used within a file name
  *    string providing some illusion of directories.
- * 5. Files may be opened for reading or for writing, but not both: The
- *    O_RDWR open flag is not supported.
+ * 5. Files may be opened for reading or for writing, but not both: The O_RDWR
+ *    open flag is not supported.
  * 6. The re-packing process occurs only during a write when the free FLASH
  *    memory at the end of the FLASH is exhausted.  Thus, occasionally, file
  *    writing may take a long time.
@@ -148,8 +160,8 @@
  * INODE_STATE_DELETED - The inode has been deleted.
  * Other values        - The inode is bad and has an invalid state.
  *
- * Care is taken so that the VALID to DELETED transition only involves
- * burning bits from the erased to non-erased state.
+ * Care is taken so that the VALID to DELETED transition only involves burning
+ * bits from the erased to non-erased state.
  */
 
 #define INODE_STATE_FILE          (CONFIG_NXFFS_ERASEDSTATE ^ 0x22)
@@ -157,7 +169,7 @@
 
 /* Number of bytes in an the NXFFS magic sequences */
 
-#define NXFFS_MAGICSIZE           4
+#define NXFFS_MAGICSIZE	          4
 
 /* When we allocate FLASH for a new inode data block, we will require that
  * space is available to hold this minimum number of data bytes in addition
@@ -167,12 +179,21 @@
 #define NXFFS_MINDATA             16
 
 /* Internal definitions *****************************************************/
-
 /* If we encounter this number of erased bytes, we assume that all of the
  * flash beyond this point is erased.
  */
 
 #define NXFFS_NERASED             128
+
+/* Quasi-standard definitions */
+
+#ifndef MIN
+#  define MIN(a,b)                (a < b ? a : b)
+#endif
+
+#ifndef MAX
+#  define MAX(a,b)                (a > b ? a : b)
+#endif
 
 /****************************************************************************
  * Public Types
@@ -268,7 +289,7 @@ struct nxffs_wrfile_s
 struct nxffs_volume_s
 {
   FAR struct mtd_dev_s     *mtd;       /* Supports FLASH access */
-  mutex_t                   lock;      /* Used to assure thread-safe access */
+  sem_t                     exclsem;   /* Used to assure thread-safe access */
   sem_t                     wrsem;     /* Enforces single writer restriction */
   struct mtd_geometry_s     geo;       /* Device geometry */
   uint8_t                   blkper;    /* R/W blocks per erase block */
@@ -533,7 +554,7 @@ off_t nxffs_iotell(FAR struct nxffs_volume_s *volume);
  *   over bad blocks and block headers as necessary.
  *
  * Input Parameters:
- *   volume - Describes the NXFFS volume. The parameters ioblock and iooffset
+ *   volume - Describes the NXFFS volume.  The parameters ioblock and iooffset
  *     in the volume structure determine the behavior of nxffs_getc().
  *   reserve - If less than this much space is available at the end of the
  *     block, then skip to the next block.
@@ -557,8 +578,8 @@ int nxffs_getc(FAR struct nxffs_volume_s *volume, uint16_t reserve);
  *   to dispose of that memory when the inode entry is no longer needed.
  *
  *   Note that the nxffs_entry_s containing structure is not freed.  The
- *   caller may call fs_heap_free upon return of this function if necessary
- *   to free the entry container.
+ *   caller may call kmm_free upon return of this function if necessary to
+ *   free the entry container.
  *
  * Input Parameters:
  *   entry  - The entry to be freed.
@@ -693,7 +714,7 @@ int nxffs_verifyblock(FAR struct nxffs_volume_s *volume, off_t block);
  *
  ****************************************************************************/
 
-int nxffs_validblock(FAR struct nxffs_volume_s *volume, FAR off_t *block);
+int nxffs_validblock(struct nxffs_volume_s *volume, off_t *block);
 
 /****************************************************************************
  * Name: nxffs_blockstats
@@ -801,8 +822,7 @@ FAR struct nxffs_ofile_s *nxffs_findofile(FAR struct nxffs_volume_s *volume,
  *
  ****************************************************************************/
 
-FAR struct nxffs_wrfile_s *
-nxffs_findwriter(FAR struct nxffs_volume_s *volume);
+FAR struct nxffs_wrfile_s *nxffs_findwriter(FAR struct nxffs_volume_s *volume);
 
 /****************************************************************************
  * Name: nxffs_wrinode
@@ -821,8 +841,8 @@ nxffs_findwriter(FAR struct nxffs_volume_s *volume);
  *   entry  - Describes the inode header to write
  *
  * Returned Value:
- *   Zero is returned on success; Otherwise, a negated errno value is
- *   returned indicating the nature of the failure.
+ *   Zero is returned on success; Otherwise, a negated errno value is returned
+ *   indicating the nature of the failure.
  *
  * Defined in nxffs_open.c
  *
@@ -843,8 +863,8 @@ int nxffs_wrinode(FAR struct nxffs_volume_s *volume,
  *   entry  - Describes the new inode entry
  *
  * Returned Value:
- *   Zero is returned on success; Otherwise, a negated errno value is
- *   returned indicating the nature of the failure.
+ *   Zero is returned on success; Otherwise, a negated errno value is returned
+ *   indicating the nature of the failure.
  *
  ****************************************************************************/
 
@@ -1010,8 +1030,8 @@ int nxffs_nextblock(FAR struct nxffs_volume_s *volume, off_t offset,
  *
  * Input Parameters:
  *   volume - Describes the current volume.
- *   offset - The byte offset from the beginning of FLASH where the data
- *     block header is expected.
+ *   offset - The byte offset from the beginning of FLASH where the data block
+ *     header is expected.
  *   datlen  - A memory location to return the data block length.
  *
  * Returned Value:
@@ -1030,7 +1050,7 @@ int nxffs_rdblkhdr(FAR struct nxffs_volume_s *volume, off_t offset,
  *
  * Description:
  *   Remove an inode from FLASH.  This is the internal implementation of
- *   the file system unlink operation.
+ *   the file system unlinke operation.
  *
  * Input Parameters:
  *   volume - Describes the NXFFS volume.
@@ -1102,12 +1122,8 @@ int nxffs_truncate(FAR struct file *filep, off_t length);
 #endif
 
 int nxffs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
-                  FAR struct fs_dirent_s **dir);
-int nxffs_closedir(FAR struct inode *mountpt,
-                   FAR struct fs_dirent_s *dir);
-int nxffs_readdir(FAR struct inode *mountpt,
-                  FAR struct fs_dirent_s *dir,
-                  FAR struct dirent *entry);
+                  FAR struct fs_dirent_s *dir);
+int nxffs_readdir(FAR struct inode *mountpt, FAR struct fs_dirent_s *dir);
 int nxffs_rewinddir(FAR struct inode *mountpt, FAR struct fs_dirent_s *dir);
 
 int nxffs_bind(FAR struct inode *blkdriver, FAR const void *data,

@@ -1,9 +1,8 @@
 /****************************************************************************
  * apps/system/ubloxmodem/ubloxmodem_main.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016 Vladimir Komendantskiy. All rights reserved.
- * SPDX-FileContributor: Vladimir Komendantskiy <vladimir@moixaenergy.com>
+ *   Copyright (C) 2016 Vladimir Komendantskiy. All rights reserved.
+ *   Author: Vladimir Komendantskiy <vladimir@moixaenergy.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,16 +42,13 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
-#include <sys/param.h>
 
-#include <debug.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <nuttx/modem/u-blox.h>
 
@@ -83,12 +79,12 @@
  * Private Data
  ****************************************************************************/
 
-static int ubloxmodem_help  (FAR struct ubloxmodem_cxt *cxt);
-static int ubloxmodem_on    (FAR struct ubloxmodem_cxt *cxt);
-static int ubloxmodem_off   (FAR struct ubloxmodem_cxt *cxt);
-static int ubloxmodem_reset (FAR struct ubloxmodem_cxt *cxt);
-static int ubloxmodem_status(FAR struct ubloxmodem_cxt *cxt);
-static int ubloxmodem_at    (FAR struct ubloxmodem_cxt *cxt);
+static int ubloxmodem_help  (FAR struct ubloxmodem_cxt* cxt);
+static int ubloxmodem_on    (FAR struct ubloxmodem_cxt* cxt);
+static int ubloxmodem_off   (FAR struct ubloxmodem_cxt* cxt);
+static int ubloxmodem_reset (FAR struct ubloxmodem_cxt* cxt);
+static int ubloxmodem_status(FAR struct ubloxmodem_cxt* cxt);
+static int ubloxmodem_at    (FAR struct ubloxmodem_cxt* cxt);
 
 /* Mapping of command indices (@ubloxmodem_cmd@ implicit from the position in
  * the list) to tuples containing the command handler and descriptive
@@ -128,8 +124,7 @@ static int make_nonblock(int fd)
 
 static int ubloxmodem_open_tty(void)
 {
-  int fd;
-  int ret;
+  int fd, ret;
 
   fd = open(CONFIG_SYSTEM_UBLOXMODEM_TTY_DEVNODE, O_RDWR);
   if (fd < 0)
@@ -149,7 +144,7 @@ static int ubloxmodem_open_tty(void)
   return fd;
 }
 
-static int chat_readb(int fd, FAR char *dst, int timeout_ms)
+static int chat_readb(int fd, FAR char* dst, int timeout_ms)
 {
   struct pollfd fds;
   int ret;
@@ -175,7 +170,7 @@ static int chat_readb(int fd, FAR char *dst, int timeout_ms)
   return 0;
 }
 
-static int chat_match_response(int fd, FAR char *response, int timeout_ms)
+static int chat_match_response(int fd, FAR char* response, int timeout_ms)
 {
   char c;
   int ret;
@@ -208,7 +203,7 @@ static int chat_match_response(int fd, FAR char *response, int timeout_ms)
   return 0;
 }
 
-static int chat_single(int fd, FAR char *cmd, FAR char *resp)
+static int chat_single(int fd, FAR char* cmd, FAR char* resp)
 {
   int ret;
 
@@ -243,13 +238,15 @@ static int chat_single(int fd, FAR char *cmd, FAR char *resp)
   return ret;
 }
 
-static int ubloxmodem_help(FAR struct ubloxmodem_cxt *cxt)
+static int ubloxmodem_help(FAR struct ubloxmodem_cxt* cxt)
 {
   int i;
 
   printf("Usage: ubloxmodem <cmd> [arguments]\n"
          "  where <cmd> is one of\n");
-  for (i = 0; i < nitems(cmdmap); i++)
+  for (i = 0;
+       i < sizeof(cmdmap) / sizeof(struct cmdinfo);
+       i++)
     {
       printf("%s\n  %s\n  %s\n",
              cmdmap[i].name,
@@ -260,7 +257,7 @@ static int ubloxmodem_help(FAR struct ubloxmodem_cxt *cxt)
   return 0;
 }
 
-static int ubloxmodem_on(FAR struct ubloxmodem_cxt *cxt)
+static int ubloxmodem_on(FAR struct ubloxmodem_cxt* cxt)
 {
   int ret;
 
@@ -274,7 +271,7 @@ static int ubloxmodem_on(FAR struct ubloxmodem_cxt *cxt)
   return ret;
 }
 
-static int ubloxmodem_off(FAR struct ubloxmodem_cxt *cxt)
+static int ubloxmodem_off(FAR struct ubloxmodem_cxt* cxt)
 {
   int ret;
 
@@ -288,7 +285,7 @@ static int ubloxmodem_off(FAR struct ubloxmodem_cxt *cxt)
   return ret;
 }
 
-static int ubloxmodem_reset(FAR struct ubloxmodem_cxt *cxt)
+static int ubloxmodem_reset(FAR struct ubloxmodem_cxt* cxt)
 {
   int ret;
 
@@ -302,16 +299,17 @@ static int ubloxmodem_reset(FAR struct ubloxmodem_cxt *cxt)
   return ret;
 }
 
-static int ubloxmodem_status(FAR struct ubloxmodem_cxt *cxt)
+static int ubloxmodem_status(FAR struct ubloxmodem_cxt* cxt)
 {
+  int ret, i;
   struct ubxmdm_status status;
-  int ret;
-  int i;
 
   /* Allocate name-value pairs */
 
   FAR struct ubxmdm_regval register_values[UBLOXMODEM_MAX_REGISTERS];
   char regname[4];   /* Null-terminated string buffer */
+
+  regname[3] = '\0'; /* Set the null string terminator */
 
   /* Set the maximum value, to be updated by driver */
 
@@ -330,7 +328,7 @@ static int ubloxmodem_status(FAR struct ubloxmodem_cxt *cxt)
        i < status.register_values_size && i < UBLOXMODEM_MAX_REGISTERS;
        i++)
     {
-      strlcpy(regname, status.register_values[i].name, sizeof(regname));
+      strncpy(regname, status.register_values[i].name, 3);
       printf("%s=%d ",
              regname,
              (int) status.register_values[i].val);
@@ -340,12 +338,11 @@ static int ubloxmodem_status(FAR struct ubloxmodem_cxt *cxt)
   return ret;
 }
 
-static int ubloxmodem_at(FAR struct ubloxmodem_cxt *cxt)
+static int ubloxmodem_at(FAR struct ubloxmodem_cxt* cxt)
 {
-  FAR char *atcmd;
-  FAR char *resp;
-  int ret;
-  int fd;
+  int fd, ret;
+  FAR char* atcmd;
+  FAR char* resp;
 
   atcmd = cxt->argv[2];
   resp  = cxt->argv[3];
@@ -371,11 +368,12 @@ static int ubloxmodem_at(FAR struct ubloxmodem_cxt *cxt)
   return ret;
 }
 
-static int ubloxmodem_parse(FAR struct ubloxmodem_cxt *cxt)
+static int ubloxmodem_parse(FAR struct ubloxmodem_cxt* cxt)
 {
   int i;
 
-  for (i = 0; i < nitems(cmdmap) &&
+  for (i = 0;
+       i < sizeof(cmdmap) / sizeof(struct cmdinfo) &&
          cxt->cmd == UBLOXMODEM_CMD_UNKNOWN;
        i++)
     {

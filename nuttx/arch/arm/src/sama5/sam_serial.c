@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_serial.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013-2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -47,7 +59,9 @@
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "chip.h"
 #include "hardware/sam_uart.h"
 #include "sam_config.h"
@@ -153,27 +167,25 @@
 #  elif defined(CONFIG_SAMA5_UART4)
 #    define TTYS0_DEV           g_uart4port  /* UART4 is ttyS0 */
 #    define UART4_ASSIGNED      1
-#  elif defined(CONFIG_SAMA5_USART0)
+#  elif defined(CONFIG_USART0_SERIALDRIVER)
 #    define TTYS0_DEV           g_usart0port /* USART0 is ttyS0 */
 #    define USART0_ASSIGNED     1
-#  elif defined(CONFIG_SAMA5_USART1)
+#  elif defined(CONFIG_USART1_SERIALDRIVER)
 #    define TTYS0_DEV           g_usart1port /* USART1 is ttyS0 */
 #    define USART1_ASSIGNED     1
-#  elif defined(CONFIG_SAMA5_USART2)
+#  elif defined(CONFIG_USART2_SERIALDRIVER)
 #    define TTYS0_DEV           g_usart2port /* USART2 is ttyS0 */
 #    define USART2_ASSIGNED     1
-#  elif defined(CONFIG_SAMA5_USART3)
+#  elif defined(CONFIG_USART3_SERIALDRIVER)
 #    define TTYS0_DEV           g_usart3port /* USART3 is ttyS0 */
 #    define USART3_ASSIGNED     1
-#  elif defined(CONFIG_SAMA5_USART4)
+#  elif defined(CONFIG_USART4_SERIALDRIVER)
 #    define TTYS0_DEV           g_usart4port /* USART4 is ttyS0 */
 #    define USART4_ASSIGNED     4
 #  endif
 #endif
 
-/* Pick ttyS1.  This could be any of UART0-4, USART0-4 excluding the
- * console UART.
- */
+/* Pick ttyS1.  This could be any of UART0-4, USART0-4 excluding the console UART. */
 
 #if defined(CONFIG_SAMA5_UART0) && !defined(UART0_ASSIGNED)
 #  define TTYS1_DEV           g_uart0port  /* UART0 is ttyS1 */
@@ -190,19 +202,19 @@
 #elif defined(CONFIG_SAMA5_UART4) && !defined(UART4_ASSIGNED)
 #  define TTYS1_DEV           g_uart4port  /* UART4 is ttyS1 */
 #  define UART4_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART0) && !defined(USART0_ASSIGNED)
+#elif defined(CONFIG_USART0_SERIALDRIVER) && !defined(USART0_ASSIGNED)
 #  define TTYS1_DEV           g_usart0port /* USART0 is ttyS1 */
 #  define USART0_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART1) && !defined(USART1_ASSIGNED)
+#elif defined(CONFIG_USART1_SERIALDRIVER) && !defined(USART1_ASSIGNED)
 #  define TTYS1_DEV           g_usart1port /* USART1 is ttyS1 */
 #  define USART1_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART2) && !defined(USART2_ASSIGNED)
+#elif defined(CONFIG_USART2_SERIALDRIVER) && !defined(USART2_ASSIGNED)
 #  define TTYS1_DEV           g_usart2port /* USART2 is ttyS1 */
 #  define USART2_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART3) && !defined(USART3_ASSIGNED)
+#elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
 #  define TTYS1_DEV           g_usart3port /* USART3 is ttyS1 */
 #  define USART3_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART4) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
 #  define TTYS1_DEV           g_usart4port /* USART4 is ttyS1 */
 #  define USART4_ASSIGNED     1
 #endif
@@ -224,19 +236,19 @@
 #elif defined(CONFIG_SAMA5_UART4) && !defined(UART4_ASSIGNED)
 #  define TTYS2_DEV           g_uart4port  /* UART4 is ttyS2 */
 #  define UART4_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART0) && !defined(USART0_ASSIGNED)
+#elif defined(CONFIG_USART0_SERIALDRIVER) && !defined(USART0_ASSIGNED)
 #  define TTYS2_DEV           g_usart0port /* USART0 is ttyS2 */
 #  define USART0_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART1) && !defined(USART1_ASSIGNED)
+#elif defined(CONFIG_USART1_SERIALDRIVER) && !defined(USART1_ASSIGNED)
 #  define TTYS2_DEV           g_usart1port /* USART1 is ttyS2 */
 #  define USART1_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART2) && !defined(USART2_ASSIGNED)
+#elif defined(CONFIG_USART2_SERIALDRIVER) && !defined(USART2_ASSIGNED)
 #  define TTYS2_DEV           g_usart2port /* USART2 is ttyS2 */
 #  define USART2_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART3) && !defined(USART3_ASSIGNED)
+#elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
 #  define TTYS2_DEV           g_usart3port /* USART3 is ttyS2 */
 #  define USART3_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART4) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
 #  define TTYS2_DEV           g_usart4port /* USART4 is ttyS2 */
 #  define USART4_ASSIGNED     1
 #endif
@@ -255,19 +267,19 @@
 #elif defined(CONFIG_SAMA5_UART4) && !defined(UART4_ASSIGNED)
 #  define TTYS3_DEV           g_uart1port  /* UART4 is ttyS3 */
 #  define UART4_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART0) && !defined(USART0_ASSIGNED)
+#elif defined(CONFIG_USART0_SERIALDRIVER) && !defined(USART0_ASSIGNED)
 #  define TTYS3_DEV           g_usart0port /* USART0 is ttyS3 */
 #  define USART0_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART1) && !defined(USART1_ASSIGNED)
+#elif defined(CONFIG_USART1_SERIALDRIVER) && !defined(USART1_ASSIGNED)
 #  define TTYS3_DEV           g_usart1port /* USART1 is ttyS3 */
 #  define USART1_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART2) && !defined(USART2_ASSIGNED)
+#elif defined(CONFIG_USART2_SERIALDRIVER) && !defined(USART2_ASSIGNED)
 #  define TTYS3_DEV           g_usart2port /* USART2 is ttyS3 */
 #  define USART2_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART3) && !defined(USART3_ASSIGNED)
+#elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
 #  define TTYS3_DEV           g_usart3port /* USART3 is ttyS3 */
 #  define USART3_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART4) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
 #  define TTYS3_DEV           g_usart4port /* USART4 is ttyS3 */
 #  define USART4_ASSIGNED     1
 #endif
@@ -283,19 +295,19 @@
 #elif defined(CONFIG_SAMA5_UART4) && !defined(UART4_ASSIGNED)
 #  define TTYS4_DEV           g_uart4port  /* UART4 is ttyS4 */
 #  define UART4_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART0) && !defined(USART0_ASSIGNED)
+#elif defined(CONFIG_USART0_SERIALDRIVER) && !defined(USART0_ASSIGNED)
 #  define TTYS4_DEV           g_usart0port /* USART0 is ttyS4 */
 #  define USART0_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART1) && !defined(USART1_ASSIGNED)
+#elif defined(CONFIG_USART1_SERIALDRIVER) && !defined(USART1_ASSIGNED)
 #  define TTYS4_DEV           g_usart1port /* USART1 is ttyS4 */
 #  define USART1_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART2) && !defined(USART2_ASSIGNED)
+#elif defined(CONFIG_USART2_SERIALDRIVER) && !defined(USART2_ASSIGNED)
 #  define TTYS4_DEV           g_usart2port /* USART2 is ttyS4 */
 #  define USART2_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART3) && !defined(USART3_ASSIGNED)
+#elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
 #  define TTYS4_DEV           g_usart3port /* USART3 is ttyS4 */
 #  define USART3_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART4) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
 #  define TTYS4_DEV           g_usart4port /* USART4 is ttyS4 */
 #  define USART4_ASSIGNED     1
 #endif
@@ -308,19 +320,19 @@
 #if defined(CONFIG_SAMA5_UART4) && !defined(UART4_ASSIGNED)
 #  define TTYS5_DEV           g_uart4port  /* UART4 is ttyS5 */
 #  define UART1_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART0) && !defined(USART0_ASSIGNED)
+#elif defined(CONFIG_USART0_SERIALDRIVER) && !defined(USART0_ASSIGNED)
 #  define TTYS5_DEV           g_usart0port /* USART0 is ttyS5 */
 #  define USART0_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART1) && !defined(USART1_ASSIGNED)
+#elif defined(CONFIG_USART1_SERIALDRIVER) && !defined(USART1_ASSIGNED)
 #  define TTYS5_DEV           g_usart1port /* USART1 is ttyS5 */
 #  define USART1_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART2) && !defined(USART2_ASSIGNED)
+#elif defined(CONFIG_USART2_SERIALDRIVER) && !defined(USART2_ASSIGNED)
 #  define TTYS5_DEV           g_usart2port /* USART2 is ttyS5 */
 #  define USART2_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART3) && !defined(USART3_ASSIGNED)
+#elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
 #  define TTYS5_DEV           g_usart3port /* USART3 is ttyS5 */
 #  define USART3_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART4) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
 #  define TTYS5_DEV           g_usart4port /* USART4 is ttyS5 */
 #  define USART4_ASSIGNED     1
 #endif
@@ -330,19 +342,19 @@
  * could also be the console.
  */
 
-#if defined(CONFIG_SAMA5_USART0) && !defined(USART0_ASSIGNED)
+#if defined(CONFIG_USART0_SERIALDRIVER) && !defined(USART0_ASSIGNED)
 #  define TTYS6_DEV           g_usart0port /* USART0 is ttyS6 */
 #  define USART0_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART1) && !defined(USART1_ASSIGNED)
+#elif defined(CONFIG_USART1_SERIALDRIVER) && !defined(USART1_ASSIGNED)
 #  define TTYS6_DEV           g_usart1port /* USART1 is ttyS6 */
 #  define USART1_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART2) && !defined(USART2_ASSIGNED)
+#elif defined(CONFIG_USART2_SERIALDRIVER) && !defined(USART2_ASSIGNED)
 #  define TTYS6_DEV           g_usart2port /* USART2 is ttyS6 */
 #  define USART2_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART3) && !defined(USART3_ASSIGNED)
+#elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
 #  define TTYS6_DEV           g_usart3port /* USART3 is ttyS6 */
 #  define USART3_ASSIGNED     1
-#elif defined(CONFIG_SAMA5_USART4) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
 #  define TTYS6_DEV           g_usart4port /* USART4 is ttyS6 */
 #  define USART4_ASSIGNED     1
 #endif
@@ -352,16 +364,16 @@
  * USART1-4 could also be the console.
  */
 
-#if defined(CONFIG_SAMA5_USART1) && !defined(USART1_ASSIGNED)
+#if defined(CONFIG_USART1_SERIALDRIVER) && !defined(USART1_ASSIGNED)
 #  define TTYS7_DEV           g_usart1port /* USART1 is ttyS7 */
 #  define USART1_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART2) && !defined(USART2_ASSIGNED)
+#elif defined(CONFIG_USART2_SERIALDRIVER) && !defined(USART2_ASSIGNED)
 #  define TTYS7_DEV           g_usart2port /* USART2 is ttyS7 */
 #  define USART2_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART3) && !defined(USART3_ASSIGNED)
+#elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
 #  define TTYS7_DEV           g_usart3port /* USART3 is ttyS7 */
 #  define USART3_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART4) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
 #  define TTYS7_DEV           g_usart4port /* USART4 is ttyS7 */
 #  define USART4_ASSIGNED      1
 #endif
@@ -371,13 +383,13 @@
  * USART2-4 could also be the console.
  */
 
-#if defined(CONFIG_SAMA5_USART2) && !defined(USART2_ASSIGNED)
+#if defined(CONFIG_USART2_SERIALDRIVER) && !defined(USART2_ASSIGNED)
 #  define TTYS8_DEV           g_usart2port /* USART2 is ttyS8 */
 #  define USART2_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART3) && !defined(USART3_ASSIGNED)
+#elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
 #  define TTYS8_DEV           g_usart3port /* USART3 is ttyS8 */
 #  define USART3_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART4) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
 #  define TTYS8_DEV           g_usart4port /* USART4 is ttyS8 */
 #  define USART4_ASSIGNED      1
 #endif
@@ -387,10 +399,10 @@
  * USART3-4 could also be the console.
  */
 
-#if defined(CONFIG_SAMA5_USART3) && !defined(USART3_ASSIGNED)
+#if defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
 #  define TTYS9_DEV           g_usart3port /* USART3 is ttyS9 */
 #  define USART3_ASSIGNED      1
-#elif defined(CONFIG_SAMA5_USART4) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
 #  define TTYS9_DEV           g_usart4port /* USART4 is ttyS9 */
 #  define USART4_ASSIGNED      1
 #endif
@@ -422,13 +434,13 @@ struct up_dev_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static int  up_interrupt(int irq, void *context, void *arg);
+static int  up_interrupt(int irq, void *context, FAR void *arg);
 static int  up_setup(struct uart_dev_s *dev);
 static void up_shutdown(struct uart_dev_s *dev);
 static int  up_attach(struct uart_dev_s *dev);
 static void up_detach(struct uart_dev_s *dev);
 static int  up_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  up_receive(struct uart_dev_s *dev, unsigned int *status);
+static int  up_receive(struct uart_dev_s *dev, uint32_t *status);
 static void up_rxint(struct uart_dev_s *dev, bool enable);
 static bool up_rxavailable(struct uart_dev_s *dev);
 static void up_send(struct uart_dev_s *dev, int ch);
@@ -481,23 +493,23 @@ static char g_uart3txbuffer[CONFIG_UART3_TXBUFSIZE];
 static char g_uart4rxbuffer[CONFIG_UART4_RXBUFSIZE];
 static char g_uart4txbuffer[CONFIG_UART4_TXBUFSIZE];
 #endif
-#if defined(CONFIG_USART0_SERIALDRIVER) && defined(CONFIG_SAMA5_USART0)
+#ifdef CONFIG_USART0_SERIALDRIVER
 static char g_usart0rxbuffer[CONFIG_USART0_RXBUFSIZE];
 static char g_usart0txbuffer[CONFIG_USART0_TXBUFSIZE];
 #endif
-#if defined(CONFIG_USART1_SERIALDRIVER) && defined(CONFIG_SAMA5_USART1)
+#ifdef CONFIG_USART1_SERIALDRIVER
 static char g_usart1rxbuffer[CONFIG_USART1_RXBUFSIZE];
 static char g_usart1txbuffer[CONFIG_USART1_TXBUFSIZE];
 #endif
-#if defined(CONFIG_USART2_SERIALDRIVER) && defined(CONFIG_SAMA5_USART2)
+#ifdef CONFIG_USART2_SERIALDRIVER
 static char g_usart2rxbuffer[CONFIG_USART2_RXBUFSIZE];
 static char g_usart2txbuffer[CONFIG_USART2_TXBUFSIZE];
 #endif
-#if defined(CONFIG_USART3_SERIALDRIVER) && defined(CONFIG_SAMA5_USART3)
+#ifdef CONFIG_USART3_SERIALDRIVER
 static char g_usart3rxbuffer[CONFIG_USART3_RXBUFSIZE];
 static char g_usart3txbuffer[CONFIG_USART3_TXBUFSIZE];
 #endif
-#if defined(CONFIG_USART4_SERIALDRIVER) && defined(CONFIG_SAMA5_USART4)
+#ifdef CONFIG_USART4_SERIALDRIVER
 static char g_usart4rxbuffer[CONFIG_USART4_RXBUFSIZE];
 static char g_usart4txbuffer[CONFIG_USART4_TXBUFSIZE];
 #endif
@@ -704,7 +716,7 @@ static uart_dev_t g_uart4port =
 
 /* This describes the state of the USART0 port. */
 
-#ifdef CONFIG_SAMA5_USART0
+#ifdef CONFIG_USART0_SERIALDRIVER
 static struct up_dev_s g_usart0priv =
 {
   .usartbase      = SAM_USART0_VBASE,
@@ -737,7 +749,7 @@ static uart_dev_t g_usart0port =
 
 /* This describes the state of the USART1 port. */
 
-#ifdef CONFIG_SAMA5_USART1
+#ifdef CONFIG_USART1_SERIALDRIVER
 static struct up_dev_s g_usart1priv =
 {
   .usartbase      = SAM_USART1_VBASE,
@@ -770,7 +782,7 @@ static uart_dev_t g_usart1port =
 
 /* This describes the state of the USART2 port. */
 
-#ifdef CONFIG_SAMA5_USART2
+#ifdef CONFIG_USART2_SERIALDRIVER
 static struct up_dev_s g_usart2priv =
 {
   .usartbase      = SAM_USART2_VBASE,
@@ -803,7 +815,7 @@ static uart_dev_t g_usart2port =
 
 /* This describes the state of the USART3 port. */
 
-#ifdef CONFIG_SAMA5_USART3
+#ifdef CONFIG_USART3_SERIALDRIVER
 static struct up_dev_s g_usart3priv =
 {
   .usartbase      = SAM_USART3_VBASE,
@@ -836,7 +848,7 @@ static uart_dev_t g_usart3port =
 
 /* This describes the state of the USART4 port. */
 
-#ifdef CONFIG_SAMA5_USART4
+#ifdef CONFIG_USART4_SERIALDRIVER
 static struct up_dev_s g_usart4priv =
 {
   .usartbase      = SAM_USART4_VBASE,
@@ -896,9 +908,7 @@ static inline void up_serialout(struct up_dev_s *priv, int offset,
 
 static inline void up_restoreusartint(struct up_dev_s *priv, uint32_t imr)
 {
-  /* Restore the previous interrupt state (assuming all interrupts
-   * disabled)
-   */
+  /* Restore the previous interrupt state (assuming all interrupts disabled) */
 
   up_serialout(priv, SAM_UART_IER_OFFSET, imr);
 }
@@ -932,15 +942,13 @@ static void up_disableallints(struct up_dev_s *priv, uint32_t *imr)
  * Name: up_interrupt
  *
  * Description:
- *   This is the common USART interrupt handler.  It will be invoked when an
- *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
- *   uart_recvchars to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'arg' to the
- *   appropriate uart_dev_s structure in order to call these functions.
+ *   This is the common USART interrupt handler.  It should call
+ *   uart_transmitchars or uart_receivechar to perform the appropriate
+ *   data transfers.
  *
  ****************************************************************************/
 
-static int up_interrupt(int irq, void *context, void *arg)
+static int up_interrupt(int irq, void *context, FAR void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   struct up_dev_s   *priv;
@@ -961,9 +969,7 @@ static int up_interrupt(int irq, void *context, void *arg)
     {
       handled = false;
 
-      /* Get the UART/USART status (we are only interested in the unmasked
-       * interrupts).
-       */
+      /* Get the UART/USART status (we are only interested in the unmasked interrupts). */
 
       priv->sr = up_serialin(priv, SAM_UART_SR_OFFSET);  /* Save for error reporting */
       imr      = up_serialin(priv, SAM_UART_IMR_OFFSET); /* Interrupt mask */
@@ -1021,7 +1027,6 @@ static int up_setup(struct uart_dev_s *dev)
   up_shutdown(dev);
 
 #if defined(CONFIG_SERIAL_IFLOWCONTROL) || defined(CONFIG_SERIAL_OFLOWCONTROL)
-#if defined(ATSAMA5D3) || defined(ATSAMA5D4)
   /* Setting the USART to operate with hardware handshaking is performed by
    * writing the USART_MODE field in the Mode Register (US_MR) to the value
    * 0x2. ... Using this mode requires using the PDC or DMAC channel for
@@ -1035,7 +1040,6 @@ static int up_setup(struct uart_dev_s *dev)
       regval = (UART_MR_MODE_HWHS | SAM_MR_USCLKS | UART_MR_CHMODE_NORMAL);
     }
   else
-#endif
 #endif
     {
 #if defined(ATSAMA5D2)
@@ -1078,13 +1082,13 @@ static int up_setup(struct uart_dev_s *dev)
            && priv->usartbase != SAM_UART1_VBASE
 #endif
 #if defined(CONFIG_SAMA5_UART2)
-#  warning REVISIT
+#  warning REVIST
 #endif
 #if defined(CONFIG_SAMA5_UART3)
-#  warning REVISIT
+#  warning REVIST
 #endif
 #if defined(CONFIG_SAMA5_UART4)
-#  warning REVISIT
+#  warning REVIST
 #endif
           )
     {
@@ -1266,6 +1270,10 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
             break;
           }
 
+        /* Return baud */
+
+        cfsetispeed(termiosp, priv->baud);
+
         /* Return parity */
 
         termiosp->c_cflag = ((priv->parity != 0) ? PARENB : 0) |
@@ -1280,10 +1288,6 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
 #if defined(CONFIG_SERIAL_IFLOWCONTROL) || defined(CONFIG_SERIAL_OFLOWCONTROL)
         termiosp->c_cflag |= (priv->flowc) ? (CCTS_OFLOW | CRTS_IFLOW): 0;
 #endif
-        /* Return baud */
-
-        cfsetispeed(termiosp, priv->baud);
-
         /* Return number of bits */
 
         switch (priv->bits)
@@ -1431,7 +1435,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int up_receive(struct uart_dev_s *dev, unsigned int *status)
+static int up_receive(struct uart_dev_s *dev, uint32_t *status)
 {
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
 
@@ -1581,8 +1585,8 @@ static bool up_txempty(struct uart_dev_s *dev)
  *
  * Description:
  *   Performs the low level USART initialization early in debug so that the
- *   serial console will be available during boot up.  This must be called
- *   before arm_serialinit.
+ *   serial console will be available during bootup.  This must be called
+ *   before up_serialinit.
  *
  ****************************************************************************/
 

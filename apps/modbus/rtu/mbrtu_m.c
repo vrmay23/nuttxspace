@@ -1,8 +1,9 @@
 /****************************************************************************
  * apps/modbus/rtu/mbrtu_m.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2013 China Beijing Armink <armink.ztl@gmail.com>
+ * FreeModbus Library: A portable Modbus implementation for Modbus ASCII/RTU.
+ * Copyright (c) 2013 China Beijing Armink <armink.ztl@gmail.com>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -64,7 +65,7 @@
 #define MB_SER_PDU_PDU_OFF      1     /* Offset of Modbus-PDU in Ser-PDU. */
 
 /****************************************************************************
- * Private Typess
+ * Private Type Definitions
  ****************************************************************************/
 
 typedef enum
@@ -277,7 +278,7 @@ bool xMBMasterRTUReceiveFSM(void)
 
   /* Always read the character. */
 
-  xMBMasterPortSerialGetByte((int8_t *) & ucByte);
+  xMBMasterPortSerialGetByte((uint8_t *) & ucByte);
 
   switch (eRcvState)
     {
@@ -395,10 +396,6 @@ bool xMBMasterRTUTransmitFSM(void)
               vMBMasterPortTimersRespondTimeoutEnable();
             }
         }
-      break;
-
-      case STATE_M_TX_XFWR:
-      default:
       break;
     }
 

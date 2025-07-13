@@ -1,11 +1,18 @@
 /****************************************************************************
  * include/nuttx/net/ip.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2007-2012, 2014 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2001-2003, Adam Dunkels. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: Adam Dunkels <adam@dunkels.com>
+ * This header file contains IP-related definitions for a number of C
+ * macros that are used by applications as well as internally by the
+ * OS networking logic.
+ *
+ *   Copyright (C) 2007-2012, 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This logic was leveraged from uIP which also has a BSD-style license:
+ *
+ *   Author Adam Dunkels <adam@dunkels.com>
+ *   Copyright (c) 2001-2003, Adam Dunkels.
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,18 +52,15 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <string.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
 #include <nuttx/net/netconfig.h>
-#include <nuttx/wqueue.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* IP Version Mask (bits 0-3 of first byte) */
 
 #define IP_VERSION_MASK  0x70
@@ -82,7 +86,6 @@
 #ifdef CONFIG_NET_IPv4
 #  define IPv4_HDRLEN     20    /* Size of IPv4 header (without options) */
 #  define IPv4_HLMASK     0x0f  /* Isolates headler length in VHL field */
-#  define IPV4_OPTMAX     40    /* The limit of ip option length */
 #endif
 
 #ifdef CONFIG_NET_IPv6
@@ -159,14 +162,6 @@ struct ipv4_hdr_s
   uint16_t srcipaddr[2];     /* 32-bit Source IP address */
   uint16_t destipaddr[2];    /* 32-bit Destination IP address */
 };
-
-/* The IPv4 options */
-
-struct ipv4_opt_s
-{
-  uint8_t len;
-  uint8_t data[IPV4_OPTMAX];
-};
 #endif /* CONFIG_NET_IPv4 */
 
 #ifdef CONFIG_NET_IPv6
@@ -193,13 +188,13 @@ struct ipv4_stats_s
   net_stats_t recv;       /* Number of received packets at the IP layer */
   net_stats_t sent;       /* Number of sent packets at the IP layer */
   net_stats_t vhlerr;     /* Number of packets dropped due to wrong
-                           * IP version or header length */
+                             IP version or header length */
   net_stats_t fragerr;    /* Number of packets dropped since they
-                           * were IP fragments */
+                             were IP fragments */
   net_stats_t chkerr;     /* Number of packets dropped due to IP
-                           * checksum errors */
+                             checksum errors */
   net_stats_t protoerr;   /* Number of packets dropped since they
-                           * were neither ICMP, UDP nor TCP */
+                             were neither ICMP, UDP nor TCP */
 };
 #endif /* CONFIG_NET_IPv6 */
 
@@ -210,49 +205,12 @@ struct ipv6_stats_s
   net_stats_t recv;       /* Number of received packets at the IP layer */
   net_stats_t sent;       /* Number of sent packets at the IP layer */
   net_stats_t vhlerr;     /* Number of packets dropped due to wrong
-                           * IP version or header length */
-  net_stats_t fragerr;    /* Number of packets dropped since they
-                           * were IP fragments */
+                             IP version or header length */
   net_stats_t protoerr;   /* Number of packets dropped since they
-                           * were neither ICMP, UDP nor TCP */
+                             were neither ICMP, UDP nor TCP */
 };
 #endif /* CONFIG_NET_IPv6 */
 #endif /* CONFIG_NET_STATISTICS */
-
-#ifdef CONFIG_NET_ARP_ACD
-#define ARP_ACD_TMR_INTERVAL      100    /* milliseconds */
-#define ARP_ACD_TICKS_PER_SECOND (1000 / ARP_ACD_TMR_INTERVAL)
-
-/* RFC 5227 Constants */
-
-#define ANNOUNCE_NUM            2   /*          (number of announcement packets)       */
-#define ANNOUNCE_INTERVAL       2   /* seconds  (time between announcement packets)    */
-#define ANNOUNCE_WAIT           2   /* seconds  (delay before announcing)              */
-#define DEFEND_INTERVAL         10  /* seconds  (min. wait between defensive ARPs)     */
-
-/* arp acd entry states */
-
-enum arp_acd_state_e
-{
-  ARP_ACD_STATE_INIT       = 0,
-  ARP_ACD_STATE_ANNOUNCING = 1,
-  ARP_ACD_STATE_FINISH     = 2
-};
-
-#define ARP_ACD_ADDRESS_NO_CONFLICT 0
-#define ARP_ACD_ADDRESS_CONFLICT    1
-
-struct arp_acd_s
-{
-  enum arp_acd_state_e state;     /* current arp_acd_s status */
-  int sendnum;                    /* sent number of probes or announces, dependent on state */
-  bool conflict_flag;             /* arp address conflict flag */
-  bool need_announce;             /* need to send arp announce packet */
-  uint32_t ttw;                   /* ticks to wait */
-  clock_t lastconflict;           /* last conflict timestamp */
-  struct work_s work;             /* For deferred timeout operations */
-};
-#endif /* CONFIG_NET_ARP_ACD */
 
 /****************************************************************************
  * Public Data
@@ -288,12 +246,10 @@ extern "C"
  ****************************************************************************/
 
 #define net_ipaddr(addr, addr0, addr1, addr2, addr3) \
-  do \
-    { \
-      addr = HTONL((uint32_t)(addr0) << 24 | (uint32_t)(addr1) << 16 | \
-                   (uint32_t)(addr2) << 8  | (uint32_t)(addr3)); \
-    } \
-  while (0)
+  do { \
+    addr = HTONL((uint32_t)(addr0) << 24 | (uint32_t)(addr1) << 16 | \
+                 (uint32_t)(addr2) << 8  | (uint32_t)(addr3)); \
+  } while (0)
 
 /****************************************************************************
  * Macro: net_ip4addr_conv32
@@ -323,19 +279,19 @@ extern "C"
  ****************************************************************************/
 
 #ifdef CONFIG_ENDIAN_BIG
-  /* Big-endian byte order: 11223344 */
+   /* Big-endian byte order: 11223344 */
 
-#  define ip4_addr1(ipaddr) ((uint8_t)(((ipaddr) >> 24) & 0xff))
-#  define ip4_addr2(ipaddr) ((uint8_t)(((ipaddr) >> 16) & 0xff))
-#  define ip4_addr3(ipaddr) ((uint8_t)(((ipaddr) >>  8) & 0xff))
-#  define ip4_addr4(ipaddr)  ((uint8_t)((ipaddr)        & 0xff))
+#  define ip4_addr1(ipaddr) (((ipaddr) >> 24) & 0xff)
+#  define ip4_addr2(ipaddr) (((ipaddr) >> 16) & 0xff)
+#  define ip4_addr3(ipaddr) (((ipaddr) >>  8) & 0xff)
+#  define ip4_addr4(ipaddr)  ((ipaddr)        & 0xff)
 #else
-  /* Little endian byte order: 44223311 */
+   /* Little endian byte order: 44223311 */
 
-#  define ip4_addr1(ipaddr)  ((uint8_t)((ipaddr)        & 0xff))
-#  define ip4_addr2(ipaddr) ((uint8_t)(((ipaddr) >>  8) & 0xff))
-#  define ip4_addr3(ipaddr) ((uint8_t)(((ipaddr) >> 16) & 0xff))
-#  define ip4_addr4(ipaddr) ((uint8_t)(((ipaddr) >> 24) & 0xff))
+#  define ip4_addr1(ipaddr)  ((ipaddr)        & 0xff)
+#  define ip4_addr2(ipaddr) (((ipaddr) >>  8) & 0xff)
+#  define ip4_addr3(ipaddr) (((ipaddr) >> 16) & 0xff)
+#  define ip4_addr4(ipaddr) (((ipaddr) >> 24) & 0xff)
 #endif
 
 /****************************************************************************
@@ -346,19 +302,17 @@ extern "C"
  *
  ****************************************************************************/
 
-#define ip6_addr(addr,addr0,addr1,addr2,addr3,addr4,addr5,addr6,addr7) \
-  do \
-    { \
-      ((FAR uint16_t *)(addr))[0] = HTONS((addr0)); \
-      ((FAR uint16_t *)(addr))[1] = HTONS((addr1)); \
-      ((FAR uint16_t *)(addr))[2] = HTONS((addr2)); \
-      ((FAR uint16_t *)(addr))[3] = HTONS((addr3)); \
-      ((FAR uint16_t *)(addr))[4] = HTONS((addr4)); \
-      ((FAR uint16_t *)(addr))[5] = HTONS((addr5)); \
-      ((FAR uint16_t *)(addr))[6] = HTONS((addr6)); \
-      ((FAR uint16_t *)(addr))[7] = HTONS((addr7)); \
-    } \
-  while (0)
+#define ip6_addr(addr, addr0,addr1,addr2,addr3,addr4,addr5,addr6,addr7) \
+  do { \
+    ((FAR uint16_t *)(addr))[0] = HTONS((addr0)); \
+    ((FAR uint16_t *)(addr))[1] = HTONS((addr1)); \
+    ((FAR uint16_t *)(addr))[2] = HTONS((addr2)); \
+    ((FAR uint16_t *)(addr))[3] = HTONS((addr3)); \
+    ((FAR uint16_t *)(addr))[4] = HTONS((addr4)); \
+    ((FAR uint16_t *)(addr))[5] = HTONS((addr5)); \
+    ((FAR uint16_t *)(addr))[6] = HTONS((addr6)); \
+    ((FAR uint16_t *)(addr))[7] = HTONS((addr7)); \
+  } while (0)
 
 /****************************************************************************
  * Macro: ip6_map_ipv4addr
@@ -387,8 +341,9 @@ extern "C"
   do \
     { \
       memset(ipv6addr, 0, 5 * sizeof(uint16_t)); \
-      (ipv6addr)[5] = 0xffff; \
-      net_ipv4addr_hdrcopy(&(ipv6addr)[6], &(ipv4addr)); \
+      ipv6addr[5] = 0xffff; \
+      ipv6addr[6] = (uint16_t)((uint32_t)ipv4addr >> 16); \
+      ipv6addr[7] = (uint16_t)ipv4addr & 0xffff; \
     } \
   while (0)
 
@@ -407,7 +362,11 @@ extern "C"
  *
  ****************************************************************************/
 
-#define ip6_get_ipv4addr(ipv6addr) net_ip4addr_conv32(&(ipv6addr)[6])
+#define ip6_get_ipv4addr(ipv6addr) \
+  (((in_addr_t)(ipv6addr)->s6_addr[12]) | \
+   ((in_addr_t)(ipv6addr)->s6_addr[13] << 8) | \
+   ((in_addr_t)(ipv6addr)->s6_addr[14] << 16) | \
+   ((in_addr_t)(ipv6addr)->s6_addr[15] << 24))
 
 /****************************************************************************
  * Macro: ip6_is_ipv4addr
@@ -428,50 +387,6 @@ extern "C"
    (ipv6addr)->s6_addr32[1] == 0 && \
    (ipv6addr)->s6_addr16[4] == 0 && \
    (ipv6addr)->s6_addr16[5] == 0xffff)
-
-/****************************************************************************
- * Macro: net_ip_domain_select
- *
- * Description:
- *   Select different value by the domain (PF_INET/PF_INET6).
- *   This domain only needs to exist when both IPv4 and IPv6 are enabled.
- *
- * Input Parameters:
- *   value4 - The value returned when domain is PF_INET.
- *   value6 - The value returned when domain is PF_INET6.
- *   domain - The domain field which may only exists when both IPv4 and IPv6
- *            are enabled.
- *
- ****************************************************************************/
-
-#if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
-#  define net_ip_domain_select(domain, value4, value6) \
-    (((domain) == PF_INET) ? (value4) : (value6))
-#elif defined(CONFIG_NET_IPv4)
-#  define net_ip_domain_select(domain, value4, value6) (value4)
-#else
-#  define net_ip_domain_select(domain, value4, value6) (value6)
-#endif
-
-/****************************************************************************
- * Macro: net_ip_binding_laddr, net_ip_binding_raddr
- *
- * Description:
- *   Get the laddr/raddr pointer form an ip_binding_u.
- *
- * Input Parameters:
- *   u      - The union of address binding.
- *   domain - The domain of address, only needs to exist when both IPv4 and
- *            IPv6 are enabled.
- *
- ****************************************************************************/
-
-#define net_ip_binding_laddr(u, domain) \
-    net_ip_domain_select(domain, (FAR void *)(&(u)->ipv4.laddr), \
-                                 (FAR void *)(&(u)->ipv6.laddr))
-#define net_ip_binding_raddr(u, domain) \
-    net_ip_domain_select(domain, (FAR void *)(&(u)->ipv4.raddr), \
-                                 (FAR void *)(&(u)->ipv6.raddr))
 
 /****************************************************************************
  * Macro: net_ipv4addr_copy, net_ipv4addr_hdrcopy, net_ipv6addr_copy, and
@@ -495,18 +410,14 @@ extern "C"
 
 #ifdef CONFIG_NET_IPv4
 #  define net_ipv4addr_copy(dest, src) \
-   do \
-     { \
-       (dest) = (in_addr_t)(src); \
-     } \
-   while (0)
+   do { \
+     (dest) = (in_addr_t)(src); \
+   } while (0)
 #  define net_ipv4addr_hdrcopy(dest, src) \
-   do \
-     { \
-       ((FAR uint16_t *)(dest))[0] = ((FAR uint16_t *)(src))[0]; \
-       ((FAR uint16_t *)(dest))[1] = ((FAR uint16_t *)(src))[1]; \
-     } \
-   while (0)
+   do { \
+     ((FAR uint16_t *)(dest))[0] = ((FAR uint16_t *)(src))[0]; \
+     ((FAR uint16_t *)(dest))[1] = ((FAR uint16_t *)(src))[1]; \
+   } while (0)
 #endif
 
 #ifdef CONFIG_NET_IPv6
@@ -634,8 +545,8 @@ bool net_ipv6addr_maskcmp(const net_ipv6addr_t addr1,
  ****************************************************************************/
 
 #define net_ipv4addr_broadcast(addr, mask) \
-  (((in_addr_t)(addr) & ~(in_addr_t)(mask)) == \
-   ((in_addr_t)(0xffffffff) & ~(in_addr_t)(mask)))
+   (((in_addr_t)(addr) & ~(in_addr_t)(mask)) == \
+    ((in_addr_t)(0xffffffff) & ~(in_addr_t)(mask)))
 
 /****************************************************************************
  * Name: net_ipv6addr_prefixcmp
@@ -665,7 +576,7 @@ bool net_ipv6addr_maskcmp(const net_ipv6addr_t addr1,
  * Name: net_is_addr_unspecified
  *
  * Description:
- *   Is the IPv6 address the unspecified address?  See RFC 4291 (replaces
+ *   Is Ithe IPv6 address the unspecified address?  See RFC 4291 (replaces
  *   3513).
  *
  ****************************************************************************/

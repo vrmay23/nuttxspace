@@ -1,22 +1,35 @@
 /****************************************************************************
- * boards/arm/stm32/viewtool-stm32f107/src/stm32_max3421e.c
+ * boards/arm/stm32/viewtools-stm32f107/src/stm32_max3421e.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -45,7 +58,7 @@
 #  include <nuttx/usb/rndis.h>
 #endif
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "stm32_gpio.h"
 #include "stm32_spi.h"
 
@@ -66,7 +79,7 @@ struct viewtool_max3421elower_s
   /* Extensions for the viewtool board */
 
   xcpt_t handler;
-  void *arg;
+  FAR void *arg;
 };
 
 /****************************************************************************
@@ -79,19 +92,17 @@ struct viewtool_max3421elower_s
  *
  * Interrupts should be configured on the falling edge of nINT.
  *
- *   attach      - Attach the ADS7843E interrupt handler to the GPIO
- *                 interrupt
+ *   attach      - Attach the ADS7843E interrupt handler to the GPIO interrupt
  *   enable      - Enable or disable the GPIO interrupt
  *   acknowledge - Acknowledge/clear any pending GPIO interrupt as necessary.
  */
 
-static int max3421e_attach(const struct max3421e_lowerhalf_s *lower,
-                           xcpt_t isr, void *arg);
-static void max3421e_enable(const struct max3421e_lowerhalf_s *lower,
+static int max3421e_attach(FAR const struct max3421e_lowerhalf_s *lower,
+                           xcpt_t isr, FAR void *arg);
+static void max3421e_enable(FAR const struct max3421e_lowerhalf_s *lower,
                             bool enable);
-static void max3421e_acknowledge
-                           (const struct max3421e_lowerhalf_s *lower);
-static void max3421e_power(const struct max3421e_lowerhalf_s *lower,
+static void max3421e_acknowledge(FAR const struct max3421e_lowerhalf_s *lower);
+static void max3421e_power(FAR const struct max3421e_lowerhalf_s *lower,
                            bool enable);
 
 /****************************************************************************
@@ -125,7 +136,7 @@ static struct viewtool_max3421elower_s g_max3421e_lower =
   },
 };
 
-static struct usbhost_connection_s *g_usbconn;
+static FAR struct usbhost_connection_s *g_usbconn;
 
 /****************************************************************************
  * Private Functions
@@ -138,19 +149,18 @@ static struct usbhost_connection_s *g_usbconn;
  * interrupts should be configured on both rising and falling edges
  * so that contact and loss-of-contact events can be detected.
  *
- *   attach      - Attach the ADS7843E interrupt handler to the GPIO
- *                 interrupt
+ *   attach      - Attach the ADS7843E interrupt handler to the GPIO interrupt
  *   enable      - Enable or disable the GPIO interrupt
  *   acknowledge - Acknowledge/clear any pending GPIO interrupt as necessary.
  *   power       - Enable or disable 5V VBUS power
  *
  ****************************************************************************/
 
-static int max3421e_attach(const struct max3421e_lowerhalf_s *lower,
-                           xcpt_t isr, void *arg)
+static int max3421e_attach(FAR const struct max3421e_lowerhalf_s *lower,
+                           xcpt_t isr, FAR void *arg)
 {
-  struct viewtool_max3421elower_s *priv =
-    (struct viewtool_max3421elower_s *)lower;
+  FAR struct viewtool_max3421elower_s *priv =
+    (FAR struct viewtool_max3421elower_s *)lower;
 
   if (isr != NULL)
     {
@@ -173,11 +183,11 @@ static int max3421e_attach(const struct max3421e_lowerhalf_s *lower,
   return OK;
 }
 
-static void max3421e_enable(const struct max3421e_lowerhalf_s *lower,
+static void max3421e_enable(FAR const struct max3421e_lowerhalf_s *lower,
                             bool enable)
 {
-  struct viewtool_max3421elower_s *priv =
-    (struct viewtool_max3421elower_s *)lower;
+  FAR struct viewtool_max3421elower_s *priv =
+    (FAR struct viewtool_max3421elower_s *)lower;
   irqstate_t flags;
 
   uinfo("enable=%u handler=%p\n", enable, priv->handler);
@@ -213,13 +223,12 @@ static void max3421e_enable(const struct max3421e_lowerhalf_s *lower,
   leave_critical_section(flags);
 }
 
-static void max3421e_acknowledge
-            (const struct max3421e_lowerhalf_s *lower)
+static void max3421e_acknowledge(FAR const struct max3421e_lowerhalf_s *lower)
 {
   /* Does nothing */
 }
 
-static void max3421e_power(const struct max3421e_lowerhalf_s *lower,
+static void max3421e_power(FAR const struct max3421e_lowerhalf_s *lower,
                            bool enable)
 {
   /* We currently have no control over VBUS power */
@@ -229,20 +238,20 @@ static void max3421e_power(const struct max3421e_lowerhalf_s *lower,
 #endif
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: usbhost_detect
  *
  * Description:
  *   Wait for USB devices to be connected.
  ****************************************************************************/
 
-static int usbhost_detect(int argc, char *argv[])
+static int usbhost_detect(int argc, FAR char *argv[])
 {
-  struct usbhost_hubport_s *hport;
+  FAR struct usbhost_hubport_s *hport;
 
   uinfo("Starting USB detect thread\n");
 
-  for (; ; )
+  for (;;)
     {
       CONN_WAIT(g_usbconn, &hport);
 
@@ -277,7 +286,8 @@ static int usbhost_detect(int argc, char *argv[])
 
 int stm32_max3421e_setup(void)
 {
-  struct spi_dev_s *spi;
+  FAR struct spi_dev_s *spi;
+  pid_t monpid;
   int ret;
 
   /* Configure the MAX3421E interrupt pin as an input and the reset and power
@@ -355,20 +365,22 @@ int stm32_max3421e_setup(void)
 #endif
 
 #if defined(CONFIG_RNDIS)
-  uint8_t mac[6];
+  {
+    uint8_t mac[6];
 
-  mac[0] = 0xa0; /* TODO */
-  mac[1] = (CONFIG_NETINIT_MACADDR_2 >> (8 * 0)) & 0xff;
-  mac[2] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 3)) & 0xff;
-  mac[3] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 2)) & 0xff;
-  mac[4] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 1)) & 0xff;
-  mac[5] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 0)) & 0xff;
+    mac[0] = 0xa0; /* TODO */
+    mac[1] = (CONFIG_NETINIT_MACADDR_2 >> (8 * 0)) & 0xff;
+    mac[2] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 3)) & 0xff;
+    mac[3] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 2)) & 0xff;
+    mac[4] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 1)) & 0xff;
+    mac[5] = (CONFIG_NETINIT_MACADDR_1 >> (8 * 0)) & 0xff;
 
-  ret = usbdev_rndis_initialize(mac);
-  if (ret < 0)
-    {
-      uerr("ERROR: Failed to register RNDIS class: %d\n", ret);
-    }
+    ret = usbdev_rndis_initialize(mac);
+    if (ret < 0)
+      {
+        uerr("ERROR: Failed to register RNDIS class: %d\n", ret);
+      }
+  }
 #endif
 
 #ifdef CONFIG_VIEWTOOL_MAX3421E_RST
@@ -397,13 +409,13 @@ int stm32_max3421e_setup(void)
 
   /* Start the USB connection monitor kernel thread */
 
-  ret = kthread_create("MAX3421E ConnMon",
-                       CONFIG_VIEWTOOL_MAX3421E_CONNMON_PRIORITY,
-                       CONFIG_VIEWTOOL_MAX3421E_CONNMON_STACKSIZE,
-                       usbhost_detect, NULL);
-  if (ret < 0)
+  monpid = kthread_create("MAX3421E ConnMon",
+                          CONFIG_VIEWTOOL_MAX3421E_CONNMON_PRIORITY,
+                          CONFIG_VIEWTOOL_MAX3421E_CONNMON_STACKSIZE,
+                          usbhost_detect, NULL);
+  if (monpid < 0)
     {
-      uerr("ERROR: Failed to start connection monitor: %d\n", ret);
+      uerr("ERROR: Failed to start connection monitor: %d\n", monpid);
     }
 
   return OK;

@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/nshlib/nsh_syscmds.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,19 +39,14 @@
 
 #include <nuttx/config.h>
 
-#include <nuttx/power/pm.h>
-#include <nuttx/rpmsg/rpmsg.h>
 #include <nuttx/rptun/rptun.h>
-#include <nuttx/streams.h>
 #include <sys/boardctl.h>
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
-#include <dirent.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <unistd.h>
 
 #include "nsh.h"
 #include "nsh_console.h"
@@ -64,21 +72,17 @@
 #define UNAME_KERNEL   (1 << 0)
 #define UNAME_NODE     (1 << 1)
 #define UNAME_RELEASE  (1 << 2)
-#define UNAME_VERSION  (1 << 3)
+#define UNAME_VERISON  (1 << 3)
 #define UNAME_MACHINE  (1 << 4)
 #define UNAME_PLATFORM (1 << 5)
 #define UNAME_UNKNOWN  (1 << 6)
 
 #ifdef CONFIG_NET
 #  define UNAME_ALL    (UNAME_KERNEL | UNAME_NODE | UNAME_RELEASE | \
-                        UNAME_VERSION | UNAME_MACHINE | UNAME_PLATFORM)
+                        UNAME_VERISON | UNAME_MACHINE | UNAME_PLATFORM)
 #else
-#  define UNAME_ALL    (UNAME_KERNEL | UNAME_RELEASE | UNAME_VERSION | \
+#  define UNAME_ALL    (UNAME_KERNEL | UNAME_RELEASE | UNAME_VERISON | \
                         UNAME_MACHINE | UNAME_PLATFORM)
-#endif
-
-#ifndef CONFIG_NSH_PROC_MOUNTPOINT
-#  define CONFIG_NSH_PROC_MOUNTPOINT "/proc"
 #endif
 
 /****************************************************************************
@@ -87,53 +91,6 @@
 
 #ifndef CONFIG_NSH_DISABLE_UNAME
 static const char g_unknown[] = "unknown";
-#endif
-
-#if defined(CONFIG_BOARDCTL_RESET_CAUSE) && !defined(CONFIG_NSH_DISABLE_RESET_CAUSE)
-
-/* Keep update with nuttx kernel definition */
-
-static FAR const char *const g_resetcause[] =
-{
-  "none",
-  "power_on",
-  "rtc_watchdog",
-  "brown_out",
-  "core_soft_reset",
-  "core_deep_sleep",
-  "core_main_watchdog",
-  "core_rtc_watchdog",
-  "cpu_main_watchdog",
-  "cpu_soft_reset",
-  "cpu_rtc_watchdog",
-  "pin",
-  "lowpower",
-  "unkown"
-};
-#endif
-
-#if (defined(CONFIG_BOARDCTL_RESET) && !defined(CONFIG_NSH_DISABLE_REBOOT)) || \
-    (defined(CONFIG_BOARDCTL_RESET_CAUSE) && !defined(CONFIG_NSH_DISABLE_RESET_CAUSE))
-static FAR const char * const g_resetflag[] =
-{
-  "reboot",
-  "assert",
-  "panic",
-  "bootloader",
-  "recovery",
-  "restore",
-  "factory",
-  NULL
-};
-#endif
-
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-#if defined(CONFIG_RPMSG) && !defined(CONFIG_NSH_DISABLE_RPMSG)
-typedef CODE int (*cmd_rpmsg_cb_t)(FAR int *cmd, FAR unsigned long * val,
-                                   FAR char **argv);
 #endif
 
 /****************************************************************************
@@ -147,7 +104,7 @@ typedef CODE int (*cmd_rpmsg_cb_t)(FAR int *cmd, FAR unsigned long * val,
 #if (defined(CONFIG_BOARDCTL_POWEROFF) || defined(CONFIG_BOARDCTL_RESET)) && \
     !defined(CONFIG_NSH_DISABLE_SHUTDOWN)
 
-int cmd_shutdown(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_shutdown(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
 #if defined(CONFIG_BOARDCTL_POWEROFF) && defined(CONFIG_BOARDCTL_RESET)
   /* If both shutdown and reset are supported, then a single option may
@@ -170,7 +127,7 @@ int cmd_shutdown(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
        * reset the board due to some constraints.
        */
 
-      boardctl(BOARDIOC_RESET, 0);
+      boardctl(BOARDIOC_RESET, EXIT_SUCCESS);
     }
   else
     {
@@ -179,7 +136,7 @@ int cmd_shutdown(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
        * to power-off the* board due to some constraints.
        */
 
-      boardctl(BOARDIOC_POWEROFF, 0);
+      boardctl(BOARDIOC_POWEROFF, EXIT_SUCCESS);
     }
 
 #elif defined(CONFIG_BOARDCTL_RESET)
@@ -200,7 +157,7 @@ int cmd_shutdown(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
    * reset the board due to some constraints.
    */
 
-  boardctl(BOARDIOC_RESET, 0);
+  boardctl(BOARDIOC_RESET, EXIT_SUCCESS);
 
 #else
   /* Only the reset behavior is supported and we already know that there is
@@ -212,11 +169,11 @@ int cmd_shutdown(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
    * off the board due to some constraints.
    */
 
-  boardctl(BOARDIOC_POWEROFF, 0);
+  boardctl(BOARDIOC_POWEROFF, EXIT_SUCCESS);
 #endif
 
-  /* boardctl() will not return in any case.  It if does, it means that
-   * there was a problem with the shutdown/reset operation.
+  /* boarctl() will not return in any case.  It if does, it means that
+   * there was a problem with the shutdown/resaet operation.
    */
 
   nsh_error(vtbl, g_fmtcmdfailed, argv[0], "boardctl", NSH_ERRNO);
@@ -229,78 +186,46 @@ int cmd_shutdown(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
  ****************************************************************************/
 
 #if defined(CONFIG_PM) && !defined(CONFIG_NSH_DISABLE_PMCONFIG)
-static int cmd_pmconfig_recursive(FAR struct nsh_vtbl_s *vtbl,
-                                  FAR const char *dirpath,
-                                  FAR struct dirent *entryp,
-                                  FAR void *pvarg)
-{
-  FAR char *path;
-  int ret = ERROR;
-
-  if (DIRENT_ISDIRECTORY(entryp->d_type))
-    {
-      return 0;
-    }
-
-  path = nsh_getdirpath(vtbl, dirpath, entryp->d_name);
-  if (path)
-    {
-      nsh_output(vtbl, "\n%s:\n", path);
-      ret = nsh_catfile(vtbl, pvarg, path);
-      free(path);
-    }
-
-  return ret;
-}
-
-int cmd_pmconfig(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_pmconfig(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   struct boardioc_pm_ctrl_s ctrl =
   {
   };
 
-  if (argc <= 2)
+  if (argc == 1)
     {
-      int next_state;
-      int last_state;
-
-      if (argc == 2)
-        {
-          ctrl.domain = atoi(argv[1]);
-          if (ctrl.domain < 0 || ctrl.domain >= CONFIG_PM_NDOMAINS)
-            {
-              nsh_error(vtbl, g_fmtargrange, argv[1]);
-              return ERROR;
-            }
-        }
+      int current_state;
+      int normal_count;
+      int idle_count;
+      int standby_count;
+      int sleep_count;
 
       ctrl.action = BOARDIOC_PM_QUERYSTATE;
       boardctl(BOARDIOC_PM_CONTROL, (uintptr_t)&ctrl);
-      last_state = ctrl.state;
+      current_state = ctrl.state;
 
-      ctrl.action = BOARDIOC_PM_CHECKSTATE;
+      ctrl.action = BOARDIOC_PM_STAYCOUNT;
+      ctrl.state = PM_NORMAL;
       boardctl(BOARDIOC_PM_CONTROL, (uintptr_t)&ctrl);
-      next_state = ctrl.state;
+      normal_count = ctrl.count;
 
-      nsh_output(vtbl, "Last state %d, Next state %d\n",
-                 last_state, next_state);
+      ctrl.state = PM_IDLE;
+      boardctl(BOARDIOC_PM_CONTROL, (uintptr_t)&ctrl);
+      idle_count = ctrl.count;
 
-      return nsh_foreach_direntry(vtbl, argv[0],
-                                  CONFIG_NSH_PROC_MOUNTPOINT "/pm",
-                                  cmd_pmconfig_recursive, argv[0]);
+      ctrl.state = PM_STANDBY;
+      boardctl(BOARDIOC_PM_CONTROL, (uintptr_t)&ctrl);
+      standby_count = ctrl.count;
+
+      ctrl.state = PM_SLEEP;
+      boardctl(BOARDIOC_PM_CONTROL, (uintptr_t)&ctrl);
+      sleep_count = ctrl.count;
+
+      nsh_output(vtbl, "Current state %d, PM stay [%d, %d, %d, %d]\n",
+        current_state, normal_count, idle_count, standby_count, sleep_count);
     }
-  else if (argc <= 4)
+  else if (argc == 3)
     {
-      if (argc == 4)
-        {
-          ctrl.domain = atoi(argv[3]);
-          if (ctrl.domain >= CONFIG_PM_NDOMAINS)
-            {
-              nsh_error(vtbl, g_fmtargrange, argv[3]);
-              return ERROR;
-            }
-        }
-
       if (strcmp(argv[1], "stay") == 0)
         {
           ctrl.action = BOARDIOC_PM_STAY;
@@ -354,7 +279,7 @@ int cmd_pmconfig(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
  ****************************************************************************/
 
 #if defined(CONFIG_BOARDCTL_POWEROFF) && !defined(CONFIG_NSH_DISABLE_POWEROFF)
-int cmd_poweroff(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_poweroff(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   /* Invoke the BOARDIOC_POWEROFF board control to shutdown the board.  If
    * the board_power_off function returns, then it was not possible to power-
@@ -367,75 +292,11 @@ int cmd_poweroff(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
     }
   else
     {
-      boardctl(BOARDIOC_POWEROFF, 0);
+      boardctl(BOARDIOC_POWEROFF, EXIT_SUCCESS);
     }
 
-  /* boardctl() will not return in any case.  It if does, it means that
+  /* boarctl() will not return in any case.  It if does, it means that
    * there was a problem with the shutdown operation.
-   */
-
-  nsh_error(vtbl, g_fmtcmdfailed, argv[0], "boardctl", NSH_ERRNO);
-  return ERROR;
-}
-#endif
-
-/****************************************************************************
- * Name: cmd_switchboot
- ****************************************************************************/
-
-#if defined(CONFIG_BOARDCTL_SWITCH_BOOT) && !defined(CONFIG_NSH_DISABLE_SWITCHBOOT)
-int cmd_switchboot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
-{
-  if (argc != 2)
-    {
-      nsh_output(vtbl, g_fmtarginvalid, argv[0]);
-      return ERROR;
-    }
-
-  boardctl(BOARDIOC_SWITCH_BOOT, (uintptr_t)argv[1]);
-  return 0;
-}
-#endif
-
-/****************************************************************************
- * Name: cmd_boot
- ****************************************************************************/
-
-#if defined(CONFIG_BOARDCTL_BOOT_IMAGE) && !defined(CONFIG_NSH_DISABLE_BOOT)
-int cmd_boot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
-{
-  struct boardioc_boot_info_s info;
-
-  memset(&info, 0, sizeof(info));
-
-  /* Invoke the BOARDIOC_BOOT_IMAGE board control to reset the board.  If
-   * the board_boot_image() function returns, then it was not possible to
-   * boot the image due to some constraints.
-   */
-
-  switch (argc)
-    {
-      default:
-        info.header_size = strtoul(argv[2], NULL, 0);
-
-        /* Go through */
-
-      case 1:
-        info.path = argv[1];
-
-        /* Go through */
-
-      case 0:
-
-        /* Nothing to do */
-
-        break;
-    }
-
-  boardctl(BOARDIOC_BOOT_IMAGE, (uintptr_t)&info);
-
-  /* boardctl() will not return in this case.  It if does, it means that
-   * there was a problem with the boot operation.
    */
 
   nsh_error(vtbl, g_fmtcmdfailed, argv[0], "boardctl", NSH_ERRNO);
@@ -448,7 +309,7 @@ int cmd_boot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
  ****************************************************************************/
 
 #if defined(CONFIG_BOARDCTL_RESET) && !defined(CONFIG_NSH_DISABLE_REBOOT)
-int cmd_reboot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_reboot(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   /* Invoke the BOARDIOC_RESET board control to reset the board.  If
    * the board_reset() function returns, then it was not possible to
@@ -457,33 +318,14 @@ int cmd_reboot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 
   if (argc > 1)
     {
-      int i = 0;
-
-      while (g_resetflag[i] != NULL)
-        {
-          if (strcmp(g_resetflag[i], argv[1]) == 0)
-            {
-              break;
-            }
-
-          i++;
-        }
-
-      if (g_resetflag[i])
-        {
-          boardctl(BOARDIOC_RESET, i);
-        }
-      else
-        {
-          boardctl(BOARDIOC_RESET, atoi(argv[1]));
-        }
+      boardctl(BOARDIOC_RESET, atoi(argv[1]));
     }
   else
     {
-      boardctl(BOARDIOC_RESET, 0);
+      boardctl(BOARDIOC_RESET, EXIT_SUCCESS);
     }
 
-  /* boardctl() will not return in this case.  It if does, it means that
+  /* boarctl() will not return in this case.  It if does, it means that
    * there was a problem with the reset operation.
    */
 
@@ -492,109 +334,28 @@ int cmd_reboot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 }
 #endif
 
-#if defined(CONFIG_BOARDCTL_RESET_CAUSE) && !defined(CONFIG_NSH_DISABLE_RESET_CAUSE)
-int cmd_reset_cause(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+/****************************************************************************
+ * Name: cmd_rptun
+ ****************************************************************************/
+
+#if defined(CONFIG_RPTUN) && !defined(CONFIG_NSH_DISABLE_RPTUN)
+int cmd_rptun(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
-  UNUSED(argc);
+  int fd, cmd;
 
-  int ret;
-  struct boardioc_reset_cause_s cause;
-
-  memset(&cause, 0, sizeof(cause));
-  ret = boardctl(BOARDIOC_RESET_CAUSE, (uintptr_t)&cause);
-  if (ret < 0)
+  if (argc < 3)
     {
-      nsh_error(vtbl, g_fmtcmdfailed, argv[0], "boardctl", NSH_ERRNO);
+      nsh_output(vtbl, g_fmtargrequired, argv[0]);
       return ERROR;
     }
 
-  if (cause.cause != BOARDIOC_RESETCAUSE_CPU_SOFT)
+  if (strcmp(argv[1], "start") == 0)
     {
-      nsh_output(vtbl, "%s(%lu)\n",
-             g_resetcause[cause.cause], cause.flag);
+      cmd = RPTUNIOC_START;
     }
-  else
+  else if (strcmp(argv[1], "stop") == 0)
     {
-      nsh_output(vtbl, "%s(%s)\n",
-             g_resetcause[cause.cause], g_resetflag[cause.flag]);
-    }
-
-  return OK;
-}
-#endif
-
-/****************************************************************************
- * Name: cmd_irq_affinity
- ****************************************************************************/
-
-#if defined(CONFIG_BOARDCTL_IRQ_AFFINITY) && !defined(CONFIG_NSH_DISABLE_IRQ_AFFINITY)
-int cmd_irq_affinity(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
-{
-  unsigned int affinity[2];
-
-  if (argc == 3)
-    {
-      affinity[0] = strtoul(argv[1], NULL, 0);
-      affinity[1] = strtoul(argv[2], NULL, 0);
-
-      if (affinity[1] == 0)
-        {
-          affinity[1] = 0x1;
-        }
-
-      return boardctl(BOARDIOC_IRQ_AFFINITY, (uintptr_t)affinity);
-    }
-
-  return ERROR;
-}
-#endif
-
-/****************************************************************************
- * Name: cmd_rpmsg
- ****************************************************************************/
-
-#if defined(CONFIG_RPMSG) && !defined(CONFIG_NSH_DISABLE_RPMSG)
-static int cmd_rpmsg_once(FAR struct nsh_vtbl_s *vtbl,
-                          FAR const char *path, FAR char **argv,
-                          cmd_rpmsg_cb_t rpmsg_cb)
-{
-#ifdef CONFIG_RPMSG_PING
-  struct rpmsg_ping_s ping;
-#endif
-  unsigned long val = 0;
-  int cmd;
-  int fd;
-
-  if (strcmp(argv[1], "panic") == 0)
-    {
-      cmd = RPMSGIOC_PANIC;
-    }
-  else if (strcmp(argv[1], "dump") == 0)
-    {
-      cmd = RPMSGIOC_DUMP;
-    }
-#ifdef CONFIG_RPMSG_PING
-  else if (strcmp(argv[1], "ping") == 0)
-    {
-      if (argv[3] == 0 || argv[4] == 0 ||
-          argv[5] == 0 || argv[6] == 0)
-        {
-          nsh_error(vtbl, g_fmtargrequired, argv[0]);
-          return ERROR;
-        }
-
-      ping.times = atoi(argv[3]);
-      ping.len   = atoi(argv[4]);
-      ping.cmd   = atoi(argv[5]);
-      ping.sleep = atoi(argv[6]);
-
-      cmd = RPMSGIOC_PING;
-      val = (unsigned long)&ping;
-    }
-#endif
-  else if (rpmsg_cb && rpmsg_cb(&cmd, &val, argv) == OK)
-    {
-      /* Nothing */
+      cmd = RPTUNIOC_STOP;
     }
   else
     {
@@ -602,164 +363,17 @@ static int cmd_rpmsg_once(FAR struct nsh_vtbl_s *vtbl,
       return ERROR;
     }
 
-  fd = open(path, O_CLOEXEC);
+  fd = open(argv[2], 0);
   if (fd < 0)
     {
-      nsh_output(vtbl, g_fmtarginvalid, path);
+      nsh_output(vtbl, g_fmtarginvalid, argv[2]);
       return ERROR;
     }
 
-  cmd = ioctl(fd, cmd, val);
+  ioctl(fd, cmd, 0);
 
   close(fd);
-
-  return cmd;
-}
-
-static int cmd_rpmsg_recursive(FAR struct nsh_vtbl_s *vtbl,
-                               FAR const char *dirpath,
-                               FAR struct dirent *entryp,
-                               FAR void *pvarg)
-{
-  FAR char *path;
-  int ret = ERROR;
-
-  if (DIRENT_ISDIRECTORY(entryp->d_type))
-    {
-      return 0;
-    }
-
-  path = nsh_getdirpath(vtbl, dirpath, entryp->d_name);
-  if (path)
-    {
-      ret = cmd_rpmsg_once(vtbl, path, pvarg, NULL);
-      free(path);
-    }
-
-  return ret;
-}
-
-static int cmd_rpmsg_help(FAR struct nsh_vtbl_s *vtbl, int argc,
-                          FAR char **argv)
-{
-  nsh_output(vtbl, "%s <panic|dump> <path>\n", argv[0]);
-#ifdef CONFIG_RPMSG_PING
-  nsh_output(vtbl, "%s ping <path> <times> <length> <cmd> "
-             "<period(ms)>\n\n", argv[0]);
-  nsh_output(vtbl, "<times>      Number of ping operations.\n");
-  nsh_output(vtbl, "<length>     The length of each ping packet.\n");
-  nsh_output(vtbl, "<cmd>        Whether the peer acknowlege or "
-             "check data.\n");
-  nsh_output(vtbl, "             Bit0 - Request need ack or not.\n");
-  nsh_output(vtbl, "             Bit1 - Check the data or not.\n");
-  nsh_output(vtbl, "             Bit2 - Random length or not.\n");
-  nsh_output(vtbl, "             Bit4~7 - Request or response or other"
-                                          "command for future use.\n");
-  nsh_output(vtbl, "<sleep(ms)>  Sleep interval between two operations.\n");
-#endif
-  nsh_output(vtbl, "<path>       Rpmsg device path.\n\n");
-  return OK;
-}
-
-int cmd_rpmsg(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
-{
-  if (argc >= 2 && strcmp(argv[1], "-h") == 0)
-    {
-      nsh_output(vtbl, "usage:\n\n");
-      return cmd_rpmsg_help(vtbl, argc, argv);
-    }
-
-  if (argc < 3)
-    {
-      nsh_output(vtbl, g_fmtargrequired, argv[0]);
-      return ERROR;
-    }
-
-  if (strcmp(argv[2], "all") == 0)
-    {
-      return nsh_foreach_direntry(vtbl, "rpmsg", "/dev/rpmsg",
-                                  cmd_rpmsg_recursive, argv);
-    }
-
-  return cmd_rpmsg_once(vtbl, argv[2], argv, NULL);
-}
-#endif
-
-/****************************************************************************
- * Name: cmd_rptun
- ****************************************************************************/
-
-#if defined(CONFIG_RPTUN) && !defined(CONFIG_NSH_DISABLE_RPTUN)
-static int cmd_rptun_cb(FAR int *cmd, FAR unsigned long *val,
-                        FAR char **argv)
-{
-  if (strcmp(argv[1], "start") == 0)
-    {
-      *cmd = RPTUNIOC_START;
-    }
-  else if (strcmp(argv[1], "stop") == 0)
-    {
-      *cmd = RPTUNIOC_STOP;
-    }
-  else if (strcmp(argv[1], "reset") == 0)
-    {
-      *val = atoi(argv[3]);
-      *cmd = RPTUNIOC_RESET;
-    }
-  else
-    {
-      return ERROR;
-    }
-
-  return OK;
-}
-
-static int cmd_rptun_recursive(FAR struct nsh_vtbl_s *vtbl,
-                               FAR const char *dirpath,
-                               FAR struct dirent *entryp,
-                               FAR void *pvarg)
-{
-  FAR char *path;
-  int ret = ERROR;
-
-  if (DIRENT_ISDIRECTORY(entryp->d_type))
-    {
-      return 0;
-    }
-
-  path = nsh_getdirpath(vtbl, dirpath, entryp->d_name);
-  if (path)
-    {
-      ret = cmd_rpmsg_once(vtbl, path, pvarg, cmd_rptun_cb);
-      free(path);
-    }
-
-  return ret;
-}
-
-int cmd_rptun(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
-{
-  if (argc >= 2 && strcmp(argv[1], "-h") == 0)
-    {
-      nsh_output(vtbl, "usage:\n\n");
-      nsh_output(vtbl, "rptun <start|stop> <path>\n");
-      nsh_output(vtbl, "rptun <reset> <path> <resetvalue>\n");
-      return cmd_rpmsg_help(vtbl, argc, argv);
-    }
-
-  if (argc < 3)
-    {
-      nsh_output(vtbl, g_fmtargrequired, argv[0]);
-      return ERROR;
-    }
-
-  if (strcmp(argv[2], "all") == 0)
-    {
-      return nsh_foreach_direntry(vtbl, "rptun", "/dev/rptun",
-                                  cmd_rptun_recursive, argv);
-    }
-
-  return cmd_rpmsg_once(vtbl, argv[2], argv, cmd_rptun_cb);
+  return 0;
 }
 #endif
 
@@ -768,12 +382,10 @@ int cmd_rptun(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
  ****************************************************************************/
 
 #ifndef CONFIG_NSH_DISABLE_UNAME
-int cmd_uname(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+int cmd_uname(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 {
   FAR const char *str;
-  struct lib_memoutstream_s stream;
   struct utsname info;
-  struct utsname output;
   unsigned int set;
   int option;
   bool badarg;
@@ -810,7 +422,7 @@ int cmd_uname(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
             break;
 
           case 'v':
-            set |= UNAME_VERSION;
+            set |= UNAME_VERISON;
             break;
 
           case 'm':
@@ -864,7 +476,6 @@ int cmd_uname(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
   /* Process each option */
 
   first = true;
-  lib_memoutstream(&stream, (FAR char *)&output, sizeof(output));
   for (i = 0; set != 0; i++)
     {
       unsigned int mask = (1 << i);
@@ -909,16 +520,15 @@ int cmd_uname(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 
           if (!first)
             {
-              lib_stream_putc(&stream, ' ');
+              nsh_output(vtbl, " ");
             }
 
-          lib_stream_puts(&stream, str, strlen(str));
+          nsh_output(vtbl, str);
           first = false;
         }
     }
 
-  lib_stream_putc(&stream, '\n');
-  nsh_write(vtbl, stream.buffer, stream.common.nput);
+  nsh_output(vtbl, "\n");
   return OK;
 }
 #endif

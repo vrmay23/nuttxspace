@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/icmpv6/icmpv6.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017-2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,12 +44,11 @@
 
 #include <sys/types.h>
 #include <stdint.h>
+#include <queue.h>
 #include <assert.h>
-#include <netinet/icmp6.h>
 
 #include <nuttx/mm/iob.h>
 #include <nuttx/net/ip.h>
-#include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/semaphore.h>
 
@@ -51,9 +63,9 @@
 /* Allocate a new ICMPv6 data callback */
 
 #define icmpv6_callback_alloc(dev, conn) \
-  devif_callback_alloc((dev), &(conn)->sconn.list, &(conn)->sconn.list_tail)
+  devif_callback_alloc((dev), &(conn)->list)
 #define icmpv6_callback_free(dev, conn, cb) \
-  devif_conn_callback_free((dev), (cb), &(conn)->sconn.list, &(conn)->sconn.list_tail)
+  devif_conn_callback_free((dev), (cb), &(conn)->list)
 
 /****************************************************************************
  * Public Type Definitions
@@ -82,11 +94,18 @@ struct icmpv6_conn_s
 {
   /* Common prologue of all connection structures. */
 
-  struct socket_conn_s sconn;
+  dq_entry_t node;     /* Supports a double linked list */
+
+  /* This is a list of ICMPV6 callbacks.  Each callback represents a thread
+   * that is stalled, waiting for a device-specific event.
+   */
+
+  FAR struct devif_callback_s *list;
 
   /* ICMPv6-specific content follows */
 
   uint16_t   id;       /* ICMPv6 ECHO request ID */
+  uint8_t    nreqs;    /* Number of requests with no response received */
   uint8_t    crefs;    /* Reference counts on this instance */
 
   /* The device that the ICMPv6 request was sent on */
@@ -99,7 +118,6 @@ struct icmpv6_conn_s
    */
 
   struct iob_queue_s readahead;  /* Read-ahead buffering */
-  struct icmp6_filter filter;    /* ICMP6 type filter */
 
   /* The following is a list of poll structures of threads waiting for
    * socket events.
@@ -107,11 +125,6 @@ struct icmpv6_conn_s
 
   struct icmpv6_poll_s pollinfo[CONFIG_NET_ICMPv6_NPOLLWAITERS];
 };
-
-/* Callback from icmpv6_foreach() */
-
-typedef CODE int (*icmpv6_callback_t)(FAR struct icmpv6_conn_s *conn,
-                                      FAR void *arg);
 #endif
 
 #ifdef CONFIG_NET_ICMPv6_NEIGHBOR
@@ -138,13 +151,6 @@ struct icmpv6_rnotify_s
 };
 #endif
 
-struct icmpv6_pmtu_entry
-{
-  net_ipv6addr_t daddr;
-  uint16_t pmtu;
-  clock_t time;
-};
-
 /****************************************************************************
  * Public Data
  ****************************************************************************/
@@ -166,26 +172,6 @@ EXTERN const struct sock_intf_s g_icmpv6_sockif;
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
-
-/****************************************************************************
- * Name: icmpv6_devinit
- *
- * Description:
- *   Called when a new network device is registered to configure that device
- *   for ICMPv6 support.
- *
- * Input Parameters:
- *   dev   - The device driver structure to configure.
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *   The network is locked.
- *
- ****************************************************************************/
-
-void icmpv6_devinit(FAR struct net_driver_s *dev);
 
 /****************************************************************************
  * Name: icmpv6_input
@@ -227,14 +213,11 @@ void icmpv6_input(FAR struct net_driver_s *dev, unsigned int iplen);
  *   ICMPv6 Neighbor Advertisement.
  *
  * Input Parameters:
- *   dev      The suggested device driver structure to do the solicitation,
- *            can be NULL for auto decision, must set for link-local ipaddr.
  *   ipaddr   The IPv6 address to be queried.
  *
  * Returned Value:
  *   Zero (OK) is returned on success and the IP address mapping can now be
- *   found in the Neighbor Table.
- *   On error a negated errno value is returned:
+ *   found in the Neighbor Table.  On error a negated errno value is returned:
  *
  *     -ETIMEDOUT:    The number or retry counts has been exceed.
  *     -EHOSTUNREACH: Could not find a route to the host
@@ -245,10 +228,9 @@ void icmpv6_input(FAR struct net_driver_s *dev, unsigned int iplen);
  ****************************************************************************/
 
 #ifdef CONFIG_NET_ICMPv6_NEIGHBOR
-int icmpv6_neighbor(FAR struct net_driver_s *dev,
-                    const net_ipv6addr_t ipaddr);
+int icmpv6_neighbor(const net_ipv6addr_t ipaddr);
 #else
-#  define icmpv6_neighbor(d,i) (0)
+#  define icmpv6_neighbor(i) (0)
 #endif
 
 /****************************************************************************
@@ -335,7 +317,6 @@ void icmpv6_rsolicit(FAR struct net_driver_s *dev);
  ****************************************************************************/
 
 void icmpv6_advertise(FAR struct net_driver_s *dev,
-                      const net_ipv6addr_t tgtaddr,
                       const net_ipv6addr_t destipaddr);
 
 /****************************************************************************
@@ -369,8 +350,8 @@ void icmpv6_radvertise(FAR struct net_driver_s *dev);
  *   is sent so that there is no race condition when icmpv6_wait() is called.
  *
  * Assumptions:
- *   This function is called from icmpv6_neighbor() and executes in the
- *   normal tasking environment.
+ *   This function is called from icmpv6_neighbor() and executes in the normal
+ *   tasking environment.
  *
  ****************************************************************************/
 
@@ -463,24 +444,6 @@ int icmpv6_autoconfig(FAR struct net_driver_s *dev);
 #endif
 
 /****************************************************************************
- * Name: icmpv6_setaddresses
- *
- * Description:
- *   We successfully obtained the Router Advertisement.  Set the new IPv6
- *   addresses in the driver structure.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_NET_ICMPv6_AUTOCONF
-void icmpv6_setaddresses(FAR struct net_driver_s *dev,
-                         const net_ipv6addr_t draddr,
-                         const net_ipv6addr_t prefix,
-                         unsigned int preflen);
-#else
-#  define icmpv6_setaddresses(dev,draddr,prefix,preflen) (0)
-#endif
-
-/****************************************************************************
  * Name: icmpv6_rwait_setup
  *
  * Description:
@@ -558,9 +521,23 @@ int icmpv6_rwait(FAR struct icmpv6_rnotify_s *notify, unsigned int timeout);
  ****************************************************************************/
 
 #ifdef CONFIG_NET_ICMPv6_AUTOCONF
-void icmpv6_rnotify(FAR struct net_driver_s *dev, int result);
+void icmpv6_rnotify(FAR struct net_driver_s *dev, const net_ipv6addr_t draddr,
+                    const net_ipv6addr_t prefix, unsigned int preflen);
 #else
-#  define icmpv6_rnotify(d,r) (0)
+#  define icmpv6_rnotify(d,p,l)
+#endif
+
+/****************************************************************************
+ * Name: icmpv6_sock_initialize
+ *
+ * Description:
+ *   Initialize the IPPROTO_ICMP socket connection structures.  Called once
+ *   and only from the network initialization layer.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_ICMPv6_SOCKET
+void icmpv6_sock_initialize(void);
 #endif
 
 /****************************************************************************
@@ -622,12 +599,11 @@ FAR struct icmpv6_conn_s *icmpv6_nextconn(FAR struct icmpv6_conn_s *conn);
 #endif
 
 /****************************************************************************
- * Name: icmpv6_foreach
+ * Name: icmpv6_findconn
  *
  * Description:
- *   Enumerate each ICMPv6 connection structure. This function will terminate
- *   when either (1) all connection have been enumerated or (2) when a
- *   callback returns any non-zero value.
+ *   Find an ICMPv6 connection structure that is expecting a ICMPv6 ECHO response
+ *   with this ID from this device
  *
  * Assumptions:
  *   This function is called from network logic at with the network locked.
@@ -635,14 +611,15 @@ FAR struct icmpv6_conn_s *icmpv6_nextconn(FAR struct icmpv6_conn_s *conn);
  ****************************************************************************/
 
 #ifdef CONFIG_NET_ICMPv6_SOCKET
-int icmpv6_foreach(icmpv6_callback_t callback, FAR void *arg);
+FAR struct icmpv6_conn_s *icmpv6_findconn(FAR struct net_driver_s *dev,
+                                          uint16_t id);
 #endif
 
 /****************************************************************************
- * Name: icmpv6_sendmsg
+ * Name: icmpv6_sendto
  *
  * Description:
- *   Implements the sendmsg() operation for the case of the IPPROTO_ICMP6
+ *   Implements the sendto() operation for the case of the IPPROTO_ICMP6
  *   socket.  The 'buf' parameter points to a block of memory that includes
  *   an ICMPv6 request header, followed by any payload that accompanies the
  *   request.  The 'len' parameter includes both the size of the ICMPv6
@@ -650,51 +627,58 @@ int icmpv6_foreach(icmpv6_callback_t callback, FAR void *arg);
  *
  * Input Parameters:
  *   psock    A pointer to a NuttX-specific, internal socket structure
- *   msg      Message to send
+ *   buf      Data to send
+ *   len      Length of data to send
  *   flags    Send flags
+ *   to       Address of recipient
+ *   tolen    The length of the address structure
  *
  * Returned Value:
- *   On success, returns the number of characters sent.  On error, a negated
- *   errno value is returned (see sendmsg() for the list of appropriate error
+ *   On success, returns the number of characters sent.  On  error, a negated
+ *   errno value is returned (see send_to() for the list of appropriate error
  *   values.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_NET_ICMPv6_SOCKET
-ssize_t icmpv6_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
-                       int flags);
+ssize_t icmpv6_sendto(FAR struct socket *psock, FAR const void *buf, size_t len,
+                      int flags, FAR const struct sockaddr *to, socklen_t tolen);
 #endif
 
 /****************************************************************************
- * Name: icmpv6_recvmsg
+ * Name: icmpv6_recvfrom
  *
  * Description:
- *   Implements the socket recvfrom interface for the case of the AF_INET
- *   data gram socket with the IPPROTO_ICMP6 protocol.  icmpv6_recvmsg()
- *   receives ICMPv6 message for the a socket.
+ *   Implements the socket recvfrom interface for the case of the AF_INET6
+ *   data gram socket with the IPPROTO_ICMP6 protocol.  icmpv6_recvfrom()
+ *   receives ICMPv6 ECHO replies for the a socket.
  *
- *   If msg_name is not NULL, and the underlying protocol provides the source
- *   address, this source address is filled in. The argument 'msg_namelen' is
- *   initialized to the size of the buffer associated with msg_name, and
+ *   If 'from' is not NULL, and the underlying protocol provides the source
+ *   address, this source address is filled in.  The argument 'fromlen' is
+ *   initialized to the size of the buffer associated with from, and
  *   modified on return to indicate the actual size of the address stored
  *   there.
  *
  * Input Parameters:
  *   psock    A pointer to a NuttX-specific, internal socket structure
- *   msg      Buffer to receive the message
+ *   buf      Buffer to receive data
+ *   len      Length of buffer
  *   flags    Receive flags
+ *   from     Address of source (may be NULL)
+ *   fromlen  The length of the address structure
  *
  * Returned Value:
- *   On success, returns the number of characters received. If no data is
+ *   On success, returns the number of characters received.  If no data is
  *   available to be received and the peer has performed an orderly shutdown,
- *   recvmsg() will return 0.  Otherwise, on errors, a negated errno value is
- *   returned (see recvmsg() for the list of appropriate error values).
+ *   recv() will return 0.  Otherwise, on errors, a negated errno value is
+ *   returned (see recvfrom() for the list of appropriate error values).
  *
  ****************************************************************************/
 
 #ifdef CONFIG_NET_ICMPv6_SOCKET
-ssize_t icmpv6_recvmsg(FAR struct socket *psock, FAR struct msghdr *msg,
-                       int flags);
+ssize_t icmpv6_recvfrom(FAR struct socket *psock, FAR void *buf, size_t len,
+                        int flags, FAR struct sockaddr *from,
+                        FAR socklen_t *fromlen);
 #endif
 
 /****************************************************************************
@@ -741,13 +725,13 @@ int icmpv6_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds);
  * Name: icmpv6_linkipaddr
  *
  * Description:
- *  Generate the device link scope ipv6 address as below:
- *  128  112  96   80    64   48   32   16
- *  ---- ---- ---- ----  ---- ---- ---- ----
- * fe80 0000 0000 0000 0000 00ff fe00 xx00 1-byte short addr IEEE 48-bit MAC
- * fe80 0000 0000 0000 0000 00ff fe00 xxxx 2-byte short addr IEEE 48-bit MAC
- * fe80 0000 0000 0000 xxxx xxff fexx xxxx 6-byte normal addr IEEE 48-bit MAC
- * fe80 0000 0000 0000 xxxx xxxx xxxx xxxx 8-byte extended addr IEEE EUI-64
+ *   Generate the device link scope ipv6 address as below:
+ *    128  112  96   80    64   48   32   16
+ *    ---- ---- ---- ----  ---- ---- ---- ----
+ *    fe80 0000 0000 0000  0000 00ff fe00 xx00 1-byte short address IEEE 48-bit MAC
+ *    fe80 0000 0000 0000  0000 00ff fe00 xxxx 2-byte short address IEEE 48-bit MAC
+ *    fe80 0000 0000 0000  xxxx xxff fexx xxxx 6-byte normal address IEEE 48-bit MAC
+ *    fe80 0000 0000 0000  xxxx xxxx xxxx xxxx 8-byte extended address IEEE EUI-64
  *
  * Input Parameters:
  *   dev    - The device driver structure containing the link layer address
@@ -759,82 +743,6 @@ int icmpv6_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds);
  ****************************************************************************/
 
 void icmpv6_linkipaddr(FAR struct net_driver_s *dev, net_ipv6addr_t ipaddr);
-
-/****************************************************************************
- * Name: icmpv6_reply
- *
- * Description:
- *   Send an ICMPv6 message in response to a situation
- *   RFC 1122: 3.2.2 MUST send at least the IP header and 8 bytes of header.
- *       MAY send more (we do).
- *       MUST NOT change this header information.
- *       MUST NOT reply to a multicast/broadcast IP address.
- *       MUST NOT reply to a multicast/broadcast MAC address.
- *       MUST reply to only the first fragment.
- *
- * Input Parameters:
- *   dev   - The device driver structure containing the received packet
- *   type  - ICMPv6 Message Type, eg. ICMPv6_DEST_UNREACHABLE
- *   code  - ICMPv6 Message Code, eg. ICMPv6_PORT_UNREACH
- *   data  - Additional 32-bit parameter in the ICMPv6 header
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-void icmpv6_reply(FAR struct net_driver_s *dev,
-                  int type, int code, int data);
-
-/****************************************************************************
- * Name: icmpv6_ioctl
- *
- * Description:
- *   This function performs icmp specific ioctl() operations.
- *
- * Parameters:
- *   conn     The ICMP connection of interest
- *   cmd      The ioctl command
- *   arg      The argument of the ioctl cmd
- *
- ****************************************************************************/
-
-#ifdef CONFIG_NET_ICMPv6_SOCKET
-int icmpv6_ioctl(FAR struct socket *psock, int cmd, unsigned long arg);
-#endif
-
-/****************************************************************************
- * Name: icmpv6_find_pmtu_entry
- *
- * Description:
- *   Search for a ipv6 pmtu entry
- *
- * Parameters:
- *   destipaddr   the IPv6 address of the destination
- *
- * Return:
- *   void
- ****************************************************************************/
-
-FAR struct icmpv6_pmtu_entry *
-icmpv6_find_pmtu_entry(net_ipv6addr_t destipaddr);
-
-/****************************************************************************
- * Name: icmpv6_add_pmtu_entry
- *
- * Description:
- *   Create a new ipv6 destination cache entry. If no unused entry is found,
- *   will recycle oldest entry
- *
- * Parameters:
- *   destipaddr   the IPv6 address of the destination
- *   mtu          MTU
- *
- * Return:
- *   void
- ****************************************************************************/
-
-void icmpv6_add_pmtu_entry(net_ipv6addr_t destipaddr, int mtu);
 
 #undef EXTERN
 #ifdef __cplusplus

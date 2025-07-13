@@ -1,9 +1,8 @@
 /****************************************************************************
- * include/sys/epoll.h
+ * fs/vfs/fs_epoll.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Anton D. Kachalov. All rights reserved.
- * SPDX-FileContributor: Anton D. Kachalov <mouse@mayc.ru>
+ *   Copyright (C) 2015 Anton D. Kachalov. All rights reserved.
+ *   Author: Anton D. Kachalov <mouse@mayc.ru>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,11 +40,7 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-#include <nuttx/compiler.h>
-
 #include <poll.h>
-#include <fcntl.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -79,72 +74,37 @@ enum EPOLL_EVENTS
 #define EPOLLERR EPOLLERR
     EPOLLHUP = POLLHUP,
 #define EPOLLHUP EPOLLHUP
-    EPOLLRDHUP = POLLRDHUP,
-#define EPOLLRDHUP EPOLLRDHUP
-    EPOLLWAKEUP = 1u << 29,
-#define EPOLLWAKEUP EPOLLWAKEUP
-    EPOLLONESHOT = 1u << 30,
-#define EPOLLONESHOT EPOLLONESHOT
-    EPOLLET = 1u << 31,
-#define EPOLLET EPOLLET
   };
 
-/* Flags to be passed to epoll_create1.  */
-
-enum
+typedef union poll_data
 {
-  EPOLL_CLOEXEC = O_CLOEXEC
-#define EPOLL_CLOEXEC EPOLL_CLOEXEC
-};
-
-union epoll_data
-{
-  FAR void    *ptr;
-  int          fd;
-  uint32_t     u32;
-#ifdef CONFIG_HAVE_LONG_LONG
-  uint64_t     u64;
-#endif
-};
-
-typedef union epoll_data epoll_data_t;
+  int          fd;       /* The descriptor being polled */
+} epoll_data_t;
 
 struct epoll_event
 {
-  uint32_t     events;
   epoll_data_t data;
+  FAR sem_t   *sem;      /* Pointer to semaphore used to post output event */
+  pollevent_t  events;   /* The input event flags */
+  pollevent_t  revents;  /* The output event flags */
+  FAR void    *priv;     /* For use by drivers */
 };
 
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-#undef EXTERN
-#if defined(__cplusplus)
-#define EXTERN extern "C"
-extern "C"
+struct epoll_head
 {
-#else
-#define EXTERN extern
-#endif
+  int size;
+  int occupied;
+  FAR struct epoll_event *evs;
+};
 
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
 
 int epoll_create(int size);
-int epoll_create1(int flags);
-int epoll_ctl(int epfd, int op, int fd, FAR struct epoll_event *ev);
-int epoll_wait(int epfd, FAR struct epoll_event *evs,
-               int maxevents, int timeout);
-int epoll_pwait(int epfd, FAR struct epoll_event *evs,
-                int maxevents, int timeout, FAR const sigset_t *sigmask);
+int epoll_ctl(int epfd, int op, int fd, struct epoll_event *ev);
+int epoll_wait(int epfd, struct epoll_event *evs, int maxevents, int timeout);
 
 void epoll_close(int epfd);
-
-#undef EXTERN
-#if defined(__cplusplus)
-}
-#endif
 
 #endif /* __INCLUDE_SYS_EPOLL_H */

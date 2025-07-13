@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/stm32h7/stm32_wwdg.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2016, 2020 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
 #include <nuttx/arch.h>
 
 #include <stdint.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -36,7 +48,7 @@
 #include <nuttx/timers/watchdog.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "stm32_wdg.h"
 
 #if defined(CONFIG_WATCHDOG) && defined(CONFIG_STM32H7_WWDG)
@@ -85,13 +97,13 @@
 
 struct stm32_lowerhalf_s
 {
-  const struct watchdog_ops_s  *ops;  /* Lower half operations */
-  xcpt_t   handler;                   /* Current EWI interrupt handler */
-  uint32_t timeout;                   /* The actual timeout value */
-  uint32_t fwwdg;                     /* WWDG clock frequency */
-  bool     started;                   /* The timer has been started */
-  uint8_t  reload;                    /* The 7-bit reload field reset value */
-  uint8_t  window;                    /* The 7-bit window (W) field value */
+  FAR const struct watchdog_ops_s  *ops;  /* Lower half operations */
+  xcpt_t   handler;  /* Current EWI interrupt handler */
+  uint32_t timeout;  /* The actual timeout value */
+  uint32_t fwwdg;    /* WWDG clock frequency */
+  bool     started;  /* The timer has been started */
+  uint8_t  reload;   /* The 7-bit reload field reset value */
+  uint8_t  window;   /* The 7-bit window (W) field value */
 };
 
 /****************************************************************************
@@ -104,28 +116,28 @@ struct stm32_lowerhalf_s
 static uint16_t stm32_getreg(uint32_t addr);
 static void     stm32_putreg(uint16_t val, uint32_t addr);
 #else
-#  define       stm32_getreg(addr)     getreg32(addr)
-#  define       stm32_putreg(val,addr) putreg32(val,addr)
+# define        stm32_getreg(addr)     getreg32(addr)
+# define        stm32_putreg(val,addr) putreg32(val,addr)
 #endif
-static void     stm32_setwindow(struct stm32_lowerhalf_s *priv,
+static void     stm32_setwindow(FAR struct stm32_lowerhalf_s *priv,
                   uint8_t window);
 
-/* Interrupt handling *******************************************************/
+/* Interrupt hanlding *******************************************************/
 
-static int      stm32_interrupt(int irq, void *context, void *arg);
+static int      stm32_interrupt(int irq, FAR void *context, FAR void *arg);
 
 /* "Lower half" driver methods **********************************************/
 
-static int      stm32_start(struct watchdog_lowerhalf_s *lower);
-static int      stm32_stop(struct watchdog_lowerhalf_s *lower);
-static int      stm32_keepalive(struct watchdog_lowerhalf_s *lower);
-static int      stm32_getstatus(struct watchdog_lowerhalf_s *lower,
-                  struct watchdog_status_s *status);
-static int      stm32_settimeout(struct watchdog_lowerhalf_s *lower,
+static int      stm32_start(FAR struct watchdog_lowerhalf_s *lower);
+static int      stm32_stop(FAR struct watchdog_lowerhalf_s *lower);
+static int      stm32_keepalive(FAR struct watchdog_lowerhalf_s *lower);
+static int      stm32_getstatus(FAR struct watchdog_lowerhalf_s *lower,
+                  FAR struct watchdog_status_s *status);
+static int      stm32_settimeout(FAR struct watchdog_lowerhalf_s *lower,
                   uint32_t timeout);
-static xcpt_t   stm32_capture(struct watchdog_lowerhalf_s *lower,
+static xcpt_t   stm32_capture(FAR struct watchdog_lowerhalf_s *lower,
                   xcpt_t handler);
-static int      stm32_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
+static int      stm32_ioctl(FAR struct watchdog_lowerhalf_s *lower, int cmd,
                   unsigned long arg);
 
 /****************************************************************************
@@ -248,8 +260,7 @@ static void stm32_putreg(uint16_t val, uint32_t addr)
  *
  ****************************************************************************/
 
-static void stm32_setwindow(struct stm32_lowerhalf_s *priv,
-                            uint8_t window)
+static void stm32_setwindow(FAR struct stm32_lowerhalf_s *priv, uint8_t window)
 {
   uint16_t regval;
 
@@ -279,9 +290,9 @@ static void stm32_setwindow(struct stm32_lowerhalf_s *priv,
  *
  ****************************************************************************/
 
-static int stm32_interrupt(int irq, void *context, void *arg)
+static int stm32_interrupt(int irq, FAR void *context, FAR void *arg)
 {
-  struct stm32_lowerhalf_s *priv = &g_wdgdev;
+  FAR struct stm32_lowerhalf_s *priv = &g_wdgdev;
   uint16_t regval;
 
   /* Check if the EWI interrupt is really pending */
@@ -327,9 +338,9 @@ static int stm32_interrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-static int stm32_start(struct watchdog_lowerhalf_s *lower)
+static int stm32_start(FAR struct watchdog_lowerhalf_s *lower)
 {
-  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
+  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
 
   wdinfo("Entry\n");
   DEBUGASSERT(priv);
@@ -359,7 +370,7 @@ static int stm32_start(struct watchdog_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int stm32_stop(struct watchdog_lowerhalf_s *lower)
+static int stm32_stop(FAR struct watchdog_lowerhalf_s *lower)
 {
   /* The watchdog is always disabled after a reset. It is enabled by setting
    * the WDGA bit in the WWDG_CR register, then it cannot be disabled again
@@ -393,9 +404,9 @@ static int stm32_stop(struct watchdog_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int stm32_keepalive(struct watchdog_lowerhalf_s *lower)
+static int stm32_keepalive(FAR struct watchdog_lowerhalf_s *lower)
 {
-  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
+  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
 
   wdinfo("Entry\n");
   DEBUGASSERT(priv);
@@ -424,10 +435,10 @@ static int stm32_keepalive(struct watchdog_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int stm32_getstatus(struct watchdog_lowerhalf_s *lower,
-                           struct watchdog_status_s *status)
+static int stm32_getstatus(FAR struct watchdog_lowerhalf_s *lower,
+                           FAR struct watchdog_status_s *status)
 {
-  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
+  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
   uint32_t elapsed;
   uint16_t reload;
 
@@ -480,10 +491,10 @@ static int stm32_getstatus(struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static int stm32_settimeout(struct watchdog_lowerhalf_s *lower,
+static int stm32_settimeout(FAR struct watchdog_lowerhalf_s *lower,
                             uint32_t timeout)
 {
-  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
+  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
   uint32_t fwwdg;
   uint32_t reload;
   uint16_t regval;
@@ -532,7 +543,7 @@ static int stm32_settimeout(struct watchdog_lowerhalf_s *lower,
        * reload = timeout * Fwwdg / 1000 - 1
        *
        * Where
-       *  timeout is the desired timeout in milliseconds
+       *  timeout is the desired timout in milliseconds
        *  reload is the contents of T{5:0]
        *  Fwwdg is the frequency of the WWDG clock
        */
@@ -545,7 +556,7 @@ static int stm32_settimeout(struct watchdog_lowerhalf_s *lower,
        */
 
 #if 0
-      wdinfo("wdgtb=%d fwwdg=%d reload=%d timeout=%d\n",
+      wdinfo("wdgtb=%d fwwdg=%d reload=%d timout=%d\n",
              wdgtb, fwwdg, reload,  1000 * (reload + 1) / fwwdg);
 #endif
       if (reload <= WWDG_CR_T_MAX || wdgtb == 3)
@@ -578,7 +589,7 @@ static int stm32_settimeout(struct watchdog_lowerhalf_s *lower,
   priv->fwwdg  = fwwdg;
   priv->reload = reload;
 
-  wdinfo("wdgtb=%d fwwdg=%d reload=%d timeout=%d\n",
+  wdinfo("wdgtb=%d fwwdg=%d reload=%d timout=%d\n",
          wdgtb, fwwdg, reload, priv->timeout);
 
   /* Set WDGTB[1:0] bits according to calculated value */
@@ -618,10 +629,10 @@ static int stm32_settimeout(struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static xcpt_t stm32_capture(struct watchdog_lowerhalf_s *lower,
+static xcpt_t stm32_capture(FAR struct watchdog_lowerhalf_s *lower,
                             xcpt_t handler)
 {
-  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
+  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
   irqstate_t flags;
   xcpt_t oldhandler;
   uint16_t regval;
@@ -684,10 +695,10 @@ static xcpt_t stm32_capture(struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static int stm32_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
+static int stm32_ioctl(FAR struct watchdog_lowerhalf_s *lower, int cmd,
                     unsigned long arg)
 {
-  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
+  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
   int ret = -ENOTTY;
 
   DEBUGASSERT(priv);
@@ -709,8 +720,7 @@ static int stm32_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
       ret = -EINVAL;
       if (mintime < priv->timeout)
         {
-          uint32_t window = (priv->timeout - mintime) *
-                             priv->fwwdg / 1000 - 1;
+          uint32_t window = (priv->timeout - mintime) * priv->fwwdg / 1000 - 1;
           DEBUGASSERT(window < priv->reload);
           stm32_setwindow(priv, window | WWDG_CR_T_RESET);
           ret = OK;
@@ -741,9 +751,9 @@ static int stm32_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
  *
  ****************************************************************************/
 
-void stm32_wwdginitialize(const char *devpath)
+void stm32_wwdginitialize(FAR const char *devpath)
 {
-  struct stm32_lowerhalf_s *priv = &g_wdgdev;
+  FAR struct stm32_lowerhalf_s *priv = &g_wdgdev;
 
   wdinfo("Entry: devpath=%s\n", devpath);
 
@@ -767,12 +777,12 @@ void stm32_wwdginitialize(const char *devpath)
    * device option bits, the watchdog is automatically enabled at power-on.
    */
 
-  stm32_settimeout((struct watchdog_lowerhalf_s *)priv,
+  stm32_settimeout((FAR struct watchdog_lowerhalf_s *)priv,
                    CONFIG_STM32H7_WWDG_DEFTIMOUT);
 
   /* Register the watchdog driver as /dev/watchdog0 */
 
-  watchdog_register(devpath, (struct watchdog_lowerhalf_s *)priv);
+  watchdog_register(devpath, (FAR struct watchdog_lowerhalf_s *)priv);
 
   /* When the microcontroller enters debug mode (Cortex-M core halted),
    * the WWDG counter either continues to work normally or stops, depending

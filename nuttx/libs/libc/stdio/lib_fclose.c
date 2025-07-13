@@ -1,22 +1,35 @@
 /****************************************************************************
  * libs/libc/stdio/lib_fclose.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2011, 2013, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,10 +44,6 @@
 #include <fcntl.h>
 #include <string.h>
 #include <errno.h>
-
-#ifdef CONFIG_FDSAN
-#  include <android/fdsan.h>
-#endif
 
 #include "libc.h"
 
@@ -60,7 +69,6 @@
 
 int fclose(FAR FILE *stream)
 {
-  FAR struct streamlist *slist;
   int errcode = EINVAL;
   int ret = ERROR;
   int status;
@@ -69,65 +77,40 @@ int fclose(FAR FILE *stream)
 
   if (stream)
     {
-      ret = OK;
-
-      /* If the stream was opened for writing, then flush the stream */
-
-      if ((stream->fs_oflags & O_WROK) != 0)
-        {
-          ret = lib_fflush(stream);
-          errcode = get_errno();
-        }
-
-      /* Skip close the builtin streams(stdin, stdout and stderr) */
-
-      if (stream == stdin || stream == stdout || stream == stderr)
-        {
-          goto done;
-        }
-
-      /* Remove FILE structure from the stream list */
-
-      slist = lib_get_streams();
-      nxmutex_lock(&slist->sl_lock);
-
-      sq_rem(&stream->fs_entry, &slist->sl_queue);
-
-      nxmutex_unlock(&slist->sl_lock);
-
-      /* Call user custom callback if it is not NULL. */
-
-      if (stream->fs_iofunc.close != NULL)
-        {
-          status = stream->fs_iofunc.close(stream->fs_cookie);
-        }
-      else
-        {
-          int fd = (int)(intptr_t)stream->fs_cookie;
-#ifdef CONFIG_FDSAN
-          uint64_t tag;
-          tag = android_fdsan_create_owner_tag(ANDROID_FDSAN_OWNER_TYPE_FILE,
-                                               (uintptr_t)stream);
-          status = android_fdsan_close_with_tag(fd, tag);
-#else
-          status = close(fd);
-#endif
-        }
-
-      /* If close() returns an error but flush() did not then make sure
-       * that we return the close() error condition.
+      /* Check that the underlying file descriptor corresponds to an an open
+       * file.
        */
 
-      if (ret == OK)
+      ret = OK;
+      if (stream->fs_fd >= 0)
         {
-          ret = status;
-          errcode = get_errno();
+          /* If the stream was opened for writing, then flush the stream */
+
+          if ((stream->fs_oflags & O_WROK) != 0)
+            {
+              ret = lib_fflush(stream, true);
+              errcode = get_errno();
+            }
+
+          /* Close the underlying file descriptor and save the return status */
+
+          status = close(stream->fs_fd);
+
+          /* If close() returns an error but flush() did not then make sure
+           * that we return the close() error condition.
+           */
+
+          if (ret == OK)
+            {
+              ret = status;
+              errcode = get_errno();
+            }
         }
 
 #ifndef CONFIG_STDIO_DISABLE_BUFFERING
-      /* Destroy the mutex */
+      /* Destroy the semaphore */
 
-      nxrmutex_destroy(&stream->fs_lock);
+      sem_destroy(&stream->fs_sem);
 
       /* Release the buffer */
 
@@ -136,12 +119,27 @@ int fclose(FAR FILE *stream)
         {
           lib_free(stream->fs_bufstart);
         }
+
+      /* Clear the whole structure */
+
+      memset(stream, 0, sizeof(FILE));
+
+#else
+#if CONFIG_NUNGET_CHARS > 0
+      /* Reset the number of ungetc characters */
+
+      stream->fs_nungotten = 0;
+#endif
+      /* Reset the flags */
+
+      stream->fs_oflags = 0;
 #endif
 
-      lib_free(stream);
+      /* Setting the file descriptor to -1 makes the stream available for reuse */
+
+      stream->fs_fd = -1;
     }
 
-done:
   /* On an error, reset the errno to the first error encountered and return
    * EOF.
    */

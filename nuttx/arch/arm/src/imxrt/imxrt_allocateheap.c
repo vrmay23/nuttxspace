@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/imxrt/imxrt_allocateheap.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -38,8 +51,9 @@
 
 #include <arch/imxrt/chip.h>
 
-#include "mpu.h"
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "hardware/imxrt_memorymap.h"
 #include "imxrt_mpuinit.h"
 
@@ -94,13 +108,6 @@
  * SOC with 1MiB
  *    IMXRT_OCRAM2_BASE          0x20200000     512KB OCRAM2
  *    IMXRT_OCRAM_BASE           0x20280000     512KB OCRAM FlexRAM
- *
- * SOC with 2MiB
- *    IMXRT_OCRAM_BASE           0x20240000     512KB OCRAM1
- *    IMXRT_OCRAM2_BASE          0x202c0000     512KB OCRAM2
- *    IMXRT_CM7_TCM_BASE         0x20380000     512KB M7 TCM FlexRAM
- *    IMXRT_CM4_TCM_BASE         0x20200000     256KB M4 TCM FlexRAM
- *    TODO ECC
  */
 
 /* There there then several memory configurations with a one primary memory
@@ -129,9 +136,7 @@
  * The pieces of the OCRAM used for DTCM and ITCM DTCM and ITCM memory spaces
  */
 
-#if defined(CONFIG_ARCH_FAMILY_IMXRT117x)
-# define _IMXRT_OCRAM_BASE IMXRT_OCRAM_BASE
-#elif defined(IMXRT_OCRAM2_BASE)
+#if defined(IMXRT_OCRAM2_BASE)
 # define _IMXRT_OCRAM_BASE IMXRT_OCRAM2_BASE
 #else
 # define _IMXRT_OCRAM_BASE IMXRT_OCRAM_BASE
@@ -157,13 +162,6 @@
 #  define CONFIG_DTCM_USED (CONFIG_IMXRT_DTCM * 1024)
 #else
 #  define IMXRT_DTCM 0
-#endif
-
-#ifndef IMXRT_OCRAM_SIZE
-
-extern  const uint32_t  _ram_size[];  /* See linker script */
-
-#  define IMXRT_OCRAM_SIZE             ((uint32_t)_ram_size)
 #endif
 
 #define FLEXRAM_REMAINING_K ((IMXRT_OCRAM_SIZE / 1024) - (CONFIG_IMXRT_DTCM + CONFIG_IMXRT_DTCM))
@@ -267,8 +265,7 @@ extern  const uint32_t  _ram_size[];  /* See linker script */
  * aligned).
  */
 
-const uintptr_t g_idle_topstack = (uintptr_t)&_ebss +
-                                  CONFIG_IDLETHREAD_STACKSIZE;
+const uintptr_t g_idle_topstack = (uintptr_t)&_ebss + CONFIG_IDLETHREAD_STACKSIZE;
 
 /****************************************************************************
  * Public Functions
@@ -303,8 +300,7 @@ const uintptr_t g_idle_topstack = (uintptr_t)&_ebss +
  *
  *     Kernel .data region.  Size determined at link time.
  *     Kernel .bss  region  Size determined at link time.
- *     Kernel IDLE thread stack. (size determined by
- *     CONFIG_IDLETHREAD_STACKSIZE).
+ *     Kernel IDLE thread stack.  Size determined by CONFIG_IDLETHREAD_STACKSIZE.
  *     Padding for alignment
  *     User .data region.  Size determined at link time.
  *     User .bss region  Size determined at link time.
@@ -314,9 +310,9 @@ const uintptr_t g_idle_topstack = (uintptr_t)&_ebss +
  ****************************************************************************/
 
 #ifdef CONFIG_BUILD_KERNEL
-void up_allocate_kheap(void **heap_start, size_t *heap_size)
+void up_allocate_kheap(FAR void **heap_start, size_t *heap_size)
 #else
-void up_allocate_heap(void **heap_start, size_t *heap_size)
+void up_allocate_heap(FAR void **heap_start, size_t *heap_size)
 #endif
 {
 #if defined(CONFIG_BUILD_PROTECTED) && defined(CONFIG_MM_KERNEL_HEAP)
@@ -325,39 +321,22 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
    * of CONFIG_MM_KERNEL_HEAPSIZE (subject to alignment).
    */
 
-  uintptr_t ubase = (uintptr_t)USERSPACE->us_bssend +
-                     CONFIG_MM_KERNEL_HEAPSIZE;
+  uintptr_t ubase = (uintptr_t)USERSPACE->us_bssend + CONFIG_MM_KERNEL_HEAPSIZE;
   size_t    usize = PRIMARY_RAM_END - ubase;
-  int       log2;
 
   DEBUGASSERT(ubase < (uintptr_t)PRIMARY_RAM_END);
-
-  /* Adjust that size to account for MPU alignment requirements.
-   * NOTE that there is an implicit assumption that the PRIMARY_RAM_END
-   * is aligned to the MPU requirement.
-   */
-
-  log2  = (int)mpu_log2regionfloor(usize);
-  DEBUGASSERT((PRIMARY_RAM_END & ((1 << log2) - 1)) == 0);
-
-  usize = (1 << log2);
-  ubase = PRIMARY_RAM_END - usize;
 
   /* Return the user-space heap settings */
 
   board_autoled_on(LED_HEAPALLOCATE);
-  *heap_start = (void *)ubase;
+  *heap_start = (FAR void *)ubase;
   *heap_size  = usize;
-
-  /* Allow user-mode access to the user heap memory */
-
-  imxrt_mpu_uheap((uintptr_t)ubase, usize);
 #else
 
   /* Return the heap settings */
 
   board_autoled_on(LED_HEAPALLOCATE);
-  *heap_start = (void *)g_idle_topstack;
+  *heap_start = (FAR void *)g_idle_topstack;
   *heap_size  = PRIMARY_RAM_END - g_idle_topstack;
 #endif
 }
@@ -374,41 +353,27 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
  ****************************************************************************/
 
 #if defined(CONFIG_BUILD_PROTECTED) && defined(CONFIG_MM_KERNEL_HEAP)
-void up_allocate_kheap(void **heap_start, size_t *heap_size)
+void up_allocate_kheap(FAR void **heap_start, size_t *heap_size)
 {
   /* Get the unaligned size and position of the user-space heap.
    * This heap begins after the user-space .bss section at an offset
    * of CONFIG_MM_KERNEL_HEAPSIZE (subject to alignment).
    */
 
-  uintptr_t ubase = (uintptr_t)USERSPACE->us_bssend +
-                    CONFIG_MM_KERNEL_HEAPSIZE;
-  size_t    usize = PRIMARY_RAM_END - ubase;
-  int       log2;
+  uintptr_t ubase = (uintptr_t)USERSPACE->us_bssend + CONFIG_MM_KERNEL_HEAPSIZE;
   DEBUGASSERT(ubase < (uintptr_t)PRIMARY_RAM_END);
-
-  /* Adjust that size to account for MPU alignment requirements.
-   * NOTE that there is an implicit assumption that the CONFIG_RAM_END
-   * is aligned to the MPU requirement.
-   */
-
-  log2  = (int)mpu_log2regionfloor(usize);
-  DEBUGASSERT((PRIMARY_RAM_END & ((1 << log2) - 1)) == 0);
-
-  usize = (1 << log2);
-  ubase = PRIMARY_RAM_END - usize;
 
   /* Return the kernel heap settings (i.e., the part of the heap region
    * that was not dedicated to the user heap).
    */
 
-  *heap_start = (void *)USERSPACE->us_bssend;
+  *heap_start = (FAR void *)USERSPACE->us_bssend;
   *heap_size  = ubase - (uintptr_t)USERSPACE->us_bssend;
 }
 #endif
 
 /****************************************************************************
- * Name: arm_addregion
+ * Name: up_addregion
  *
  * Description:
  *   Memory may be added in non-contiguous chunks.  Additional chunks are
@@ -417,11 +382,11 @@ void up_allocate_kheap(void **heap_start, size_t *heap_size)
  ****************************************************************************/
 
 #if CONFIG_MM_REGIONS > 1
-void arm_addregion(void)
+void up_addregion(void)
 {
   /* Add region 1 to the user heap */
 
-  kumm_addregion((void *)REGION1_RAM_START, REGION1_RAM_SIZE);
+  kumm_addregion((FAR void *)REGION1_RAM_START, REGION1_RAM_SIZE);
 
 #if defined(CONFIG_BUILD_PROTECTED) && defined(CONFIG_MM_KERNEL_HEAP)
   /* Allow user-mode access to region 1 */
@@ -432,7 +397,7 @@ void arm_addregion(void)
 #if CONFIG_MM_REGIONS > 2
   /* Add region 2 to the user heap */
 
-  kumm_addregion((void *)REGION2_RAM_START, REGION2_RAM_SIZE);
+  kumm_addregion((FAR void *)REGION2_RAM_START, REGION2_RAM_SIZE);
 
 #if defined(CONFIG_BUILD_PROTECTED) && defined(CONFIG_MM_KERNEL_HEAP)
   /* Allow user-mode access to region 2 */

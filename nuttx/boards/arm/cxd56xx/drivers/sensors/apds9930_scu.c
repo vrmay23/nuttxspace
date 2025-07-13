@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/cxd56xx/drivers/sensors/apds9930_scu.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +42,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fixedmath.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <arch/types.h>
@@ -134,18 +146,20 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
-/* Structure for apds9930 device */
+/**
+ * @brief Structure for apds9930 device
+ */
 
 struct apds9930_dev_s
 {
-  struct i2c_master_s *i2c; /* I2C interface */
-  uint8_t addr;             /* I2C address */
-  int port;                 /* I2C port */
-  struct seq_s *seq;        /* Sequencer instance */
-  int minor;                /* Minor device number */
+  FAR struct i2c_master_s *i2c; /* I2C interface */
+  uint8_t addr;                 /* I2C address */
+  int port;                     /* I2C port */
+  struct seq_s *seq;            /* Sequencer instance */
+  int minor;                    /* Minor device number */
 };
 
 /****************************************************************************
@@ -154,19 +168,19 @@ struct apds9930_dev_s
 
 /* Character driver methods */
 
-static int apds9930_open_als(struct file *filep);
-static int apds9930_open_ps(struct file *filep);
-static int apds9930_close_als(struct file *filep);
-static int apds9930_close_ps(struct file *filep);
-static ssize_t apds9930_read_als(struct file *filep, char *buffer,
+static int apds9930_open_als(FAR struct file *filep);
+static int apds9930_open_ps(FAR struct file *filep);
+static int apds9930_close_als(FAR struct file *filep);
+static int apds9930_close_ps(FAR struct file *filep);
+static ssize_t apds9930_read_als(FAR struct file *filep, FAR char *buffer,
                                  size_t buflen);
-static ssize_t apds9930_read_ps(struct file *filep, char *buffer,
+static ssize_t apds9930_read_ps(FAR struct file *filep, FAR char *buffer,
                                 size_t buflen);
-static ssize_t apds9930_write(struct file *filep, const char *buffer,
+static ssize_t apds9930_write(FAR struct file *filep, FAR const char *buffer,
                               size_t buflen);
-static int apds9930_ioctl_als(struct file *filep, int cmd,
+static int apds9930_ioctl_als(FAR struct file *filep, int cmd,
                               unsigned long arg);
-static int apds9930_ioctl_ps(struct file *filep, int cmd,
+static int apds9930_ioctl_ps(FAR struct file *filep, int cmd,
                              unsigned long arg);
 
 /****************************************************************************
@@ -181,8 +195,12 @@ static const struct file_operations g_apds9930alsfops =
   apds9930_close_als,          /* close */
   apds9930_read_als,           /* read */
   apds9930_write,              /* write */
-  NULL,                        /* seek */
+  0,                           /* seek */
   apds9930_ioctl_als,          /* ioctl */
+#ifndef CONFIG_DISABLE_POLL
+  0,                           /* poll */
+#endif
+  0                            /* unlink */
 };
 
 /* Proximity sensor */
@@ -193,8 +211,12 @@ static const struct file_operations g_apds9930psfops =
   apds9930_close_ps,           /* close */
   apds9930_read_ps,            /* read */
   apds9930_write,              /* write */
-  NULL,                        /* seek */
+  0,                           /* seek */
   apds9930_ioctl_ps,           /* ioctl */
+#ifndef CONFIG_DISABLE_POLL
+  0,                           /* poll */
+#endif
+  0                            /* unlink */
 };
 
 /* SCU instructions for pick ambient light sensing data. */
@@ -249,7 +271,7 @@ static uint8_t g_ps_persistence = APDS9930_PERS_PS_DEFAULT << 4;
  *
  ****************************************************************************/
 
-static uint8_t apds9930_getreg8(struct apds9930_dev_s *priv,
+static uint8_t apds9930_getreg8(FAR struct apds9930_dev_s *priv,
                                 uint8_t regaddr)
 {
   uint8_t regval = 0;
@@ -273,7 +295,7 @@ static uint8_t apds9930_getreg8(struct apds9930_dev_s *priv,
  *
  ****************************************************************************/
 
-static void apds9930_putreg8(struct apds9930_dev_s *priv,
+static void apds9930_putreg8(FAR struct apds9930_dev_s *priv,
                              uint8_t regaddr, uint8_t regval)
 {
   uint16_t inst[2];
@@ -295,7 +317,7 @@ static void apds9930_putreg8(struct apds9930_dev_s *priv,
  *
  ****************************************************************************/
 
-static uint16_t apds9930_getreg16(struct apds9930_dev_s *priv,
+static uint16_t apds9930_getreg16(FAR struct apds9930_dev_s *priv,
                                   uint8_t regaddr)
 {
   uint16_t regval = 0;
@@ -306,12 +328,7 @@ static uint16_t apds9930_getreg16(struct apds9930_dev_s *priv,
   inst[0] = SCU_INST_SEND(APDS9930_CMD_TYPE_AUTOINC | regaddr);
   inst[1] = SCU_INST_RECV(2) | SCU_INST_LAST;
 
-  scu_i2ctransfer(priv->port,
-                  priv->addr,
-                  inst,
-                  2,
-                 (uint8_t *)&regval,
-                  2);
+  scu_i2ctransfer(priv->port, priv->addr, inst, 2, (FAR uint8_t *)&regval, 2);
 
   return regval;
 }
@@ -324,7 +341,7 @@ static uint16_t apds9930_getreg16(struct apds9930_dev_s *priv,
  *
  ****************************************************************************/
 
-static void apds9930_putreg16(struct apds9930_dev_s *priv,
+static void apds9930_putreg16(FAR struct apds9930_dev_s *priv,
                               uint8_t regaddr, uint16_t regval)
 {
   uint16_t inst[3];
@@ -346,7 +363,7 @@ static void apds9930_putreg16(struct apds9930_dev_s *priv,
  *
  ****************************************************************************/
 
-static void apds9930_intclr(struct apds9930_dev_s *priv)
+static void apds9930_intclr(FAR struct apds9930_dev_s *priv)
 {
   uint16_t inst = SCU_INST_SEND(APDS9930_CMD_TYPE_PSINTCLR) | SCU_INST_LAST;
 
@@ -364,7 +381,7 @@ static void apds9930_intclr(struct apds9930_dev_s *priv)
  *
  ****************************************************************************/
 
-static int apds9930_checkid(struct apds9930_dev_s *priv)
+static int apds9930_checkid(FAR struct apds9930_dev_s *priv)
 {
   uint8_t id;
 
@@ -391,7 +408,7 @@ static int apds9930_checkid(struct apds9930_dev_s *priv)
  *
  ****************************************************************************/
 
-static void apds9930_setenable(struct apds9930_dev_s *priv,
+static void apds9930_setenable(FAR struct apds9930_dev_s *priv,
                                uint8_t type, bool enable)
 {
   uint8_t val;
@@ -468,7 +485,7 @@ static void apds9930_setenable(struct apds9930_dev_s *priv,
  *
  ****************************************************************************/
 
-static int apds9930als_seqinit(struct apds9930_dev_s *priv)
+static int apds9930als_seqinit(FAR struct apds9930_dev_s *priv)
 {
   DEBUGASSERT(g_als_seq == NULL);
 
@@ -486,13 +503,8 @@ static int apds9930als_seqinit(struct apds9930_dev_s *priv)
 
   /* Set instruction and sample data information to sequencer */
 
-  seq_setinstruction(priv->seq,
-                     g_apds9930alsinst,
-                     itemsof(g_apds9930alsinst));
-  seq_setsample(priv->seq,
-                APDS9930_ALS_BYTESPERSAMPLE,
-                0,
-                APDS9930_ELEMENTSIZE,
+  seq_setinstruction(priv->seq, g_apds9930alsinst, itemsof(g_apds9930alsinst));
+  seq_setsample(priv->seq, APDS9930_ALS_BYTESPERSAMPLE, 0, APDS9930_ELEMENTSIZE,
                 false);
 
   return OK;
@@ -507,7 +519,7 @@ static int apds9930als_seqinit(struct apds9930_dev_s *priv)
  *
  ****************************************************************************/
 
-static int apds9930ps_seqinit(struct apds9930_dev_s *priv)
+static int apds9930ps_seqinit(FAR struct apds9930_dev_s *priv)
 {
   DEBUGASSERT(g_ps_seq == NULL);
 
@@ -525,13 +537,8 @@ static int apds9930ps_seqinit(struct apds9930_dev_s *priv)
 
   /* Set instruction and sample data information to sequencer */
 
-  seq_setinstruction(priv->seq,
-                     g_apds9930psinst,
-                     itemsof(g_apds9930psinst));
-  seq_setsample(priv->seq,
-                APDS9930_PS_BYTESPERSAMPLE,
-                0,
-                APDS9930_ELEMENTSIZE,
+  seq_setinstruction(priv->seq, g_apds9930psinst, itemsof(g_apds9930psinst));
+  seq_setsample(priv->seq, APDS9930_PS_BYTESPERSAMPLE, 0, APDS9930_ELEMENTSIZE,
                 false);
 
   return OK;
@@ -546,10 +553,10 @@ static int apds9930ps_seqinit(struct apds9930_dev_s *priv)
  *
  ****************************************************************************/
 
-static int apds9930_open_als(struct file *filep)
+static int apds9930_open_als(FAR struct file *filep)
 {
-  struct inode *inode = filep->f_inode;
-  struct apds9930_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct apds9930_dev_s *priv = inode->i_private;
 
   if (g_als_refcnt == 0)
     {
@@ -583,11 +590,11 @@ static int apds9930_open_als(struct file *filep)
  *
  ****************************************************************************/
 
-static int apds9930_open_ps(struct file *filep)
+static int apds9930_open_ps(FAR struct file *filep)
 {
 #ifndef CONFIG_SENSORS_APDS9930_PROXIMITY_INTERRUPT
-  struct inode *inode = filep->f_inode;
-  struct apds9930_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct apds9930_dev_s *priv = inode->i_private;
 
   if (g_ps_refcnt == 0)
     {
@@ -622,10 +629,10 @@ static int apds9930_open_ps(struct file *filep)
  *
  ****************************************************************************/
 
-static int apds9930_close_als(struct file *filep)
+static int apds9930_close_als(FAR struct file *filep)
 {
-  struct inode *inode = filep->f_inode;
-  struct apds9930_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct apds9930_dev_s *priv = inode->i_private;
 
   g_als_refcnt--;
 
@@ -654,11 +661,11 @@ static int apds9930_close_als(struct file *filep)
  *
  ****************************************************************************/
 
-static int apds9930_close_ps(struct file *filep)
+static int apds9930_close_ps(FAR struct file *filep)
 {
 #ifndef CONFIG_SENSORS_APDS9930_PROXIMITY_INTERRUPT
-  struct inode *inode = filep->f_inode;
-  struct apds9930_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct apds9930_dev_s *priv = inode->i_private;
 
   g_ps_refcnt--;
 
@@ -687,11 +694,11 @@ static int apds9930_close_ps(struct file *filep)
  * Name: apds9930_read_als
  ****************************************************************************/
 
-static ssize_t apds9930_read_als(struct file *filep, char *buffer,
+static ssize_t apds9930_read_als(FAR struct file *filep, FAR char *buffer,
                                  size_t len)
 {
-  struct inode *inode = filep->f_inode;
-  struct apds9930_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct apds9930_dev_s *priv = inode->i_private;
 
   len = len / APDS9930_ALS_BYTESPERSAMPLE * APDS9930_ALS_BYTESPERSAMPLE;
   len = seq_read(priv->seq, priv->minor, buffer, len);
@@ -703,11 +710,11 @@ static ssize_t apds9930_read_als(struct file *filep, char *buffer,
  * Name: apds9930_read_ps
  ****************************************************************************/
 
-static ssize_t apds9930_read_ps(struct file *filep, char *buffer,
+static ssize_t apds9930_read_ps(FAR struct file *filep, FAR char *buffer,
                                 size_t len)
 {
-  struct inode *inode = filep->f_inode;
-  struct apds9930_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct apds9930_dev_s *priv = inode->i_private;
 
   len = len / APDS9930_PS_BYTESPERSAMPLE * APDS9930_PS_BYTESPERSAMPLE;
 
@@ -715,7 +722,7 @@ static ssize_t apds9930_read_ps(struct file *filep, char *buffer,
   if (len)
     {
       len = APDS9930_PS_BYTESPERSAMPLE;
-      *(uint16_t *)buffer = apds9930_getreg16(priv, APDS9930_PDATAL);
+      *(FAR uint16_t *)buffer = apds9930_getreg16(priv, APDS9930_PDATAL);
     }
 #else
   len = seq_read(priv->seq, priv->minor, buffer, len);
@@ -728,7 +735,7 @@ static ssize_t apds9930_read_ps(struct file *filep, char *buffer,
  * Name: apds9930_write
  ****************************************************************************/
 
-static ssize_t apds9930_write(struct file *filep, const char *buffer,
+static ssize_t apds9930_write(FAR struct file *filep, FAR const char *buffer,
                               size_t buflen)
 {
   return -ENOSYS;
@@ -738,11 +745,11 @@ static ssize_t apds9930_write(struct file *filep, const char *buffer,
  * Name: apds9930_ioctl_als
  ****************************************************************************/
 
-static int apds9930_ioctl_als(struct file *filep, int cmd,
+static int apds9930_ioctl_als(FAR struct file *filep, int cmd,
                               unsigned long arg)
 {
-  struct inode *inode = filep->f_inode;
-  struct apds9930_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct apds9930_dev_s *priv = inode->i_private;
   int ret = OK;
 
   switch (cmd)
@@ -771,11 +778,11 @@ static int apds9930_ioctl_als(struct file *filep, int cmd,
  * Name: apds9930_ioctl_ps
  ****************************************************************************/
 
-static int apds9930_ioctl_ps(struct file *filep, int cmd,
+static int apds9930_ioctl_ps(FAR struct file *filep, int cmd,
                              unsigned long arg)
 {
-  struct inode *inode = filep->f_inode;
-  struct apds9930_dev_s *priv = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct apds9930_dev_s *priv = inode->i_private;
   int ret = OK;
 
   switch (cmd)
@@ -816,8 +823,8 @@ static int apds9930_ioctl_ps(struct file *filep, int cmd,
 
       case SNIOC_GETINTSTATUS:
         {
-          uint8_t intstatus = apds9930_getreg8(priv, APDS9930_STATUS);
-          *(uint8_t *)(uintptr_t)arg = intstatus;
+          FAR uint8_t intstatus = apds9930_getreg8(priv, APDS9930_STATUS);
+          *(FAR uint8_t *)(uintptr_t)arg = intstatus;
           sninfo("Get proximity IntStatus 0x%02x\n", intstatus);
         }
         break;
@@ -874,10 +881,10 @@ static int apds9930_ioctl_ps(struct file *filep, int cmd,
  *
  ****************************************************************************/
 
-int apds9930_init(struct i2c_master_s *i2c, int port)
+int apds9930_init(FAR struct i2c_master_s *i2c, int port)
 {
-  struct apds9930_dev_s tmp;
-  struct apds9930_dev_s *priv = &tmp;
+  FAR struct apds9930_dev_s tmp;
+  FAR struct apds9930_dev_s *priv = &tmp;
   int ret;
   uint8_t val;
 
@@ -948,16 +955,16 @@ int apds9930_init(struct i2c_master_s *i2c, int port)
  *
  ****************************************************************************/
 
-int apds9930als_register(const char *devpath, int minor,
-                         struct i2c_master_s *i2c, int port)
+int apds9930als_register(FAR const char *devpath, int minor,
+                         FAR struct i2c_master_s *i2c, int port)
 {
-  struct apds9930_dev_s *priv;
+  FAR struct apds9930_dev_s *priv;
   char path[16];
   int ret;
 
   /* Initialize the APDS9930 device structure */
 
-  priv = (struct apds9930_dev_s *)
+  priv = (FAR struct apds9930_dev_s *)
     kmm_malloc(sizeof(struct apds9930_dev_s));
   if (!priv)
     {
@@ -1002,16 +1009,16 @@ int apds9930als_register(const char *devpath, int minor,
  *
  ****************************************************************************/
 
-int apds9930ps_register(const char *devpath, int minor,
-                        struct i2c_master_s *i2c, int port)
+int apds9930ps_register(FAR const char *devpath, int minor,
+                        FAR struct i2c_master_s *i2c, int port)
 {
-  struct apds9930_dev_s *priv;
+  FAR struct apds9930_dev_s *priv;
   char path[16];
   int ret;
 
   /* Initialize the APDS9930 device structure */
 
-  priv = (struct apds9930_dev_s *)
+  priv = (FAR struct apds9930_dev_s *)
     kmm_malloc(sizeof(struct apds9930_dev_s));
   if (!priv)
     {

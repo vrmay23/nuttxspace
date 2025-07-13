@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/sama5/sama5d2-xult/src/sam_buttons.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  boards/arm/sama5/sama5d2-xult/src/sam_buttons.c
  *
  *  Licensed to the Apache Software Foundation (ASF) under one or more
  *  contributor license agreements.  See the NOTICE file distributed with
@@ -44,6 +42,8 @@
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
 #include <nuttx/irq.h>
+
+#include <nuttx/irq.h>
 #include <arch/board/board.h>
 
 #include "sam_pio.h"
@@ -66,10 +66,9 @@
  *
  ****************************************************************************/
 
-uint32_t board_button_initialize(void)
+void board_button_initialize(void)
 {
   sam_configpio(PIO_BTN_USER);
-  return NUM_BUTTONS;
 }
 
 /****************************************************************************
@@ -104,7 +103,7 @@ uint32_t board_buttons(void)
  ****************************************************************************/
 
 #if defined(CONFIG_SAMA5_PIOB_IRQ) && defined(CONFIG_ARCH_IRQBUTTONS)
-int board_button_irq(int id, xcpt_t irqhandler, void *arg)
+int board_button_irq(int id, xcpt_t irqhandler, FAR void *arg)
 {
   int ret = -EINVAL;
 

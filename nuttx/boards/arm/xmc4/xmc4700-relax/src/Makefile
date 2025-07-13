@@ -1,7 +1,5 @@
 ############################################################################
-# boards/arm/xmc4/xmc4700-relax/src/Makefile
-#
-# SPDX-License-Identifier: Apache-2.0
+# boards/arm/xmc4/xmc4500-relax/src/Makefile
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -20,11 +18,12 @@
 #
 ############################################################################
 
-include $(TOPDIR)/Make.defs
+-include $(TOPDIR)/Make.defs
 
+ASRCS =
 CSRCS = xmc4_boot.c xmc4_bringup.c
 
-ifeq ($(CONFIG_INPUT_BUTTONS),y)
+ifeq ($(CONFIG_BUTTONS),y)
 CSRCS += xmc4_buttons.c
 endif
 
@@ -34,12 +33,12 @@ else
 CSRCS += xmc4_userleds.c
 endif
 
-ifeq ($(CONFIG_XMC4_USCI_SPI),y)
-CSRCS += xmc4_spi.c
+ifeq ($(CONFIG_LIB_BOARDCTL),y)
+CSRCS += xmc4_appinit.c
 endif
 
-ifeq ($(CONFIG_BOARDCTL),y)
-CSRCS += xmc4_appinit.c
+ifeq ($(CONFIG_TESTING_OSTEST),y)
+CSRCS += xmc4_ostest.c
 endif
 
 include $(TOPDIR)/boards/Board.mk

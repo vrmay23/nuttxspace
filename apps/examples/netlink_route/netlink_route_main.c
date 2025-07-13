@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/netlink_route/netlink_route_main.c
+ * examples/netlink_route/netlink_route_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008, 2011-2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,9 +49,9 @@
 #include <net/if.h>
 #include <net/route.h>
 #include <net/ethernet.h>
-#include <netinet/arp.h>
 #include <netinet/in.h>
 
+#include <nuttx/net/arp.h>
 #include <nuttx/net/neighbor.h>
 
 #include "netutils/netlib.h"
@@ -50,7 +63,7 @@
  ****************************************************************************/
 
 #define MAX_DEVICES 16
-#define MAX_ROUTES  4
+#define MAX_ROUTES  64
 
 #ifdef CONFIG_NET_IPv6
 #  define ROUTE_BUFSIZE INET6_ADDRSTRLEN
@@ -150,11 +163,11 @@ static void dump_neighbor(void)
         {
           if ((j + 1) >= nb->ne_addr.na_llsize)
             {
-              printf("%02x", nb->ne_addr.u.na_addr[j]);
+              printf("%02x", nb->ne_addr.u.na_addr);
             }
           else
             {
-              printf("%02x.", nb->ne_addr.u.na_addr[j]);
+              printf("%02x.", nb->ne_addr.u.na_addr);
             }
         }
 
@@ -184,8 +197,8 @@ static void dump_neighbor(void)
 #if defined(CONFIG_NET_ARP) && !defined(CONFIG_NETLINK_DISABLE_GETNEIGH)
 static void dump_arp(void)
 {
-  FAR struct arpreq *arptab;
-  char buffer[INET_ADDRSTRLEN];
+  FAR struct arp_entry_s *arptab;
+  FAR char buffer[INET_ADDRSTRLEN];
   size_t allocsize;
   ssize_t nentries;
   int i;
@@ -195,8 +208,8 @@ static void dump_arp(void)
 
   /* Allocate a buffer to hold the ARP table */
 
-  allocsize = CONFIG_NET_ARPTAB_SIZE * sizeof(struct arpreq);
-  arptab = (FAR struct arpreq *)malloc(allocsize);
+  allocsize = CONFIG_NET_ARPTAB_SIZE * sizeof(struct arp_entry_s);
+  arptab = (FAR struct arp_entry_s *)malloc(allocsize);
   if (arptab == NULL)
     {
       fprintf(stderr, "\nERROR: Failed to allocate ARP table\n");
@@ -219,23 +232,28 @@ static void dump_arp(void)
 
   for (i = 0; i < nentries; i++)
     {
-      FAR struct arpreq *arp = &arptab[i];
-      FAR struct sockaddr_in *addr = (FAR struct sockaddr_in *)&arp->arp_pa;
+      FAR struct arp_entry_s *arp = &arptab[i];
 
-      inet_ntop(AF_INET, &addr->sin_addr.s_addr, buffer, INET_ADDRSTRLEN);
+      inet_ntop(AF_INET, &arp->at_ipaddr, buffer, INET_ADDRSTRLEN);
       printf("  Dest: %s MAC Addr: ", buffer);
 
       for (j = 0; j < ETHER_ADDR_LEN; j++)
         {
           if (j == (ETHER_ADDR_LEN - 1))
             {
-              printf("%02x", (uint8_t)arp->arp_ha.sa_data[j]);
+              printf("%02x", arp->at_ethaddr.ether_addr_octet[j]);
             }
           else
             {
-              printf("%02x.", (uint8_t)arp->arp_ha.sa_data[j]);
+              printf("%02x.", arp->at_ethaddr.ether_addr_octet[j]);
             }
         }
+
+#ifdef CONFIG_SYSTEM_TIME64
+      printf(" Time 0x%" PRIx64 "\n", arp->at_time);
+#else
+      printf(" Time 0x%" PRIx32 "\n", arp->at_time);
+#endif
     }
 
   free(arptab);

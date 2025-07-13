@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/sama5/sama5d2-xult/src/sam_nandflash.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  boards/arm/sama5/sama5d2-xult/src/sam_nandflash.c
  *
  *  Licensed to the Apache Software Foundation (ASF) under one or more
  *  contributor license agreements.  See the NOTICE file distributed with
@@ -26,16 +24,16 @@
 
 #include <nuttx/config.h>
 
+#include <sys/mount.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/mtd/mtd.h>
-#include <nuttx/fs/fs.h>
 #include <nuttx/fs/nxffs.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "sam_periphclks.h"
 #include "sam_pio.h"
 #include "sam_nand.h"
@@ -154,7 +152,7 @@ int board_nandflash_config(int cs)
 #ifdef HAVE_NAND
 int sam_nand_automount(int minor)
 {
-  struct mtd_dev_s *mtd;
+  FAR struct mtd_dev_s *mtd;
   static bool initialized = false;
   int ret;
 
@@ -194,10 +192,10 @@ int sam_nand_automount(int minor)
 
       /* Mount the file system at /mnt/nand */
 
-      ret = nx_mount(NULL, "/mnt/nand", "nxffs", 0, NULL);
+      ret = mount(NULL, "/mnt/nand", "nxffs", 0, NULL);
       if (ret < 0)
         {
-          ferr("ERROR: Failed to mount the NXFFS volume: %d\n", ret);
+          ferr("ERROR: Failed to mount the NXFFS volume: %d\n", errno);
           return ret;
         }
 #endif

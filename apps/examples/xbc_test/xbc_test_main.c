@@ -1,11 +1,11 @@
 /****************************************************************************
- * apps/examples/xbc_test/xbc_test_main.c
+ * examples/xbc_test/xbc_test_main.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2017 Brian Webb. All rights reserved.
- * SPDX-FileCopyrightText: 2008, 2011-2012 Gregory Nutt. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: Brian Webb <webbbn@gmail.com>
+ *   Copyright (C) 2008, 2011-2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ *   Copyright (C) 2017 Brian Webb. All rights reserved.
+ *   Author: Brian Webb <webbbn@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -53,6 +53,17 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+/* Configuration ************************************************************/
+
+/* Sanity checking */
+
+#ifndef CONFIG_USBHOST
+#  error "CONFIG_USBHOST is not defined"
+#endif
+
+#ifdef CONFIG_USBHOST_INT_DISABLE
+#  error "Interrupt endpoints are disabled (CONFIG_USBHOST_INT_DISABLE)"
+#endif
 
 /* Provide some default values for other configuration settings */
 
@@ -78,7 +89,7 @@ int main(int argc, FAR char *argv[])
    * controller test.
    */
 
-  for (; ; )
+  for (;;)
     {
       /* Open the controller device.  Loop until the device is successfully
        * opened.
@@ -111,33 +122,24 @@ int main(int argc, FAR char *argv[])
             {
               /* On success, echo the buffer to stdout */
 
-              printf("%zd bytes read\n", nbytes);
-              if (nbytes == sizeof(struct xbox_controller_buttonstate_s))
-                {
-                  struct xbox_controller_buttonstate_s *rpt =
-                         (FAR struct xbox_controller_buttonstate_s *)buffer;
-                  printf("guide: %d  sync: %d  start: %d  back: %d
-                          a: %d  b: %d  x: %d  y: %d\n",
-                          rpt->guide, rpt->sync, rpt->start,
-                          rpt->back, rpt->a, rpt->b, rpt->x, rpt->y);
-                  printf("dpad_u: %d  d: %d  l: %d  r: %d  bump_l: %d
-                          r: %d  stick_l: %d  r: %d\n",
-                          rpt->dpad_up, rpt->dpad_down, rpt->dpad_left,
-                          rpt->dpad_right, rpt->bumper_left,
-                          rpt->bumper_right, rpt->stick_click_left,
-                          rpt->stick_click_right);
-                  printf("stick_left_x: %d  y: %d  right_x: %d  y: %d
-                          trigger_l: %d  r: %d\n",
-                          rpt->stick_left_x, rpt->stick_left_y,
-                          rpt->stick_right_x, rpt->stick_right_y,
-                          rpt->trigger_left, rpt->trigger_right);
-                }
-            }
+	      printf("%d bytes read\n", nbytes);
+	      if (nbytes == sizeof(struct xbox_controller_buttonstate_s))
+		{
+		  struct xbox_controller_buttonstate_s *rpt = (struct xbox_controller_buttonstate_s*)buffer;
+		  printf("guide: %d  sync: %d  start: %d  back: %d  a: %d  b: %d  x: %d  y: %d\n",
+			 rpt->guide, rpt->sync, rpt->start, rpt->back, rpt->a, rpt->b, rpt->x, rpt->y);
+		  printf("dpad_u: %d  d: %d  l: %d  r: %d  bump_l: %d  r: %d  stick_l: %d  r: %d\n",
+			 rpt->dpad_up, rpt->dpad_down, rpt->dpad_left, rpt->dpad_right,
+			 rpt->bumper_left, rpt->bumper_right, rpt->stick_click_left, rpt->stick_click_right);
+		  printf("stick_left_x: %d  y: %d  right_x: %d  y: %d  trigger_l: %d  r: %d\n",
+			 rpt->stick_left_x, rpt->stick_left_y, rpt->stick_right_x, rpt->stick_right_y,
+			 rpt->trigger_left, rpt->trigger_right);
+		}
+	    }
         }
       while (nbytes > 0);
 
-      printf("Closing device %s: %zd\n", CONFIG_EXAMPLES_XBC_DEVNAME,
-              nbytes);
+      printf("Closing device %s: %d\n", CONFIG_EXAMPLES_XBC_DEVNAME, (int)nbytes);
       fflush(stdout);
       close(fd);
       break;

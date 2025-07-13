@@ -1,38 +1,40 @@
 /****************************************************************************
  * arch/arm/src/nrf52/nrf52_nvmc.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2018 Zglue Inc. All rights reserved.
- * SPDX-FileCopyrightText: 2012 - 2018, Nordic Semiconductor ASA
- * SPDX-FileContributor: Levin Li <zhiqiang@zglue.com>
- * SPDX-FileContributor: Alan Carvalho de Assis <acassis@gmail.com>
+ *   Copyright (C) 2018 Zglue Inc. All rights reserved.
+ *   Author: Levin Li <zhiqiang@zglue.com>
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ *
+ * Ported from the Nordic SDK, this is the original license:
+ *
+ * Copyright (c) 2012 - 2018, Nordic Semiconductor ASA
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * modification, are permitted provided that the following conditions are met:
  *
- * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
  * 3. Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
+ *    contributors may be used to endorse or promote products derived from this
+ *    software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER
- * OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -43,21 +45,12 @@
 #include <nuttx/config.h>
 #include <stdbool.h>
 
-#include <arch/barriers.h>
-
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "barriers.h"
 
 #include "hardware/nrf52_ficr.h"
 #include "hardware/nrf52_nvmc.h"
 #include "nrf52_nvmc.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifndef CONFIG_ALLOW_BSD_COMPONENTS
-#  error "This file requires Kconfig ALLOW_BSD_COMPONENTS"
-#endif
 
 /****************************************************************************
  * Private Functions
@@ -100,12 +93,85 @@ static inline void wait_for_flash_ready(void)
 
 static inline void nrf_mem_barrier(void)
 {
-  UP_MB();
+  ARM_ISB();
+  ARM_DSB();
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: nrf_nvmc_enable_icache
+ *
+ * Description:
+ *   Enable I-Cache for Flash
+ *
+ * Input Parameter:
+ *   flag - Flag to enable or disable.
+ *
+ * Returned Values:
+ *   None
+ *
+ ****************************************************************************/
+
+void nrf_nvmc_enable_icache(bool flag)
+{
+  uint32_t value;
+
+  /* Read the current icache configuration */
+
+  value = getreg32(NRF52_NVMC_ICACHECNF);
+
+  if (flag)
+    {
+      value |= NVMC_ICACHECNF_CACHEEN;
+    }
+  else
+    {
+      value &= ~NVMC_ICACHECNF_CACHEEN;
+    }
+
+  /* Setup the new icache configuration */
+
+  putreg32(value, NRF52_NVMC_ICACHECNF);
+}
+
+/****************************************************************************
+ * Name: nrf_nvmc_enable_profile
+ *
+ * Description:
+ *   Enable profiling I-Cache for flash
+ *
+ * Input Parameter:
+ *   flag - Flag to enable or disable.
+ *
+ * Returned Values:
+ *   None
+ *
+ ****************************************************************************/
+
+void nrf_nvmc_enable_profile(bool flag)
+{
+  uint32_t value;
+
+  /* Read the current icache configuration */
+
+  value = getreg32(NRF52_NVMC_ICACHECNF);
+
+  if (flag)
+    {
+      value |= NVMC_ICACHECNF_CACHEPROFEN;
+    }
+  else
+    {
+      value &= ~NVMC_ICACHECNF_CACHEPROFEN;
+    }
+
+  /* Setup the new icache configuration */
+
+  putreg32(value, NRF52_NVMC_ICACHECNF);
+}
 
 /****************************************************************************
  * Name: nrf_nvmc_get_profiling_ihit
@@ -237,7 +303,8 @@ uint32_t nrf_nvmc_read_dev_id1(void)
 
 uint32_t system_image_start_address(void)
 {
-  return (uint32_t)_stext;
+  extern uint32_t _stext;
+  return (uint32_t)&_stext;
 }
 
 /****************************************************************************
@@ -256,7 +323,8 @@ uint32_t system_image_start_address(void)
 
 uint32_t system_image_ro_section_end(void)
 {
-  return (uint32_t)_eronly;
+  extern uint32_t _eronly;
+  return (uint32_t)&_eronly;
 }
 
 /****************************************************************************
@@ -275,7 +343,16 @@ uint32_t system_image_ro_section_end(void)
 
 uint32_t system_image_data_section_size(void)
 {
-  return _edata - _sdata;
+  extern uint32_t _edata;
+  extern uint32_t _sdata;
+  uint32_t data_size;
+  uint32_t start;
+  uint32_t end;
+
+  start     = (uint32_t)&_sdata;
+  end       = (uint32_t)&_edata;
+  data_size = end - start;
+  return data_size;
 }
 
 /****************************************************************************
@@ -330,9 +407,9 @@ void nrf_nvmc_page_erase(uint32_t address)
 void nrf_nvmc_write_byte(uint32_t address, uint8_t value)
 {
   uint32_t byte_shift = address & (uint32_t)0x03;
-  uint32_t address32  = address & ~byte_shift; /* Address to the word this byte is in. */
+  uint32_t address32  = address & ~byte_shift; /* Address to the word this byte is in.*/
   uint32_t value32    = (*(uint32_t *)address32 &
-                         ~((uint32_t)0xff << (byte_shift << (uint32_t)3)));
+                         ~((uint32_t)0xFF << (byte_shift << (uint32_t)3)));
   value32             = value32 + ((uint32_t)value << (byte_shift << 3));
 
   /* Enable write */

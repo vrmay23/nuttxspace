@@ -1,22 +1,35 @@
 /****************************************************************************
- * arch/arm/src/lpc54xx/lpc54_rtc.c
+ * arch/arm/src/lpc54/lpc54_rtc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -39,7 +52,8 @@
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "hardware/lpc54_rtc.h"
 #include "lpc54_enableclk.h"
 #include "lpc54_rtc.h"
@@ -92,7 +106,7 @@ volatile bool g_rtc_enabled = false;
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int lpc54_rtc_interrupt(int irq, void *context, void *arg)
+static int lpc54_rtc_interrupt(int irq, void *context, FAR void *arg)
 {
   uint32_t status = getreg16(LPC54_RTC_CTRL);
 
@@ -100,8 +114,7 @@ static int lpc54_rtc_interrupt(int irq, void *context, void *arg)
     {
       /* Clear pending status */
 
-      putreg32(status | RTC_CTRL_ALARM1HZ | RTC_CTRL_WAKE1KHZ,
-               LPC54_RTC_CTRL);
+      putreg32(status | RTC_CTRL_ALARM1HZ | RTC_CTRL_WAKE1KHZ, LPC54_RTC_CTRL);
 
       /* Perform the alarm callback */
 
@@ -121,8 +134,8 @@ static int lpc54_rtc_interrupt(int irq, void *context, void *arg)
  * Name: up_rtc_initialize
  *
  * Description:
- *   Initialize the hardware RTC per the selected configuration.
- *   This function is called once during the OS initialization sequence
+ *   Initialize the hardware RTC per the selected configuration.  This function is
+ *   called once during the OS initialization sequence
  *
  * Input Parameters:
  *   None
@@ -138,15 +151,15 @@ int up_rtc_initialize(void)
 
   lpc54_rtc_enableclk();
 
-  /* If the 32 kHz output of the RTC is used by another part of the system,
-   * enable it via the EN bit in the RTCOSCCTRL register
+  /* If the 32 kHz output of the RTC is used by another part of the system, enable it
+   * via the EN bit in the RTCOSCCTRL register
    */
 
   putreg32(SYSCON_RTCOSCCTRL_EN, LPC54_SYSCON_RTCOSCCTRL);
 
-  /* The RTC is already running or, perhaps waiting to be enabled if it was
-   * never configured.  We will set enable the RTC only if the time if
-   * initialized by higher level logic.
+  /* The RTC is already running or, perhaps waiting to be enabled if it was never
+   * configured.  We will set enable the RTC only if the time if initialized by
+   * higher level logic.
    */
 
   g_rtc_enabled = true;
@@ -158,10 +171,9 @@ int up_rtc_initialize(void)
  *
  * Description:
  *   Get the current time in seconds.  This is similar to the standard time()
- *   function.  This interface is only required if the low-resolution
- *   RTC/counter hardware implementation selected.  It is only used by the
- *   RTOS during initialization to set up the system time when CONFIG_RTC is
- *   set.
+ *   function.  This interface is only required if the low-resolution RTC/counter
+ *   hardware implementation selected.  It is only used by the RTOS during
+ *   initialization to set up the system time when CONFIG_RTC is set.
  *
  * Input Parameters:
  *   None
@@ -193,7 +205,7 @@ time_t up_rtc_time(void)
  *
  ****************************************************************************/
 
-int up_rtc_settime(const struct timespec *tp)
+int up_rtc_settime(FAR const struct timespec *tp)
 {
   irqstate_t flags;
   uint32_t regval;
@@ -247,7 +259,7 @@ int up_rtc_settime(const struct timespec *tp)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-int lpc54_rtc_setalarm(const struct timespec *tp, alarmcb_t callback)
+int lpc54_rtc_setalarm(FAR const struct timespec *tp, alarmcb_t callback)
 {
   irqstate_t flags;
   uint32_t regval;
@@ -265,8 +277,7 @@ int lpc54_rtc_setalarm(const struct timespec *tp, alarmcb_t callback)
       /* Make sure the the RTC is out of reset. */
 
       regval  = getreg32(LPC54_RTC_CTRL);
-      regval &= ~(RTC_CTRL_SWRESET | RTC_CTRL_ALARMDPDEN |
-                  RTC_CTRL_RTC1KHZEN |
+      regval &= ~(RTC_CTRL_SWRESET | RTC_CTRL_ALARMDPDEN | RTC_CTRL_RTC1KHZEN |
                   RTC_CTRL_WAKEDPDEN | RTC_CTRL_OSCPD);
       putreg32(regval, LPC54_RTC_CTRL);
 
@@ -306,7 +317,7 @@ int lpc54_rtc_setalarm(const struct timespec *tp, alarmcb_t callback)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-int lpc54_rtc_rdalarm(struct tm *time)
+int lpc54_rtc_rdalarm(FAR struct tm *time)
 {
   uint32_t match;
 
@@ -351,8 +362,7 @@ int lpc54_rtc_cancelalarm(void)
       /* Unset the alarm */
 
       regval  = getreg32(LPC54_RTC_CTRL);
-      regval &= ~(RTC_CTRL_SWRESET | RTC_CTRL_ALARMDPDEN |
-                  RTC_CTRL_RTC1KHZEN |
+      regval &= ~(RTC_CTRL_SWRESET | RTC_CTRL_ALARMDPDEN | RTC_CTRL_RTC1KHZEN |
                   RTC_CTRL_WAKEDPDEN | RTC_CTRL_OSCPD);
       putreg32(regval, LPC54_RTC_CTRL);
 

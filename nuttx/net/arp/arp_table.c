@@ -1,7 +1,6 @@
 /****************************************************************************
  * net/arp/arp_table.c
- *
- * SPDX-License-Identifier: BSD-3-Clause
+ * Implementation of the ARP Address Resolution Protocol.
  *
  *   Copyright (C) 2007-2009, 2011, 2014, 2018 Gregory Nutt. All rights
  *     reserved.
@@ -59,11 +58,11 @@
 #include <nuttx/net/netconfig.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
+#include <nuttx/net/arp.h>
 #include <nuttx/net/ip.h>
 
-#include "netdev/netdev.h"
-#include "netlink/netlink.h"
-#include "arp/arp.h"
+#include <arp/arp.h>
+#include <netdev/netdev.h>
 
 #ifdef CONFIG_NET_ARP
 
@@ -79,8 +78,8 @@
 
 struct arp_table_info_s
 {
-  in_addr_t    ai_ipaddr;   /* IP address for lookup */
-  FAR uint8_t *ai_ethaddr;  /* Location to return the MAC address */
+  in_addr_t              ai_ipaddr;   /* IP address for lookup */
+  FAR struct ether_addr *ai_ethaddr;  /* Location to return the MAC address */
 };
 
 /****************************************************************************
@@ -90,13 +89,6 @@ struct arp_table_info_s
 /* The table of known address mappings */
 
 static struct arp_entry_s g_arptable[CONFIG_NET_ARPTAB_SIZE];
-
-static const struct ether_addr g_zero_ethaddr =
-{
-  {
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-  }
-};
 
 /****************************************************************************
  * Private Functions
@@ -178,91 +170,6 @@ arp_return_old_entry(FAR struct arp_entry_s *e1, FAR struct arp_entry_s *e2)
 }
 
 /****************************************************************************
- * Name: arp_lookup
- *
- * Description:
- *   Find the ARP entry corresponding to this IP address in the ARP table.
- *
- * Input Parameters:
- *   ipaddr - Refers to an IP address in network order
- *   dev    - Device structure
- *   check_expiry - Expiry check
- *
- * Assumptions:
- *   The network is locked to assure exclusive access to the ARP table.
- *   The return value will become unstable when the network is unlocked.
- *
- ****************************************************************************/
-
-static FAR struct arp_entry_s *arp_lookup(in_addr_t ipaddr,
-                                          FAR struct net_driver_s *dev,
-                                          bool check_expiry)
-{
-  FAR struct arp_entry_s *tabptr;
-  int i;
-
-  /* Check if the IPv4 address is already in the ARP table. */
-
-  for (i = 0; i < CONFIG_NET_ARPTAB_SIZE; ++i)
-    {
-      tabptr = &g_arptable[i];
-      if (tabptr->at_dev == dev &&
-          net_ipv4addr_cmp(ipaddr, tabptr->at_ipaddr))
-        {
-          /* Find matching entries */
-
-          if (!check_expiry)
-            {
-              return tabptr;  /* Ignore expiration time */
-            }
-
-          /* Check if it has expired */
-
-          if (clock_systime_ticks() - tabptr->at_time <= ARP_MAXAGE_TICK)
-            {
-              return tabptr;
-            }
-
-          return NULL;  /* Expired */
-        }
-    }
-
-  /* Not found */
-
-  return NULL;
-}
-
-/****************************************************************************
- * Name: arp_get_arpreq
- *
- * Description:
- *   Translate (struct arp_entry_s) to (struct arpreq) for netlink notify.
- *
- * Input Parameters:
- *   output - Location to return the ARP table copy
- *   input  - The arp entry in table
- *
- ****************************************************************************/
-
-#ifdef CONFIG_NETLINK_ROUTE
-static void arp_get_arpreq(FAR struct arpreq *output,
-                           FAR struct arp_entry_s *input)
-{
-  FAR struct sockaddr_in *outaddr;
-
-  DEBUGASSERT(output != NULL && input != NULL);
-
-  outaddr = (FAR struct sockaddr_in *)&output->arp_pa;
-  outaddr->sin_family      = AF_INET;
-  outaddr->sin_port        = 0;
-  outaddr->sin_addr.s_addr = input->at_ipaddr;
-  memcpy(output->arp_ha.sa_data, input->at_ethaddr.ether_addr_octet,
-         sizeof(struct ether_addr));
-  strlcpy(output->arp_dev, input->at_dev->d_ifname, sizeof(output->arp_dev));
-}
-#endif
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -274,7 +181,6 @@ static void arp_get_arpreq(FAR struct arpreq *output,
  *   address of an existing association.
  *
  * Input Parameters:
- *   dev     - The device driver structure
  *   ipaddr  - The IP address as an inaddr_t
  *   ethaddr - Refers to a HW address uint8_t[IFHWADDRLEN]
  *
@@ -287,15 +193,9 @@ static void arp_get_arpreq(FAR struct arpreq *output,
  *
  ****************************************************************************/
 
-int arp_update(FAR struct net_driver_s *dev, in_addr_t ipaddr,
-               FAR const uint8_t *ethaddr)
+int arp_update(in_addr_t ipaddr, FAR uint8_t *ethaddr)
 {
   FAR struct arp_entry_s *tabptr = &g_arptable[0];
-#ifdef CONFIG_NETLINK_ROUTE
-  struct arpreq arp_notify;
-  bool found = false;
-  bool new_entry;
-#endif
   int i;
 
   /* Walk through the ARP mapping table and try to find an entry to
@@ -309,16 +209,12 @@ int arp_update(FAR struct net_driver_s *dev, in_addr_t ipaddr,
        * the IP address in this ARP table entry.
        */
 
-      if (g_arptable[i].at_dev == dev &&
-          g_arptable[i].at_ipaddr != 0 &&
+      if (g_arptable[i].at_ipaddr != 0 &&
           net_ipv4addr_cmp(ipaddr, g_arptable[i].at_ipaddr))
         {
           /* An old entry found, break. */
 
           tabptr = &g_arptable[i];
-#ifdef CONFIG_NETLINK_ROUTE
-          found = true;
-#endif
           break;
         }
       else
@@ -329,45 +225,13 @@ int arp_update(FAR struct net_driver_s *dev, in_addr_t ipaddr,
         }
     }
 
-  if (ethaddr == NULL)
-    {
-      ethaddr = g_zero_ethaddr.ether_addr_octet;
-    }
-
-  /* When overwrite old entry, notify old entry RTM_DELNEIGH */
-
-#ifdef CONFIG_NETLINK_ROUTE
-  if (!found && tabptr->at_ipaddr != 0)
-    {
-      arp_get_arpreq(&arp_notify, tabptr);
-      netlink_neigh_notify(&arp_notify, RTM_DELNEIGH, AF_INET);
-    }
-
-  /* Need to notify when entry is not found or changes in table */
-
-  new_entry = !found || memcmp(tabptr->at_ethaddr.ether_addr_octet,
-                               ethaddr, ETHER_ADDR_LEN) != 0;
-#endif
-
   /* Now, tabptr is the ARP table entry which we will fill with the new
    * information.
    */
 
   tabptr->at_ipaddr = ipaddr;
   memcpy(tabptr->at_ethaddr.ether_addr_octet, ethaddr, ETHER_ADDR_LEN);
-  tabptr->at_dev = dev;
-  tabptr->at_time = clock_systime_ticks();
-
-  /* Notify the new entry */
-
-#ifdef CONFIG_NETLINK_ROUTE
-  if (new_entry)
-    {
-      arp_get_arpreq(&arp_notify, tabptr);
-      netlink_neigh_notify(&arp_notify, RTM_NEWNEIGH, AF_INET);
-    }
-#endif
-
+  tabptr->at_time = clock_systimer();
   return OK;
 }
 
@@ -379,7 +243,6 @@ int arp_update(FAR struct net_driver_s *dev, in_addr_t ipaddr,
  *   address of an existing association.
  *
  * Input Parameters:
- *   dev     - The device driver structure
  *   pipaddr - Refers to an IP address uint16_t[2] in network order
  *   ethaddr - Refers to a HW address uint8_t[IFHWADDRLEN]
  *
@@ -392,14 +255,50 @@ int arp_update(FAR struct net_driver_s *dev, in_addr_t ipaddr,
  *
  ****************************************************************************/
 
-void arp_hdr_update(FAR struct net_driver_s *dev, FAR uint16_t *pipaddr,
-                    FAR const uint8_t *ethaddr)
+void arp_hdr_update(FAR uint16_t *pipaddr, FAR uint8_t *ethaddr)
 {
   in_addr_t ipaddr = net_ip4addr_conv32(pipaddr);
 
   /* Update the ARP table */
 
-  arp_update(dev, ipaddr, ethaddr);
+  arp_update(ipaddr, ethaddr);
+}
+
+/****************************************************************************
+ * Name: arp_lookup
+ *
+ * Description:
+ *   Find the ARP entry corresponding to this IP address in the ARP table.
+ *
+ * Input Parameters:
+ *   ipaddr - Refers to an IP address in network order
+ *
+ * Assumptions:
+ *   The network is locked to assure exclusive access to the ARP table.
+ *   The return value will become unstable when the network is unlocked.
+ *
+ ****************************************************************************/
+
+FAR struct arp_entry_s *arp_lookup(in_addr_t ipaddr)
+{
+  FAR struct arp_entry_s *tabptr;
+  int i;
+
+  /* Check if the IPv4 address is already in the ARP table. */
+
+  for (i = 0; i < CONFIG_NET_ARPTAB_SIZE; ++i)
+    {
+      tabptr = &g_arptable[i];
+      if (net_ipv4addr_cmp(ipaddr, tabptr->at_ipaddr) &&
+          clock_systimer() - tabptr->at_time <= ARP_MAXAGE_TICK)
+        {
+          return tabptr;
+        }
+    }
+
+  /* Not found */
+
+  return NULL;
 }
 
 /****************************************************************************
@@ -410,40 +309,27 @@ void arp_hdr_update(FAR struct net_driver_s *dev, FAR uint16_t *pipaddr,
  *   not be in the ARP table (it may, instead, be a local network device).
  *
  * Input Parameters:
- *   ipaddr  - Refers to an IP address in network order
+ *   ipaddr -  Refers to an IP address in network order
  *   ethaddr - Location to return the corresponding Ethernet MAN address.
  *             This address may be NULL.  In that case, this function may be
  *             used simply to determine if the Ethernet MAC address is
  *             available.
- *   dev     - Device structure
- *   check_expiry  - Expiry check
  *
  * Assumptions
  *   The network is locked to assure exclusive access to the ARP table.
  *
  ****************************************************************************/
 
-int arp_find(in_addr_t ipaddr, FAR uint8_t *ethaddr,
-             FAR struct net_driver_s *dev, bool check_expiry)
+int arp_find(in_addr_t ipaddr, FAR struct ether_addr *ethaddr)
 {
   FAR struct arp_entry_s *tabptr;
   struct arp_table_info_s info;
 
   /* Check if the IPv4 address is already in the ARP table. */
 
-  tabptr = arp_lookup(ipaddr, dev, check_expiry);
+  tabptr = arp_lookup(ipaddr);
   if (tabptr != NULL)
     {
-      /* Addresses that have failed to be searched will return a special
-       * error code so that the upper layer can return faster.
-       */
-
-      if (memcmp(&tabptr->at_ethaddr, &g_zero_ethaddr,
-                 sizeof(tabptr->at_ethaddr)) == 0)
-        {
-          return -ENETUNREACH;
-        }
-
       /* Yes.. return the Ethernet MAC address if the caller has provided a
        * non-NULL address in 'ethaddr'.
        */
@@ -453,8 +339,8 @@ int arp_find(in_addr_t ipaddr, FAR uint8_t *ethaddr,
           memcpy(ethaddr, &tabptr->at_ethaddr, ETHER_ADDR_LEN);
         }
 
-      /* Return success meaning that a valid Ethernet MAC address mapping
-       * is available for the IP address.
+      /* Return success in any case meaning that a valid Ethernet MAC
+       * address mapping is available for the IP address.
        */
 
       return OK;
@@ -486,64 +372,24 @@ int arp_find(in_addr_t ipaddr, FAR uint8_t *ethaddr,
  *
  * Input Parameters:
  *   ipaddr - Refers to an IP address in network order
- *   dev    - Device structure
  *
  * Assumptions
  *   The network is locked to assure exclusive access to the ARP table.
  *
  ****************************************************************************/
 
-int arp_delete(in_addr_t ipaddr, FAR struct net_driver_s *dev)
+void arp_delete(in_addr_t ipaddr)
 {
   FAR struct arp_entry_s *tabptr;
-#ifdef CONFIG_NETLINK_ROUTE
-  struct arpreq arp_notify;
-#endif
+
   /* Check if the IPv4 address is in the ARP table. */
 
-  tabptr = arp_lookup(ipaddr, dev, false);
+  tabptr = arp_lookup(ipaddr);
   if (tabptr != NULL)
     {
-      /* Notify to netlink */
-
-#ifdef CONFIG_NETLINK_ROUTE
-      arp_get_arpreq(&arp_notify, tabptr);
-      netlink_neigh_notify(&arp_notify, RTM_DELNEIGH, AF_INET);
-#endif
-
       /* Yes.. Set the IP address to zero to "delete" it */
 
       tabptr->at_ipaddr = 0;
-      return OK;
-    }
-
-  return -ENOENT;
-}
-
-/****************************************************************************
- * Name: arp_cleanup
- *
- * Description:
- *   Clear the ARP table on the network device
- *
- * Input Parameters:
- *   dev  - The device driver structure
- *
- * Assumptions
- *   The network is locked to assure exclusive access to the ARP table.
- *
- ****************************************************************************/
-
-void arp_cleanup(FAR struct net_driver_s *dev)
-{
-  int i;
-
-  for (i = 0; i < CONFIG_NET_ARPTAB_SIZE; ++i)
-    {
-      if (dev == g_arptable[i].at_dev)
-        {
-          memset(&g_arptable[i], 0, sizeof(g_arptable[i]));
-        }
     }
 }
 
@@ -568,7 +414,7 @@ void arp_cleanup(FAR struct net_driver_s *dev)
  ****************************************************************************/
 
 #ifdef CONFIG_NETLINK_ROUTE
-unsigned int arp_snapshot(FAR struct arpreq *snapshot,
+unsigned int arp_snapshot(FAR struct arp_entry_s *snapshot,
                           unsigned int nentries)
 {
   FAR struct arp_entry_s *tabptr;
@@ -578,7 +424,7 @@ unsigned int arp_snapshot(FAR struct arpreq *snapshot,
 
   /* Copy all non-empty, non-expired entries in the ARP table. */
 
-  for (i = 0, now = clock_systime_ticks(), ncopied = 0;
+  for (i = 0, now = clock_systimer(), ncopied = 0;
        nentries > ncopied && i < CONFIG_NET_ARPTAB_SIZE;
        i++)
     {
@@ -586,7 +432,7 @@ unsigned int arp_snapshot(FAR struct arpreq *snapshot,
       if (tabptr->at_ipaddr != 0 &&
           now - tabptr->at_time <= ARP_MAXAGE_TICK)
         {
-          arp_get_arpreq(&snapshot[ncopied], tabptr);
+          memcpy(&snapshot[ncopied], tabptr, sizeof(struct arp_entry_s));
           ncopied++;
         }
     }

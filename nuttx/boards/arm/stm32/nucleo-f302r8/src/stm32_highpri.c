@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/stm32/nucleo-f302r8/src/stm32_highpri.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Mateusz Szafoni <raiden00@railab.me>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,12 +39,10 @@
 
 #include <nuttx/config.h>
 
-#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
 #include <unistd.h>
-#include <debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/signal.h>
@@ -42,7 +53,7 @@
 #include <arch/irq.h>
 #include <arch/armv7-m/nvicpri.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
 #include "ram_vectors.h"
 
 #include "stm32_pwm.h"
@@ -87,6 +98,12 @@
 #  endif
 #endif
 
+#ifdef HIGHPRI_HAVE_TIM1
+#  ifndef ADC1_EXTSEL_VALUE
+#    error ADC1 EXTSEL have to be configured in board.h
+#  endif
+#endif
+
 #if (CONFIG_STM32_ADC1_INJECTED_CHAN > 0)
 #  if (CONFIG_STM32_ADC1_INJECTED_CHAN > 2)
 #    error Max 2 injected channels supported for now
@@ -122,7 +139,7 @@
 
 struct highpri_s
 {
-  struct stm32_adc_dev_s *adc1;
+  FAR struct stm32_adc_dev_s *adc1;
 #ifdef HIGHPRI_HAVE_TIM1
   struct stm32_pwm_dev_s     *pwm;
 #endif
@@ -193,7 +210,7 @@ static struct highpri_s g_highpri;
 #if !defined(CONFIG_STM32_ADC1_DMA) || defined(HIGHPRI_HAVE_INJECTED)
 void adc12_handler(void)
 {
-  struct stm32_adc_dev_s *adc = g_highpri.adc1;
+  FAR struct stm32_adc_dev_s *adc = g_highpri.adc1;
   float ref = ADC_REF_VOLTAGE;
   float bit = ADC_VAL_MAX;
   uint32_t pending;
@@ -203,7 +220,7 @@ void adc12_handler(void)
 
   /* Get pending ADC interrupts */
 
-  pending = STM32_ADC_INT_GET(adc);
+  pending = ADC_INT_GET(adc);
 
   if (g_highpri.lock == true)
     {
@@ -221,14 +238,14 @@ void adc12_handler(void)
 
       /* Get regular data */
 
-      g_highpri.r_val[g_highpri.current] = STM32_ADC_REGDATA_GET(adc);
+      g_highpri.r_val[g_highpri.current] = ADC_REGDATA_GET(adc);
 
       /* Do some floating point operations */
 
       g_highpri.r_volt[g_highpri.current] =
         (float)g_highpri.r_val[g_highpri.current] * ref / bit;
 
-      if (g_highpri.current >= REG_NCHANNELS - 1)
+      if (g_highpri.current >= REG_NCHANNELS-1)
         {
           g_highpri.current = 0;
         }
@@ -252,7 +269,7 @@ void adc12_handler(void)
 
       for (i = 0; i < INJ_NCHANNELS; i += 1)
         {
-          g_highpri.j_val[i] = STM32_ADC_INJDATA_GET(adc, i);
+          g_highpri.j_val[i] = ADC_INJDATA_GET(adc, i);
         }
 
       /* Do some floating point operations */
@@ -265,10 +282,9 @@ void adc12_handler(void)
 #endif
 
 irq_out:
-
   /* Clear ADC pending interrupts */
 
-  STM32_ADC_INT_ACK(adc, pending);
+  ADC_INT_ACK(adc, pending);
 }
 #endif
 
@@ -307,7 +323,6 @@ void dma1ch1_handler(void)
     }
 
 irq_out:
-
   /* Clear DMA pending interrupts */
 
   stm32_dma_intack(STM32_DMA1_CHAN1, pending);
@@ -331,8 +346,8 @@ int highpri_main(int argc, char *argv[])
 #ifdef HIGHPRI_HAVE_TIM1
   struct stm32_pwm_dev_s *pwm1;
 #endif
-  struct adc_dev_s *adc1;
-  struct highpri_s *highpri;
+  FAR struct adc_dev_s *adc1;
+  FAR struct highpri_s *highpri;
   int ret;
   int i;
 
@@ -366,7 +381,7 @@ int highpri_main(int argc, char *argv[])
 #ifdef HIGHPRI_HAVE_TIM1
   /* Initialize TIM1 */
 
-  pwm1 = (struct stm32_pwm_dev_s *) stm32_pwminitialize(1);
+  pwm1 = (FAR struct stm32_pwm_dev_s *) stm32_pwminitialize(1);
   if (pwm1 == NULL)
     {
       printf("ERROR: Failed to get PWM1 interface\n");
@@ -384,6 +399,7 @@ int highpri_main(int argc, char *argv[])
 
   PWM_FREQ_UPDATE(pwm1, 1000);
 
+#if ADC1_EXTSEL_VALUE == ADC1_EXTSEL_T1CC1
   /* Set CCR1 */
 
   PWM_CCR_UPDATE(pwm1, 1, 0x0f00);
@@ -391,6 +407,9 @@ int highpri_main(int argc, char *argv[])
   /* Enable TIM1 OUT1 */
 
   PWM_OUTPUTS_ENABLE(pwm1, STM32_PWM_OUT1, true);
+#else
+#  error T1CC1 only supported for now
+#endif
 
 #ifdef CONFIG_DEBUG_PWM_INFO
   /* Print debug */
@@ -403,10 +422,10 @@ int highpri_main(int argc, char *argv[])
 #if !defined(CONFIG_STM32_ADC1_DMA) || defined(HIGHPRI_HAVE_INJECTED)
   /* Attach ADC12 ram vector if no DMA or injected channels support */
 
-  ret = arm_ramvec_attach(STM32_IRQ_ADC12, adc12_handler);
+  ret = up_ramvec_attach(STM32_IRQ_ADC12, adc12_handler);
   if (ret < 0)
     {
-      fprintf(stderr, "highpri_main: ERROR: arm_ramvec_attach failed: %d\n",
+      fprintf(stderr, "highpri_main: ERROR: up_ramvec_attach failed: %d\n",
               ret);
       ret = EXIT_FAILURE;
       goto errout;
@@ -429,10 +448,10 @@ int highpri_main(int argc, char *argv[])
 #ifdef CONFIG_STM32_ADC1_DMA
   /* Attach DMA1 CH1 ram vector if DMA */
 
-  ret = arm_ramvec_attach(STM32_IRQ_DMA1CH1, dma1ch1_handler);
+  ret = up_ramvec_attach(STM32_IRQ_DMA1CH1, dma1ch1_handler);
   if (ret < 0)
     {
-      fprintf(stderr, "highpri_main: ERROR: arm_ramvec_attach failed: %d\n",
+      fprintf(stderr, "highpri_main: ERROR: up_ramvec_attach failed: %d\n",
               ret);
       ret = EXIT_FAILURE;
       goto errout;
@@ -456,25 +475,20 @@ int highpri_main(int argc, char *argv[])
 
   adc1->ad_ops->ao_setup(adc1);
 
-  /* Configure regular channels trigger to T1CC1 */
-
-  STM32_ADC_EXTCFG_SET(highpri->adc1,
-                       ADC1_EXTSEL_T1CC1 | ADC_EXTREG_EXTEN_DEFAULT);
-
 #ifndef CONFIG_STM32_ADC1_DMA
   /* Enable ADC regular conversion interrupts if no DMA */
 
-  STM32_ADC_INT_ENABLE(highpri->adc1, ADC_IER_EOC);
+  ADC_INT_ENABLE(highpri->adc1, ADC_IER_EOC);
 #else
   /* Register ADC buffer for DMA transfer */
 
-  STM32_ADC_REGBUF_REGISTER(highpri->adc1, g_highpri.r_val, REG_NCHANNELS);
+  ADC_REGBUF_REGISTER(highpri->adc1, g_highpri.r_val, REG_NCHANNELS);
 #endif
 
 #ifdef HIGHPRI_HAVE_INJECTED
   /* Enable ADC injected sequence end interrupts */
 
-  STM32_ADC_INT_ENABLE(highpri->adc1, ADC_IER_JEOS);
+  ADC_INT_ENABLE(highpri->adc1, ADC_IER_JEOS);
 #endif
 
 #ifdef HIGHPRI_HAVE_TIM1
@@ -490,7 +504,7 @@ int highpri_main(int argc, char *argv[])
 
       adc1->ad_ops->ao_ioctl(adc1, IO_TRIGGER_REG, 0);
 
-      nxsig_usleep(100);
+      usleep(100);
 #endif
 
 #ifdef HIGHPRI_HAVE_INJECTED
@@ -498,17 +512,17 @@ int highpri_main(int argc, char *argv[])
 
       adc1->ad_ops->ao_ioctl(adc1, IO_TRIGGER_INJ, 0);
 
-      nxsig_usleep(100);
+      usleep(100);
 #endif
       /* Lock global data */
 
       g_highpri.lock = true;
 
 #ifndef CONFIG_STM32_ADC1_DMA
-      printf("%" PRId32 " [%d] %0.3fV\n", g_highpri.cntr1, g_highpri.current,
+      printf("%d [%d] %0.3fV\n", g_highpri.cntr1, g_highpri.current,
               g_highpri.r_volt[g_highpri.current]);
 #else
-      printf("%" PRId32 " ", g_highpri.cntr1);
+      printf("%d ", g_highpri.cntr1);
 
       for (i = 0; i < REG_NCHANNELS; i += 1)
         {
@@ -521,7 +535,7 @@ int highpri_main(int argc, char *argv[])
 #ifdef HIGHPRI_HAVE_INJECTED
       /* Print data from injected channels */
 
-      printf("%" PRId32 " ", g_highpri.cntr2);
+      printf("%d ", g_highpri.cntr2);
 
       for (i = 0; i < INJ_NCHANNELS; i += 1)
         {

@@ -1,22 +1,35 @@
 /****************************************************************************
- * libs/libc/spawn/lib_psfa_adddup2.c
+ * libs/libc/string/lib_psfa_adddup2.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,8 +43,6 @@
 #include <spawn.h>
 #include <assert.h>
 #include <errno.h>
-#include <unistd.h>
-#include <fcntl.h>
 
 #include <nuttx/spawn.h>
 
@@ -55,7 +66,7 @@
  * Input Parameters:
  *   file_actions - The posix_spawn_file_actions_t to append the action.
  *   fd1 - The first file descriptor to be argument to dup2.
- *   fd2 - The second file descriptor to be argument to dup2.
+ *   fd2 - The first file descriptor to be argument to dup2.
  *
  * Returned Value:
  *   On success, these functions return 0; on failure they return an error
@@ -63,18 +74,19 @@
  *
  ****************************************************************************/
 
-int posix_spawn_file_actions_adddup2(
-                         FAR posix_spawn_file_actions_t *file_actions,
-                         int fd1, int fd2)
+int posix_spawn_file_actions_adddup2(FAR posix_spawn_file_actions_t *file_actions,
+                                     int fd1, int fd2)
 {
   FAR struct spawn_dup2_file_action_s *entry;
 
-  DEBUGASSERT(file_actions && fd1 >= 0 && fd2 >= 0);
+  DEBUGASSERT(file_actions &&
+              fd1 >= 0 && fd1 < CONFIG_NFILE_DESCRIPTORS &&
+              fd2 >= 0 && fd2 < CONFIG_NFILE_DESCRIPTORS);
 
   /* Allocate the action list entry */
 
   entry = (FAR struct spawn_dup2_file_action_s *)
-    lib_zalloc(sizeof(struct spawn_dup2_file_action_s));
+    lib_zalloc(sizeof(struct spawn_close_file_action_s));
 
   if (!entry)
     {
@@ -89,7 +101,6 @@ int posix_spawn_file_actions_adddup2(
 
   /* And add it to the file action list */
 
-  add_file_action(file_actions,
-                 (FAR struct spawn_general_file_action_s *)entry);
+  add_file_action(file_actions, (FAR struct spawn_general_file_action_s *)entry);
   return OK;
 }

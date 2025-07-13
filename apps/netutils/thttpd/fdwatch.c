@@ -1,10 +1,14 @@
 /****************************************************************************
- * apps/netutils/thttpd/fdwatch.c
+ * netutils/thttpd/timers.c
+ * FD watcher routines for poll()
  *
- * SPDX-License-Identifier: BSD-2-Clause
- * SPDX-FileCopyrightText: 2009 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 1999,2000 by Jef Poskanzer <jef@mail.acme.com>.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2009 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Derived from the file of the same name in the original THTTPD package:
+ *
+ *   Copyright © 1999,2000 by Jef Poskanzer <jef@mail.acme.com>.
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,9 +42,9 @@
 
 #include <stdint.h>
 #include <stdlib.h>
-#include <sys/param.h>
 #include <debug.h>
 #include <poll.h>
+#include <debug.h>
 
 #include "config.h"
 #include "thttpd_alloc.h"
@@ -57,11 +61,25 @@
  */
 
 #ifdef CONFIG_THTTPD_FDWATCH_DEBUG
-#  define fwerr    nerr
-#  define fwinfo   ninfo
+#  ifdef CONFIG_CPP_HAVE_VARARGS
+#    define fwerr(format, ...)    nerr(format, ##__VA_ARGS__)
+#    define fwinfo(format, ...)   ninfo(format, ##__VA_ARGS__)
+#  else
+#    define fwerr    nerr
+#    define fwinfo   ninfo
+#  endif
 #else
-#  define fwerr    _none
-#  define fwinfo   _none
+#  ifdef CONFIG_CPP_HAVE_VARARGS
+#    define fwerr(x...)
+#    define fwinfo(x...)
+#  else
+#    define fwerr    (void)
+#    define fwinfo  (void)
+#  endif
+#endif
+
+#ifndef MIN
+#  define MIN(a,b) ((a) < (b) ? (a) : (b))
 #endif
 
 /****************************************************************************
@@ -84,17 +102,16 @@ static void fdwatch_dump(const char *msg, FAR struct fdwatch_s *fw)
   fwinfo("%s\n", msg);
   fwinfo("nwatched: %d nfds: %d\n", fw->nwatched, fw->nfds);
   for (i = 0; i < fw->nwatched; i++)
-    {
-      fwinfo("%2d.pollfds: {fd: %d events: %02x revents: %02x} client: %p\n",
-             i + 1, fw->pollfds[i].fd, fw->pollfds[i].events,
-             fw->pollfds[i].revents, fw->client[i]);
-    }
-
+  {
+    fwinfo("%2d. pollfds: {fd: %d events: %02x revents: %02x} client: %p\n",
+           i+1, fw->pollfds[i].fd, fw->pollfds[i].events,
+           fw->pollfds[i].revents, fw->client[i]);
+  }
   fwinfo("nactive: %d next: %d\n", fw->nactive, fw->next);
   for (i = 0; i < fw->nactive; i++)
-    {
-      fwinfo("%2d. %d active\n", i, fw->ready[i]);
-    }
+  {
+    fwinfo("%2d. %d active\n", i, fw->ready[i]);
+  }
 }
 #else
 #  define fdwatch_dump(m,f)
@@ -115,7 +132,7 @@ static int fdwatch_pollndx(FAR struct fdwatch_s *fw, int fd)
         }
     }
 
-  fwerr("ERROR: No poll index for fd %d\n", fd);
+  fwerr("ERROR: No poll index for fd %d: %d\n", fd);
   return -1;
 }
 
@@ -131,7 +148,7 @@ struct fdwatch_s *fdwatch_initialize(int nfds)
 
   /* Allocate the fdwatch data structure */
 
-  fw = (struct fdwatch_s *)zalloc(sizeof(struct fdwatch_s));
+  fw = (struct fdwatch_s*)zalloc(sizeof(struct fdwatch_s));
   if (!fw)
     {
       fwerr("ERROR: Failed to allocate fdwatch\n");
@@ -142,19 +159,19 @@ struct fdwatch_s *fdwatch_initialize(int nfds)
 
   fw->nfds = nfds;
 
-  fw->client = (void **)httpd_malloc(sizeof(void *) * nfds);
+  fw->client = (void**)httpd_malloc(sizeof(void*) * nfds);
   if (!fw->client)
     {
       goto errout_with_allocations;
     }
 
-  fw->pollfds = (struct pollfd *)httpd_malloc(sizeof(struct pollfd) * nfds);
+  fw->pollfds = (struct pollfd*)httpd_malloc(sizeof(struct pollfd) * nfds);
   if (!fw->pollfds)
     {
       goto errout_with_allocations;
     }
 
-  fw->ready = (uint8_t *)httpd_malloc(sizeof(uint8_t) * nfds);
+  fw->ready = (uint8_t*)httpd_malloc(sizeof(uint8_t) * nfds);
   if (!fw->ready)
     {
       goto errout_with_allocations;
@@ -194,7 +211,7 @@ void fdwatch_uninitialize(struct fdwatch_s *fw)
     }
 }
 
-/* Add a descriptor to the watch list. rw is either FDW_READ or FDW_WRITE. */
+/* Add a descriptor to the watch list.  rw is either FDW_READ or FDW_WRITE.  */
 
 void fdwatch_add_fd(struct fdwatch_s *fw, int fd, void *client_data)
 {
@@ -247,8 +264,7 @@ void fdwatch_del_fd(struct fdwatch_s *fw, int fd)
           fw->client[pollndx]  = fw->client[fw->nwatched];
         }
     }
-
-  fdwatch_dump("After deleting:", fw);
+   fdwatch_dump("After deleting:", fw);
 }
 
 /* Do the watch.  Return value is the number of descriptors that are ready,
@@ -267,7 +283,7 @@ int fdwatch(struct fdwatch_s *fw, long timeout_msecs)
    */
 
   fdwatch_dump("Before waiting:", fw);
-  fwinfo("Waiting... (timeout %ld)\n", timeout_msecs);
+  fwinfo("Waiting... (timeout %d)\n", timeout_msecs);
   fw->nactive = 0;
   fw->next    = 0;
   ret         = poll(fw->pollfds, fw->nwatched, (int)timeout_msecs);
@@ -283,12 +299,11 @@ int fdwatch(struct fdwatch_s *fw, long timeout_msecs)
         {
           /* Is there activity on this descriptor? */
 
-          if (fw->pollfds[i].revents &
-              (POLLIN | POLLERR | POLLHUP | POLLNVAL))
+          if (fw->pollfds[i].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL))
             {
               /* Yes... save it in a shorter list */
 
-              fwinfo("pollndx: %d fd: %d revents: %08" PRIx32 "\n",
+              fwinfo("pollndx: %d fd: %d revents: %04x\n",
                     i, fw->pollfds[i].fd, fw->pollfds[i].revents);
 
               fw->ready[fw->nactive++] = fw->pollfds[i].fd;
@@ -336,7 +351,7 @@ void *fdwatch_get_next_client_data(struct fdwatch_s *fw)
   if (fw->next >= fw->nwatched)
     {
       fwinfo("All client data returned: %d\n", fw->next);
-      return (void *)(uintptr_t)-1;
+      return (void*)-1;
     }
 
   fwinfo("client_data[%d]: %p\n", fw->next, fw->client[fw->next]);

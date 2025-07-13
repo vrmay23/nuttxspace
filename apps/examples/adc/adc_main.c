@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/adc/adc_main.c
+ * examples/adc/adc_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011-2012, 2015, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -93,14 +106,12 @@ static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath)
 static void adc_help(FAR struct adc_state_s *adc)
 {
   printf("Usage: adc [OPTIONS]\n");
-  printf("\nArguments are \"sticky\".  "
-         "For example, once the ADC device is\n");
+  printf("\nArguments are \"sticky\".  For example, once the ADC device is\n");
   printf("specified, that device will be re-used until it is changed.\n");
   printf("\n\"sticky\" OPTIONS include:\n");
   printf("  [-p devpath] selects the ADC device.  "
          "Default: %s Current: %s\n",
-         CONFIG_EXAMPLES_ADC_DEVPATH,
-         g_adcstate.devpath ? g_adcstate.devpath : "NONE");
+         CONFIG_EXAMPLES_ADC_DEVPATH, g_adcstate.devpath ? g_adcstate.devpath : "NONE");
   printf("  [-n count] selects the samples to collect.  "
          "Default: 1 Current: %d\n", adc->count);
   printf("  [-h] shows this message and exits\n");
@@ -144,8 +155,7 @@ static int arg_decimal(FAR char **arg, FAR long *value)
  * Name: parse_args
  ****************************************************************************/
 
-static void parse_args(FAR struct adc_state_s *adc, int argc,
-                       FAR char **argv)
+static void parse_args(FAR struct adc_state_s *adc, int argc, FAR char **argv)
 {
   FAR char *ptr;
   FAR char *str;
@@ -218,8 +228,8 @@ int main(int argc, FAR char *argv[])
 
   if (!g_adcstate.initialized)
     {
-      /* Initialization of the ADC hardware must be performed by
-       * board-specific logic prior to running this test.
+      /* Initialization of the ADC hardware must be performed by board-specific
+       * logic prior to running this test.
        */
 
       /* Set the default values */
@@ -258,77 +268,76 @@ int main(int argc, FAR char *argv[])
    * ADC samples.
    */
 
-  for (; ; )
-    {
-      /* Flush any output before the loop entered or from the previous pass
-       * through the loop.
-       */
+  for (;;)
+  {
+    /* Flush any output before the loop entered or from the previous pass
+     * through the loop.
+     */
 
-      fflush(stdout);
+    fflush(stdout);
 
 #ifdef CONFIG_EXAMPLES_ADC_SWTRIG
-      /* Issue the software trigger to start ADC conversion */
+    /* Issue the software trigger to start ADC conversion */
 
-      ret = ioctl(fd, ANIOC_TRIGGER, 0);
-      if (ret < 0)
-        {
-          int errcode = errno;
-          printf("adc_main: ANIOC_TRIGGER ioctl failed: %d\n", errcode);
-        }
+    ret = ioctl(fd, ANIOC_TRIGGER, 0);
+    if (ret < 0)
+      {
+        int errcode = errno;
+        printf("adc_main: ANIOC_TRIGGER ioctl failed: %d\n", errcode);
+      }
 #endif
 
-      /* Read up to CONFIG_EXAMPLES_ADC_GROUPSIZE samples */
+    /* Read up to CONFIG_EXAMPLES_ADC_GROUPSIZE samples */
 
-      readsize = CONFIG_EXAMPLES_ADC_GROUPSIZE * sizeof(struct adc_msg_s);
-      nbytes = read(fd, sample, readsize);
+    readsize = CONFIG_EXAMPLES_ADC_GROUPSIZE * sizeof(struct adc_msg_s);
+    nbytes = read(fd, sample, readsize);
 
-      /* Handle unexpected return values */
+    /* Handle unexpected return values */
 
-      if (nbytes < 0)
-        {
-          errval = errno;
-          if (errval != EINTR)
-            {
-              printf("adc_main: read %s failed: %d\n",
-                     g_adcstate.devpath, errval);
-              errval = 3;
-              goto errout_with_dev;
-            }
+    if (nbytes < 0)
+      {
+        errval = errno;
+        if (errval != EINTR)
+          {
+            printf("adc_main: read %s failed: %d\n",
+                   g_adcstate.devpath, errval);
+            errval = 3;
+            goto errout_with_dev;
+          }
 
-          printf("adc_main: Interrupted read...\n");
-        }
-      else if (nbytes == 0)
-        {
-          printf("adc_main: No data read, Ignoring\n");
-        }
+        printf("adc_main: Interrupted read...\n");
+      }
+    else if (nbytes == 0)
+      {
+        printf("adc_main: No data read, Ignoring\n");
+      }
 
-      /* Print the sample data on successful return */
+    /* Print the sample data on successful return */
 
-      else
-        {
-          int nsamples = nbytes / sizeof(struct adc_msg_s);
-          if (nsamples * sizeof(struct adc_msg_s) != nbytes)
-            {
-              printf("adc_main: read size=%ld is not a multiple of "
-                     "sample size=%zu, Ignoring\n",
-                     (long)nbytes, sizeof(struct adc_msg_s));
-            }
-          else
-            {
-              printf("Sample:\n");
-              for (i = 0; i < nsamples; i++)
-                {
-                  printf("%d: channel: %d value: %" PRId32 "\n",
-                         i + 1, sample[i].am_channel, sample[i].am_data);
-                }
-            }
-        }
+    else
+      {
+        int nsamples = nbytes / sizeof(struct adc_msg_s);
+        if (nsamples * sizeof(struct adc_msg_s) != nbytes)
+          {
+            printf("adc_main: read size=%ld is not a multiple of sample size=%d, Ignoring\n",
+                   (long)nbytes, sizeof(struct adc_msg_s));
+          }
+        else
+          {
+            printf("Sample:\n");
+            for (i = 0; i < nsamples; i++)
+              {
+                printf("%d: channel: %d value: %d\n",
+                       i+1, sample[i].am_channel, sample[i].am_data);
+              }
+          }
+      }
 
-      if (g_adcstate.count && --g_adcstate.count <= 0)
-        {
-          break;
-        }
-    }
+    if (g_adcstate.count && --g_adcstate.count <= 0)
+      {
+        break;
+      }
+  }
 
   close(fd);
   return OK;

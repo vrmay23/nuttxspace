@@ -1,22 +1,36 @@
 /****************************************************************************
  * include/nuttx/syslog/syslog.h
+ * The NuttX SYSLOGing interface
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2014-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +43,6 @@
 
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
-#include <nuttx/streams.h>
 
 #include <sys/types.h>
 #include <stdarg.h>
@@ -80,82 +93,28 @@
 #  endif
 #endif
 
-/* Get a list of syslog channels */
-
-#define SYSLOGIOC_GETCHANNELS _SYSLOGIOC(0x0001)
-
-/* Set syslog channel filter */
-
-#define SYSLOGIOC_SETFILTER _SYSLOGIOC(0x0002)
-
-#define SYSLOG_CHANNEL_NAME_LEN       32
-
-#define SYSLOG_CHANNEL_DISABLE        0x01
-#define SYSLOG_CHANNEL_DISABLE_CRLF   0x02
-
 /****************************************************************************
  * Public Types
  ****************************************************************************/
 
-/* Forward declaration */
+/* This structure provides the interface to a SYSLOG device */
 
-#if defined(CONFIG_SYSLOG_IOCTL) || defined(CONFIG_SYSLOG_CONSOLE) || \
-    defined(CONFIG_SYSLOG_CHAR) || defined(CONFIG_SYSLOG_FILE)
-typedef struct syslog_channel_s syslog_channel_t;
-#else
-typedef const struct syslog_channel_s syslog_channel_t;
-#endif
-
-/* SYSLOG I/O redirection methods */
-
-typedef CODE ssize_t (*syslog_write_t)(FAR syslog_channel_t *channel,
-                                       FAR const char *buf, size_t buflen);
-typedef CODE int (*syslog_putc_t)(FAR syslog_channel_t *channel,
-                                  int ch);
-typedef CODE int (*syslog_flush_t)(FAR syslog_channel_t *channel);
-typedef CODE void (*syslog_close_t)(FAR syslog_channel_t *channel);
-
-/* SYSLOG device operations */
-
-struct syslog_channel_ops_s
-{
-  syslog_putc_t  sc_putc;         /* Normal buffered output */
-  syslog_putc_t  sc_force;        /* Low-level output for interrupt handlers */
-  syslog_flush_t sc_flush;        /* Flush buffered output (on crash) */
-  syslog_write_t sc_write;        /* Write multiple bytes */
-  syslog_write_t sc_write_force;  /* Write multiple bytes for interrupt handlers */
-  syslog_close_t sc_close;        /* Channel close callback */
-};
-
-struct syslog_channel_info_s
-{
-  char sc_name[SYSLOG_CHANNEL_NAME_LEN];
-  bool sc_disable;
-};
-
-/* This structure provides the interface to a SYSLOG channel */
+typedef CODE ssize_t (*syslog_write_t)(FAR const char *buf, size_t buflen);
+typedef CODE int (*syslog_putc_t)(int ch);
+typedef CODE int (*syslog_flush_t)(void);
 
 struct syslog_channel_s
 {
-  /* Channel operations */
+  /* I/O redirection methods */
 
-  FAR const struct syslog_channel_ops_s *sc_ops;
+  syslog_putc_t  sc_putc;   /* Normal buffered output */
+  syslog_putc_t  sc_force;  /* Low-level output for interrupt handlers */
+  syslog_flush_t sc_flush;  /* Flush buffered output (on crash) */
+#ifdef CONFIG_SYSLOG_WRITE
+  syslog_write_t sc_write;  /* Write multiple bytes */
+#endif
 
   /* Implementation specific logic may follow */
-
-#ifdef CONFIG_SYSLOG_IOCTL
-  /* Syslog channel name */
-
-  char sc_name[SYSLOG_CHANNEL_NAME_LEN];
-#endif
-  /* Syslog channel state:
-   * bit0: the channel is disabled
-   * bit1: the channel disable CRLF conversion
-   */
-
-#if defined(CONFIG_SYSLOG_IOCTL) || defined(CONFIG_SYSLOG_CRLF)
-  uint8_t sc_state;
-#endif
 };
 
 /****************************************************************************
@@ -177,7 +136,7 @@ extern "C"
  ****************************************************************************/
 
 /****************************************************************************
- * Name: syslog_channel_register
+ * Name: syslog_channel
  *
  * Description:
  *   Configure the SYSLOGging function to use the provided channel to
@@ -187,30 +146,12 @@ extern "C"
  *   channel - Provides the interface to the channel to be used.
  *
  * Returned Value:
- *   Zero (OK) is returned on success.  A negated errno value is returned
+ *   Zero (OK)is returned on  success.  A negated errno value is returned
  *   on any failure.
  *
  ****************************************************************************/
 
-int syslog_channel_register(FAR syslog_channel_t *channel);
-
-/****************************************************************************
- * Name: syslog_channel_unregister
- *
- * Description:
- *   Removes an already configured SYSLOG channel from the list of used
- *   channels.
- *
- * Input Parameters:
- *   channel - Provides the interface to the channel to be removed.
- *
- * Returned Value:
- *   Zero (OK) is returned on success.  A negated errno value is returned
- *   on any failure.
- *
- ****************************************************************************/
-
-int syslog_channel_unregister(FAR syslog_channel_t *channel);
+int syslog_channel(FAR const struct syslog_channel_s *channel);
 
 /****************************************************************************
  * Name: syslog_initialize
@@ -224,11 +165,11 @@ int syslog_channel_unregister(FAR syslog_channel_t *channel);
  *   This function performs these basic operations:
  *
  *   - Initialize the SYSLOG device
- *   - Call syslog_channel_register() to begin using that device.
+ *   - Call syslog_channel() to begin using that device.
  *
  *   If CONFIG_ARCH_SYSLOG is selected, then the architecture-specifica
  *   logic will provide its own SYSLOG device initialize which must include
- *   as a minimum a call to syslog_channel_register() to use the device.
+ *   as a minimum a call to syslog_channel() to use the device.
  *
  * Input Parameters:
  *   None
@@ -239,7 +180,7 @@ int syslog_channel_unregister(FAR syslog_channel_t *channel);
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SYSLOG
+#ifndef CONFIG_ARCH_SYSLOG
 int syslog_initialize(void);
 #else
 #  define syslog_initialize()
@@ -253,10 +194,9 @@ int syslog_initialize(void);
  *   SYSLOG channel.
  *
  *   This tiny function is simply a wrapper around syslog_dev_initialize()
- *   and syslog_channel_register().  It calls syslog_dev_initialize() to
- *   configure the character file at 'devpath then calls
- *   syslog_channel_register() to use that device as the SYSLOG output
- *   channel.
+ *   and syslog_channel().  It calls syslog_dev_initialize() to configure
+ *   the character file at 'devpath then calls syslog_channel() to use that
+ *   device as the SYSLOG output channel.
  *
  *   File SYSLOG channels differ from other SYSLOG channels in that they
  *   cannot be established until after fully booting and mounting the target
@@ -277,56 +217,14 @@ int syslog_initialize(void);
  *     file.
  *
  * Returned Value:
- *   A pointer to the new SYSLOG channel; NULL is returned on any failure.
+ *   Zero (OK) is returned on success; a negated errno value is returned on
+ *   any failure.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_SYSLOG_FILE
-FAR syslog_channel_t *syslog_file_channel(FAR const char *devpath);
+int syslog_file_channel(FAR const char *devpath);
 #endif
-
-/****************************************************************************
- * Name: syslog_stream_channel
- *
- * Description:
- *   Initialize to use the device stream as the SYSLOG sink.
- *
- *   On power up, the SYSLOG facility is non-existent or limited to very
- *   low-level output.  This function may be called later in the
- *   initialization sequence after full driver support has been initialized.
- *   (via syslog_initialize())  It installs the configured SYSLOG drivers
- *   and enables full SYSLOGing capability.
- *
- * Input Parameters:
- *   stream - The stream device to be used.
- *
- * Returned Value:
- *   Returns a newly created SYSLOG channel, or NULL in case of any failure.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_SYSLOG_STREAM
-FAR syslog_channel_t *
-syslog_stream_channel(FAR struct lib_outstream_s *stream);
-#endif
-
-/****************************************************************************
- * Name: syslog_write
- *
- * Description:
- *   This is the low-level, multiple character, system logging interface.
- *
- * Input Parameters:
- *   buffer - The buffer containing the data to be output
- *   buflen - The number of bytes in the buffer
- *
- * Returned Value:
- *   On success, the number of characters written is returned.  A negated
- *   errno value is returned on any failure.
- *
- ****************************************************************************/
-
-ssize_t syslog_write(FAR const char *buffer, size_t buflen);
 
 /****************************************************************************
  * Name: syslog_flush
@@ -355,11 +253,7 @@ ssize_t syslog_write(FAR const char *buffer, size_t buflen);
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SYSLOG
 int syslog_flush(void);
-#else
-#  define syslog_flush()
-#endif
 
 /****************************************************************************
  * Name: nx_vsyslog
@@ -374,9 +268,7 @@ int syslog_flush(void);
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SYSLOG
 int nx_vsyslog(int priority, FAR const IPTR char *src, FAR va_list *ap);
-#endif
 
 #undef EXTERN
 #ifdef __cplusplus

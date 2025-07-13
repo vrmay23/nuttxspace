@@ -1,22 +1,35 @@
 /****************************************************************************
- * arch/arm/src/lpc43xx/lpc43_cgu.c
+ *  arch/arm/src/lpc43/lpc43_cgu.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,25 +42,23 @@
 #include <nuttx/arch.h>
 #include <errno.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "lpc43_cgu.h"
 #include <arch/board/board.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Maximum/Threshold Frequencies ********************************************/
 
 #define LOW_XTAL_FREQUENCY     15000000
 #define MAX_XTAL_FREQUENCY     25000000
 
-#define MAX_FCLKOUT_FREQUENCY  204000000
-#define MAX_FCLKOUT_DIRECT     156000000
-#define MAX_FCCO_FREQUENCY     320000000
+#define MAX_FCLKOUT_FREQUENCY 204000000
+#define MAX_FCLKOUT_DIRECT    156000000
+#define MAX_FCCO_FRQUENCY     320000000
 
 /* Configuration ************************************************************/
-
 /* This supports configuration of CGU clocking from board-specific parameters
  * that must be provided in the board.h header file.
  *
@@ -68,13 +79,11 @@
 #  error "BOARD_FCLKOUT_FREQUENCY exceed the maximum"
 #endif
 
-#if BOARD_FCCO_FREQUENCY > MAX_FCCO_FREQUENCY
+#if BOARD_FCCO_FREQUENCY > MAX_FCCO_FRQUENCY
 #  error "BOARD_FCCO_FREQUENCY exceed the maximum"
 #endif
 
-/* Convert the user-friendly definitions in board.h to register bit
- * settings
- */
+/* Convert the user-friendly definitions in board.h to register bit settings */
 
 /* Check if we are using a RAMP */
 
@@ -84,12 +93,12 @@
 
 #  define PLL_RAMP 1
 
-/* Get initial PLL values */
+   /* Get initial PLL values */
 
 #  define INIT_MSEL_VALUE PLL1_CTRL_MSEL(1)
 #  define INIT_NSEL_VALUE PLL1_CTRL_NSEL_DIV1
 
-/* Pick the initial PSEL value (integer mode) */
+   /* Pick the initial PSEL value (integer mode) */
 
 #  ifndef BOARD_XTAL_FREQUENCY
 #    error "BOARD_XTAL_FREQUENCY is not defined in board.h"
@@ -99,29 +108,29 @@
 #    error "BOARD_XTAL_FREQUENCY value is not supported"
 #  endif
 
-#  if (2 * BOARD_XTAL_FREQUENCY) > MAX_FCCO_FREQUENCY
+#  if (2 * BOARD_XTAL_FREQUENCY) > MAX_FCCO_FRQUENCY
 #    error "Impossible value for BOARD_XTAL_FREQUENCY"
-#  elif (2 * 2 * BOARD_XTAL_FREQUENCY) > MAX_FCCO_FREQUENCY
+#  elif (2 * 2 * BOARD_XTAL_FREQUENCY) > MAX_FCCO_FRQUENCY
 #    define INIT_PSEL_VALUE PLL1_CTRL_PSEL_DIV1
-#  elif (2 * 4 * BOARD_XTAL_FREQUENCY) > MAX_FCCO_FREQUENCY
+#  elif (2 * 4 * BOARD_XTAL_FREQUENCY) > MAX_FCCO_FRQUENCY
 #    define INIT_PSEL_VALUE PLL1_CTRL_PSEL_DIV2
-#  elif (2 * 8 * BOARD_XTAL_FREQUENCY) > MAX_FCCO_FREQUENCY
+#  elif (2 * 8 * BOARD_XTAL_FREQUENCY) > MAX_FCCO_FRQUENCY
 #    define INIT_PSEL_VALUE PLL1_CTRL_PSEL_DIV4
 #  else
 #    define INIT_PSEL_VALUE PLL1_CTRL_PSEL_DIV8
 #  endif
 
-/* Select initial integer mode controls */
+   /* Select initial integer mode controls */
 
 #  define INIT_PLL_CONTROLS \
    (PLL1_CTRL_FBSEL | INIT_PSEL_VALUE  | INIT_NSEL_VALUE | INIT_MSEL_VALUE)
 
-/* Select a value close to a 10 millisecond delay */
+   /* Select a value close to a 10 millisecond delay */
 
 #  define XTAL_DELAY \
    (10 * BOARD_XTAL_FREQUENCY + (LPC43_CCLK - 1)) / LPC43_CCLK
 
-/* Check the ramp-up MSEL value */
+   /* Check the ramp-up MSEL value */
 
 #  if (BOARD_PLL_RAMP_MSEL > 0) && (BOARD_PLL_RAMP_MSEL < 256)
 #    define RAMP_MSEL_VALUE PLL1_CTRL_MSEL(BOARD_PLL_RAMP_MSEL)
@@ -129,7 +138,7 @@
 #    error "Unsupported value of BOARD_PLL_RAMP_NSEL"
 #  endif
 
-/* Check the ramp-up NSEL value */
+   /* Check the ramp-up NSEL value */
 
 #  ifndef BOARD_PLL_RAMP_NSEL
 #    error "BOARD_PLL_RAMP_NSEL is not defined in board.h"
@@ -147,7 +156,7 @@
 #    error "Unsupported value of BOARD_PLL_RAMP_NSEL"
 #  endif
 
-/* Check for direct mode */
+   /* Check for direct mode */
 
 #  ifndef BOARD_RAMP_FCLKOUT
 #    error "BOARD_RAMP_FCLKOUT is not defined in board.h"
@@ -155,14 +164,14 @@
 
 #  if BOARD_RAMP_FCLKOUT >= MAX_FCLKOUT_DIRECT
 
-/* Select direct mode controls */
+     /* Select direct mode controls */
 
 #    define RAMP_PLL_CONTROLS \
     (PLL1_CTRL_FBSEL | PLL1_CTRL_DIRECT  | RAMP_NSEL_VALUE | RAMP_MSEL_VALUE)
 
 #  else
 
-/* Check the ramp-up PSEL value */
+   /* Check the ramp-up PSEL value */
 
 #    ifndef BOARD_PLL_RAMP_PSEL
 #     error "BOARD_PLL_RAMP_PSEL is not defined in board.h"
@@ -181,16 +190,16 @@
 #    endif
 #  endif
 
-/* Select integer mode controls */
+     /* Select integer mode controls */
 
 #    define RAMP_PLL_CONTROLS \
      (PLL1_CTRL_FBSEL | RAMP_PSEL_VALUE  | RAMP_NSEL_VALUE | RAMP_MSEL_VALUE)
 
-/* Select a value close to a 10 millisecond delay */
+   /* Select a value close to a 10 millisecond delay */
 
 #endif
 
-/* Check the Final MSEL value */
+   /* Check the Final MSEL value */
 
 #ifndef BOARD_PLL_MSEL
 #  error "BOARD_PLL_MSEL is not defined in board.h"
@@ -202,7 +211,7 @@
 #  error "Unsupported value of BOARD_PLL_MSEL"
 #endif
 
-/* Check the Final NSEL value */
+   /* Check the Final NSEL value */
 
 #ifndef BOARD_PLL_NSEL
 #  error "BOARD_PLL_NSEL is not defined in board.h"
@@ -220,7 +229,7 @@
 #  error "Unsupported value of BOARD_PLL_NSEL"
 #endif
 
-/* Check for direct mode */
+   /* Check for direct mode */
 
 #ifndef BOARD_FCLKOUT_FREQUENCY
 #  error "BOARD_FCLKOUT_FREQUENCY is not defined in board.h"
@@ -228,14 +237,14 @@
 
 #if BOARD_FCLKOUT_FREQUENCY >= MAX_FCLKOUT_DIRECT
 
-/* Select direct mode controls */
+     /* Select direct mode controls */
 
 #    define PLL_CONTROLS \
      (PLL1_CTRL_FBSEL | PLL1_CTRL_DIRECT | CTRL_NSEL_VALUE | CTRL_MSEL_VALUE)
 
 #  else
 
-/* Check the Final PSEL value */
+   /* Check the Final PSEL value */
 
 #  ifndef BOARD_PLL_PSEL
 #    error "BOARD_PLL_PSEL is not defined in board.h"
@@ -253,7 +262,7 @@
 #    error "Unsupported value of BOARD_PLL_PSEL"
 #  endif
 
-/* Select integer mode controls */
+     /* Select integer mode controls */
 
 #    define PLL_CONTROLS \
      (PLL1_CTRL_FBSEL | CTRL_PSEL_VALUE  | CTRL_NSEL_VALUE | CTRL_MSEL_VALUE)
@@ -286,8 +295,7 @@ static inline void lpc43_xtalconfig(void)
   /* Set/clear the HF bit in the crystal oscillator control register.
    * - The bit must be cleared if low-frequency oscillators (<=15MHz)
    * - The HF bit must be set for high-frequency osciallators (>20MHz)
-   * - For oscillators in the range 15-20 MHz,
-   *   the HF setting does not matter.
+   * - For oscillators in the range 15-20 MHz, the HF setting does not matter.
    */
 
   regval = getreg32(LPC43_XTAL_OSC_CTRL);
@@ -347,8 +355,7 @@ static inline void lpc43_pll1config(uint32_t ctrlvalue)
    *
    *   - PLL1_CTRL_FBSEL:     Set in both integer and direct modes
    *   - PLL1_CTRL_DIRECT:    Set in direct mode
-   *   - PLL1_CTRL_PSEL:      Set to the value from board.h
-   *                          (integer mode only)
+   *   - PLL1_CTRL_PSEL:      Set to the value from board.h (integer mode only)
    *   - PLL1_CTRL_NSEL:      Set to the value from board.h
    *   - PLL1_CTRL_MSEL:      Set to the value from board.h
    */
@@ -414,8 +421,7 @@ static inline void lpc43_m4clkselect(uint32_t clksel)
  * Name: lpc43_pll0usbconfig
  *
  * Description:
- *   Configure PLL0USB dividers and multipliers per the settings in the
- *   board.h
+ *   Configure PLL0USB dividers and multipliers per the settings in the board.h
  *   file to generate the desired Fclkcout and Fcco frequencies.
  *
  ****************************************************************************/
@@ -424,9 +430,7 @@ void lpc43_pll0usbconfig(void)
 {
   /* Power down, no bypass, direct i-o, */
 
-  putreg32((PLL0USB_CTRL_PD | PLL0USB_CTRL_DIRECTI | PLL0USB_CTRL_DIRECTO |
-            PLL0USB_CTRL_CLKEN | PLL0USB_CTRL_AUTOBLOCK | BOARD_USB0_CLKSRC),
-            LPC43_PLL0USB_CTRL);
+  putreg32((PLL0USB_CTRL_PD | PLL0USB_CTRL_DIRECTI | PLL0USB_CTRL_DIRECTO | PLL0USB_CTRL_CLKEN | PLL0USB_CTRL_AUTOBLOCK | BOARD_USB0_CLKSRC), LPC43_PLL0USB_CTRL);
 
   putreg32(BOARD_USB0_MDIV, LPC43_PLL0USB_MDIV);
   putreg32(BOARD_USB0_NP_DIV, LPC43_PLL0USB_NP_DIV);
@@ -442,6 +446,7 @@ void lpc43_pll0usbconfig(void)
 
 #if defined(CONFIG_LPC43_ETHERNET)
 void lpc43_enetclkconfig(void)
+
 {
   /* Note that using TXCLK for RX implies use of RMII */
 
@@ -518,8 +523,7 @@ void lpc43_idiva(void)
 
   regval  = getreg32(LPC43_IDIVA_CTRL);
   regval &= ~(IDIVA_CTRL_CLKSEL_MASK | IDIVA_CTRL_IDIV_MASK);
-  regval |= BOARD_IDIVA_CLKSRC | IDIVA_CTRL_AUTOBLOCK |
-            IDIVA_CTRL_IDIV(BOARD_IDIVA_DIVIDER);
+  regval |= BOARD_IDIVA_CLKSRC | IDIVA_CTRL_AUTOBLOCK | IDIVA_CTRL_IDIV(BOARD_IDIVA_DIVIDER);
   putreg32(regval, LPC43_IDIVA_CTRL);
 }
 #endif
@@ -533,8 +537,7 @@ void lpc43_idivb(void)
 
   regval  = getreg32(LPC43_IDIVB_CTRL);
   regval &= ~(IDIVBCD_CTRL_CLKSEL_MASK | IDIVBCD_CTRL_IDIV_MASK);
-  regval |= BOARD_IDIVB_CLKSRC | IDIVBCD_CTRL_AUTOBLOCK |
-            IDIVBCD_CTRL_IDIV(BOARD_IDIVB_DIVIDER);
+  regval |= BOARD_IDIVB_CLKSRC | IDIVBCD_CTRL_AUTOBLOCK | IDIVBCD_CTRL_IDIV(BOARD_IDIVB_DIVIDER);
   putreg32(regval, LPC43_IDIVB_CTRL);
 }
 #endif
@@ -548,8 +551,7 @@ void lpc43_idivc(void)
 
   regval  = getreg32(LPC43_IDIVC_CTRL);
   regval &= ~(IDIVBCD_CTRL_CLKSEL_MASK | IDIVBCD_CTRL_IDIV_MASK);
-  regval |= BOARD_IDIVC_CLKSRC | IDIVBCD_CTRL_AUTOBLOCK |
-            IDIVBCD_CTRL_IDIV(BOARD_IDIVC_DIVIDER);
+  regval |= BOARD_IDIVC_CLKSRC | IDIVBCD_CTRL_AUTOBLOCK | IDIVBCD_CTRL_IDIV(BOARD_IDIVC_DIVIDER);
   putreg32(regval, LPC43_IDIVC_CTRL);
 }
 #endif
@@ -563,8 +565,7 @@ void lpc43_idivd(void)
 
   regval  = getreg32(LPC43_IDIVD_CTRL);
   regval &= ~(IDIVBCD_CTRL_CLKSEL_MASK | IDIVBCD_CTRL_IDIV_MASK);
-  regval |= BOARD_IDIVD_CLKSRC | IDIVBCD_CTRL_AUTOBLOCK |
-            IDIVBCD_CTRL_IDIV(BOARD_IDIVD_DIVIDER);
+  regval |= BOARD_IDIVD_CLKSRC | IDIVBCD_CTRL_AUTOBLOCK | IDIVBCD_CTRL_IDIV(BOARD_IDIVD_DIVIDER);
   putreg32(regval, LPC43_IDIVD_CTRL);
 }
 #endif
@@ -578,8 +579,7 @@ void lpc43_idive(void)
 
   regval  = getreg32(LPC43_IDIVE_CTRL);
   regval &= ~(IDIVE_CTRL_CLKSEL_MASK | IDIVE_CTRL_IDIV_MASK);
-  regval |= BOARD_IDIVE_CLKSRC | IDIVE_CTRL_AUTOBLOCK |
-            IDIVE_CTRL_IDIV(BOARD_IDIVE_DIVIDER);
+  regval |= BOARD_IDIVE_CLKSRC | IDIVE_CTRL_AUTOBLOCK | IDIVE_CTRL_IDIV(BOARD_IDIVE_DIVIDER);
   putreg32(regval, LPC43_IDIVE_CTRL);
 }
 #endif
@@ -611,6 +611,7 @@ void lpc43_abp3(void)
   putreg32(regval, LPC43_BASE_APB3_CLK);
 }
 #endif
+
 
 /****************************************************************************
  * Name: lpc43_clockconfig

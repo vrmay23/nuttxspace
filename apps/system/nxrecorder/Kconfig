@@ -13,15 +13,9 @@ config SYSTEM_NXRECORDER
 
 if SYSTEM_NXRECORDER
 
-config NXRECORDER_MAINTHREAD_STACKSIZE
-	int "NxRecoder main thread stack size"
-	default DEFAULT_TASK_STACKSIZE
-	---help---
-		Stack size to use with the NxRecoder main thread.
-
 config NXRECORDER_RECORDTHREAD_STACKSIZE
 	int "NxRecorder thread stack size"
-	default PTHREAD_STACK_DEFAULT
+	default 1500
 	---help---
 		Stack size to use with the NxRecorder record thread.
 
@@ -42,16 +36,6 @@ config NXRECORDER_INCLUDE_HELP
 	---help---
 		Compiles in the NxRecorder help text to provide online help
 		for available commands with syntax.
-
-config NXRECORDER_FMT_FROM_EXT
-	bool "Include code to determine Audio format from extension"
-	default y
-	---help---
-		Compiles in extra code to determine audio format based
-		on the filename extension for known file types.
-		This feature is used if the format is not manually
-		specified, and will take priority over the more lengthy
-		file content detection approach.
 
 endif
 endif

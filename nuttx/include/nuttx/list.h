@@ -1,13 +1,20 @@
 /****************************************************************************
  * include/nuttx/list.h
  *
- * SPDX-License-Identifier: BSD-2-Clause
- * SPDX-FileCopyrightText: 2008 Travis Geiselbrecht. All rights reserved.
- * SPDX-FileContributor: Travis Geiselbrecht <geist@foobox.com>
+ *   Copyright (C) 2017 Pinecone Inc. All rights reserved.
+ *   Author: Yinlin Zhu <zhuyanlin@pinecone.net>
+ *
+ * Adapted to the NuttX coding standard by:
+ *
+ *   Copyright (C) 2019 Gregory Nutt.  All rights reserved.
+ *   Author:  Gregory Nutt <gnutt@nuttx.org>
  *
  * Extracted from logic originally written by Travis Geiselbrecht and
  * released under a public domain license.  Re-released here under the 3-
  * clause BSD license by Pinecone, Inc.
+ *
+ *   Copyright (C) 2008 Travis Geiselbrecht. All rights reserved.
+ *   Author: Travis Geiselbrecht <geist@foobox.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,6 +52,8 @@
  * Included Files
  ****************************************************************************/
 
+#include <nuttx/nuttx.h>
+
 #include <stddef.h>
 #include <stdbool.h>
 
@@ -52,197 +61,147 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Name: list_container_of
- *
- * Description:
- *   Cast a member of a structure out to get the address of the containing
- *   structure
- *
- * Arguments:
- *   ptr    - The pointer to the member.
- *   type   - The type of the container struct this is embedded in.
- *   member - The name of the member within the struct.
- */
-
-#define list_container_of(ptr, type, member) \
-  ((type *)((uintptr_t)(ptr) - offsetof(type, member)))
-
 #define LIST_INITIAL_VALUE(list) { &(list), &(list) }
 #define LIST_INITIAL_CLEARED_VALUE { NULL, NULL }
 
-#define list_in_list(item)     ((item)->prev != NULL)
-#define list_is_empty(list)    ((list)->next == list)
-#define list_is_clear(list)    ((list)->next == NULL)
-#define list_is_singular(list) ((list)->next == (list)->prev)
-
-#define list_initialize(list) \
-  do \
-    { \
-      FAR struct list_node *__list = (list); \
-      __list->prev = __list->next = __list; \
-    } \
-  while(0)
-
-#define list_clear_node(item) \
-  do \
-    { \
-      FAR struct list_node *__item = (item); \
-      __item->prev = __item->next = NULL; \
-    } \
-  while (0)
-
-#define list_is_head(list, item) ((list)->next == (item))
-#define list_is_tail(list, item) ((list)->prev == (item))
-#define list_peek_head(list) ((list)->next != (list) ? (list)->next : NULL)
-#define list_peek_tail(list) ((list)->prev != (list) ? (list)->prev : NULL)
-
-#define list_prev(list, item) ((item)->prev != (list) ? (item)->prev : NULL)
-#define list_prev_wrap(list, item) \
-  ((item)->prev != (list) ? (item)->prev : \
-   (item)->prev->prev != (list) ? (item)->prev->prev : NULL)
-
-#define list_next(list, item) ((item)->next != (list) ? (item)->next : NULL)
-#define list_next_wrap(list, item) \
-  ((item)->next != (list) ? (item)->next : \
-   (item)->next->next != (list) ? (item)->next->next : NULL)
-
-#define list_entry(ptr, type, member) list_container_of(ptr, type, member)
-#define list_first_entry(list, type, member) list_container_of((list)->next, type, member)
-#define list_last_entry(list, type, member) list_container_of((list)->prev, type, member)
-#define list_next_entry(list, type, member) list_container_of((list)->member.next, type, member)
-#define list_prev_entry(list, type, member) list_container_of((list)->member.prev, type, member)
-
 #define list_add_after(entry, new_entry) list_add_head(entry, new_entry)
-#define list_add_head(list, item) \
-  do \
-    { \
-      FAR struct list_node *__list = (list); \
-      FAR struct list_node *__item = (item); \
-      __item->next       = __list->next; \
-      __item->prev       = __list; \
-      __list->next->prev = __item; \
-      __list->next       = __item; \
-    } \
-  while (0)
-
 #define list_add_before(entry, new_entry) list_add_tail(entry, new_entry)
-#define list_add_tail(list, item) \
-  do \
-    { \
-      FAR struct list_node *__list = (list); \
-      FAR struct list_node *__item = (item); \
-      __item->prev       = __list->prev; \
-      __item->next       = __list; \
-      __list->prev->next = __item; \
-      __list->prev       = __item; \
-    } \
-  while (0)
 
-#define list_delete(item) \
-  do \
-    { \
-      FAR struct list_node *__item = (item); \
-      __item->next->prev = __item->prev; \
-      __item->prev->next = __item->next; \
-      __item->prev = __item->next = NULL; \
-    } \
-  while (0)
+#define list_remove_head_type(list, type, element) (\
+{\
+  FAR struct list_node *__nod = list_remove_head(list);\
+  FAR type *__t;\
+\
+  if(__nod)\
+    {\
+      __t = container_of(__nod, type, element);\
+    }\
+  else\
+    {\
+      __t = (type *)0;\
+    }\
+\
+  __t;\
+})
 
-#define list_delete_init(item) \
-  do \
-    { \
-      list_delete(item); \
-      list_initialize(item); \
-    } \
-  while (0)
+#define list_remove_tail_type(list, type, element) (\
+{\
+  FAR struct list_node *__nod = list_remove_tail(list);\
+  FAR ype *__t;\
+\
+  if(__nod)\
+    {\
+      __t = container_of(__nod, type, element);\
+    }\
+  else\
+    {\
+      __t = (type *)0;\
+    }\
+\
+  __t;\
+})
 
-#define list_remove_head_type(list, type, member) \
-  ({ \
-    FAR struct list_node *__node = list_remove_head(list); \
-    FAR type *__t = NULL; \
-    if(__node) \
-      { \
-        __t = list_container_of(__node, type, member); \
-      } \
-    __t; \
-  })
+#define list_peek_head_type(list, type, element) (\
+{\
+  FAR struct list_node *__nod = list_peek_head(list);\
+  FAR type *__t;\
+\
+  if(__nod)\
+    {\
+      __t = container_of(__nod, type, element);\
+    }\
+  else\
+    {\
+      __t = (type *)0;\
+    }\
+\
+  __t;\
+})
 
-#define list_remove_tail_type(list, type, member) \
-  ({ \
-    FAR struct list_node *__node = list_remove_tail(list); \
-    FAR type *__t = NULL; \
-    if(__node) \
-      { \
-        __t = list_container_of(__node, type, member); \
-      } \
-    __t; \
-  })
+#define list_peek_tail_type(list, type, element) (\
+{\
+  FAR struct list_node *__nod = list_peek_tail(list);\
+  FAR type *__t;\
+\
+  if(__nod)\
+    {\
+      __t = container_of(__nod, type, element);\
+    }\
+  else\
+    {\
+      __t = (type *)0;\
+    }\
+\
+  __t;\
+})
 
-#define list_peek_head_type(list, type, member) \
-  ({ \
-    FAR struct list_node *__node = list_peek_head(list); \
-    FAR type *__t = NULL; \
-    if(__node) \
-      { \
-        __t = list_container_of(__node, type, member); \
-      } \
-    __t; \
-  })
+#define list_prev_type(list, item, type, element) (\
+{\
+  FAR struct list_node *__nod = list_prev(list, item);\
+  FAR type *__t;\
+\
+  if(__nod)\
+    {\
+      __t = container_of(__nod, type, element);\
+    }\
+  else\
+    {\
+      __t = (type *)0;\
+    }\
+\
+  __t;\
+})
 
-#define list_peek_tail_type(list, type, member) \
-  ({ \
-    FAR struct list_node *__node = list_peek_tail(list); \
-    FAR type *__t = NULL; \
-    if(__node) \
-      { \
-        __t = list_container_of(__node, type, member); \
-      } \
-    __t; \
-  })
+#define list_prev_wrap_type(list, item, type, element) (\
+{\
+  FAR struct list_node *__nod = list_prev_wrap(list, item);\
+  FAR type *__t;\
+\
+  if(__nod)\
+    {\
+      __t = container_of(__nod, type, element);\
+    }\
+  else\
+    {\
+      __t = (type *)0;\
+    }\
+\
+  __t;\
+})
 
-#define list_prev_type(list, item, type, member) \
-  ({ \
-    FAR struct list_node *__node = list_prev(list, item); \
-    FAR type *__t = NULL; \
-    if(__node) \
-      { \
-        __t = list_container_of(__node, type, member); \
-      } \
-    __t; \
-  })
+#define list_next_type(list, item, type, element) (\
+{\
+  FAR struct list_node *__nod = list_next(list, item);\
+  FAR type *__t;\
+\
+  if(__nod)\
+    {\
+      __t = container_of(__nod, type, element);\
+    }\
+  else\
+    {\
+      __t = (type *)0;\
+    }\
+\
+  __t;\
+})
 
-#define list_prev_wrap_type(list, item, type, member) \
-  ({ \
-    FAR struct list_node *__node = list_prev_wrap(list, item); \
-    FAR type *__t = NULL; \
-    if(__node) \
-      { \
-        __t = list_container_of(__node, type, member); \
-      } \
-    __t; \
-  })
-
-#define list_next_type(list, item, type, member) \
-  ({ \
-    FAR struct list_node *__node = list_next(list, item); \
-    FAR type *__t = NULL; \
-    if(__node) \
-      { \
-        __t = list_container_of(__node, type, member); \
-      } \
-    __t; \
-  })
-
-#define list_next_wrap_type(list, item, type, member) \
-  ({ \
-    FAR struct list_node *__node = list_next_wrap(list, item); \
-    FAR type *__t = NULL; \
-    if(__node) \
-      { \
-        __t = list_container_of(__node, type, member); \
-      } \
-    __t; \
-  })
+#define list_next_wrap_type(list, item, type, element) (\
+{\
+  FAR struct list_node *__nod = list_next_wrap(list, item);\
+  FAR type *__t;\
+\
+  if(__nod)\
+    {\
+      __t = container_of(__nod, type, element);\
+    }\
+  else\
+    {\
+      __t = (type *)0;\
+    }\
+\
+  __t;\
+})
 
 /* iterates over the list, node should be struct list_node* */
 
@@ -253,47 +212,28 @@
  * node and temp_node should be struct list_node*
  */
 
-#define list_for_every_safe(list, node, temp) \
-  for(node = (list)->next, temp = node->next; \
-      node != (list); node = temp, temp = node->next)
+#define list_for_every_safe(list, node, temp_node) \
+  for(node = (list)->next, temp_node = (node)->next;\
+      node != (list);\
+      node = temp_node, temp_node = (node)->next)
 
 /* iterates over the list, entry should be the container structure type */
 
 #define list_for_every_entry(list, entry, type, member) \
-  for(entry = list_container_of((list)->next, type, member); \
-      &entry->member != (list); \
-      entry = list_container_of(entry->member.next, type, member))
+  for((entry) = container_of((list)->next, type, member);\
+      &(entry)->member != (list);\
+      (entry) = container_of((entry)->member.next, type, member))
 
 /* iterates over the list in a safe way for deletion of current node
  * entry and temp_entry should be the container structure type *
  */
 
-#define list_for_every_entry_safe(list, entry, temp, type, member) \
-  for(entry = list_container_of((list)->next, type, member), \
-      temp = list_container_of(entry->member.next, type, member); \
-      &entry->member != (list); entry = temp, \
-      temp = list_container_of(temp->member.next, type, member))
-
-/* Iterate from a given entry node in a safe way */
-
-#define list_for_every_entry_safe_from(list, cur, temp, type, member) \
-  for ((temp) = list_next_entry(cur, type, member); \
-       &(cur)->member != (list); \
-       (cur) = (temp), (temp) = list_next_entry(temp, type, member))
-
-#define list_for_every_entry_continue(list, head, type, member)    \
-  for ((list) = list_next_entry(list, type, member); \
-       &(list)->member != (head); \
-       (list) = list_next_entry(list, type, member))
-
-/* iterates over the list in reverse order, entry should be the container
- * structure type
- */
-
-#define list_for_every_entry_reverse(list, entry, type, member) \
-  for(entry = list_container_of((list)->prev, type, member); \
-      &entry->member != (list); \
-      entry = list_container_of(entry->member.prev, type, member))
+#define list_for_every_entry_safe(list, entry, temp_entry, type, member) \
+  for(entry = container_of((list)->next, type, member),\
+      temp_entry = container_of((entry)->member.next, type, member);\
+      &(entry)->member != (list);\
+      entry = temp_entry, \
+      temp_entry = container_of((temp_entry)->member.next, type, member))
 
 /****************************************************************************
  * Public Type Definitions
@@ -309,8 +249,54 @@ struct list_node
  * Inline Functions
  ****************************************************************************/
 
-static inline FAR struct list_node *
-list_remove_head(FAR struct list_node *list)
+static inline void list_initialize(FAR struct list_node *list)
+{
+  list->prev = list->next = list;
+}
+
+static inline void list_clear_node(FAR struct list_node *item)
+{
+  item->prev = item->next = 0;
+}
+
+static inline bool list_in_list(FAR struct list_node *item)
+{
+  if (item->prev == 0 && item->next == 0)
+    {
+      return false;
+    }
+  else
+    {
+      return true;
+    }
+}
+
+static inline void list_add_head(FAR struct list_node *list,
+                                 FAR struct list_node *item)
+{
+  item->next       = list->next;
+  item->prev       = list;
+  list->next->prev = item;
+  list->next       = item;
+}
+
+static inline void list_add_tail(FAR struct list_node *list,
+                                 FAR struct list_node *item)
+{
+  item->prev       = list->prev;
+  item->next       = list;
+  list->prev->next = item;
+  list->prev       = item;
+}
+
+static inline void list_delete(struct list_node *item)
+{
+  item->next->prev = item->prev;
+  item->prev->next = item->next;
+  item->prev       = item->next = 0;
+}
+
+static inline FAR struct list_node *list_remove_head(FAR struct list_node *list)
 {
   if (list->next != list)
     {
@@ -324,8 +310,7 @@ list_remove_head(FAR struct list_node *list)
     }
 }
 
-static inline FAR struct list_node *
-list_remove_tail(FAR struct list_node *list)
+static inline FAR struct list_node *list_remove_tail(FAR struct list_node *list)
 {
   if (list->prev != list)
     {
@@ -337,6 +322,95 @@ list_remove_tail(FAR struct list_node *list)
     {
       return NULL;
     }
+}
+
+static inline FAR struct list_node *list_peek_head(FAR struct list_node *list)
+{
+  if (list->next != list)
+    {
+      return list->next;
+    }
+  else
+    {
+      return NULL;
+    }
+}
+
+static inline FAR struct list_node *list_peek_tail(FAR struct list_node *list)
+{
+  if (list->prev != list)
+    {
+      return list->prev;
+    }
+  else
+    {
+      return NULL;
+    }
+}
+
+static inline FAR struct list_node *list_prev(FAR struct list_node *list,
+                                              FAR struct list_node *item)
+{
+  if (item->prev != list)
+    {
+      return item->prev;
+    }
+  else
+    {
+      return NULL;
+    }
+}
+
+static inline FAR struct list_node *list_prev_wrap(FAR struct list_node *list,
+                                                   FAR struct list_node *item)
+{
+  if (item->prev != list)
+    {
+      return item->prev;
+    }
+  else if (item->prev->prev != list)
+    {
+      return item->prev->prev;
+    }
+  else
+    {
+      return NULL;
+    }
+}
+
+static inline FAR struct list_node *list_next(FAR struct list_node *list,
+                                              FAR struct list_node *item)
+{
+  if (item->next != list)
+    {
+      return item->next;
+    }
+  else
+    {
+      return NULL;
+    }
+}
+
+static inline FAR struct list_node *list_next_wrap(FAR struct list_node *list,
+                                                   FAR struct list_node *item)
+{
+  if (item->next != list)
+    {
+      return item->next;
+    }
+  else if (item->next->next != list)
+    {
+      return item->next->next;
+    }
+  else
+    {
+      return NULL;
+    }
+}
+
+static inline bool list_is_empty(FAR struct list_node *list)
+{
+  return (list->next == list) ? true : false;
 }
 
 static inline size_t list_length(FAR struct list_node *list)
@@ -352,4 +426,4 @@ static inline size_t list_length(FAR struct list_node *list)
   return cnt;
 }
 
-#endif /* __INCLUDE_NUTTX_LIST_H */
+#endif /*__INCLUDE_NUTTX_LIST_H */

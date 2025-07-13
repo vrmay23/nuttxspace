@@ -1,46 +1,59 @@
-/****************************************************************************
+/****************************************************************************************************
  * arch/arm/src/tms570/hardware/tms570_sci.h
+ * Secondary System Control Register Definitions
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   TMS570LS04x/03x 16/32-Bit RISC Flash Microcontroller, Technical Reference Manual, Texas
+ *   Instruments, Literature Number: SPNU517A, September 2013
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- ****************************************************************************/
-
-/* References:
- * TMS570LS04x/03x 16/32-Bit RISC Flash Microcontroller,
- * Technical Reference Manual, Texas Instruments,
- * Literature Number: SPNU517A, September 2013
- */
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_TMS570_HARDWARE_TMS570_SCI_H
 #define __ARCH_ARM_SRC_TMS570_HARDWARE_TMS570_SCI_H
 
-/****************************************************************************
+/****************************************************************************************************
  * Included Files
- ****************************************************************************/
+ ****************************************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/tms570_memorymap.h"
 
-/****************************************************************************
+/****************************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ****************************************************************************************************/
 
-/* Register Offsets *********************************************************/
+/* Register Offsets *********************************************************************************/
 
 #define TMS570_SCI_GCR0_OFFSET        0x0000 /* SCI Global Control Register 0 */
 #define TMS570_SCI_GCR1_OFFSET        0x0004 /* SCI Global Control Register 1 */
@@ -88,7 +101,7 @@
 #define TMS570_SCI_PD_OFFSET          TMS570_SCI_PIO7_OFFSET  /* Pin Pullup/Pulldown Disable Register */
 #define TMS570_SCI_PSL_OFFSET         TMS570_SCI_PIO8_OFFSET  /* Pin Pullup/Pulldown Selection Register */
 
-/* Register Addresses *******************************************************/
+/* Register Addresses *******************************************************************************/
 
 #define TMS570_SCI1_GCR0              (TMS570_SCI1_BASE+TMS570_SCI_GCR0_OFFSET)
 #define TMS570_SCI1_GCR1              (TMS570_SCI1_BASE+TMS570_SCI_GCR1_OFFSET)
@@ -180,7 +193,7 @@
 #  define TMS570_SCI1_PSL             TMS570_SCI_PIO8  /* Pin Pullup/Pulldown Selection Register */
 #endif
 
-/* Register Bit-Field Definitions *******************************************/
+/* Register Bit-Field Definitions *******************************************************************/
 
 /* SCI Global Control Register 0 */
 
@@ -216,7 +229,7 @@
 
 /* SCI Set Interrupt Register,
  * SCI Clear Interrupt Register,
- * SCI Set Interrupt Level Register, and
+ ( SCI Set Interrupt Level Register, and
  * SCI Clear Interrupt Level Register
  */
 
@@ -225,7 +238,7 @@
 #define SCI_INT_TIMEOUT               (1 << 4)  /* Bit 4:  Timeout interrupt */
 #define SCI_INT_TOAWUS                (1 << 6)  /* Bit 6:  Timeout after wakeup signal interrupt */
 #define SCI_INT_TOA3WUS               (1 << 7)  /* Bit 7:  Timeout after 2 Wakeup signls interrupt */
-#define SCI_INT_TX                    (1 << 8)  /* Bit 8:  Transmitter interrupt */
+#define SCI_INT_TX                    (1 << 8)  /* Bit 8:  Tranmitter interrupt */
 #define SCI_INT_RX                    (1 << 9)  /* Bit 9:  Receiver interrupt */
 #define SCI_INT_ID                    (1 << 13) /* Bit 13: Identification interrupt */
 #define SCI_INT_PE                    (1 << 24) /* Bit 24: Parity error interrupt */
@@ -282,7 +295,7 @@
 #  define SCI_INTVECT_OE              (9)       /*   Overrun error interrupt */
 #  define SCI_INTVECT_BE              (10)      /*   Bit error interrupt */
 #  define SCI_INTVECT_RX              (11)      /*   Receive interrupt */
-#  define SCI_INTVECT_TX              (12)      /*   Transmit interrupt */
+#  define SCI_INTVECT_TX              (12)      /*   Tranmit interrupt */
 #  define SCI_INTVECT_NRE             (13)      /*   No response error interrupt */
 #  define SCI_INTVECT_TOAWUS          (14)      /*   Timeout after wakeup signal interrupt */
 #  define SCI_INTVECT_TOA3WUS         (15)      /*   Timeout after 2 Wakeup signls interrupt */
@@ -311,10 +324,8 @@
 
 /* Receiver Emulation Data Buffer */
 #define SCI_ED_
-
 /* Receiver Data Buffer */
 #define SCI_RD_
-
 /* Transmit Data Buffer */
 #define SCI_TD_
 
@@ -334,28 +345,20 @@
 
 /* LIN Compare Register */
 #define LIN_COMPARE_
-
 /* LIN Receive Buffer 0 Register */
 #define LIN_RD0_
-
 /* LIN Receive Buffer 1 Register */
 #define LIN_RD1_
-
 /* LIN Mask Register */
 #define LIN_MASK_
-
 /* LIN Identification Register */
 #define LIN_ID_
-
 /* LIN Transmit Buffer 0 */
 #define LIN_TD0_
-
 /* LIN Transmit Buffer 1 */
 #define LIN_TD1_
-
 /* Maximum Baud Rate Selection Register */
 #define SCI_MBRS_
-
 /* Input/Output Error Enable Register */
 #define SCI_IODFTCTRL_
 

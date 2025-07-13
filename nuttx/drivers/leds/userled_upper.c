@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/leds/userled_upper.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,13 +49,11 @@
 #include <sys/types.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/mutex.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/leds/userled.h>
 
@@ -60,7 +71,7 @@ struct userled_upperhalf_s
 
   userled_set_t lu_supported; /* The set of supported LEDs */
   userled_set_t lu_ledset;    /* Current state of LEDs */
-  mutex_t lu_lock;            /* Supports exclusive access to the device */
+  sem_t lu_exclsem;           /* Supports exclusive access to the device */
 
   /* The following is a singly linked list of open references to the
    * LED device.
@@ -86,6 +97,11 @@ struct userled_open_s
  * Private Function Prototypes
  ****************************************************************************/
 
+/* Semaphore helpers */
+
+static inline int userled_takesem(sem_t *sem);
+#define userled_givesem(s) nxsem_post(s);
+
 /* Character driver methods */
 
 static int     userled_open(FAR struct file *filep);
@@ -99,7 +115,7 @@ static int     userled_ioctl(FAR struct file *filep, int cmd,
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations g_userled_fops =
+static const struct file_operations userled_fops =
 {
   userled_open,   /* open */
   userled_close,  /* close */
@@ -107,11 +123,24 @@ static const struct file_operations g_userled_fops =
   userled_write,  /* write */
   NULL,           /* seek */
   userled_ioctl,  /* ioctl */
+  NULL            /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL          /* unlink */
+#endif
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: userled_takesem
+ ****************************************************************************/
+
+static inline int userled_takesem(sem_t *sem)
+{
+  return nxsem_wait(sem);
+}
 
 /****************************************************************************
  * Name: userled_open
@@ -124,28 +153,28 @@ static int userled_open(FAR struct file *filep)
   FAR struct userled_open_s *opriv;
   int ret;
 
+  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv = inode->i_private;
+  priv = (FAR struct userled_upperhalf_s *)inode->i_private;
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lu_lock);
+  ret = userled_takesem(&priv->lu_exclsem);
   if (ret < 0)
     {
-      lederr("ERROR: nxmutex_lock failed: %d\n", ret);
+      lederr("ERROR: userled_takesem failed: %d\n", ret);
       return ret;
     }
 
   /* Allocate a new open structure */
 
-  opriv = (FAR struct userled_open_s *)
-          kmm_zalloc(sizeof(struct userled_open_s));
+  opriv = (FAR struct userled_open_s *)kmm_zalloc(sizeof(struct userled_open_s));
   if (!opriv)
     {
       lederr("ERROR: Failed to allocate open structure\n");
       ret = -ENOMEM;
-      goto errout_with_lock;
+      goto errout_with_sem;
     }
 
   /* Attach the open structure to the device */
@@ -155,11 +184,11 @@ static int userled_open(FAR struct file *filep)
 
   /* Attach the open structure to the file structure */
 
-  filep->f_priv = opriv;
+  filep->f_priv = (FAR void *)opriv;
   ret = OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lu_lock);
+errout_with_sem:
+  userled_givesem(&priv->lu_exclsem);
   return ret;
 }
 
@@ -178,11 +207,11 @@ static int userled_close(FAR struct file *filep)
   bool closing;
   int ret;
 
-  DEBUGASSERT(filep->f_priv);
+  DEBUGASSERT(filep && filep->f_priv && filep->f_inode);
   opriv = filep->f_priv;
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  priv  = (FAR struct userled_upperhalf_s *)inode->i_private;
 
   /* Handle an improbable race conditions with the following atomic test
    * and set.
@@ -208,10 +237,10 @@ static int userled_close(FAR struct file *filep)
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lu_lock);
+  ret = userled_takesem(&priv->lu_exclsem);
   if (ret < 0)
     {
-      lederr("ERROR: nxmutex_lock failed: %d\n", ret);
+      lederr("ERROR: userled_takesem failed: %d\n", ret);
       return ret;
     }
 
@@ -226,7 +255,7 @@ static int userled_close(FAR struct file *filep)
     {
       lederr("ERROR: Failed to find open entry\n");
       ret = -ENOENT;
-      goto errout_with_lock;
+      goto errout_with_exclsem;
     }
 
   /* Remove the structure from the device */
@@ -245,8 +274,8 @@ static int userled_close(FAR struct file *filep)
   kmm_free(opriv);
   ret = OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lu_lock);
+errout_with_exclsem:
+  userled_givesem(&priv->lu_exclsem);
   return ret;
 }
 
@@ -263,9 +292,10 @@ static ssize_t userled_write(FAR struct file *filep, FAR const char *buffer,
   userled_set_t ledset;
   int ret;
 
+  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  priv  = (FAR struct userled_upperhalf_s *)inode->i_private;
 
   /* Make sure that the buffer is sufficiently large to hold at least one
    * complete sample.
@@ -289,20 +319,20 @@ static ssize_t userled_write(FAR struct file *filep, FAR const char *buffer,
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lu_lock);
+  ret = userled_takesem(&priv->lu_exclsem);
   if (ret < 0)
     {
-      lederr("ERROR: nxmutex_lock failed: %d\n", ret);
+      lederr("ERROR: userled_takesem failed: %d\n", ret);
       return ret;
     }
 
   /* Read and return the current state of the LEDs */
 
   lower = priv->lu_lower;
-  DEBUGASSERT(lower && lower->ll_setall);
-  lower->ll_setall(lower, ledset);
+  DEBUGASSERT(lower && lower->ll_ledset);
+  lower->ll_ledset(lower, ledset);
 
-  nxmutex_unlock(&priv->lu_lock);
+  userled_givesem(&priv->lu_exclsem);
   return (ssize_t)sizeof(userled_set_t);
 }
 
@@ -317,18 +347,17 @@ static int userled_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR const struct userled_lowerhalf_s *lower;
   int ret;
 
-  DEBUGASSERT(filep->f_priv != NULL &&
-              filep->f_inode != NULL);
+  DEBUGASSERT(filep != NULL && filep->f_priv != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = inode->i_private;
+  priv  = (FAR struct userled_upperhalf_s *)inode->i_private;
 
   /* Get exclusive access to the driver structure */
 
-  ret = nxmutex_lock(&priv->lu_lock);
+  ret = userled_takesem(&priv->lu_exclsem);
   if (ret < 0)
     {
-      lederr("ERROR: nxmutex_lock failed: %d\n", ret);
+      lederr("ERROR: userled_takesem failed: %d\n", ret);
       return ret;
     }
 
@@ -341,8 +370,8 @@ static int userled_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
      * Description: Report the set of LEDs supported by the hardware;
      * Argument:    A pointer to writeable userled_set_t value in which to
      *              return the set of supported LEDs.
-     * Return:      Zero (OK) on success.  Minus one will be returned on
-     *              failure with the errno value set appropriately.
+     * Return:      Zero (OK) on success.  Minus one will be returned on failure
+     *              with the errno value set appropriately.
      */
 
     case ULEDIOC_SUPPORTED:
@@ -362,14 +391,13 @@ static int userled_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
     /* Command:     ULEDIOC_SETLED
      * Description: Set the state of one LED.
      * Argument:    A read-only pointer to an instance of struct userled_s
-     * Return:      Zero (OK) on success.  Minus one will be returned on
-     *              failure with the errno value set appropriately.
+     * Return:      Zero (OK) on success.  Minus one will be returned on failure
+     *              with the errno value set appropriately.
      */
 
     case ULEDIOC_SETLED:
       {
-        FAR struct userled_s *userled = (FAR struct userled_s *)
-                                        ((uintptr_t)arg);
+        FAR struct userled_s *userled = (FAR struct userled_s *)((uintptr_t)arg);
         int led;
         bool ledon;
 
@@ -399,8 +427,8 @@ static int userled_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
                 /* Set the LED state */
 
                 lower = priv->lu_lower;
-                DEBUGASSERT(lower != NULL && lower->ll_setled != NULL);
-                lower->ll_setled(lower, led, ledon);
+                DEBUGASSERT(lower != NULL && lower->ll_led != NULL);
+                lower->ll_led(lower, led, ledon);
                 ret = OK;
               }
           }
@@ -410,8 +438,8 @@ static int userled_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
     /* Command:     ULEDIOC_SETALL
      * Description: Set the state of all LEDs.
      * Argument:    A value of type userled_set_t cast to unsigned long
-     * Return:      Zero (OK) on success.  Minus one will be returned on
-     *              failure with the errno value set appropriately.
+     * Return:      Zero (OK) on success.  Minus one will be returned on failure
+     *              with the errno value set appropriately.
      */
 
     case ULEDIOC_SETALL:
@@ -429,19 +457,19 @@ static int userled_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             /* Set the new LED state */
 
             lower = priv->lu_lower;
-            DEBUGASSERT(lower != NULL && lower->ll_setall != NULL);
-            lower->ll_setall(lower, ledset);
+            DEBUGASSERT(lower != NULL && lower->ll_led != NULL);
+            lower->ll_ledset(lower, ledset);
             ret = OK;
           }
       }
       break;
 
     /* Command:     ULEDIOC_GETALL
-     * Description: Get the state of all LEDs.
-     * Argument:    A write-able pointer to a userled_set_t memory location
-     *              in which to return the LED state.
-     * Return:      Zero (OK) on success.  Minus one will be returned on
-     *              failure with the errno value set appropriately.
+     * Description: Get the state of one LED.
+     * Argument:    A write-able pointer to a userled_set_t memory location in
+     *              which to return the LED state.
+     * Return:      Zero (OK) on success.  Minus one will be returned on failure
+     *              with the errno value set appropriately.
      */
 
     case ULEDIOC_GETALL:
@@ -452,72 +480,19 @@ static int userled_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
         if (ledset)
           {
-#ifdef CONFIG_USERLED_LOWER_READSTATE
-            lower = priv->lu_lower;
-            DEBUGASSERT(lower != NULL && lower->ll_getall != NULL);
-            lower->ll_getall(lower, ledset);
-#else
             *ledset = priv->lu_ledset;
-#endif
             ret = OK;
           }
       }
       break;
 
-#ifdef CONFIG_USERLED_EFFECTS
-    /* Command:     ULEDIOC_SUPEFFECT
-     * Description: Get supported effects of one LED.
-     * Argument:    A write-able pointer to a struct userled_effect_sup_s
-     *              which to return the supported LED effects.
-     * Return:      Zero (OK) on success.  Minus one will be returned on
-     *              failure with the errno value set appropriately.
-     */
-
-    case ULEDIOC_SUPEFFECT:
-    {
-      FAR struct userled_effect_sup_s *effect =
-        (FAR struct userled_effect_sup_s *)((uintptr_t)arg);
-
-      if (effect)
-        {
-          lower = priv->lu_lower;
-          DEBUGASSERT(lower != NULL && lower->ll_effect_sup != NULL);
-          lower->ll_effect_sup(lower, effect);
-          ret = OK;
-        }
-    }
-    break;
-
-    /* Command:     ULEDIOC_SETEFFECT
-     * Description: Set effects for one LED.
-     * Argument:    A read-only pointer to an instance of
-     *              struct userled_effect_set_s.
-     * Return:      Zero (OK) on success.  Minus one will be returned on
-     *              failure with the errno value set appropriately.
-     */
-
-    case ULEDIOC_SETEFFECT:
-    {
-      FAR struct userled_effect_set_s *effect =
-        (FAR struct userled_effect_set_s *)((uintptr_t)arg);
-
-      if (effect)
-        {
-          lower = priv->lu_lower;
-          DEBUGASSERT(lower != NULL && lower->ll_effect_set != NULL);
-          ret = lower->ll_effect_set(lower, effect);
-        }
-    }
-    break;
-#endif
-
     default:
-      lederr("ERROR: Unrecognized command: %d\n", cmd);
+      lederr("ERROR: Unrecognized command: %ld\n", cmd);
       ret = -ENOTTY;
       break;
     }
 
-  nxmutex_unlock(&priv->lu_lock);
+  userled_givesem(&priv->lu_exclsem);
   return ret;
 }
 
@@ -567,18 +542,18 @@ int userled_register(FAR const char *devname,
   /* Initialize the new LED driver instance */
 
   priv->lu_lower = lower;
-  nxmutex_init(&priv->lu_lock);
+  nxsem_init(&priv->lu_exclsem, 0, 1);
 
   DEBUGASSERT(lower && lower->ll_supported);
   priv->lu_supported = lower->ll_supported(lower);
 
-  DEBUGASSERT(lower && lower->ll_setall);
+  DEBUGASSERT(lower && lower->ll_ledset);
   priv->lu_ledset = 0;
-  lower->ll_setall(lower, priv->lu_ledset);
+  lower->ll_ledset(lower, priv->lu_ledset);
 
   /* And register the LED driver */
 
-  ret = register_driver(devname, &g_userled_fops, 0666, priv);
+  ret = register_driver(devname, &userled_fops, 0666, priv);
   if (ret < 0)
     {
       lederr("ERROR: register_driver failed: %d\n", ret);
@@ -588,7 +563,7 @@ int userled_register(FAR const char *devname,
   return OK;
 
 errout_with_priv:
-  nxmutex_destroy(&priv->lu_lock);
+  nxsem_destroy(&priv->lu_exclsem);
   kmm_free(priv);
   return ret;
 }

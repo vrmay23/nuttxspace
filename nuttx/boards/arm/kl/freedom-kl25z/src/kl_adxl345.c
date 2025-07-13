@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/kl/freedom-kl25z/src/kl_adxl345.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +41,6 @@
 
 #include <stdbool.h>
 #include <stdio.h>
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -87,9 +99,9 @@ struct kl_adxl345config_s
 
   /* Additional private definitions only known to this driver */
 
-  ADXL345_HANDLE handle;     /* The ADXL345 driver handle */
-  adxl345_handler_t handler; /* The ADXL345 interrupt handler */
-  void *arg;                 /* Argument to pass to the interrupt handler */
+  ADXL345_HANDLE handle;      /* The ADXL345 driver handle */
+  adxl345_handler_t handler;  /* The ADXL345 interrupt handler */
+  FAR void *arg;              /* Argument to pass to the interrupt handler */
 };
 
 /****************************************************************************
@@ -105,10 +117,10 @@ struct kl_adxl345config_s
  *   clear   - Acknowledge/clear any pending GPIO interrupt
  */
 
-static int  adxl345_attach(struct adxl345_config_s *state,
-                           adxl345_handler_t handler, void *arg);
-static void adxl345_enable(struct adxl345_config_s *state, bool enable);
-static void adxl345_clear(struct adxl345_config_s *state);
+static int  adxl345_attach(FAR struct adxl345_config_s *state,
+                           adxl345_handler_t handler, FAR void *arg);
+static void adxl345_enable(FAR struct adxl345_config_s *state, bool enable);
+static void adxl345_clear(FAR struct adxl345_config_s *state);
 
 /****************************************************************************
  * Private Data
@@ -145,7 +157,7 @@ static struct kl_adxl345config_s g_adxl345config =
 
 /* This is the ADXL345 Interrupt handler */
 
-int adxl345_interrupt(int irq, void *context)
+int adxl345_interrupt(int irq, FAR void *context)
 {
   /* Verify that we have a handler attached */
 
@@ -168,11 +180,11 @@ int adxl345_interrupt(int irq, void *context)
  *   clear   - Acknowledge/clear any pending GPIO interrupt
  */
 
-static int adxl345_attach(struct adxl345_config_s *state,
-                          adxl345_handler_t handler, void *arg)
+static int adxl345_attach(FAR struct adxl345_config_s *state,
+                           adxl345_handler_t handler, FAR void *arg)
 {
-  struct kl_adxl345config_s *priv =
-      (struct kl_adxl345config_s *)state;
+  FAR struct kl_adxl345config_s *priv =
+      (FAR struct kl_adxl345config_s *)state;
 
   sninfo("Saving handler %p\n", handler);
   DEBUGASSERT(priv);
@@ -186,10 +198,10 @@ static int adxl345_attach(struct adxl345_config_s *state,
   return OK;
 }
 
-static void adxl345_enable(struct adxl345_config_s *state, bool enable)
+static void adxl345_enable(FAR struct adxl345_config_s *state, bool enable)
 {
-  struct kl_adxl345config_s *priv =
-     (struct kl_adxl345config_s *)state;
+  FAR struct kl_adxl345config_s *priv =
+     (FAR struct kl_adxl345config_s *)state;
   irqstate_t flags;
 
   /* Attach and enable, or detach and disable.  Enabling and disabling GPIO
@@ -217,7 +229,7 @@ static void adxl345_enable(struct adxl345_config_s *state, bool enable)
   leave_critical_section(flags);
 }
 
-static void adxl345_clear(struct adxl345_config_s *state)
+static void adxl345_clear(FAR struct adxl345_config_s *state)
 {
   /* Does nothing */
 }
@@ -246,7 +258,7 @@ static void adxl345_clear(struct adxl345_config_s *state)
 
 int adxl345_archinitialize(int minor)
 {
-  struct spi_dev_s *dev;
+  FAR struct spi_dev_s *dev;
   int ret;
 
   sninfo("minor %d\n", minor);
@@ -275,8 +287,7 @@ int adxl345_archinitialize(int minor)
       /* Instantiate the ADXL345 driver */
 
       g_adxl345config.handle =
-        adxl345_instantiate(dev,
-                           (struct adxl345_config_s *)&g_adxl345config);
+        adxl345_instantiate(dev, (FAR struct adxl345_config_s *)&g_adxl345config);
       if (!g_adxl345config.handle)
         {
           snerr("ERROR: Failed to instantiate the ADXL345 driver\n");
@@ -285,8 +296,7 @@ int adxl345_archinitialize(int minor)
 
       /* Initialize and register the ADXL345 driver */
 
-      ret = adxl345_register(g_adxl345config.handle,
-                             CONFIG_ADXL345_DEVMINOR);
+      ret = adxl345_register(g_adxl345config.handle, CONFIG_ADXL345_DEVMINOR);
       if (ret < 0)
         {
           snerr("ERROR: Failed to register ADXL345 driver: %d\n", ret);

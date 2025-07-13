@@ -1,29 +1,41 @@
 /****************************************************************************
  * boards/arm/lpc31xx/ea3131/src/lpc31_mem.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009-2010,2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References:
+ *   - NXP UM10314 LPC3130/31 User manual Rev. 1.01 — 9 September 2009
+ *   - NXP lpc313x.cdl.drivers.zip example driver code
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
-/* References:
- *   - NXP UM10314 LPC3130/31 User manual Rev. 1.01 - 9 September 2009
- *   - NXP lpc313x.cdl.drivers.zip example driver code
- */
 
 /****************************************************************************
  * Included Files
@@ -39,7 +51,8 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "lpc31_syscreg.h"
 #include "lpc31_cgudrvr.h"
 #include "lpc31_mpmc.h"
@@ -102,18 +115,18 @@
  *    undefined operation. Once power is applied to VDD and VDDQ
  *    (simultaneously) and the clock is stable (stable clock is defined as
  *    a signal cycling within timing constraints specified for the clock
- *    pin), the SDRAM requires a 100Âµs delay prior to issuing any command
+ *    pin), the SDRAM requires a 100µs delay prior to issuing any command
  *    other than a COMMAND INHIBIT or NOP.
  *
- *   "Starting at some point during this 100Âµs period and continuing at
- *    least through the end of this period, COMMAND INHIBIT or NOP commands
- *    should be applied.  Once the 100Âµs delay has been satisfied with at
- *    least one COMMAND INHIBIT or NOP command having been applied, a
- *    PRECHARGE command should be applied. All banks must then be precharged,
- *    thereby placing the device in the all banks idle state.
+ *   "Starting at some point during this 100µs period and continuing at least
+ *    through the end of this period, COMMAND INHIBIT or NOP commands should
+ *    be applied.  Once the 100µs delay has been satisfied with at least one
+ *    COMMAND INHIBIT or NOP command having been applied, a PRECHARGE command
+ *    should be applied. All banks must then be precharged, thereby placing
+ *    the device in the all banks idle state.
  *
- *   "Once in the idle state, two AUTO REFRESH cycles must be performed.
- *    After the AUTO REFRESH cycles are complete, the SDRAM is ready for mode
+ *   "Once in the idle state, two AUTO REFRESH cycles must be performed. After
+ *    the AUTO REFRESH cycles are complete, the SDRAM is ready for mode
  *    register programming.
  *
  *   "Because the mode register will power up in an unknown state, it should
@@ -150,10 +163,10 @@ static void lpc31_sdraminitialize(void)
    */
 
 #ifdef CONFIG_LPC31_SDRAMHCLK
-#  define HCLK CONFIG_LPC31_SDRAMHCLK
+# define HCLK CONFIG_LPC31_SDRAMHCLK
 #else
   uint32_t hclk = lpc31_clkfreq(CLKID_MPMCCFGCLK2, DOMAINID_SYS);
-#  define HCLK hclk
+# define HCLK hclk
 #endif
 
   /* Check RTL for divide by 2 possible.
@@ -167,9 +180,9 @@ static void lpc31_sdraminitialize(void)
     {
       hclk2 >>= 1;
     }
-#  define HCLK2 hclk2
+# define HCLK2 hclk2
 #else
-#  define HCLK2 hclk
+# define HCLK2 hclk
 #endif
   up_udelay(100);
 
@@ -251,8 +264,8 @@ static void lpc31_sdraminitialize(void)
   /* Program the SDRAM internal mode registers on bank nSDCE0 and reconfigure
    * the SDRAM chips.
    * Bus speeds up to 90MHz requires use of a CAS latency = 2.
-   * To get correct value on address bus CAS cycle, requires a shift by 13
-   * for 16bit mode
+   * To get correct value on address bus CAS cycle, requires a shift by 13 for
+   * 16bit mode
    */
 
   getreg32(LPC31_EXTSDRAM0_VSECTION | (0x23 << 13));

@@ -1,31 +1,44 @@
-/****************************************************************************
+/********************************************************************************
  * include/limits.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2014, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ********************************************************************************/
 
 #ifndef __INCLUDE_LIMITS_H
 #define __INCLUDE_LIMITS_H
 
-/****************************************************************************
+/********************************************************************************
  * Included Files
- ****************************************************************************/
+ ********************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -33,12 +46,10 @@
 
 #include <arch/limits.h>
 
-/****************************************************************************
+/********************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
-
-/* Default values for user configurable limits ******************************/
-
+ ********************************************************************************/
+/* Default values for user configurable limits **********************************/
 /* Maximum number of bytes in a filename (not including terminating null). */
 
 #ifndef CONFIG_NAME_MAX
@@ -57,14 +68,7 @@
 #  endif
 #endif
 
-/* Maximum length of any multibyte character in any locale.
- * We define this value here since the gcc header does not define
- * the correct value.
- */
-
-#define MB_LEN_MAX            4
-
-/* Configurable limits required by POSIX ************************************
+/* Configurable limits required by POSIX ****************************************
  *
  * Required for all implementations:
  *
@@ -76,18 +80,15 @@
  *   _POSIX_NAME_MAX       Number of bytes in a file or pathname component
  *   _POSIX_NGROUPS_MAX    Number supplementary group IDs
  *   _POSIX_OPEN_MAX       Number of files a task can have open at once
- *   _POSIX_PATH_MAX       Number of bytes in a full pathname
- *                         (including NULL)
+ *   _POSIX_PATH_MAX       Number of bytes in a full pathname (including NULL)
  *   _POSIX_PIPE_BUF       Number of bytes for atomic write into pipe
- *   _POSIX_SSIZE_MAX      Largest filesystem write; also max value
- *                         of ssize_t
+ *   _POSIX_SSIZE_MAX      Largest filesystem write; also max value of ssize_t
  *   _POSIX_STREAM_MAX     Number of std I/O streams open at once
  *   _POSIX_TZNAME_MAX     Max number of bytes of a timezone name
  *
  * Required for sigqueue
  *
- *   _POSIX_RTSIG_MAX      Number of realtime signals reserved
- *                         for application
+ *   _POSIX_RTSIG_MAX      Difference between SIGRTMIN and SIGRTMAX
  *   _POSIX_SIGQUEUE_MAX   Max number signals a task can queue
  *
  * Required for POSIX timers
@@ -112,9 +113,9 @@
  *   _POSIX_SEM_VALUE_MAX  Max value a semaphore may have
  *
  * Required for symbolic links
- *   _POSIX_SYMLOOP_MAX    Maximum number of symbolic links that can be
- *                         reliably traversed in the resolution of a pathname
- *                         in the absence of a loop.
+ *   _POSIX_SYMLOOP_MAX   Maximum number of symbolic links that can be
+ *                        reliably traversed in the resolution of a pathname
+ *                        in the absence of a loop.
  *
  */
 
@@ -125,12 +126,11 @@
 #define _POSIX_MAX_INPUT      255
 #define _POSIX_NAME_MAX       CONFIG_NAME_MAX
 #define _POSIX_NGROUPS_MAX    0
-#define _POSIX_OPEN_MAX       16
+#define _POSIX_OPEN_MAX       CONFIG_NFILE_DESCRIPTORS
 #define _POSIX_PATH_MAX       CONFIG_PATH_MAX
 #define _POSIX_PIPE_BUF       512
-#define _POSIX_STREAM_MAX     16
+#define _POSIX_STREAM_MAX     CONFIG_NFILE_STREAMS
 #define _POSIX_TZNAME_MAX     3
-#define _POSIX2_LINE_MAX      CONFIG_LINE_MAX
 
 #ifdef CONFIG_SMALL_MEMORY
 
@@ -142,17 +142,17 @@
 
 #else /* CONFIG_SMALL_MEMORY */
 
-#define _POSIX_SIZE_MAX       ULONG_MAX
+#define _POSIX_SIZE_MAX       4294967295UL /* See sys/types.h */
 #define _POSIX_SIZE_MIN       0
 
-#define _POSIX_SSIZE_MAX      LONG_MAX
-#define _POSIX_SSIZE_MIN      LONG_MIN
+#define _POSIX_SSIZE_MAX      2147483647L  /* See sys/types.h */
+#define _POSIX_SSIZE_MIN      -2147483648L
 
 #endif /* CONFIG_SMALL_MEMORY */
 
 /* Required for sigqueue */
 
-#define _POSIX_RTSIG_MAX      8   /*  Number of reserved realtime signals */
+#define _POSIX_RTSIG_MAX      31
 #define _POSIX_SIGQUEUE_MAX   32
 
 /* Required for symbolic links */
@@ -177,9 +177,9 @@
 #define _POSIX_TIMER_MAX      32
 
 #ifdef CONFIG_USEC_PER_TICK
-#  define _POSIX_CLOCKRES_MIN ((CONFIG_USEC_PER_TICK)*1000)
+# define _POSIX_CLOCKRES_MIN  ((CONFIG_USEC_PER_TICK)*1000)
 #else
-#  define _POSIX_CLOCKRES_MIN (10*1000000)
+# define _POSIX_CLOCKRES_MIN  (10*1000000)
 #endif
 
 /* Required for asynchronous I/O */
@@ -195,7 +195,7 @@
 /* Required for POSIX semaphores */
 
 #define _POSIX_SEM_NSEMS_MAX  INT_MAX
-#define _POSIX_SEM_VALUE_MAX  INT_MAX
+#define _POSIX_SEM_VALUE_MAX  0x7fff
 
 /* Numerical limits.  These values may be increased from the POSIX minimum
  * values above or made indeterminate
@@ -203,18 +203,12 @@
 
 #define ARG_MAX        _POSIX_ARG_MAX
 #define CHILD_MAX      _POSIX_CHILD_MAX
-#define LINE_MAX       _POSIX2_LINE_MAX
 #define LINK_MAX       _POSIX_LINK_MAX
 #define MAX_CANON      _POSIX_MAX_CANON
 #define MAX_INPUT      _POSIX_MAX_INPUT
 #define NAME_MAX       _POSIX_NAME_MAX
-#define TTY_NAME_MAX   _POSIX_NAME_MAX
 #define NGROUPS_MAX    _POSIX_NGROUPS_MAX
-#if CONFIG_LIBC_OPEN_MAX < _POSIX_OPEN_MAX
-#  define OPEN_MAX     _POSIX_OPEN_MAX
-#else
-#  define OPEN_MAX     CONFIG_LIBC_OPEN_MAX
-#endif
+#define OPEN_MAX       _POSIX_OPEN_MAX
 #define PATH_MAX       _POSIX_PATH_MAX
 #define PIPE_BUF       _POSIX_PIPE_BUF
 #define SIZE_MAX       _POSIX_SIZE_MAX
@@ -227,7 +221,7 @@
 #define TZ_MAX_TIMES   CONFIG_LIBC_TZ_MAX_TIMES
 #define TZ_MAX_TYPES   CONFIG_LIBC_TZ_MAX_TYPES
 
-#define RTSIG_MAX      32
+#define RTSIG_MAX      _POSIX_RTSIG_MAX
 #define SIGQUEUE_MAX   _POSIX_SIGQUEUE_MAX
 
 #define SYMLOOP_MAX    _POSIX_SYMLOOP_MAX
@@ -235,12 +229,6 @@
 #define DELAYTIMER_MAX _POSIX_DELAYTIMER_MAX
 #define TIMER_MAX      _POSIX_TIMER_MAX
 #define CLOCKRES_MIN   _POSIX_CLOCKRES_MIN
-
-#ifdef CONFIG_SYSTEM_TIME64
-#  define CLOCK_MAX    UINT64_MAX
-#else
-#  define CLOCK_MAX    UINT32_MAX
-#endif
 
 /* Other invariant values */
 
@@ -294,10 +282,10 @@
 #define NL_TEXTMAX _POSIX2_LINE_MAX
 
 /* NZERO
- *   Default process priority. Minimum Acceptable Value: 100
+ *   Default process priority. Minimum Acceptable Value: 20
  */
 
-#define NZERO SCHED_PRIORITY_DEFAULT
+#define NZERO 20
 
 /* Required for asynchronous I/O */
 
@@ -315,16 +303,8 @@
 #define SEM_VALUE_MAX  _POSIX_SEM_VALUE_MAX
 
 /* Required for readv() and writev() */
-
 /* There really is no upper limit on the number of vectors */
 
 #define IOV_MAX        INT_MAX
-
-#define HOST_NAME_MAX  32
-
-/* ptrdiff_t limits */
-
-#define PTRDIFF_MAX PTR_MAX
-#define PTRDIFF_MIN PTR_MIN
 
 #endif /* __INCLUDE_LIMITS_H */

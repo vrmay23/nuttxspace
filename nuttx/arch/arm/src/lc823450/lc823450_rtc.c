@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_rtc.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2014,2015,2016,2017 Sony Video & Sound Products Inc.
+ *   Author: Masatoshi Tateishi <Masatoshi.Tateishi@jp.sony.com>
+ *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,7 +42,6 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
-#include <nuttx/spinlock.h>
 #include <nuttx/timers/rtc.h>
 
 #ifdef CONFIG_RTC_ALARM
@@ -43,7 +56,7 @@
 #include <string.h>
 
 #include "lc823450_syscontrol.h"
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "clock/clock.h"
 
 /****************************************************************************
@@ -137,7 +150,6 @@ static void rtc_pmnotify(struct pm_callback_s *cb, enum pm_state_e pmstate);
 
 #ifdef CONFIG_RTC_ALARM
 static alarmcb_t g_alarmcb;
-static spinlock_t g_alarmcb_lock = SP_UNLOCKED;
 #endif
 
 #ifdef CONFIG_RTC_SAVE_DEFAULT
@@ -151,8 +163,10 @@ static struct pm_callback_s pm_cb =
 static int cboot = 1;
 #endif /* CONFIG_RTC_DIV */
 
+#ifdef CONFIG_CLOCK_MONOTONIC
 static struct timespec lastupdate_mono;
 static struct timespec lastupdate_rtc;
+#endif
 
 /****************************************************************************
  * Public Data
@@ -172,7 +186,7 @@ volatile bool g_rtc_enabled = false;
 static void tm_divider(struct tm *tm, int divn, int divm)
 {
   time_t tt;
-  tt = timegm(tm);
+  tt = mktime(tm);
   tt = (time_t) ((uint64_t)tt * divn / divm);
   gmtime_r(&tt, tm);
 }
@@ -209,6 +223,7 @@ static void rtc_pmnotify(struct pm_callback_s *cb, enum pm_state_e pmstate)
     default:
       break;
     }
+  return;
 }
 #endif /* CONFIG_RTC_SAVE_DEFAULT */
 
@@ -228,7 +243,7 @@ static void rtc_pmnotify(struct pm_callback_s *cb, enum pm_state_e pmstate)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int rtc_interrupt(int irq, void *context, void *arg)
+static int rtc_interrupt(int irq, void *context, FAR void *arg)
 {
   struct tm tm;
   up_rtc_getdatetime(&tm);
@@ -266,15 +281,14 @@ static int rtc_interrupt(int irq, void *context, void *arg)
  * Description:
  *   Get the current date and time from the date/time RTC.  This interface
  *   is only supported by the date/time RTC hardware implementation.
- *   It is used to replace the system timer.
- *   It is only used by the RTOS during initialization to
- *   set up the system time when CONFIG_RTC and CONFIG_RTC_DATETIME
+ *   It is used to replace the system timer.  It is only used by the RTOS during
+ *   initialization to set up the system time when CONFIG_RTC and CONFIG_RTC_DATETIME
  *   are selected (and CONFIG_RTC_HIRES is not).
  *
- *   NOTE: Some date/time RTC hardware is capability of sub-second accuracy.
- *   That sub-second accuracy is lost in this interface.
- *   However, since the system time is reinitialized on each power-up/reset,
- *   there will be no timing inaccuracy in the long run.
+ *   NOTE: Some date/time RTC hardware is capability of sub-second accuracy.  That
+ *   sub-second accuracy is lost in this interface.  However, since the system time
+ *   is reinitialized on each power-up/reset, there will be no timing inaccuracy in
+ *   the long run.
  *
  * Input Parameters:
  *   tp - The location to return the high resolution time value.
@@ -284,7 +298,7 @@ static int rtc_interrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-static int up_rtc_getdatetime_main(struct tm *tp)
+static int up_rtc_getdatetime_main(FAR struct tm *tp)
 {
 #ifdef CONFIG_RTC_DIV
   tp->tm_sec  = getreg8(RTC_SEC);
@@ -454,10 +468,9 @@ int up_rtc_initialize(void)
   return OK;
 }
 
-int up_rtc_getdatetime(struct tm *tp)
+int up_rtc_getdatetime(FAR struct tm *tp)
 {
-  struct tm tm1;
-  struct tm tm2;
+  struct tm tm1, tm2;
 
 #ifdef CONFIG_RTC_DIV
   /* WA: time registers cannot be read within one second(from set) */
@@ -498,9 +511,8 @@ int up_rtc_getdatetime(struct tm *tp)
  * Name: up_rtc_settime
  *
  * Description:
- *   Set the RTC to the provided time.
- *   All RTC implementations must be able to set their time
- *   based on a standard timespec.
+ *   Set the RTC to the provided time.  All RTC implementations must be able to
+ *   set their time based on a standard timespec.
  *
  * Input Parameters:
  *   tp - the time to use
@@ -510,7 +522,7 @@ int up_rtc_getdatetime(struct tm *tp)
  *
  ****************************************************************************/
 
-int up_rtc_settime(const struct timespec *ts)
+int up_rtc_settime(FAR const struct timespec *ts)
 {
   struct tm *tp;
 
@@ -550,8 +562,10 @@ int up_rtc_settime(const struct timespec *ts)
   up_rtc_set_default_datetime(tp);
 #endif /* CONFIG_RTC_SAVE_DEFAULT */
 
-  clock_systime_timespec(&lastupdate_mono);
+#ifdef CONFIG_CLOCK_MONOTONIC
+  clock_gettime(CLOCK_MONOTONIC, &lastupdate_mono);
   lastupdate_rtc = *ts;
+#endif
 
   /* Start rtc update */
 
@@ -581,9 +595,8 @@ int up_rtc_settime(const struct timespec *ts)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-int up_rtc_setalarm(const struct timespec *ts, alarmcb_t callback)
+int up_rtc_setalarm(FAR const struct timespec *ts, alarmcb_t callback)
 {
-  irqstate_t   flags;
   struct tm *tp;
 
   if (g_alarmcb)
@@ -592,12 +605,9 @@ int up_rtc_setalarm(const struct timespec *ts, alarmcb_t callback)
     }
 
   tp = gmtime(&ts->tv_sec);
-
 #ifdef CONFIG_RTC_DIV
   tm_divider(tp, CONFIG_RTC_DIV_M, CONFIG_RTC_DIV_N);
 #endif /* CONFIG_RTC_DIV */
-
-  flags = spin_lock_irqsave(&g_alarmcb_lock);
   g_alarmcb = callback;
 #if 0
   llinfo("SETALARM (%04d/%02d/%02d %02d:%02d:%02d)\n",
@@ -629,8 +639,6 @@ int up_rtc_setalarm(const struct timespec *ts, alarmcb_t callback)
 
   modifyreg8(RTC_RTCINT, 1 << RTC_RTCINT_SET, 1 << RTC_RTCINT_AIE);
 
-  spin_unlock_irqrestore(&g_alarmcb_lock, flags);
-
   return OK;
 }
 
@@ -641,18 +649,19 @@ int up_rtc_setalarm(const struct timespec *ts, alarmcb_t callback)
 int up_rtc_cancelalarm(void)
 {
   irqstate_t   flags;
-  flags = spin_lock_irqsave(&g_alarmcb_lock);
+  flags = enter_critical_section();
   g_alarmcb = NULL;
 
   /* Disable IRQ */
 
   putreg8(0, RTC_RTCINT);
 
-  spin_unlock_irqrestore(&g_alarmcb_lock, flags);
+  leave_critical_section(flags);
   return 0;
 }
 
 #endif
+
 
 /****************************************************************************
  * Name: up_rtc_getrawtime
@@ -662,13 +671,14 @@ int up_rtc_cancelalarm(void)
  *
  ****************************************************************************/
 
-int up_rtc_getrawtime(struct timespec *ts)
+int up_rtc_getrawtime(FAR struct timespec *ts)
 {
   struct tm tm;
-  struct timespec now;
-  struct timespec diff;
 
-  clock_systime_timespec(&now);
+#ifdef CONFIG_CLOCK_MONOTONIC
+  struct timespec now, diff;
+
+  clock_gettime(CLOCK_MONOTONIC, &now);
   timespec_sub(&now, &lastupdate_mono, &diff);
 
   if (lastupdate_rtc.tv_sec != 0 && diff.tv_sec < 1)
@@ -678,6 +688,7 @@ int up_rtc_getrawtime(struct timespec *ts)
       *ts = lastupdate_rtc;
       return 0;
     }
+#endif
 
   tm.tm_sec  = getreg8(RTC_SEC);
   tm.tm_min  = getreg8(RTC_MIN);
@@ -691,7 +702,7 @@ int up_rtc_getrawtime(struct timespec *ts)
 #endif /* CONFIG_RTC_DIV */
 
   ts->tv_nsec = 0;
-  ts->tv_sec = timegm(&tm);
+  ts->tv_sec = mktime(&tm);
   return 0;
 }
 
@@ -772,6 +783,7 @@ void up_rtc_clear_default(void)
   bchlib_write(handle, (void *)&rtc_def,
                CONFIG_RTC_SAVE_SECTOR_OFFSET * 512, sizeof(rtc_def));
   bchlib_teardown(handle);
+  return;
 }
 
 #endif /* CONFIG_RTC_SAVE_DEFAULT */

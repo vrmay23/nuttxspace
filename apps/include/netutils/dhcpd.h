@@ -1,10 +1,13 @@
 /****************************************************************************
  * apps/include/netutils/dhcpd.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2007, 2009-2011, 2015 Gregory Nutt
- * SPDX-FileCopyrightText: 2005 Swedish Institute of Computer Science
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2007, 2009, 2011, 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This logic was leveraged from uIP which also has a BSD-style license:
+ *
+ *   Copyright (c) 2005, Swedish Institute of Computer Science
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,8 +42,6 @@
  * Included Files
  ****************************************************************************/
 
-#include <netinet/in.h>
-
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -62,12 +63,6 @@ extern "C"
 #endif
 
 int dhcpd_run(FAR const char *interface);
-int dhcpd_start(FAR const char *interface);
-int dhcpd_stop(void);
-int dhcpd_set_startip(in_addr_t startip);
-int dhcpd_set_routerip(in_addr_t routerip);
-int dhcpd_set_netmask(in_addr_t netmask);
-int dhcpd_set_dnsip(in_addr_t dnsip);
 
 #undef EXTERN
 #ifdef __cplusplus

@@ -1,26 +1,40 @@
-/****************************************************************************
+/*****************************************************************************
  * arch/arm/src/imxrt/imxrt_lpspi.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Authors: Teodora Kireva
+ *            Ivan Ucherdzhiev <ivanucherdjiev@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-/****************************************************************************
+/*****************************************************************************
  * The external functions, imxrt_lpspi1/2/3/4select and
  * imxrt_lpspi1/2/3/4status must be provided by board-specific logic.
  * They are implementations of the select and status methods of the SPI
@@ -29,69 +43,71 @@
  * imxrt_lpspibus_initialize()) are provided by common IMXRT logic.
  * To use this common SPI logic on your board:
  *
- *   1. Provide logic in imxrt_boardinitialize() to configure SPI chip
- *      select pins.
+ *   1. Provide logic in imxrt_boardinitialize() to configure SPI chip select
+ *      pins.
  *   2. Provide imxrt_lpspi1/2/3/4select() and imxrt_lpspi1/2/3/4status()
- *      functions in your board-specific logic.  These functions will
- *      perform chip selection and status operations using GPIOs in the way
- *      your board is configured.
+ *      functions in your board-specific logic.  These functions will perform
+ *      chip selection and status operations using GPIOs in the way your board
+ *      is configured.
  *   3. Add a calls to imxrt_lpspibus_initialize() in your low level
  *      application initialization logic
- *   4. The handle returned by imxrt_lpspibus_initialize() may then be
- *      used to bind the SPI driver to higher level logic (e.g., calling
- *      mmcsd_lpspislotinitialize(), for example, will bind the SPI
- *      driver to the SPI MMC/SD driver).
+ *   4. The handle returned by imxrt_lpspibus_initialize() may then be used to
+ *      bind the SPI driver to higher level logic (e.g., calling
+ *      mmcsd_lpspislotinitialize(), for example, will bind the SPI driver to
+ *      the SPI MMC/SD driver).
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-/****************************************************************************
+/*****************************************************************************
  * Included Files
- ****************************************************************************/
+ *****************************************************************************/
 
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
+#include <nuttx/power/pm.h>
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "chip.h"
 
 #include "imxrt_lpspi.h"
 #include "imxrt_gpio.h"
 #include "hardware/imxrt_pinmux.h"
 #include "hardware/imxrt_lpspi.h"
-#include "imxrt_clockconfig.h"
 #include "hardware/imxrt_ccm.h"
 #include "imxrt_periphclks.h"
 
-#include "hardware/imxrt_dmamux.h"
-#include "imxrt_edma.h"
+#if defined(CONFIG_IMXRT_LPSPI1) || defined(CONFIG_IMXRT_LPSPI2) || \
+    defined(CONFIG_IMXRT_LPSPI3) || defined(CONFIG_IMXRT_LPSPI4)
 
-#ifdef CONFIG_IMXRT_LPSPI
-
-/****************************************************************************
+/*****************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ *****************************************************************************/
 
-/* Configuration ************************************************************/
+/* Configuration *************************************************************/
 
 /* SPI interrupts */
 
 #ifdef CONFIG_IMXRT_LPSPI_INTERRUPTS
 #  error "Interrupt driven SPI not yet supported"
+#endif
+
+#if defined(CONFIG_IMXRT_LPSPI_DMA)
+#  error "DMA mode is not yet supported"
 #endif
 
 /* Can't have both interrupt driven SPI and SPI DMA */
@@ -100,12 +116,9 @@
 #  error "Cannot enable both interrupt mode and DMA mode for SPI"
 #endif
 
-#define  SPI_SR_CLEAR   (LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF  | \
-                         LPSPI_SR_TEF | LPSPI_SR_REF | LPSPI_SR_DMF)
-
-/****************************************************************************
+/*****************************************************************************
  * Private Types
- ****************************************************************************/
+ *****************************************************************************/
 
 struct imxrt_lpspidev_s
 {
@@ -114,21 +127,11 @@ struct imxrt_lpspidev_s
 #ifdef CONFIG_IMXRT_LPSPI_INTERRUPTS
   uint8_t spiirq;             /* SPI IRQ number */
 #endif
-  mutex_t lock;               /* Held while chip is selected for mutual exclusion */
+  sem_t exclsem;              /* Held while chip is selected for mutual exclusion */
   uint32_t frequency;         /* Requested clock frequency */
   uint32_t actual;            /* Actual clock frequency */
   int8_t nbits;               /* Width of word in bits */
   uint8_t mode;               /* Mode 0,1,2,3 */
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-  volatile uint32_t rxresult;   /* Result of the RX DMA */
-  volatile uint32_t txresult;   /* Result of the TX DMA */
-  const uint16_t    rxch;       /* The RX DMA channel number */
-  const uint16_t    txch;       /* The TX DMA channel number */
-  DMACH_HANDLE      rxdma;      /* DMA channel handle for RX transfers */
-  DMACH_HANDLE      txdma;      /* DMA channel handle for TX transfers */
-  sem_t             rxsem;      /* Wait for RX DMA to complete */
-  sem_t             txsem;      /* Wait for TX DMA to complete */
-#endif
 };
 
 enum imxrt_delay_e
@@ -138,78 +141,61 @@ enum imxrt_delay_e
   LPSPI_BETWEEN_TRANSFER      /* Delay between transfers. */
 };
 
-/****************************************************************************
+/*****************************************************************************
  * Private Function Prototypes
- ****************************************************************************/
+ *****************************************************************************/
 
 /* Helpers */
 
-static inline uint32_t
-imxrt_lpspi_getreg32(struct imxrt_lpspidev_s *priv,
-                     uint8_t offset);
-static inline void imxrt_lpspi_putreg32(struct imxrt_lpspidev_s *priv,
+static inline uint32_t imxrt_lpspi_getreg32(FAR struct imxrt_lpspidev_s *priv,
+                                            uint8_t offset);
+static inline void imxrt_lpspi_putreg32(FAR struct imxrt_lpspidev_s *priv,
                                         uint8_t offset, uint32_t value);
 static inline uint32_t imxrt_lpspi_readword(
-                          struct imxrt_lpspidev_s *priv);
-static inline void imxrt_lpspi_writeword(struct imxrt_lpspidev_s *priv,
+                          FAR struct imxrt_lpspidev_s *priv);
+static inline void imxrt_lpspi_writeword(FAR struct imxrt_lpspidev_s *priv,
                                          uint16_t byte);
 static inline bool imxrt_lpspi_9to16bitmode(
-                          struct imxrt_lpspidev_s *priv);
-static inline void imxrt_lpspi_master_set_delays(struct imxrt_lpspidev_s
+                          FAR struct imxrt_lpspidev_s *priv);
+static inline void imxrt_lpspi_master_set_delays(FAR struct imxrt_lpspidev_s
                                                  *priv, uint32_t delay_ns,
                                                  enum imxrt_delay_e type);
 static inline void imxrt_lpspi_master_set_delay_scaler(
-                          struct imxrt_lpspidev_s *priv,
+                          FAR struct imxrt_lpspidev_s *priv,
                           uint32_t scaler,
                           enum imxrt_delay_e type);
 
-/* DMA support */
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static int         spi_dmarxwait(struct imxrt_lpspidev_s *priv);
-static int         spi_dmatxwait(struct imxrt_lpspidev_s *priv);
-static inline void spi_dmarxwakeup(struct imxrt_lpspidev_s *priv);
-static inline void spi_dmatxwakeup(struct imxrt_lpspidev_s *priv);
-static void        spi_dmarxcallback(DMACH_HANDLE handle, void *arg,
-                                     bool done, int result);
-static void        spi_dmatxcallback(DMACH_HANDLE handle, void *arg,
-                                     bool done, int result);
-static inline void spi_dmarxstart(struct imxrt_lpspidev_s *priv);
-static inline void spi_dmatxstart(struct imxrt_lpspidev_s *priv);
-#endif
-
 /* SPI methods */
 
-static int imxrt_lpspi_lock(struct spi_dev_s *dev, bool lock);
-static uint32_t imxrt_lpspi_setfrequency(struct spi_dev_s *dev,
+static int imxrt_lpspi_lock(FAR struct spi_dev_s *dev, bool lock);
+static uint32_t imxrt_lpspi_setfrequency(FAR struct spi_dev_s *dev,
                                          uint32_t frequency);
-static void imxrt_lpspi_setmode(struct spi_dev_s *dev,
+static void imxrt_lpspi_setmode(FAR struct spi_dev_s *dev,
                                 enum spi_mode_e mode);
-static void imxrt_lpspi_setbits(struct spi_dev_s *dev, int nbits);
+static void imxrt_lpspi_setbits(FAR struct spi_dev_s *dev, int nbits);
 #ifdef CONFIG_SPI_HWFEATURES
-static int imxrt_lpspi_hwfeatures(struct spi_dev_s *dev,
+static int imxrt_lpspi_hwfeatures(FAR struct spi_dev_s *dev,
                                   imxrt_lpspi_hwfeatures_t features);
 #endif
-static uint32_t imxrt_lpspi_send(struct spi_dev_s *dev, uint32_t wd);
-static void imxrt_lpspi_exchange(struct spi_dev_s *dev,
-                                 const void *txbuffer,
-                                 void *rxbuffer,
+static uint32_t imxrt_lpspi_send(FAR struct spi_dev_s *dev, uint32_t wd);
+static void imxrt_lpspi_exchange(FAR struct spi_dev_s *dev,
+                                 FAR const void *txbuffer, FAR void *rxbuffer,
                                  size_t nwords);
 #ifndef CONFIG_SPI_EXCHANGE
-static void imxrt_lpspi_sndblock(struct spi_dev_s *dev,
-                                 const void *txbuffer, size_t nwords);
-static void imxrt_lpspi_recvblock(struct spi_dev_s *dev,
-                                  void *rxbuffer,
+static void imxrt_lpspi_sndblock(FAR struct spi_dev_s *dev,
+                                 FAR const void *txbuffer, size_t nwords);
+static void imxrt_lpspi_recvblock(FAR struct spi_dev_s *dev,
+                                  FAR void *rxbuffer,
                                   size_t nwords);
 #endif
 
 /* Initialization */
 
-static void imxrt_lpspi_bus_initialize(struct imxrt_lpspidev_s *priv);
+static void imxrt_lpspi_bus_initialize(FAR struct imxrt_lpspidev_s *priv);
 
-/****************************************************************************
+/*****************************************************************************
  * Private Data
- ****************************************************************************/
+ *****************************************************************************/
 
 #ifdef CONFIG_IMXRT_LPSPI1
 static const struct spi_ops_s g_spi1ops =
@@ -244,18 +230,15 @@ static struct imxrt_lpspidev_s g_lpspi1dev =
 {
   .spidev       =
   {
-    .ops        = &g_spi1ops,
+    &g_spi1ops
   },
   .spibase      = IMXRT_LPSPI1_BASE,
 #ifdef CONFIG_IMXRT_LPSPI_INTERRUPTS
   .spiirq       = IMXRT_IRQ_LPSPI1,
 #endif
-  .lock         = NXMUTEX_INITIALIZER,
-#ifdef CONFIG_IMXRT_LPSPI1_DMA
-  .rxch         = IMXRT_DMACHAN_LPSPI1_RX,
-  .txch         = IMXRT_DMACHAN_LPSPI1_TX,
-  .rxsem        = SEM_INITIALIZER(0),
-  .txsem        = SEM_INITIALIZER(0),
+#ifdef CONFIG_IMXRT_LPSPI_DMA
+  .rxch         = DMAMAP_LPSPI1_RX,
+  .txch         = DMAMAP_LPSPI1_TX,
 #endif
 };
 #endif
@@ -293,18 +276,15 @@ static struct imxrt_lpspidev_s g_lpspi2dev =
 {
   .spidev       =
   {
-    .ops        = &g_spi2ops,
+    &g_spi2ops
   },
   .spibase      = IMXRT_LPSPI2_BASE,
 #ifdef CONFIG_IMXRT_LPSPI_INTERRUPTS
   .spiirq       = IMXRT_IRQ_LPSPI2,
 #endif
-  .lock         = NXMUTEX_INITIALIZER,
-#ifdef CONFIG_IMXRT_LPSPI2_DMA
-  .rxch         = IMXRT_DMACHAN_LPSPI2_RX,
-  .txch         = IMXRT_DMACHAN_LPSPI2_TX,
-  .rxsem        = SEM_INITIALIZER(0),
-  .txsem        = SEM_INITIALIZER(0),
+#ifdef CONFIG_IMXRT_LPSPI_DMA
+  .rxch         = DMAMAP_LPSPI2_RX,
+  .txch         = DMAMAP_LPSPI2_TX,
 #endif
 };
 #endif
@@ -342,18 +322,15 @@ static struct imxrt_lpspidev_s g_lpspi3dev =
 {
   .spidev       =
   {
-    .ops        = &g_spi3ops,
+    &g_spi3ops
   },
   .spibase      = IMXRT_LPSPI3_BASE,
 #ifdef CONFIG_IMXRT_LPSPI_INTERRUPTS
   .spiirq       = IMXRT_IRQ_LPSPI3,
 #endif
-  .lock         = NXMUTEX_INITIALIZER,
-#ifdef CONFIG_IMXRT_LPSPI3_DMA
-  .rxch         = IMXRT_DMACHAN_LPSPI3_RX,
-  .txch         = IMXRT_DMACHAN_LPSPI3_TX,
-  .rxsem        = SEM_INITIALIZER(0),
-  .txsem        = SEM_INITIALIZER(0),
+#ifdef CONFIG_IMXRT_LPSPI_DMA
+  .rxch         = DMAMAP_LPSPI3_RX,
+  .txch         = DMAMAP_LPSPI3_TX,
 #endif
 };
 #endif
@@ -391,119 +368,64 @@ static struct imxrt_lpspidev_s g_lpspi4dev =
 {
   .spidev       =
   {
-    .ops        = &g_spi4ops,
+    &g_spi4ops
   },
   .spibase      = IMXRT_LPSPI4_BASE,
 #ifdef CONFIG_IMXRT_LPSPI_INTERRUPTS
   .spiirq       = IMXRT_IRQ_LPSPI4,
 #endif
-  .lock         = NXMUTEX_INITIALIZER,
-#ifdef CONFIG_IMXRT_LPSPI4_DMA
-  .rxch         = IMXRT_DMACHAN_LPSPI4_RX,
-  .txch         = IMXRT_DMACHAN_LPSPI4_TX,
-  .rxsem        = SEM_INITIALIZER(0),
-  .txsem        = SEM_INITIALIZER(0),
+#ifdef CONFIG_IMXRT_LPSPI_DMA
+  .rxch         = DMAMAP_LPSPI4_RX,
+  .txch         = DMAMAP_LPSPI4_TX,
 #endif
 };
 #endif
 
-#ifdef CONFIG_IMXRT_LPSPI5
-static const struct spi_ops_s g_spi5ops =
-{
-  .lock         = imxrt_lpspi_lock,
-  .select       = imxrt_lpspi5select,
-  .setfrequency = imxrt_lpspi_setfrequency,
-  .setmode      = imxrt_lpspi_setmode,
-  .setbits      = imxrt_lpspi_setbits,
-#ifdef CONFIG_SPI_HWFEATURES
-  .hwfeatures   = imxrt_lpspi_hwfeatures,
-#endif
-  .status       = imxrt_lpspi5status,
-#ifdef CONFIG_SPI_CMDDATA
-  .cmddata      = imxrt_lpspi5cmddata,
-#endif
-  .send         = imxrt_lpspi_send,
-#ifdef CONFIG_SPI_EXCHANGE
-  .exchange     = imxrt_lpspi_exchange,
-#else
-  .sndblock     = imxrt_lpspi_sndblock,
-  .recvblock    = imxrt_lpspi_recvblock,
-#endif
-#ifdef CONFIG_SPI_CALLBACK
-  .registercallback = imxrt_lpspi5register,  /* Provided externally */
-#else
-  .registercallback = 0,                     /* Not implemented */
-#endif
-};
-
-static struct imxrt_lpspidev_s g_lpspi5dev =
-{
-  .spidev       =
-  {
-    &g_spi5ops
-  },
-  .spibase      = IMXRT_LPSPI5_BASE,
-#ifdef CONFIG_IMXRT_LPSPI_INTERRUPTS
-  .spiirq       = IMXRT_IRQ_LPSPI5,
-#endif
-#ifdef CONFIG_IMXRT_LPSPI5_DMA
-  .rxch         = IMXRT_DMACHAN_LPSPI5_RX,
-  .txch         = IMXRT_DMACHAN_LPSPI5_TX,
-#endif
-};
-#endif
-
-#ifdef CONFIG_IMXRT_LPSPI6
-static const struct spi_ops_s g_spi6ops =
-{
-  .lock         = imxrt_lpspi_lock,
-  .select       = imxrt_lpspi6select,
-  .setfrequency = imxrt_lpspi_setfrequency,
-  .setmode      = imxrt_lpspi_setmode,
-  .setbits      = imxrt_lpspi_setbits,
-#ifdef CONFIG_SPI_HWFEATURES
-  .hwfeatures   = imxrt_lpspi_hwfeatures,
-#endif
-  .status       = imxrt_lpspi6status,
-#ifdef CONFIG_SPI_CMDDATA
-  .cmddata      = imxrt_lpspi6cmddata,
-#endif
-  .send         = imxrt_lpspi_send,
-#ifdef CONFIG_SPI_EXCHANGE
-  .exchange     = imxrt_lpspi_exchange,
-#else
-  .sndblock     = imxrt_lpspi_sndblock,
-  .recvblock    = imxrt_lpspi_recvblock,
-#endif
-#ifdef CONFIG_SPI_CALLBACK
-  .registercallback = imxrt_lpspi6register,  /* Provided externally */
-#else
-  .registercallback = 0,                     /* Not implemented */
-#endif
-};
-
-static struct imxrt_lpspidev_s g_lpspi6dev =
-{
-  .spidev       =
-  {
-    &g_spi6ops
-  },
-  .spibase      = IMXRT_LPSPI6_BASE,
-#ifdef CONFIG_IMXRT_LPSPI_INTERRUPTS
-  .spiirq       = IMXRT_IRQ_LPSPI6,
-#endif
-#ifdef CONFIG_IMXRT_LPSPI6_DMA
-  .rxch         = IMXRT_DMACHAN_LPSPI6_RX,
-  .txch         = IMXRT_DMACHAN_LPSPI6_TX,
-#endif
-};
-#endif
-
-/****************************************************************************
+/*****************************************************************************
  * Private Functions
- ****************************************************************************/
+ *****************************************************************************/
 
-/****************************************************************************
+/*****************************************************************************
+ * Name: imxrt_lpspi_getreg8
+ *
+ * Description:
+ *   Get the contents of the SPI register at offset
+ *
+ * Input Parameters:
+ *   priv   - private SPI device structure
+ *   offset - offset to the register of interest
+ *
+ * Returned Value:
+ *   The contents of the 8-bit register
+ *
+ *****************************************************************************/
+
+static inline uint8_t imxrt_lpspi_getreg8(FAR struct imxrt_lpspidev_s *priv,
+                                          uint8_t offset)
+{
+  return getreg8(priv->spibase + offset);
+}
+
+/*****************************************************************************
+ * Name: imxrt_lpspi_putreg8
+ *
+ * Description:
+ *   Write a 8-bit value to the SPI register at offset
+ *
+ * Input Parameters:
+ *   priv   - private SPI device structure
+ *   offset - offset to the register of interest
+ *   value  - the 8-bit value to be written
+ *
+ *****************************************************************************/
+
+static inline void imxrt_lpspi_putreg8(FAR struct imxrt_lpspidev_s *priv,
+                                       uint8_t offset, uint8_t value)
+{
+  putreg8(value, priv->spibase + offset);
+}
+
+/*****************************************************************************
  * Name: imxrt_lpspi_getreg
  *
  * Description:
@@ -516,16 +438,15 @@ static struct imxrt_lpspidev_s g_lpspi6dev =
  * Returned Value:
  *   The contents of the 32-bit register
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static inline uint32_t
-imxrt_lpspi_getreg32(struct imxrt_lpspidev_s *priv,
-                     uint8_t offset)
+static inline uint32_t imxrt_lpspi_getreg32(FAR struct imxrt_lpspidev_s *priv,
+                                            uint8_t offset)
 {
   return getreg32(priv->spibase + offset);
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_putreg
  *
  * Description:
@@ -539,15 +460,15 @@ imxrt_lpspi_getreg32(struct imxrt_lpspidev_s *priv,
  * Returned Value:
  *   The contents of the 32-bit register
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static inline void imxrt_lpspi_putreg32(struct imxrt_lpspidev_s *priv,
+static inline void imxrt_lpspi_putreg32(FAR struct imxrt_lpspidev_s *priv,
                                         uint8_t offset, uint32_t value)
 {
   putreg32(value, priv->spibase + offset);
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_readword
  *
  * Description:
@@ -559,10 +480,9 @@ static inline void imxrt_lpspi_putreg32(struct imxrt_lpspidev_s *priv,
  * Returned Value:
  *   word as read
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static inline uint32_t
-imxrt_lpspi_readword(struct imxrt_lpspidev_s *priv)
+static inline uint32_t imxrt_lpspi_readword(FAR struct imxrt_lpspidev_s *priv)
 {
   /* Wait until the receive buffer is not empty */
 
@@ -574,7 +494,7 @@ imxrt_lpspi_readword(struct imxrt_lpspidev_s *priv)
   return imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_RDR_OFFSET);
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_writeword
  *
  * Description:
@@ -587,9 +507,9 @@ imxrt_lpspi_readword(struct imxrt_lpspidev_s *priv)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static inline void imxrt_lpspi_writeword(struct imxrt_lpspidev_s *priv,
+static inline void imxrt_lpspi_writeword(FAR struct imxrt_lpspidev_s *priv,
                                          uint16_t word)
 {
   /* Wait until the transmit buffer is empty */
@@ -602,7 +522,61 @@ static inline void imxrt_lpspi_writeword(struct imxrt_lpspidev_s *priv,
   imxrt_lpspi_putreg32(priv, IMXRT_LPSPI_TDR_OFFSET, word);
 }
 
-/****************************************************************************
+/*****************************************************************************
+ * Name: imxrt_lpspi_readbyte
+ *
+ * Description:
+ *   Read one byte from SPI
+ *
+ * Input Parameters:
+ *   priv - Device-specific state data
+ *
+ * Returned Value:
+ *   Byte as read
+ *
+ *****************************************************************************/
+
+static inline uint8_t imxrt_lpspi_readbyte(FAR struct imxrt_lpspidev_s *priv)
+{
+  /* Wait until the receive buffer is not empty */
+
+  while ((imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_SR_OFFSET)
+                       & LPSPI_SR_RDF) == 0);
+
+  /* Then return the received byte */
+
+  return imxrt_lpspi_getreg8(priv, IMXRT_LPSPI_RDR_OFFSET);
+}
+
+/*****************************************************************************
+ * Name: imxrt_lpspi_writebyte
+ *
+ * Description:
+ *   Write one 8-bit frame to the SPI FIFO
+ *
+ * Input Parameters:
+ *   priv - Device-specific state data
+ *   byte - Byte to send
+ *
+ * Returned Value:
+ *   None
+ *
+ *****************************************************************************/
+
+static inline void imxrt_lpspi_writebyte(FAR struct imxrt_lpspidev_s *priv,
+                                         uint8_t byte)
+{
+  /* Wait until the transmit buffer is empty */
+
+  while ((imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_SR_OFFSET)
+                           & LPSPI_SR_TDF) == 0);
+
+  /* Then send the byte */
+
+  imxrt_lpspi_putreg8(priv, IMXRT_LPSPI_TDR_OFFSET, byte);
+}
+
+/*****************************************************************************
  * Name: imxrt_lpspi_9to16bitmode
  *
  * Description:
@@ -614,10 +588,9 @@ static inline void imxrt_lpspi_writeword(struct imxrt_lpspidev_s *priv,
  * Returned Value:
  *   true: >8 bit mode-bit mode, false: <= 8-bit mode
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static inline bool
-imxrt_lpspi_9to16bitmode(struct imxrt_lpspidev_s *priv)
+static inline bool imxrt_lpspi_9to16bitmode(FAR struct imxrt_lpspidev_s *priv)
 {
   bool ret;
 
@@ -634,8 +607,8 @@ imxrt_lpspi_9to16bitmode(struct imxrt_lpspidev_s *priv)
   return ret;
 }
 
-/****************************************************************************
- * Name: imxrt_lpspi_modifyreg32
+/*****************************************************************************
+ * Name: imxrt_lpspi_modifyreg
  *
  * Description:
  *   Clear and set bits in register
@@ -649,16 +622,16 @@ imxrt_lpspi_9to16bitmode(struct imxrt_lpspidev_s *priv)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static void imxrt_lpspi_modifyreg32(struct imxrt_lpspidev_s *priv,
+static void imxrt_lpspi_modifyreg32(FAR struct imxrt_lpspidev_s *priv,
                                     uint8_t offset, uint32_t clrbits,
                                     uint32_t setbits)
 {
   modifyreg32(priv->spibase + offset, clrbits, setbits);
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_master_set_delays
  *
  * Description:
@@ -672,10 +645,10 @@ static void imxrt_lpspi_modifyreg32(struct imxrt_lpspidev_s *priv,
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 static inline void imxrt_lpspi_master_set_delay_scaler(
-                          struct imxrt_lpspidev_s *priv,
+                          FAR struct imxrt_lpspidev_s *priv,
                           uint32_t scaler,
                           enum imxrt_delay_e type)
 {
@@ -704,7 +677,7 @@ static inline void imxrt_lpspi_master_set_delay_scaler(
     }
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_master_set_delays
  *
  * Description:
@@ -718,19 +691,18 @@ static inline void imxrt_lpspi_master_set_delay_scaler(
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 static inline void imxrt_lpspi_master_set_delays(
-                             struct imxrt_lpspidev_s *priv,
+                             FAR struct imxrt_lpspidev_s *priv,
                              uint32_t delay_ns,
                              enum imxrt_delay_e type)
 {
-#ifndef CONFIG_ARCH_FAMILY_IMXRT117x
   uint32_t pll3_div;
   uint32_t pll_freq;
-#endif
   uint32_t src_freq;
   uint64_t real_delay;
+  uint64_t best_delay;
   uint32_t scaler;
   uint32_t best_scaler;
   uint32_t diff;
@@ -738,33 +710,6 @@ static inline void imxrt_lpspi_master_set_delays(
   uint64_t initial_delay_ns;
   uint32_t clock_div_prescaler;
   uint32_t additional_scaler;
-
-#ifdef CONFIG_ARCH_FAMILY_IMXRT117x
-  if (priv->spibase == IMXRT_LPSPI1_BASE)
-    {
-      imxrt_get_rootclock(CCM_CR_LPSPI1, &src_freq);
-    }
-  else if (priv->spibase == IMXRT_LPSPI2_BASE)
-    {
-      imxrt_get_rootclock(CCM_CR_LPSPI2, &src_freq);
-    }
-  else if (priv->spibase == IMXRT_LPSPI3_BASE)
-    {
-      imxrt_get_rootclock(CCM_CR_LPSPI3, &src_freq);
-    }
-  else if (priv->spibase == IMXRT_LPSPI4_BASE)
-    {
-      imxrt_get_rootclock(CCM_CR_LPSPI4, &src_freq);
-    }
-  else if (priv->spibase == IMXRT_LPSPI5_BASE)
-    {
-      imxrt_get_rootclock(CCM_CR_LPSPI5, &src_freq);
-    }
-  else if (priv->spibase == IMXRT_LPSPI6_BASE)
-    {
-      imxrt_get_rootclock(CCM_CR_LPSPI6, &src_freq);
-    }
-#else
 
   if ((getreg32(IMXRT_CCM_ANALOG_PLL_USB1) &
        CCM_ANALOG_PLL_USB1_DIV_SELECT_MASK) != 0)
@@ -791,8 +736,6 @@ static inline void imxrt_lpspi_master_set_delays(
   src_freq /= ((getreg32(IMXRT_CCM_CBCMR) & CCM_CBCMR_LPSPI_PODF_MASK) >>
                CCM_CBCMR_LPSPI_PODF_SHIFT) + 1;
 
-#endif
-
   clock_div_prescaler = src_freq /
               (1 << ((imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_TCR_OFFSET) &
               LPSPI_TCR_PRESCALE_MASK) >> LPSPI_TCR_PRESCALE_SHIFT));
@@ -805,15 +748,24 @@ static inline void imxrt_lpspi_master_set_delays(
 
   if (type == LPSPI_BETWEEN_TRANSFER)
     {
-      /* First calculate the initial, default delay, note min delay is 2
-       * clock cycles. Due to large size of * calculated values (uint64_t),
-       * we need to break up the calculation into several steps to ensure
-       * accurate calculated results
+      /* First calculate the initial, default delay, note min delay is 2 clock
+       * cycles. Due to large size of * calculated values (uint64_t), we need
+       * to break up the calculation into several steps to ensure * accurate
+       * calculated results
        */
 
       initial_delay_ns = 1000000000U;
       initial_delay_ns *= 2;
       initial_delay_ns /= clock_div_prescaler;
+
+      /* Calculate the maximum delay */
+
+      best_delay = 1000000000U;
+
+      /* based on DBT+2, or 255 + 2 */
+
+      best_delay *= 257;
+      best_delay /= clock_div_prescaler;
 
       additional_scaler = 1U;
     }
@@ -827,6 +779,15 @@ static inline void imxrt_lpspi_master_set_delays(
 
       initial_delay_ns = 1000000000U;
       initial_delay_ns /= clock_div_prescaler;
+
+      /* Calculate the maximum delay */
+
+      best_delay = 1000000000U;
+
+      /* Based on SCKPCS+1 or PCSSCK+1, or 255 + 1 */
+
+      best_delay *= 256;
+      best_delay /= clock_div_prescaler;
 
       additional_scaler = 0;
     }
@@ -856,9 +817,9 @@ static inline void imxrt_lpspi_master_set_delays(
           real_delay *= (scaler + 1 + additional_scaler);
           real_delay /= clock_div_prescaler;
 
-          /* calculate the delay difference based on the conditional
-           * statement that states that the calculated delay must not be
-           * less then the desired delay
+          /* calculate the delay difference based on the conditional statement
+           * that states that the calculated delay must not be less then the
+           * desired delay
            */
 
           if (real_delay >= delay_ns)
@@ -870,6 +831,7 @@ static inline void imxrt_lpspi_master_set_delays(
 
                   min_diff = diff;
                   best_scaler = scaler;
+                  best_delay = real_delay;
                 }
             }
         }
@@ -878,7 +840,7 @@ static inline void imxrt_lpspi_master_set_delays(
     }
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_lock
  *
  * Description:
@@ -897,26 +859,26 @@ static inline void imxrt_lpspi_master_set_delays(
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static int imxrt_lpspi_lock(struct spi_dev_s *dev, bool lock)
+static int imxrt_lpspi_lock(FAR struct spi_dev_s *dev, bool lock)
 {
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)dev;
+  FAR struct imxrt_lpspidev_s *priv = (FAR struct imxrt_lpspidev_s *)dev;
   int ret;
 
   if (lock)
     {
-      ret = nxmutex_lock(&priv->lock);
+      ret = nxsem_wait_uninterruptible(&priv->exclsem);
     }
   else
     {
-      ret = nxmutex_unlock(&priv->lock);
+      ret = nxsem_post(&priv->exclsem);
     }
 
   return ret;
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_setfrequency
  *
  * Description:
@@ -929,18 +891,16 @@ static int imxrt_lpspi_lock(struct spi_dev_s *dev, bool lock)
  * Returned Value:
  *   Returns the actual frequency selected
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static uint32_t imxrt_lpspi_setfrequency(struct spi_dev_s *dev,
+static uint32_t imxrt_lpspi_setfrequency(FAR struct spi_dev_s *dev,
                                          uint32_t frequency)
 {
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)dev;
+  FAR struct imxrt_lpspidev_s *priv = (FAR struct imxrt_lpspidev_s *)dev;
 
-#ifndef CONFIG_ARCH_FAMILY_IMXRT117x
+  uint32_t men;
   uint32_t pll_freq;
   uint32_t pll3_div;
-#endif
-  uint32_t men;
   uint32_t src_freq = 0;
   uint32_t prescaler;
   uint32_t best_prescaler;
@@ -964,33 +924,6 @@ static uint32_t imxrt_lpspi_setfrequency(struct spi_dev_s *dev,
                                         LPSPI_CR_MEN, 0);
         }
 
-#ifdef CONFIG_ARCH_FAMILY_IMXRT117x
-      if (priv->spibase == IMXRT_LPSPI1_BASE)
-        {
-          imxrt_get_rootclock(CCM_CR_LPSPI1, &src_freq);
-        }
-      else if (priv->spibase == IMXRT_LPSPI2_BASE)
-        {
-          imxrt_get_rootclock(CCM_CR_LPSPI2, &src_freq);
-        }
-      else if (priv->spibase == IMXRT_LPSPI3_BASE)
-        {
-          imxrt_get_rootclock(CCM_CR_LPSPI3, &src_freq);
-        }
-      else if (priv->spibase == IMXRT_LPSPI4_BASE)
-        {
-          imxrt_get_rootclock(CCM_CR_LPSPI4, &src_freq);
-        }
-      else if (priv->spibase == IMXRT_LPSPI5_BASE)
-        {
-          imxrt_get_rootclock(CCM_CR_LPSPI5, &src_freq);
-        }
-      else if (priv->spibase == IMXRT_LPSPI6_BASE)
-        {
-          imxrt_get_rootclock(CCM_CR_LPSPI6, &src_freq);
-        }
-#else
-
       if ((getreg32(IMXRT_CCM_ANALOG_PLL_USB1) &
            CCM_ANALOG_PLL_USB1_DIV_SELECT_MASK) != 0)
         {
@@ -1004,8 +937,8 @@ static uint32_t imxrt_lpspi_setfrequency(struct spi_dev_s *dev,
       pll_freq = BOARD_XTAL_FREQUENCY * pll3_div;
 
       /* Assumption this formula will work only if the LPSPI Clock Source is
-       * PLL3 PFD0 * so check if LPSPI clock source is set to 1 (PLL3 PFD0)
-       * in CCM_CBCMR register bits 4-5
+       * PLL3 PFD0 * so check if LPSPI clock source is set to 1 (PLL3 PFD0) in
+       * CCM_CBCMR register bits 4-5
        */
 
       src_freq  = pll_freq /
@@ -1015,7 +948,6 @@ static uint32_t imxrt_lpspi_setfrequency(struct spi_dev_s *dev,
       src_freq *= 18;
       src_freq /= ((getreg32(IMXRT_CCM_CBCMR) & CCM_CBCMR_LPSPI_PODF_MASK) >>
                    CCM_CBCMR_LPSPI_PODF_SHIFT) + 1;
-#endif
 
       min_diff  = 0xffffffff;
 
@@ -1083,7 +1015,7 @@ static uint32_t imxrt_lpspi_setfrequency(struct spi_dev_s *dev,
   return priv->actual;
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_setmode
  *
  * Description:
@@ -1096,12 +1028,12 @@ static uint32_t imxrt_lpspi_setfrequency(struct spi_dev_s *dev,
  * Returned Value:
  *   Returns the actual frequency selected
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static void imxrt_lpspi_setmode(struct spi_dev_s *dev,
+static void imxrt_lpspi_setmode(FAR struct spi_dev_s *dev,
                                 enum spi_mode_e mode)
 {
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)dev;
+  FAR struct imxrt_lpspidev_s *priv = (FAR struct imxrt_lpspidev_s *)dev;
   uint32_t setbits;
   uint32_t clrbits;
   uint32_t men;
@@ -1147,8 +1079,7 @@ static void imxrt_lpspi_setmode(struct spi_dev_s *dev,
           return;
         }
 
-      imxrt_lpspi_modifyreg32(priv, IMXRT_LPSPI_TCR_OFFSET,
-                              clrbits, setbits);
+      imxrt_lpspi_modifyreg32(priv, IMXRT_LPSPI_TCR_OFFSET, clrbits, setbits);
 
       while ((imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_RSR_OFFSET) &
               LPSPI_RSR_RXEMPTY) != LPSPI_RSR_RXEMPTY)
@@ -1172,7 +1103,7 @@ static void imxrt_lpspi_setmode(struct spi_dev_s *dev,
     }
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_setbits
  *
  * Description:
@@ -1185,12 +1116,13 @@ static void imxrt_lpspi_setmode(struct spi_dev_s *dev,
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static void imxrt_lpspi_setbits(struct spi_dev_s *dev, int nbits)
+static void imxrt_lpspi_setbits(FAR struct spi_dev_s *dev, int nbits)
 {
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)dev;
+  FAR struct imxrt_lpspidev_s *priv = (FAR struct imxrt_lpspidev_s *)dev;
   uint32_t men;
+  int savbits = nbits;
 
   spiinfo("nbits=%d\n", nbits);
 
@@ -1216,11 +1148,12 @@ static void imxrt_lpspi_setbits(struct spi_dev_s *dev, int nbits)
                               LPSPI_TCR_FRAMESZ_MASK,
                               LPSPI_TCR_FRAMESZ(nbits - 1));
 
-      /* Save the selection so the subsequent re-configurations
-       * will be faster.
+      /* Save the selection so the subsequence re-configurations
+       * will be faster
        */
 
-      priv->nbits = nbits;
+      priv->nbits = savbits;    /* nbits has been clobbered... save the signed
+                                 * value. */
 
       /* Re-enable LPSPI if it was enabled previously */
 
@@ -1232,7 +1165,7 @@ static void imxrt_lpspi_setbits(struct spi_dev_s *dev, int nbits)
     }
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_hwfeatures
  *
  * Description:
@@ -1246,16 +1179,17 @@ static void imxrt_lpspi_setbits(struct spi_dev_s *dev, int nbits)
  *   Zero (OK) if the selected H/W features are enabled; A negated errno
  *   value if any H/W feature is not supportable.
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 #ifdef CONFIG_SPI_HWFEATURES
-static int imxrt_lpspi_hwfeatures(struct spi_dev_s *dev,
+static int imxrt_lpspi_hwfeatures(FAR struct spi_dev_s *dev,
                                   imxrt_lpspi_hwfeatures_t features)
 {
 #ifdef CONFIG_SPI_BITORDER
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)dev;
+  FAR struct imxrt_lpspidev_s *priv = (FAR struct imxrt_lpspidev_s *)dev;
   uint32_t setbits;
   uint32_t clrbits;
+  int savbits = nbits;
 
   spiinfo("features=%08x\n", features);
 
@@ -1272,7 +1206,7 @@ static int imxrt_lpspi_hwfeatures(struct spi_dev_s *dev,
       clrbits = LPSPI_TCR_LSBF;
     }
 
-  imxrt_lpspi_modifyreg32(priv, IMXRT_LPSPI_TCR_OFFSET, clrbits, setbits);
+  imxrt_lpspi_modigyreg32(priv, IMXRT_LPSPI_TCR_OFFSET, clrbits, setbits);
 
   /* Other H/W features are not supported */
 
@@ -1283,7 +1217,7 @@ static int imxrt_lpspi_hwfeatures(struct spi_dev_s *dev,
 }
 #endif
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_send
  *
  * Description:
@@ -1297,11 +1231,11 @@ static int imxrt_lpspi_hwfeatures(struct spi_dev_s *dev,
  * Returned Value:
  *   response
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-static uint32_t imxrt_lpspi_send(struct spi_dev_s *dev, uint32_t wd)
+static uint32_t imxrt_lpspi_send(FAR struct spi_dev_s *dev, uint32_t wd)
 {
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)dev;
+  FAR struct imxrt_lpspidev_s *priv = (FAR struct imxrt_lpspidev_s *)dev;
   uint32_t regval;
   uint32_t ret;
 
@@ -1309,8 +1243,8 @@ static uint32_t imxrt_lpspi_send(struct spi_dev_s *dev, uint32_t wd)
 
   imxrt_lpspi_writeword(priv, wd);
 
-  while ((imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_SR_OFFSET) &
-          LPSPI_SR_RDF) != LPSPI_SR_RDF);
+  while ((imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_SR_OFFSET) & LPSPI_SR_RDF) !=
+         LPSPI_SR_RDF);
 
   ret = imxrt_lpspi_readword(priv);
 
@@ -1320,15 +1254,13 @@ static uint32_t imxrt_lpspi_send(struct spi_dev_s *dev, uint32_t wd)
 
   regval = imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_SR_OFFSET);
 
-  spiinfo(
-         "Sent: %04" PRIx32 " Return: %04" PRIx32 " Status: %02" PRIx32 "\n",
-          wd, ret, regval);
+  spiinfo("Sent: %04x Return: %04x Status: %02x\n", wd, ret, regval);
 
   UNUSED(regval);
   return ret;
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_exchange (no DMA).  aka imxrt_lpspi_exchange_nodma
  *
  * Description:
@@ -1338,7 +1270,7 @@ static uint32_t imxrt_lpspi_send(struct spi_dev_s *dev, uint32_t wd)
  *   dev      - Device-specific state data
  *   txbuffer - A pointer to the buffer of data to be sent
  *   rxbuffer - A pointer to a buffer in which to receive data
- *   nwords   - the length of data to be exchanged in units of words.
+ *   nwords   - the length of data to be exchaned in units of words.
  *              The wordsize is determined by the number of bits-per-word
  *              selected for the SPI interface.  If nbits <= 8, the data is
  *              packed into uint8_t's; if nbits >8, the data is packed
@@ -1347,20 +1279,20 @@ static uint32_t imxrt_lpspi_send(struct spi_dev_s *dev, uint32_t wd)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
+#if !defined(CONFIG_IMXRT_LPSPI_DMA) || defined(CONFIG_IMXRT_DMACAPABLE)
 #if !defined(CONFIG_IMXRT_LPSPI_DMA)
-static void imxrt_lpspi_exchange(struct spi_dev_s *dev,
-                                 const void *txbuffer,
-                                 void *rxbuffer,
+static void imxrt_lpspi_exchange(FAR struct spi_dev_s *dev,
+                                 FAR const void *txbuffer, FAR void *rxbuffer,
                                  size_t nwords)
 #else
-static void imxrt_lpspi_exchange_nodma(struct spi_dev_s *dev,
-                                       const void *txbuffer,
-                                       void *rxbuffer, size_t nwords)
+static void imxrt_lpspi_exchange_nodma(FAR struct spi_dev_s *dev,
+                                       FAR const void *txbuffer,
+                                       FAR void *rxbuffer, size_t nwords)
 #endif
 {
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)dev;
+  FAR struct imxrt_lpspidev_s *priv = (FAR struct imxrt_lpspidev_s *)dev;
   DEBUGASSERT(priv && priv->spibase);
 
   spiinfo("txbuffer=%p rxbuffer=%p nwords=%d\n", txbuffer, rxbuffer, nwords);
@@ -1371,8 +1303,8 @@ static void imxrt_lpspi_exchange_nodma(struct spi_dev_s *dev,
     {
       /* 16-bit mode */
 
-      const uint16_t *src = txbuffer;
-      uint16_t *dest = rxbuffer;
+      const uint16_t *src = (const uint16_t *)txbuffer;
+      uint16_t *dest = (uint16_t *) rxbuffer;
       uint16_t word;
 
       while (nwords-- > 0)
@@ -1404,8 +1336,8 @@ static void imxrt_lpspi_exchange_nodma(struct spi_dev_s *dev,
     {
       /* 8-bit mode */
 
-      const uint8_t *src = txbuffer;
-      uint8_t *dest = rxbuffer;
+      const uint8_t *src = (const uint8_t *)txbuffer;
+      uint8_t *dest = (uint8_t *) rxbuffer;
       uint8_t word;
 
       while (nwords-- > 0)
@@ -1423,7 +1355,7 @@ static void imxrt_lpspi_exchange_nodma(struct spi_dev_s *dev,
 
           /* Exchange one word */
 
-          word = (uint8_t)imxrt_lpspi_send(dev, word);
+          word = (uint8_t) imxrt_lpspi_send(dev, (uint32_t) word);
 
           /* Is there a buffer to receive the return value? */
 
@@ -1434,161 +1366,9 @@ static void imxrt_lpspi_exchange_nodma(struct spi_dev_s *dev,
         }
     }
 }
+#endif /* !CONFIG_IMXRT_LPSPI_DMA || CONFIG_IMXRT_DMACAPABLE */
 
-/****************************************************************************
- * Name: spi_exchange (with DMA capability)
- *
- * Description:
- *   Exchange a block of data on SPI using DMA
- *
- * Input Parameters:
- *   dev      - Device-specific state data
- *   txbuffer - A pointer to the buffer of data to be sent
- *   rxbuffer - A pointer to a buffer in which to receive data
- *   nwords   - the length of data to be exchanged in units of words.
- *              The wordsize is determined by the number of bits-per-word
- *              selected for the SPI interface.  If nbits <= 8, the data is
- *              packed into uint8_t's; if nbits > 8, the data is packed into
- *              uint16_t's
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static void imxrt_lpspi_exchange(struct spi_dev_s *dev,
-                                 const void *txbuffer,
-                                 void *rxbuffer, size_t nwords)
-{
-  int                      ret;
-  size_t                   adjust;
-  ssize_t                  nbytes;
-  static uint8_t           rxdummy[4] aligned_data(4);
-  static const uint16_t    txdummy = 0xffff;
-  uint32_t                 regval;
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)dev;
-
-  DEBUGASSERT(priv != NULL);
-  DEBUGASSERT(priv && priv->spibase);
-  spiinfo("txbuffer=%p rxbuffer=%p nwords=%d\n", txbuffer, rxbuffer, nwords);
-
-  /* Convert the number of word to a number of bytes */
-
-  nbytes = (priv->nbits > 8) ? nwords << 2 : nwords;
-
-  /* Invalid DMA channels fall back to non-DMA method. */
-
-  if (priv->rxdma == NULL || priv->txdma == NULL
-#ifdef CONFIG_IMXRT_LPSPI_DMATHRESHOLD
-      /* If this is a small SPI transfer, then let
-       * imxrt_lpspi_exchange_nodma() do the work.
-       */
-
-      || nbytes <= CONFIG_IMXRT_LPSPI_DMATHRESHOLD
-#endif
-      )
-    {
-      imxrt_lpspi_exchange_nodma(dev, txbuffer, rxbuffer, nwords);
-      return;
-    }
-
-  /* ERR050456 workaround: Reset FIFOs using CR[RST] bit */
-
-  regval = imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_CFGR1_OFFSET);
-
-  imxrt_lpspi_modifyreg32(priv, IMXRT_LPSPI_CR_OFFSET,
-                LPSPI_CR_RTF | LPSPI_CR_RRF,
-                LPSPI_CR_RTF | LPSPI_CR_RRF);
-
-  imxrt_lpspi_putreg32(priv, IMXRT_LPSPI_CFGR1_OFFSET, regval);
-
-  /* Clear all status bits */
-
-  imxrt_lpspi_putreg32(priv, IMXRT_LPSPI_SR_OFFSET, SPI_SR_CLEAR);
-
-  /* disable DMA */
-
-  imxrt_lpspi_putreg32(priv, IMXRT_LPSPI_DER_OFFSET, 0);
-
-  if (txbuffer)
-    {
-      up_clean_dcache((uintptr_t)txbuffer, (uintptr_t)txbuffer + nbytes);
-    }
-
-  /* Set up the DMA */
-
-  adjust = (priv->nbits > 8) ? 2 : 1;
-
-  struct imxrt_edma_xfrconfig_s config;
-
-  config.saddr  = priv->spibase + IMXRT_LPSPI_RDR_OFFSET;
-  config.daddr  = (uint32_t) (rxbuffer ? rxbuffer : rxdummy);
-  config.soff   = 0;
-  config.doff   = rxbuffer ? adjust : 0;
-  config.iter   = nbytes;
-  config.flags  = EDMA_CONFIG_LINKTYPE_LINKNONE;
-  config.ssize  = adjust == 1 ? EDMA_8BIT : EDMA_16BIT;
-  config.dsize  = adjust == 1 ? EDMA_8BIT : EDMA_16BIT;
-  config.nbytes = adjust;
-#ifdef CONFIG_KINETIS_EDMA_ELINK
-  config.linkch = NULL;
-#endif
-  imxrt_dmach_xfrsetup(priv->rxdma, &config);
-
-  config.saddr  = (uint32_t) (txbuffer ? txbuffer : &txdummy);
-  config.daddr  = priv->spibase + IMXRT_LPSPI_TDR_OFFSET;
-  config.soff   = txbuffer ? adjust : 0;
-  config.doff   = 0;
-  config.iter   = nbytes;
-  config.flags  = EDMA_CONFIG_LINKTYPE_LINKNONE;
-  config.ssize  = adjust == 1 ? EDMA_8BIT : EDMA_16BIT;
-  config.dsize  = adjust == 1 ? EDMA_8BIT : EDMA_16BIT;
-  config.nbytes = adjust;
-#ifdef CONFIG_KINETIS_EDMA_ELINK
-  config.linkch = NULL;
-#endif
-  imxrt_dmach_xfrsetup(priv->txdma, &config);
-
-  /* Start the DMAs */
-
-  spi_dmarxstart(priv);
-  spi_dmatxstart(priv);
-
-  /* Invoke SPI DMA */
-
-  imxrt_lpspi_modifyreg32(priv, IMXRT_LPSPI_DER_OFFSET,
-                0, LPSPI_DER_TDDE | LPSPI_DER_RDDE);
-
-  /* Then wait for each to complete */
-
-  ret = spi_dmarxwait(priv);
-
-  if (ret < 0)
-    {
-      ret = spi_dmatxwait(priv);
-    }
-
-  /* Reset any status */
-
-  imxrt_lpspi_putreg32(priv, IMXRT_LPSPI_SR_OFFSET,
-                         imxrt_lpspi_getreg32(priv,
-                                                IMXRT_LPSPI_SR_OFFSET));
-
-  /* Disable DMA */
-
-  imxrt_lpspi_putreg32(priv, IMXRT_LPSPI_DER_OFFSET, 0);
-
-  if (rxbuffer)
-    {
-     up_invalidate_dcache((uintptr_t)rxbuffer,
-                          (uintptr_t)rxbuffer + nbytes);
-    }
-}
-
-#endif /* CONFIG_IMXRT_SPI_DMA */
-
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_sndblock
  *
  * Description:
@@ -1597,27 +1377,27 @@ static void imxrt_lpspi_exchange(struct spi_dev_s *dev,
  * Input Parameters:
  *   dev      - Device-specific state data
  *   txbuffer - A pointer to the buffer of data to be sent
- *   nwords   - the length of data to send from the buffer in number of
- *              words. The wordsize is determined by the number of
- *              bits-per-word selected for the SPI interface.  If nbits <= 8,
- *              the data is packed into uint8_t's; if nbits >8, the data is
- *              packed into uint16_t's
+ *   nwords   - the length of data to send from the buffer in number of words.
+ *              The wordsize is determined by the number of bits-per-word
+ *              selected for the SPI interface.  If nbits <= 8, the data is
+ *              packed into uint8_t's; if nbits >8, the data is packed into
+ *              uint16_t's
  *
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 #ifndef CONFIG_SPI_EXCHANGE
-static void imxrt_lpspi_sndblock(struct spi_dev_s *dev,
-                                 const void *txbuffer, size_t nwords)
+static void imxrt_lpspi_sndblock(FAR struct spi_dev_s *dev,
+                                 FAR const void *txbuffer, size_t nwords)
 {
   spiinfo("txbuffer=%p nwords=%d\n", txbuffer, nwords);
   return imxrt_lpspi_exchange(dev, txbuffer, NULL, nwords);
 }
 #endif
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_recvblock
  *
  * Description:
@@ -1635,24 +1415,24 @@ static void imxrt_lpspi_sndblock(struct spi_dev_s *dev,
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 #ifndef CONFIG_SPI_EXCHANGE
-static void imxrt_lpspi_recvblock(struct spi_dev_s *dev,
-                                  void *rxbuffer, size_t nwords)
+static void imxrt_lpspi_recvblock(FAR struct spi_dev_s *dev,
+                                  FAR void *rxbuffer, size_t nwords)
 {
   spiinfo("rxbuffer=%p nwords=%d\n", rxbuffer, nwords);
   return imxrt_lpspi_exchange(dev, NULL, rxbuffer, nwords);
 }
 #endif
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_clock_enable
  *
  * Description:
  *   Ungate LPSPI clock
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 void imxrt_lpspi_clock_enable(uint32_t base)
 {
@@ -1672,27 +1452,15 @@ void imxrt_lpspi_clock_enable(uint32_t base)
     {
       imxrt_clockall_lpspi4();
     }
-#if defined(IMXRT_LPSPI5_BASE)
-  else if (base == IMXRT_LPSPI5_BASE)
-    {
-      imxrt_clockall_lpspi5();
-    }
-#endif
-#if defined(IMXRT_LPSPI6_BASE)
-  else if (base == IMXRT_LPSPI6_BASE)
-    {
-      imxrt_clockall_lpspi6();
-    }
-#endif
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_clock_disable
  *
  * Description:
  *   Gate LPSPI clock
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 void imxrt_lpspi_clock_disable(uint32_t base)
 {
@@ -1712,21 +1480,9 @@ void imxrt_lpspi_clock_disable(uint32_t base)
     {
       imxrt_clockoff_lpspi4();
     }
-#if defined(IMXRT_LPSPI5_BASE)
-  else if (base == IMXRT_LPSPI5_BASE)
-    {
-      imxrt_clockoff_lpspi5();
-    }
-#endif
-#if defined(IMXRT_LPSPI6_BASE)
-  else if (base == IMXRT_LPSPI6_BASE)
-    {
-      imxrt_clockoff_lpspi6();
-    }
-#endif
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspi_bus_initialize
  *
  * Description:
@@ -1739,7 +1495,7 @@ void imxrt_lpspi_clock_disable(uint32_t base)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 static void imxrt_lpspi_bus_initialize(struct imxrt_lpspidev_s *priv)
 {
@@ -1775,7 +1531,7 @@ static void imxrt_lpspi_bus_initialize(struct imxrt_lpspidev_s *priv)
 
   /* Set frequency and delay times */
 
-  imxrt_lpspi_setfrequency((struct spi_dev_s *)priv, 400000);
+  imxrt_lpspi_setfrequency((FAR struct spi_dev_s *)priv, 400000);
 
   /* Set default watermarks */
 
@@ -1784,188 +1540,24 @@ static void imxrt_lpspi_bus_initialize(struct imxrt_lpspidev_s *priv)
 
   /* Set Transmit Command Register */
 
-  imxrt_lpspi_setbits((struct spi_dev_s *)priv, 8);
+  imxrt_lpspi_setbits((FAR struct spi_dev_s *)priv, 8);
 
-  imxrt_lpspi_setmode((struct spi_dev_s *)priv, SPIDEV_MODE0);
+  imxrt_lpspi_setmode((FAR struct spi_dev_s *)priv, SPIDEV_MODE0);
+
+  /* Initialize the SPI semaphore that enforces mutually exclusive access */
+
+  nxsem_init(&priv->exclsem, 0, 1);
 
   /* Enable LPSPI */
 
   imxrt_lpspi_modifyreg32(priv, IMXRT_LPSPI_CR_OFFSET, 0, LPSPI_CR_MEN);
 }
 
-/****************************************************************************
- * Name: spi_dmarxwait
- *
- * Description:
- *   Wait for DMA to complete.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static int spi_dmarxwait(struct imxrt_lpspidev_s *priv)
-{
-  int ret;
-
-  /* Take the semaphore (perhaps waiting).  If the result is zero, then the
-   *  DMA must not really have completed.
-   */
-
-  do
-    {
-      ret = nxsem_wait_uninterruptible(&priv->rxsem);
-
-      /* The only expected error is ECANCELED which would occur if the
-       * calling thread were canceled.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -ECANCELED);
-    }
-  while (priv->rxresult == 0 && ret == OK);
-
-  return ret;
-}
-#endif
-
-/****************************************************************************
- * Name: spi_dmatxwait
- *
- * Description:
- *   Wait for DMA to complete.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static int spi_dmatxwait(struct imxrt_lpspidev_s *priv)
-{
-  int ret;
-
-  /* Take the semaphore (perhaps waiting).  If the result is zero, then the
-   * DMA must not really have completed.
-   */
-
-  do
-    {
-      ret = nxsem_wait_uninterruptible(&priv->txsem);
-
-      /* The only expected error is ECANCELED which would occur if the
-       * calling thread were canceled.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -ECANCELED);
-    }
-  while (priv->txresult == 0 && ret == OK);
-
-  return ret;
-}
-#endif
-
-/****************************************************************************
- * Name: spi_dmarxwakeup
- *
- * Description:
- *   Signal that DMA is complete
- *
- ****************************************************************************/
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static inline void spi_dmarxwakeup(struct imxrt_lpspidev_s *priv)
-{
-  nxsem_post(&priv->rxsem);
-}
-#endif
-
-/****************************************************************************
- * Name: spi_dmatxwakeup
- *
- * Description:
- *   Signal that DMA is complete
- *
- ****************************************************************************/
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static inline void spi_dmatxwakeup(struct imxrt_lpspidev_s *priv)
-{
-  nxsem_post(&priv->txsem);
-}
-#endif
-
-/****************************************************************************
- * Name: spi_dmarxcallback
- *
- * Description:
- *   Called when the RX DMA completes
- *
- ****************************************************************************/
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static void spi_dmarxcallback(DMACH_HANDLE handle, void *arg, bool done,
-                              int result)
-{
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)arg;
-
-  priv->rxresult = result | 0x80000000;  /* assure non-zero */
-  spi_dmarxwakeup(priv);
-}
-#endif
-
-/****************************************************************************
- * Name: spi_dmatxcallback
- *
- * Description:
- *   Called when the RX DMA completes
- *
- ****************************************************************************/
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static void spi_dmatxcallback(DMACH_HANDLE handle, void *arg, bool done,
-                              int result)
-{
-  struct imxrt_lpspidev_s *priv = (struct imxrt_lpspidev_s *)arg;
-
-  /* Wake-up the SPI driver */
-
-  priv->txresult = result | 0x80000000;  /* assure non-zero */
-  spi_dmatxwakeup(priv);
-}
-#endif
-
-/****************************************************************************
- * Name: spi_dmarxstart
- *
- * Description:
- *   Start RX DMA
- *
- ****************************************************************************/
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static inline void spi_dmarxstart(struct imxrt_lpspidev_s *priv)
-{
-  priv->rxresult = 0;
-  imxrt_dmach_start(priv->rxdma, spi_dmarxcallback, priv);
-}
-#endif
-
-/****************************************************************************
- * Name: spi_dmatxstart
- *
- * Description:
- *   Start TX DMA
- *
- ****************************************************************************/
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-static inline void spi_dmatxstart(struct imxrt_lpspidev_s *priv)
-{
-  priv->txresult = 0;
-  imxrt_dmach_start(priv->txdma, spi_dmatxcallback, priv);
-}
-#endif
-
-/****************************************************************************
+/*****************************************************************************
  * Public Functions
- ****************************************************************************/
+ *****************************************************************************/
 
-/****************************************************************************
+/*****************************************************************************
  * Name: imxrt_lpspibus_initialize
  *
  * Description:
@@ -1977,11 +1569,11 @@ static inline void spi_dmatxstart(struct imxrt_lpspidev_s *priv)
  * Returned Value:
  *   Valid SPI device structure reference on success; a NULL on failure
  *
- ****************************************************************************/
+ *****************************************************************************/
 
-struct spi_dev_s *imxrt_lpspibus_initialize(int bus)
+FAR struct spi_dev_s *imxrt_lpspibus_initialize(int bus)
 {
-  struct imxrt_lpspidev_s *priv = NULL;
+  FAR struct imxrt_lpspidev_s *priv = NULL;
 
   irqstate_t flags = enter_critical_section();
 
@@ -2109,94 +1701,14 @@ struct spi_dev_s *imxrt_lpspibus_initialize(int bus)
     }
   else
 #endif
-#ifdef CONFIG_IMXRT_LPSPI5
-  if (bus == 5)
-    {
-      /* Select SPI5 */
-
-      priv = &g_lpspi5dev;
-
-      /* Only configure if the bus is not already configured */
-
-      if ((imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_CR_OFFSET)
-           & LPSPI_CR_MEN) == 0)
-        {
-          /* Configure SPI5 pins: SCK, MISO, and MOSI */
-
-          imxrt_config_gpio(GPIO_LPSPI5_SCK);
-          imxrt_config_gpio(GPIO_LPSPI5_MISO);
-          imxrt_config_gpio(GPIO_LPSPI5_MOSI);
-#ifdef GPIO_LPSPI5_CS
-          imxrt_config_gpio(GPIO_LPSPI5_CS);
-#endif
-#if defined(GPIO_LPSPI5_DC) && defined(CONFIG_SPI_CMDDATA)
-          imxrt_config_gpio(GPIO_LPSPI5_DC);
-#endif
-
-          /* Set up default configuration: Master, 8-bit, etc. */
-
-          imxrt_lpspi_bus_initialize(priv);
-        }
-    }
-  else
-#endif
-#ifdef CONFIG_IMXRT_LPSPI6
-  if (bus == 6)
-    {
-      /* Select SPI6 */
-
-      priv = &g_lpspi6dev;
-
-      /* Only configure if the bus is not already configured */
-
-      if ((imxrt_lpspi_getreg32(priv, IMXRT_LPSPI_CR_OFFSET)
-           & LPSPI_CR_MEN) == 0)
-        {
-          /* Configure SPI6 pins: SCK, MISO, and MOSI */
-
-          imxrt_config_gpio(GPIO_LPSPI6_SCK);
-          imxrt_config_gpio(GPIO_LPSPI6_MISO);
-          imxrt_config_gpio(GPIO_LPSPI6_MOSI);
-#ifdef GPIO_LPSPI6_CS
-          imxrt_config_gpio(GPIO_LPSPI6_CS);
-#endif
-#if defined(GPIO_LPSPI6_DC) && defined(CONFIG_SPI_CMDDATA)
-          imxrt_config_gpio(GPIO_LPSPI6_DC);
-#endif
-
-          /* Set up default configuration: Master, 8-bit, etc. */
-
-          imxrt_lpspi_bus_initialize(priv);
-        }
-    }
-  else
-#endif
     {
       spierr("ERROR: Unsupported SPI bus: %d\n", bus);
+      return NULL;
     }
-
-#ifdef CONFIG_IMXRT_LPSPI_DMA
-  if (priv->rxch && priv->txch)
-    {
-      if (priv->txdma == NULL && priv->rxdma == NULL)
-        {
-          priv->txdma = imxrt_dmach_alloc(priv->txch | DMAMUX_CHCFG_ENBL,
-                                            0);
-          priv->rxdma = imxrt_dmach_alloc(priv->rxch | DMAMUX_CHCFG_ENBL,
-                                            0);
-          DEBUGASSERT(priv->rxdma && priv->txdma);
-        }
-    }
-  else
-    {
-      priv->rxdma = NULL;
-      priv->txdma = NULL;
-    }
-#endif
 
   leave_critical_section(flags);
 
-  return (struct spi_dev_s *)priv;
+  return (FAR struct spi_dev_s *)priv;
 }
 
-#endif /* CONFIG_IMXRT_LPSPI */
+#endif /* CONFIG_IMXRT_LPSPI1 */

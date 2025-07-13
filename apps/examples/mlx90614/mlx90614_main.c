@@ -1,10 +1,9 @@
 /****************************************************************************
- * apps/examples/mlx90614/mlx90614_main.c
+ * examples/mlx90614/mlx90614_main.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2015-2017 Pololu Corporation.
- * SPDX-FileContributor: Alan Carvalho de Assis <acassis@gmail.com>
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (c) 2015-2017 Pololu Corporation.
+ *   Author: Alan Carvalho de Assis <acassis@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,7 +47,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
-#include <unistd.h>
 
 #include <nuttx/sensors/ioctl.h>
 #include <nuttx/sensors/mlx90614.h>
@@ -111,8 +109,7 @@ int main(int argc, FAR char *argv[])
 
       if (buffer[0] != '0' && buffer[1] != 'x')
         {
-          fprintf(stderr,
-                  "You need to pass the I2C address in hexa: 0xNN\n");
+          fprintf(stderr, "You need to pass the I2C address in hexa: 0xNN\n");
           goto out;
         }
 
@@ -124,13 +121,10 @@ int main(int argc, FAR char *argv[])
           goto out;
         }
 
-      ret = ioctl(fd, SNIOC_CHANGE_SMBUSADDR,
-                  (unsigned long)((uintptr_t)&newaddr));
+      ret = ioctl(fd, SNIOC_CHANGE_SMBUSADDR,  (unsigned long)((uintptr_t)&newaddr));
       if (ret < 0)
         {
-          fprintf(stderr,
-                  "ERROR: ioctl(SNIOC_CHANGE_SMBUSADDR) failed: %d\n",
-                  errno);
+          fprintf(stderr, "ERROR: ioctl(SNIOC_CHANGE_SMBUSADDR) failed: %d\n", errno);
           goto out;
         }
 
@@ -167,6 +161,7 @@ int main(int argc, FAR char *argv[])
     }
 
 out:
+
   close(fd);
   return 0;
 }

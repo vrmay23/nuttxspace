@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/dm320/dm320_usbdev.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2013 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -45,7 +57,8 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
 #include "dm320_usb.h"
 
 /****************************************************************************
@@ -84,7 +97,7 @@
 
 #undef CONFIG_DM320_USBDEV_REGDEBUG
 
-/* Debug ********************************************************************/
+/* Debug ***********************************************************************/
 
 /* Trace error codes */
 
@@ -144,7 +157,7 @@
 #define DM320_TRACEINTID_USBCTLR         0x001d
 #define DM320_TRACEINTID_VBUSERR         0x001f
 
-/* Hardware interface *******************************************************/
+/* Hardware interface **********************************************************/
 
 /* The DM320 hardware supports 8 configurable endpoints EP1-4, IN and OUT
  * (in addition to EP0 IN and OUT).  This driver, however, does not exploit
@@ -166,7 +179,7 @@
 #define DM320_EPBULKOUT          2          /* Bulk EP for recv to host */
 #define DM320_EPINTRIN           3          /* Intr EP for host poll */
 
-/* Request queue operations *************************************************/
+/* Request queue operations ****************************************************/
 
 #define dm320_rqempty(ep)       ((ep)->head == NULL)
 #define dm320_rqpeek(ep)        ((ep)->head)
@@ -263,21 +276,18 @@ static void dm320_putreg8(uint8_t val, uint32_t addr);
 static void dm320_putreg16(uint16_t val, uint32_t addr);
 static void dm320_putreg32(uint32_t val, uint32_t addr);
 #else
-#  define dm320_getreg8(addr)      getreg8(addr)
-#  define dm320_getreg16(addr)     getreg16(addr)
-#  define dm320_getreg32(addr)     getreg32(addr)
-#  define dm320_putreg8(val,addr)  putreg8(val,addr)
-#  define dm320_putreg16(val,addr) putreg16(val,addr)
-#  define dm320_putreg32(val,addr) putreg32(val,addr)
+# define dm320_getreg8(addr)      getreg8(addr)
+# define dm320_getreg16(addr)     getreg16(addr)
+# define dm320_getreg32(addr)     getreg32(addr)
+# define dm320_putreg8(val,addr)  putreg8(val,addr)
+# define dm320_putreg16(val,addr) putreg16(val,addr)
+# define dm320_putreg32(val,addr) putreg32(val,addr)
 #endif
 
-/* Request queue operations *************************************************/
+/* Request queue operations ****************************************************/
 
-static struct
-dm320_req_s *dm320_rqdequeue(struct dm320_ep_s *privep);
-
-static void dm320_rqenqueue(struct dm320_ep_s *privep,
-                            struct dm320_req_s *req);
+static FAR struct dm320_req_s *dm320_rqdequeue(FAR struct dm320_ep_s *privep);
+static void dm320_rqenqueue(FAR struct dm320_ep_s *privep, FAR struct dm320_req_s *req);
 
 /* Low level data transfers and request operations */
 
@@ -299,8 +309,8 @@ static void dm320_dispatchrequest(struct dm320_usbdev_s *priv,
               const struct usb_ctrlreq_s *ctrl);
 static inline void dm320_ep0setup(struct dm320_usbdev_s *priv);
 static inline uint32_t dm320_highestpriinterrupt(int intstatus);
-static int  dm320_ctlrinterrupt(int irq, void *context, void *arg);
-static int  dm320_attachinterrupt(int irq, void *context, void *arg);
+static int  dm320_ctlrinterrupt(int irq, FAR void *context, FAR void *arg);
+static int  dm320_attachinterrupt(int irq, FAR void *context, FAR void *arg);
 
 /* Initialization operations */
 
@@ -310,28 +320,23 @@ static void dm320_ctrlinitialize(struct dm320_usbdev_s *priv);
 
 /* Endpoint methods */
 
-static int  dm320_epconfigure(struct usbdev_ep_s *ep,
+static int  dm320_epconfigure(FAR struct usbdev_ep_s *ep,
               const struct usb_epdesc_s *desc, bool last);
-static int  dm320_epdisable(struct usbdev_ep_s *ep);
-static struct usbdev_req_s *dm320_epallocreq(struct usbdev_ep_s *ep);
-static void dm320_epfreereq(struct usbdev_ep_s *ep,
-                            struct usbdev_req_s *req);
+static int  dm320_epdisable(FAR struct usbdev_ep_s *ep);
+static FAR struct usbdev_req_s *dm320_epallocreq(FAR struct usbdev_ep_s *ep);
+static void dm320_epfreereq(FAR struct usbdev_ep_s *ep, FAR struct usbdev_req_s *req);
 #ifdef CONFIG_USBDEV_DMA
-static void *dm320_epallocbuffer(struct usbdev_ep_s *ep,
-                                     uint16_t nbytes);
-static void dm320_epfreebuffer(struct usbdev_ep_s *ep, void *buf);
+static FAR void *dm320_epallocbuffer(FAR struct usbdev_ep_s *ep, uint16_t nbytes);
+static void dm320_epfreebuffer(FAR struct usbdev_ep_s *ep, void *buf);
 #endif
-static int  dm320_epsubmit(struct usbdev_ep_s *ep,
-                           struct usbdev_req_s *privreq);
-static int  dm320_epcancel(struct usbdev_ep_s *ep,
-                           struct usbdev_req_s *privreq);
+static int  dm320_epsubmit(FAR struct usbdev_ep_s *ep, struct usbdev_req_s *privreq);
+static int  dm320_epcancel(FAR struct usbdev_ep_s *ep, struct usbdev_req_s *privreq);
 
 /* USB device controller methods */
 
-static struct usbdev_ep_s *dm320_allocep(struct usbdev_s *dev,
+static FAR struct usbdev_ep_s *dm320_allocep(FAR struct usbdev_s *dev,
               uint8_t epno, bool in, uint8_t eptype);
-static void dm320_freeep(struct usbdev_s *dev,
-                         struct usbdev_ep_s *ep);
+static void dm320_freeep(FAR struct usbdev_s *dev, FAR struct usbdev_ep_s *ep);
 static int dm320_getframe(struct usbdev_s *dev);
 static int dm320_wakeup(struct usbdev_s *dev);
 static int dm320_selfpowered(struct usbdev_s *dev, bool selfpowered);
@@ -371,9 +376,7 @@ static const struct usbdev_ops_s g_devops =
 #endif
 };
 
-/* There is only one, single, pre-allocated instance of the driver
- * structure
- */
+/* There is only one, single, pre-allocated instance of the driver structure */
 
 static struct dm320_usbdev_s g_usbdev;
 
@@ -430,8 +433,8 @@ static uint8_t dm320_getreg8(uint32_t addr)
 
   uint8_t val = getreg8(addr);
 
-  /* Is this the same value that we read from the same register last time?
-   * Are we polling the register?  If so, suppress some of the output.
+  /* Is this the same value that we read from the same register last time?  Are
+   * we polling the register?  If so, suppress some of the output.
    */
 
   if (addr == prevaddr || val == preval)
@@ -457,7 +460,7 @@ static uint8_t dm320_getreg8(uint32_t addr)
         {
           /* Yes.. then show how many times the value repeated */
 
-          uinfo("[repeats %d more times]\n", count - 3);
+          uinfo("[repeats %d more times]\n", count-3);
         }
 
       /* Save the new address, value, and count */
@@ -493,8 +496,8 @@ static uint32_t dm320_getreg16(uint32_t addr)
 
   uint16_t val = getreg16(addr);
 
-  /* Is this the same value that we read from the same register last time?
-   * Are we polling the register?  If so, suppress some of the output.
+  /* Is this the same value that we read from the same register last time?  Are
+   * we polling the register?  If so, suppress some of the output.
    */
 
   if (addr == prevaddr || val == preval)
@@ -520,7 +523,7 @@ static uint32_t dm320_getreg16(uint32_t addr)
         {
           /* Yes.. then show how many times the value repeated */
 
-          uinfo("[repeats %d more times]\n", count - 3);
+          uinfo("[repeats %d more times]\n", count-3);
         }
 
       /* Save the new address, value, and count */
@@ -556,8 +559,8 @@ static uint32_t dm320_getreg32(uint32_t addr)
 
   uint32_t val = getreg32(addr);
 
-  /* Is this the same value that we read from the same register last time?
-   *  Are we polling the register?  If so, suppress some of the output.
+  /* Is this the same value that we read from the same register last time?  Are
+   * we polling the register?  If so, suppress some of the output.
    */
 
   if (addr == prevaddr || val == preval)
@@ -583,7 +586,7 @@ static uint32_t dm320_getreg32(uint32_t addr)
         {
           /* Yes.. then show how many times the value repeated */
 
-          uinfo("[repeats %d more times]\n", count - 3);
+          uinfo("[repeats %d more times]\n", count-3);
         }
 
       /* Save the new address, value, and count */
@@ -671,9 +674,9 @@ static void dm320_putreg32(uint32_t val, uint32_t addr)
  *
  ****************************************************************************/
 
-static struct dm320_req_s *dm320_rqdequeue(struct dm320_ep_s *privep)
+static FAR struct dm320_req_s *dm320_rqdequeue(FAR struct dm320_ep_s *privep)
 {
-  struct dm320_req_s *ret = privep->head;
+  FAR struct dm320_req_s *ret = privep->head;
 
   if (ret)
     {
@@ -697,8 +700,8 @@ static struct dm320_req_s *dm320_rqdequeue(struct dm320_ep_s *privep)
  *
  ****************************************************************************/
 
-static void dm320_rqenqueue(struct dm320_ep_s *privep,
-                            struct dm320_req_s *req)
+static void dm320_rqenqueue(FAR struct dm320_ep_s *privep,
+                            FAR struct dm320_req_s *req)
 {
   req->flink = NULL;
   if (!privep->head)
@@ -766,7 +769,6 @@ static int dm320_epwrite(uint8_t epphy, uint8_t *buf, uint16_t nbytes)
     {
       return ret;
     }
-
   dm320_putreg8(epphy, DM320_USB_INDEX);
 
   if (epphy == USB_EP0_SELECT)
@@ -786,11 +788,9 @@ static int dm320_epwrite(uint8_t epphy, uint8_t *buf, uint16_t nbytes)
 
   if (dm320_getreg8(DM320_USB_PERTXCSR1) & USB_TXCSR1_FIFOEMP)
     {
-      dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) |
-                    USB_TXCSR1_TXPKTRDY, DM320_USB_PERTXCSR1);
+      dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) | USB_TXCSR1_TXPKTRDY, DM320_USB_PERTXCSR1);
       while (dm320_getreg8(DM320_USB_PERTXCSR1) & USB_TXCSR1_TXPKTRDY);
-      dm320_putreg8((dm320_getreg8(DM320_USB_PERTXCSR1) |
-                     USB_TXCSR1_FLFIFO), DM320_USB_PERTXCSR1);
+      dm320_putreg8((dm320_getreg8(DM320_USB_PERTXCSR1) | USB_TXCSR1_FLFIFO), DM320_USB_PERTXCSR1);
     }
 
   while (bytesleft > 0)
@@ -798,9 +798,7 @@ static int dm320_epwrite(uint8_t epphy, uint8_t *buf, uint16_t nbytes)
       *fifo = *buf++;
       bytesleft--;
     }
-
-  dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) |
-                USB_TXCSR1_TXPKTRDY, DM320_USB_PERTXCSR1);
+  dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) | USB_TXCSR1_TXPKTRDY, DM320_USB_PERTXCSR1);
   return ret;
 }
 
@@ -822,7 +820,6 @@ static int dm320_epread(uint8_t epphy, uint8_t *buf, uint16_t nbytes)
     {
       return ret;
     }
-
   dm320_putreg8(epphy, DM320_USB_INDEX);
 
   if (epphy == USB_EP0_SELECT)
@@ -855,8 +852,7 @@ static int dm320_epread(uint8_t epphy, uint8_t *buf, uint16_t nbytes)
 
   /* Clear RXPKTRDY bit in PER_RXCSR1 */
 
-  dm320_putreg8(dm320_getreg8(DM320_USB_PERRXCSR1) &
-              ~(USB_PERRXCSR1_RXPKTRDY), DM320_USB_PERRXCSR1);
+  dm320_putreg8(dm320_getreg8(DM320_USB_PERRXCSR1) & ~(USB_PERRXCSR1_RXPKTRDY), DM320_USB_PERRXCSR1);
   return ret;
 }
 
@@ -872,8 +868,7 @@ static inline void dm320_abortrequest(struct dm320_ep_s *privep,
                                       struct dm320_req_s *privreq,
                                       int16_t result)
 {
-  usbtrace(TRACE_DEVERROR(DM320_TRACEERR_REQABORTED),
-          (uint16_t)privep->epphy);
+  usbtrace(TRACE_DEVERROR(DM320_TRACEERR_REQABORTED), (uint16_t)privep->epphy);
 
   /* Save the result in the request structure */
 
@@ -1067,8 +1062,7 @@ static int dm320_rdrequest(struct dm320_ep_s *privep)
    */
 
   privreq->req.xfrd += nbytesread;
-  if (privreq->req.len < privreq->req.xfrd ||
-      nbytesread < privep->ep.maxpacket)
+  if (privreq->req.len < privreq->req.xfrd || nbytesread < privep->ep.maxpacket)
     {
       usbtrace(TRACE_COMPLETE(privep->epphy), privreq->req.xfrd);
       dm320_reqcomplete(privep, OK);
@@ -1249,8 +1243,7 @@ static inline void dm320_ep0setup(struct dm320_usbdev_s *priv)
          * len:   2; data = status
          */
 
-        dm320_putreg8(USB_PERCSR0_CLRRXRDY |
-                      USB_PERCSR0_DATAEND, DM320_USB_PERCSR0);
+        dm320_putreg8(USB_PERCSR0_CLRRXRDY | USB_PERCSR0_DATAEND, DM320_USB_PERCSR0);
         usbtrace(TRACE_INTDECODE(DM320_TRACEINTID_GETSTATUS), 0);
 
         if (len != 2 || (ctrl.type & USB_REQ_DIR_IN) == 0 || value != 0)
@@ -1268,8 +1261,7 @@ static inline void dm320_ep0setup(struct dm320_usbdev_s *priv)
                   privep = dm320_epfindbyaddr(priv, index);
                   if (!privep)
                     {
-                      usbtrace(TRACE_DEVERROR(DM320_TRACEERR_STALLEDGETSTEP),
-                               ctrl.type);
+                      usbtrace(TRACE_DEVERROR(DM320_TRACEERR_STALLEDGETSTEP), ctrl.type);
                       priv->stalled = 1;
                     }
                 }
@@ -1282,8 +1274,7 @@ static inline void dm320_ep0setup(struct dm320_usbdev_s *priv)
 
               default:
                 {
-                  usbtrace(TRACE_DEVERROR(DM320_TRACEERR_STALLEDGETSTRECIP),
-                           ctrl.type);
+                  usbtrace(TRACE_DEVERROR(DM320_TRACEERR_STALLEDGETSTRECIP), ctrl.type);
                   priv->stalled = 1;
                 }
                 break;
@@ -1300,10 +1291,8 @@ static inline void dm320_ep0setup(struct dm320_usbdev_s *priv)
          * len:   zero, data = none
          */
 
-        dm320_putreg8(USB_PERCSR0_CLRRXRDY |
-                      USB_PERCSR0_DATAEND, DM320_USB_PERCSR0);
-        usbtrace(TRACE_INTDECODE(DM320_TRACEINTID_CLEARFEATURE),
-                (uint16_t)ctrl.req);
+        dm320_putreg8(USB_PERCSR0_CLRRXRDY | USB_PERCSR0_DATAEND, DM320_USB_PERCSR0);
+        usbtrace(TRACE_INTDECODE(DM320_TRACEINTID_CLEARFEATURE), (uint16_t)ctrl.req);
         if (ctrl.type != USB_REQ_RECIPIENT_ENDPOINT)
           {
               dm320_dispatchrequest(priv, &ctrl);
@@ -1319,8 +1308,7 @@ static inline void dm320_ep0setup(struct dm320_usbdev_s *priv)
           }
         else
           {
-            usbtrace(TRACE_DEVERROR(DM320_TRACEERR_STALLEDCLRFEATURE),
-                     ctrl.type);
+            usbtrace(TRACE_DEVERROR(DM320_TRACEERR_STALLEDCLRFEATURE), ctrl.type);
             priv->stalled = 1;
           }
       }
@@ -1334,11 +1322,9 @@ static inline void dm320_ep0setup(struct dm320_usbdev_s *priv)
          * len:   0; data = none
          */
 
-        dm320_putreg8(USB_PERCSR0_CLRRXRDY |
-                      USB_PERCSR0_DATAEND, DM320_USB_PERCSR0);
+        dm320_putreg8(USB_PERCSR0_CLRRXRDY | USB_PERCSR0_DATAEND, DM320_USB_PERCSR0);
         usbtrace(TRACE_INTDECODE(DM320_TRACEINTID_SETFEATURE), 0);
-        if (ctrl.type == USB_REQ_RECIPIENT_DEVICE &&
-            value == USB_FEATURE_TESTMODE)
+        if (ctrl.type == USB_REQ_RECIPIENT_DEVICE && value == USB_FEATURE_TESTMODE)
           {
             usbtrace(TRACE_INTDECODE(DM320_TRACEINTID_TESTMODE), index);
           }
@@ -1353,8 +1339,7 @@ static inline void dm320_ep0setup(struct dm320_usbdev_s *priv)
           }
         else
           {
-            usbtrace(TRACE_DEVERROR(DM320_TRACEERR_STALLEDSETFEATURE),
-                     ctrl.type);
+            usbtrace(TRACE_DEVERROR(DM320_TRACEERR_STALLEDSETFEATURE), ctrl.type);
             priv->stalled = 1;
           }
       }
@@ -1376,21 +1361,17 @@ static inline void dm320_ep0setup(struct dm320_usbdev_s *priv)
       break;
 
     case USB_REQ_GETDESCRIPTOR:
-
       /* type:  device-to-host; recipient = device
        * value: descriptor type and index
        * index: 0 or language ID;
        * len:   descriptor len; data = descriptor
        */
-
     case USB_REQ_SETDESCRIPTOR:
-
       /* type:  host-to-device; recipient = device
        * value: descriptor type and index
        * index: 0 or language ID;
        * len:   descriptor len; data = descriptor
        */
-
       {
         dm320_putreg8(USB_PERCSR0_CLRRXRDY, DM320_USB_PERCSR0);
         usbtrace(TRACE_INTDECODE(DM320_TRACEINTID_GETSETDESC), 0);
@@ -1399,31 +1380,24 @@ static inline void dm320_ep0setup(struct dm320_usbdev_s *priv)
       break;
 
     case USB_REQ_GETCONFIGURATION:
-
       /* type:  device-to-host; recipient = device
        * value: 0;
        * index: 0;
        * len:   1; data = configuration value
        */
-
     case USB_REQ_SETCONFIGURATION:
-
       /* type:  host-to-device; recipient = device
        * value: configuration value
        * index: 0;
        * len:   0; data = none
        */
-
     case USB_REQ_GETINTERFACE:
-
       /* type:  device-to-host; recipient = interface
        * value: 0
        * index: interface;
        * len:   1; data = alt interface
        */
-
     case USB_REQ_SETINTERFACE:
-
       /* type:  host-to-device; recipient = interface
        * value: alternate setting
        * index: interface;
@@ -1539,7 +1513,7 @@ static inline uint32_t dm320_highestpriinterrupt(int intstatus)
  *
  ****************************************************************************/
 
-static int dm320_ctlrinterrupt(int irq, void *context, void *arg)
+static int dm320_ctlrinterrupt(int irq, FAR void *context, FAR void *arg)
 {
   struct dm320_usbdev_s *priv = &g_usbdev;
   struct dm320_ep_s *privep ;
@@ -1554,7 +1528,6 @@ static int dm320_ctlrinterrupt(int irq, void *context, void *arg)
   intstatus  = ((uint32_t)dm320_getreg8(DM320_USB_INTRTX1) << 12) |
                (((uint32_t)dm320_getreg8(DM320_USB_INTRRX1) >> 1) << 8) |
                (uint32_t)dm320_getreg8(DM320_USB_INTRUSB);
-
   /* Then process each interrupt source, highest priority first */
 
   do
@@ -1618,8 +1591,7 @@ static int dm320_ctlrinterrupt(int irq, void *context, void *arg)
               }
             else if ((csr0 & USB_PERCSR0_SETEND) != 0)
               {
-                usbtrace(TRACE_INTENTRY(DM320_TRACEINTID_TXFIFOSETEND),
-                         csr0);
+                usbtrace(TRACE_INTENTRY(DM320_TRACEINTID_TXFIFOSETEND), csr0);
                 dm320_putreg8(USB_PERCSR0_CLRSETEND, DM320_USB_PERCSR0);
               }
             else if ((csr0 & USB_PERCSR0_TXPKTRDY) != 0)
@@ -1630,8 +1602,7 @@ static int dm320_ctlrinterrupt(int irq, void *context, void *arg)
               {
                 /* Now ignore these unknown interrupts */
 
-                dm320_putreg8(USB_PERCSR0_CLRRXRDY |
-                              USB_PERCSR0_DATAEND, DM320_USB_PERCSR0);
+                dm320_putreg8(USB_PERCSR0_CLRRXRDY | USB_PERCSR0_DATAEND, DM320_USB_PERCSR0);
                 usbtrace(TRACE_INTENTRY(DM320_TRACEINTID_UNKNOWN), csr0);
               }
           }
@@ -1660,18 +1631,14 @@ static int dm320_ctlrinterrupt(int irq, void *context, void *arg)
             dm320_putreg8(DM320_EPBULKIN, DM320_USB_INDEX);
             if (dm320_getreg8(DM320_USB_PERTXCSR1) & USB_TXCSR1_SENTST)
               {
-                dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) &
-                              ~USB_TXCSR1_SENTST, DM320_USB_PERTXCSR1);
-                dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) &
-                              ~USB_TXCSR1_SENDST, DM320_USB_PERTXCSR1);
+                dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) & ~USB_TXCSR1_SENTST, DM320_USB_PERTXCSR1);
+                dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) & ~USB_TXCSR1_SENDST, DM320_USB_PERTXCSR1);
               }
 #endif
-
             if (priv->usbdev.speed == USB_SPEED_UNKNOWN)
               {
                 priv->usbdev.speed = USB_SPEED_FULL;
               }
-
             privep = &priv->eplist[DM320_EPBULKIN];
 
             if (!dm320_rqempty(privep))
@@ -1699,8 +1666,8 @@ static int dm320_ctlrinterrupt(int irq, void *context, void *arg)
         }
 
       intstatus = intstatus & ~priorityint;
-    }
 
+    }
   while (intstatus != USB_INT_NOINTERRUPT);
   return OK;
 }
@@ -1709,11 +1676,11 @@ static int dm320_ctlrinterrupt(int irq, void *context, void *arg)
  * Name: dm320_attachinterrupt
  *
  * Description:
- *   Attach GIO interrupt handler
+ *   Attach GIO interrtup handler
  *
  ****************************************************************************/
 
-static int dm320_attachinterrupt(int irq, void *context, void *arg)
+static int dm320_attachinterrupt(int irq, FAR void *context, FAR void *arg)
 {
   struct dm320_usbdev_s *priv = &g_usbdev;
   uint16_t gio;
@@ -1735,8 +1702,7 @@ static int dm320_attachinterrupt(int irq, void *context, void *arg)
           priv->usbdev.speed = USB_SPEED_UNKNOWN;
           priv->attached = 0;
 
-          dm320_putreg16(dm320_getreg16(DM320_CLKC_LPCTL1) |
-                         0x0010, DM320_CLKC_LPCTL1);
+          dm320_putreg16(dm320_getreg16(DM320_CLKC_LPCTL1) | 0x0010, DM320_CLKC_LPCTL1);
           if ((dm320_getreg8(DM320_USB_PERTXCSR1) & USB_TXCSR1_FIFOEMP))
             {
               dm320_putreg8(USB_TXCSR1_FLFIFO, DM320_USB_PERTXCSR1);
@@ -1753,17 +1719,14 @@ static int dm320_attachinterrupt(int irq, void *context, void *arg)
       priv->usbdev.speed = USB_SPEED_UNKNOWN;
       dm320_ctrlinitialize(priv);
 
-      dm320_putreg16(dm320_getreg16(DM320_INTC_FISEL0) &
-                     0x7f, DM320_INTC_FISEL0);
-      dm320_putreg16(dm320_getreg16(DM320_INTC_EINT0) |
-                     0x80, DM320_INTC_EINT0);
+      dm320_putreg16(dm320_getreg16(DM320_INTC_FISEL0) & 0x7f, DM320_INTC_FISEL0);
+      dm320_putreg16(dm320_getreg16(DM320_INTC_EINT0) | 0x80, DM320_INTC_EINT0);
 
       priv->usbdev.speed  = USB_SPEED_UNKNOWN;
       priv->paddrset      = 0;
       priv->paddr         = 0;
       priv->attached      = 1;
     }
-
   return OK;
 }
 
@@ -1774,8 +1737,7 @@ static int dm320_attachinterrupt(int irq, void *context, void *arg)
 static void dm320_epreset(unsigned int index)
 {
   dm320_putreg8(index, DM320_USB_INDEX);
-  dm320_putreg8(USB_PERCSR0_CLRSETEND |
-                USB_PERCSR0_CLRRXRDY, DM320_USB_PERCSR0);
+  dm320_putreg8(USB_PERCSR0_CLRSETEND | USB_PERCSR0_CLRRXRDY, DM320_USB_PERCSR0);
   dm320_putreg8(USB_CSR2_FLFIFO, DM320_USB_CSR2);
   dm320_putreg8(USB_CSR2_FLFIFO, DM320_USB_CSR2);
 }
@@ -1790,7 +1752,7 @@ static void dm320_epreset(unsigned int index)
 
 static inline void dm320_epinitialize(struct dm320_usbdev_s *priv)
 {
-  uint16_t  offset;   /* Full USB buffer offset */
+  uint16_t  offset;     /* Full USB buffer offset */
   uint8_t addrhi;     /* MS bytes of offset */
   uint8_t addrlo;     /* LS bytes of offset */
   int     i;
@@ -1864,14 +1826,12 @@ static inline void dm320_epinitialize(struct dm320_usbdev_s *priv)
           /* FIFO address, max packet size, dual/single buffered */
 
           dm320_putreg8(addrhi, DM320_USB_RXFIFO1);
-          dm320_putreg8(addrhi | g_epinfo[i].fifo |
-                        USB_RXFIF02_DPB, DM320_USB_RXFIFO2);
+          dm320_putreg8(addrhi | g_epinfo[i].fifo | USB_RXFIF02_DPB, DM320_USB_RXFIFO2);
 
           /* RX endpoint max packet size */
 
           dm320_putreg8(g_epinfo[i].maxpacket >> 3, DM320_USB_RXMAXP);
         }
-
       offset += g_epinfo[i].maxpacket;
     }
 }
@@ -1884,19 +1844,16 @@ static inline void dm320_epinitialize(struct dm320_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static void dm320_ctrlinitialize(struct dm320_usbdev_s *priv)
+static void dm320_ctrlinitialize(FAR struct dm320_usbdev_s *priv)
 {
-  /* Setup the USB controller for operation as a periperhal *****************/
-
+  /* Setup the USB controller for operation as a periperhal *******************/
   /* Enable USB clock */
 
-  dm320_putreg16(dm320_getreg16(DM320_CLKC_MOD2) |
-                 0x0060, DM320_CLKC_MOD2);
+  dm320_putreg16(dm320_getreg16(DM320_CLKC_MOD2) | 0x0060, DM320_CLKC_MOD2);
 
   /* Disable USB Power down mode */
 
-  dm320_putreg16(dm320_getreg16(DM320_CLKC_LPCTL1) &
-                 0xffef, DM320_CLKC_LPCTL1);
+  dm320_putreg16(dm320_getreg16(DM320_CLKC_LPCTL1) & 0xFFEF, DM320_CLKC_LPCTL1);
 
   /* Put USB controller in peripheral mode */
 
@@ -1908,10 +1865,10 @@ static void dm320_ctrlinitialize(struct dm320_usbdev_s *priv)
   dm320_putreg8(0x00, DM320_USB_FADDR);      /* Reset peripheral address register */
   dm320_putreg8(0x00, DM320_USB_POWER);      /* Reset power control register */
 
-  /* Initialize interrupts **************************************************/
+  /* Initialize interrupts *****************************************************/
 
-  arm_ack_irq(DM320_IRQ_USB0);                /* Clear USB controller interrupt */
-  arm_ack_irq(DM320_IRQ_USB1);                /* Clear USB DMA interrupt flag */
+  up_ack_irq(DM320_IRQ_USB0);                /* Clear USB controller interrupt */
+  up_ack_irq(DM320_IRQ_USB1);                /* Clear USB DMA interrupt flag */
 
   dm320_getreg8(DM320_USB_INTRTX1);          /* Clear TX interrupt */
   dm320_getreg8(DM320_USB_INTRRX1);          /* Clear RX interrupt */
@@ -1926,7 +1883,7 @@ static void dm320_ctrlinitialize(struct dm320_usbdev_s *priv)
                 USB_INT_SESSRQ | USB_INT_SOF,
                 DM320_USB_INTRUSBE);
 
-  /* Initialize endpoints ***************************************************/
+  /* Initialize endpoints ******************************************************/
 
   dm320_epinitialize(priv);
 
@@ -1959,11 +1916,11 @@ static void dm320_ctrlinitialize(struct dm320_usbdev_s *priv)
  *
  ****************************************************************************/
 
-static int dm320_epconfigure(struct usbdev_ep_s *ep,
-                             const struct usb_epdesc_s *desc,
+static int dm320_epconfigure(FAR struct usbdev_ep_s *ep,
+                             FAR const struct usb_epdesc_s *desc,
                              bool last)
 {
-  struct dm320_ep_s *privep = (struct dm320_ep_s *)ep;
+  FAR struct dm320_ep_s *privep = (FAR struct dm320_ep_s *)ep;
 
   /* Retain what we need from the descriptor */
 
@@ -1981,9 +1938,9 @@ static int dm320_epconfigure(struct usbdev_ep_s *ep,
  *
  ****************************************************************************/
 
-static int dm320_epdisable(struct usbdev_ep_s *ep)
+static int dm320_epdisable(FAR struct usbdev_ep_s *ep)
 {
-  struct dm320_ep_s *privep = (struct dm320_ep_s *)ep;
+  FAR struct dm320_ep_s *privep = (FAR struct dm320_ep_s *)ep;
   irqstate_t flags;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -1993,7 +1950,6 @@ static int dm320_epdisable(struct usbdev_ep_s *ep)
       return -EINVAL;
     }
 #endif
-
   usbtrace(TRACE_EPDISABLE, privep->epphy);
 
   /* Cancel any ongoing activity and reset the endpoint */
@@ -2014,9 +1970,9 @@ static int dm320_epdisable(struct usbdev_ep_s *ep)
  *
  ****************************************************************************/
 
-static struct usbdev_req_s *dm320_epallocreq(struct usbdev_ep_s *ep)
+static FAR struct usbdev_req_s *dm320_epallocreq(FAR struct usbdev_ep_s *ep)
 {
-  struct dm320_req_s *privreq;
+  FAR struct dm320_req_s *privreq;
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!ep)
@@ -2024,10 +1980,9 @@ static struct usbdev_req_s *dm320_epallocreq(struct usbdev_ep_s *ep)
       return NULL;
     }
 #endif
+  usbtrace(TRACE_EPALLOCREQ, ((FAR struct dm320_ep_s *)ep)->epphy);
 
-  usbtrace(TRACE_EPALLOCREQ, ((struct dm320_ep_s *)ep)->epphy);
-
-  privreq = kmm_malloc(sizeof(struct dm320_req_s));
+  privreq = (FAR struct dm320_req_s *)kmm_malloc(sizeof(struct dm320_req_s));
   if (!privreq)
     {
       usbtrace(TRACE_DEVERROR(DM320_TRACEERR_ALLOCFAIL), 0);
@@ -2046,10 +2001,9 @@ static struct usbdev_req_s *dm320_epallocreq(struct usbdev_ep_s *ep)
  *
  ****************************************************************************/
 
-static void dm320_epfreereq(struct usbdev_ep_s *ep,
-                            struct usbdev_req_s *req)
+static void dm320_epfreereq(FAR struct usbdev_ep_s *ep, FAR struct usbdev_req_s *req)
 {
-  struct dm320_req_s *privreq = (struct dm320_req_s *)req;
+  FAR struct dm320_req_s *privreq = (FAR struct dm320_req_s *)req;
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!ep || !req)
@@ -2059,7 +2013,7 @@ static void dm320_epfreereq(struct usbdev_ep_s *ep,
     }
 #endif
 
-  usbtrace(TRACE_EPFREEREQ, ((struct dm320_ep_s *)ep)->epphy);
+  usbtrace(TRACE_EPFREEREQ, ((FAR struct dm320_ep_s *)ep)->epphy);
   kmm_free(privreq);
 }
 
@@ -2072,7 +2026,7 @@ static void dm320_epfreereq(struct usbdev_ep_s *ep,
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_DMA
-static void *dm320_epallocbuffer(struct usbdev_ep_s *ep, unsigned bytes)
+static void *dm320_epallocbuffer(FAR struct usbdev_ep_s *ep, unsigned bytes)
 {
   usbtrace(TRACE_EPALLOCBUFFER, privep->epphy);
 
@@ -2093,7 +2047,7 @@ static void *dm320_epallocbuffer(struct usbdev_ep_s *ep, unsigned bytes)
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_DMA
-static void dm320_epfreebuffer(struct usbdev_ep_s *ep, void *buf)
+static void dm320_epfreebuffer(FAR struct usbdev_ep_s *ep, FAR void *buf)
 {
   usbtrace(TRACE_EPFREEBUFFER, privep->epphy);
 
@@ -2113,12 +2067,11 @@ static void dm320_epfreebuffer(struct usbdev_ep_s *ep, void *buf)
  *
  ****************************************************************************/
 
-static int dm320_epsubmit(struct usbdev_ep_s *ep,
-                          struct usbdev_req_s *req)
+static int dm320_epsubmit(FAR struct usbdev_ep_s *ep, FAR struct usbdev_req_s *req)
 {
-  struct dm320_req_s *privreq = (struct dm320_req_s *)req;
-  struct dm320_ep_s *privep = (struct dm320_ep_s *)ep;
-  struct dm320_usbdev_s *priv;
+  FAR struct dm320_req_s *privreq = (FAR struct dm320_req_s *)req;
+  FAR struct dm320_ep_s *privep = (FAR struct dm320_ep_s *)ep;
+  FAR struct dm320_usbdev_s *priv;
   irqstate_t flags;
   int ret = OK;
 
@@ -2129,7 +2082,6 @@ static int dm320_epsubmit(struct usbdev_ep_s *ep,
       return -EINVAL;
     }
 #endif
-
   usbtrace(TRACE_EPSUBMIT, privep->epphy);
   priv = privep->dev;
 
@@ -2148,8 +2100,7 @@ static int dm320_epsubmit(struct usbdev_ep_s *ep,
   if (req->len == 0 && (privep->in || privep->epphy == 3))
     {
       usbtrace(TRACE_DEVERROR(DM320_TRACEERR_NULLPACKET), 0);
-      dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) |
-                    USB_TXCSR1_TXPKTRDY, DM320_USB_PERTXCSR1);
+      dm320_putreg8(dm320_getreg8(DM320_USB_PERTXCSR1) | USB_TXCSR1_TXPKTRDY, DM320_USB_PERTXCSR1);
       dm320_abortrequest(privep, privreq, OK);
     }
 
@@ -2213,11 +2164,10 @@ static int dm320_epsubmit(struct usbdev_ep_s *ep,
  *
  ****************************************************************************/
 
-static int dm320_epcancel(struct usbdev_ep_s *ep,
-                          struct usbdev_req_s *req)
+static int dm320_epcancel(struct usbdev_ep_s *ep, FAR struct usbdev_req_s *req)
 {
-  struct dm320_ep_s *privep = (struct dm320_ep_s *)ep;
-  struct dm320_usbdev_s *priv;
+  FAR struct dm320_ep_s *privep = (FAR struct dm320_ep_s *)ep;
+  FAR struct dm320_usbdev_s *priv;
   irqstate_t flags;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -2248,21 +2198,19 @@ static int dm320_epcancel(struct usbdev_ep_s *ep,
  *   Allocate an endpoint matching the parameters
  *
  * Input Parameters:
- *   eplog  - 7-bit logical endpoint number (direction bit ignored).  Zero
- *            means that any endpoint matching the other requirements will
- *            suffice.  The assigned endpoint can be found in the eplog
- *            field.
+ *   eplog  - 7-bit logical endpoint number (direction bit ignored).  Zero means
+ *            that any endpoint matching the other requirements will suffice.  The
+ *            assigned endpoint can be found in the eplog field.
  *   in     - true: IN (device-to-host) endpoint requested
- *   eptype - Endpoint type.  One of {USB_EP_ATTR_XFER_ISOC,
- *            USB_EP_ATTR_XFER_BULK, USB_EP_ATTR_XFER_INT}
+ *   eptype - Endpoint type.  One of {USB_EP_ATTR_XFER_ISOC, USB_EP_ATTR_XFER_BULK,
+ *            USB_EP_ATTR_XFER_INT}
  *
  ****************************************************************************/
 
-static struct usbdev_ep_s *dm320_allocep(struct usbdev_s *dev,
-                                             uint8_t eplog,
+static FAR struct usbdev_ep_s *dm320_allocep(FAR struct usbdev_s *dev, uint8_t eplog,
                                              bool in, uint8_t eptype)
 {
-  struct dm320_usbdev_s *priv = (struct dm320_usbdev_s *)dev;
+  FAR struct dm320_usbdev_s *priv = (FAR struct dm320_usbdev_s *)dev;
   int ndx;
 
   usbtrace(TRACE_DEVALLOCEP, 0);
@@ -2321,10 +2269,9 @@ static struct usbdev_ep_s *dm320_allocep(struct usbdev_s *dev,
  *
  ****************************************************************************/
 
-static void dm320_freeep(struct usbdev_s *dev,
-                         struct usbdev_ep_s *ep)
+static void dm320_freeep(FAR struct usbdev_s *dev, FAR struct usbdev_ep_s *ep)
 {
-  struct dm320_ep_s *privep = (struct dm320_ep_s *)ep;
+  FAR struct dm320_ep_s *privep = (FAR struct dm320_ep_s *)ep;
   usbtrace(TRACE_DEVFREEEP, (uint16_t)privep->epphy);
   UNUSED(privep);
 
@@ -2445,14 +2392,14 @@ static int dm320_pullup(struct usbdev_s *dev, bool enable)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_usbinitialize
+ * Name: up_usbinitialize
  *
  * Description:
  *   Initialize USB hardware
  *
  ****************************************************************************/
 
-void arm_usbinitialize(void)
+void up_usbinitialize(void)
 {
   struct dm320_usbdev_s *priv = &g_usbdev;
   struct dm320_ep_s *privep;
@@ -2476,21 +2423,18 @@ void arm_usbinitialize(void)
   /* Enable USB clock & GIO clock  */
 
   dm320_putreg16(dm320_getreg16(DM320_CLKC_MOD2) | 0x0060, DM320_CLKC_MOD2);
-  dm320_putreg16(dm320_getreg16(DM320_CLKC_DIV4) |
-                 (((4) - 1) << 8) | ((1) - 1),
-                 DM320_CLKC_DIV4);
+  dm320_putreg16(dm320_getreg16(DM320_CLKC_DIV4) | (((4) - 1) << 8) | ((1) - 1), DM320_CLKC_DIV4);
 
   /* Initialize  D+ pullup control GIO */
 
   GIO_OUTPUT(CONFIG_DM320_GIO_USBDPPULLUP);
   GIO_SET_OUTPUT(CONFIG_DM320_GIO_USBDPPULLUP);
 
-  /* Initialize USB attach GIO */
+  /* Initilialize USB attach GIO */
 
   GIO_INTERRUPT(CONFIG_DM320_GIO_USBATTACH);
   GIO_BOTHEDGES(CONFIG_DM320_GIO_USBATTACH);
-  dm320_putreg16(dm320_getreg16(DM320_GIO_CHAT0) |
-                (1 << CONFIG_DM320_GIO_USBATTACH), DM320_GIO_CHAT0);
+  dm320_putreg16(dm320_getreg16(DM320_GIO_CHAT0) | (1 << CONFIG_DM320_GIO_USBATTACH), DM320_GIO_CHAT0);
 
   /* Attach host attach GIO interrupt */
 
@@ -2555,14 +2499,14 @@ void arm_usbinitialize(void)
   return;
 
 errout:
-  arm_usbuninitialize();
+  up_usbuninitialize();
 }
 
 /****************************************************************************
- * Name: arm_usbuninitialize
+ * Name: up_usbuninitialize
  ****************************************************************************/
 
-void arm_usbuninitialize(void)
+void up_usbuninitialize(void)
 {
   struct dm320_usbdev_s *priv = &g_usbdev;
 
@@ -2574,8 +2518,7 @@ void arm_usbuninitialize(void)
     }
 
   priv->usbdev.speed = USB_SPEED_UNKNOWN;
-  dm320_putreg16(dm320_getreg16(DM320_CLKC_LPCTL1) | 0x0010,
-                                DM320_CLKC_LPCTL1);
+  dm320_putreg16(dm320_getreg16(DM320_CLKC_LPCTL1) | 0x0010, DM320_CLKC_LPCTL1);
 
   /* Disable and detach IRQs */
 
@@ -2586,16 +2529,16 @@ void arm_usbuninitialize(void)
   irq_detach(DM320_IRQ_USB1);
 }
 
-/****************************************************************************
+/************************************************************************************
  * Name: usbdevclass_register
  *
  * Description:
- *   Register a USB device class driver. The class driver's bind() method
- *   will be called to bind it to a USB device driver.
+ *   Register a USB device class driver. The class driver's bind() method will be
+ *   called to bind it to a USB device driver.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-int usbdev_register(struct usbdevclass_driver_s *driver)
+int usbdev_register(FAR struct usbdevclass_driver_s *driver)
 {
   int ret;
 
@@ -2645,18 +2588,17 @@ int usbdev_register(struct usbdevclass_driver_s *driver)
   return OK;
 }
 
-/****************************************************************************
+/************************************************************************************
  * Name: usbdev_unregister
  *
  * Description:
- *   Un-register usbdev class driver.If the USB device is connected to a USB
- *   host, it will first disconnect().  The driver is also requested to
- *   unbind() and clean up any device state, before this procedure finally
- *   returns.
+ *   Un-register usbdev class driver.If the USB device is connected to a USB host,
+ *   it will first disconnect().  The driver is also requested to unbind() and clean
+ *   up any device state, before this procedure finally returns.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-int usbdev_unregister(struct usbdevclass_driver_s *driver)
+int usbdev_unregister(FAR struct usbdevclass_driver_s *driver)
 {
   usbtrace(TRACE_DEVUNREGISTER, 0);
 

@@ -1,22 +1,35 @@
 /****************************************************************************
- * wireless/pktradio/pktradio_metadata.c
+ *  wireless/pktradio/pktradio_metadata.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -34,7 +47,7 @@
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/mm/iob.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 
 #include <nuttx/wireless/pktradio.h>
 
@@ -51,7 +64,7 @@ static FAR struct pktradio_metadata_s *g_free_metadata;
 
 /* Supports mutually exclusive access to the free list */
 
-static mutex_t g_metadata_lock = NXMUTEX_INITIALIZER;
+static sem_t g_metadata_sem;
 
 /* Idempotence support */
 
@@ -105,6 +118,9 @@ void pktradio_metadata_initialize(void)
           g_free_metadata    = metadata;
         }
 
+      /* Initialize the mutual exclusion semaphore */
+
+      nxsem_init(&g_metadata_sem, 0, 1);
       g_metadata_initialized = true;
     }
 }
@@ -137,7 +153,7 @@ FAR struct pktradio_metadata_s *pktradio_metadata_allocate(void)
 
   /* Get exclusive access to the free list */
 
-  nxmutex_lock(&g_metadata_lock);
+  nxsem_wait_uninterruptible(&g_metadata_sem);
 
   /* Try the free list first */
 
@@ -149,7 +165,7 @@ FAR struct pktradio_metadata_s *pktradio_metadata_allocate(void)
 
       /* We are finished with the free list */
 
-      nxmutex_unlock(&g_metadata_lock);
+      nxsem_post(&g_metadata_sem);
     }
   else
     {
@@ -158,7 +174,7 @@ FAR struct pktradio_metadata_s *pktradio_metadata_allocate(void)
        * access the free list.
        */
 
-      nxmutex_unlock(&g_metadata_lock);
+      nxsem_post(&g_metadata_sem);
 
       metadata = (FAR struct pktradio_metadata_s *)
         kmm_malloc((sizeof (struct pktradio_metadata_s)));
@@ -199,7 +215,7 @@ void pktradio_metadata_free(FAR struct pktradio_metadata_s *metadata)
 {
   /* Get exclusive access to the free list */
 
-  nxmutex_lock(&g_metadata_lock);
+  nxsem_wait_uninterruptible(&g_metadata_sem);
 
   /* If this is a pre-allocated meta-data structure, then just put it back
    * in the free list.
@@ -212,7 +228,7 @@ void pktradio_metadata_free(FAR struct pktradio_metadata_s *metadata)
 
       /* We are finished with the free list */
 
-      nxmutex_unlock(&g_metadata_lock);
+      nxsem_post(&g_metadata_sem);
     }
   else
     {
@@ -220,7 +236,7 @@ void pktradio_metadata_free(FAR struct pktradio_metadata_s *metadata)
 
       /* Otherwise, deallocate it.  We won't access the free list */
 
-      nxmutex_unlock(&g_metadata_lock);
+      nxsem_post(&g_metadata_sem);
       kmm_free(metadata);
     }
 }

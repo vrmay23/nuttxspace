@@ -1,22 +1,37 @@
 /****************************************************************************
  * boards/arm/imxrt/imxrt1050-evk/include/board.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            David Sidrane <david_s5@nscdg.com>
+ *            Dave Marples <dave@marples.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -41,10 +56,8 @@
 
 #define IMXRT_VDD_SOC (0x12)
 
-/* Set Arm PLL (PLL1) to  fOut    = (24Mhz * ARM_PLL_DIV_SELECT/2) /
- *                                  ARM_PODF_DIVISOR
- *                        600Mhz  = (24Mhz * ARM_PLL_DIV_SELECT/2) /
- *                                  ARM_PODF_DIVISOR
+/* Set Arm PLL (PLL1) to  fOut    = (24Mhz * ARM_PLL_DIV_SELECT/2) / ARM_PODF_DIVISOR
+ *                        600Mhz  = (24Mhz * ARM_PLL_DIV_SELECT/2) / ARM_PODF_DIVISOR
  *                        ARM_PLL_DIV_SELECT = 100
  *                        ARM_PODF_DIVISOR   = 2
  *                        600Mhz  = (24Mhz * 100/2) / 2
@@ -63,8 +76,7 @@
  *                       IMXRT_IPG_PODF_DIVIDER = 4
  *                       150Mhz = 600Mhz / 4
  *
- *     PERCLK_CLOCK_ROOT          = IPG_CLOCK_ROOT /
- *                                  IMXRT_PERCLK_PODF_DIVIDER
+ *     PERCLK_CLOCK_ROOT          = IPG_CLOCK_ROOT / IMXRT_PERCLK_PODF_DIVIDER
  *                       IMXRT_PERCLK_PODF_DIVIDER = 9
  *                       16.6Mhz  = 150Mhz / 9
  *
@@ -222,39 +234,39 @@
 #define BOARD_USDHC_SD4MODE_PRESCALER   USDHC_SYSCTL_SDCLKFS_DIV8
 #define BOARD_USDHC_SD4MODE_DIVISOR     USDHC_SYSCTL_DVS_DIV(1)
 
-/* LCD **********************************************************************/
+/* LCD *********************************************************************/
 
 #ifdef CONFIG_IMXRT_LCD
 /* LCD controller */
 
-#  define GPIO_LCD_DATA23    (GPIO_LCD_DATA23_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA22    (GPIO_LCD_DATA22_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA21    (GPIO_LCD_DATA21_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA20    (GPIO_LCD_DATA20_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA19    (GPIO_LCD_DATA19_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA18    (GPIO_LCD_DATA18_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA17    (GPIO_LCD_DATA17_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA16    (GPIO_LCD_DATA16_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA15    (GPIO_LCD_DATA15_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA14    (GPIO_LCD_DATA14_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA13    (GPIO_LCD_DATA13_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA12    (GPIO_LCD_DATA12_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA11    (GPIO_LCD_DATA11_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA10    (GPIO_LCD_DATA10_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA09    (GPIO_LCD_DATA09_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA08    (GPIO_LCD_DATA08_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA07    (GPIO_LCD_DATA07_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA06    (GPIO_LCD_DATA06_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA05    (GPIO_LCD_DATA05_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA04    (GPIO_LCD_DATA04_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA03    (GPIO_LCD_DATA03_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA02    (GPIO_LCD_DATA02_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA01    (GPIO_LCD_DATA01_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_DATA00    (GPIO_LCD_DATA00_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_ENABLE    (GPIO_LCD_ENABLE_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_HSYNC     (GPIO_LCD_HSYNC_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_VSYNC     (GPIO_LCD_VSYNC_1 | IOMUX_LCD_DEFAULT)
-#  define GPIO_LCD_CLK       (GPIO_LCD_CLK_1 | IOMUX_LCD_DEFAULT)
+#  define GPIO_LCD_DATA23    GPIO_LCD_DATA23_1
+#  define GPIO_LCD_DATA22    GPIO_LCD_DATA22_1
+#  define GPIO_LCD_DATA21    GPIO_LCD_DATA21_1
+#  define GPIO_LCD_DATA20    GPIO_LCD_DATA20_1
+#  define GPIO_LCD_DATA19    GPIO_LCD_DATA19_1
+#  define GPIO_LCD_DATA18    GPIO_LCD_DATA18_1
+#  define GPIO_LCD_DATA17    GPIO_LCD_DATA17_1
+#  define GPIO_LCD_DATA16    GPIO_LCD_DATA16_1
+#  define GPIO_LCD_DATA15    GPIO_LCD_DATA15_1
+#  define GPIO_LCD_DATA14    GPIO_LCD_DATA14_1
+#  define GPIO_LCD_DATA13    GPIO_LCD_DATA13_1
+#  define GPIO_LCD_DATA12    GPIO_LCD_DATA12_1
+#  define GPIO_LCD_DATA11    GPIO_LCD_DATA11_1
+#  define GPIO_LCD_DATA10    GPIO_LCD_DATA10_1
+#  define GPIO_LCD_DATA09    GPIO_LCD_DATA09_1
+#  define GPIO_LCD_DATA08    GPIO_LCD_DATA08_1
+#  define GPIO_LCD_DATA07    GPIO_LCD_DATA07_1
+#  define GPIO_LCD_DATA06    GPIO_LCD_DATA06_1
+#  define GPIO_LCD_DATA05    GPIO_LCD_DATA05_1
+#  define GPIO_LCD_DATA04    GPIO_LCD_DATA04_1
+#  define GPIO_LCD_DATA03    GPIO_LCD_DATA03_1
+#  define GPIO_LCD_DATA02    GPIO_LCD_DATA02_1
+#  define GPIO_LCD_DATA01    GPIO_LCD_DATA01_1
+#  define GPIO_LCD_DATA00    GPIO_LCD_DATA00_1
+#  define GPIO_LCD_ENABLE    GPIO_LCD_ENABLE_1
+#  define GPIO_LCD_HSYNC     GPIO_LCD_HSYNC_1
+#  define GPIO_LCD_VSYNC     GPIO_LCD_VSYNC_1
+#  define GPIO_LCD_CLK       GPIO_LCD_CLK_1
 #endif
 
 /* ETH Disambiguation *******************************************************/
@@ -330,6 +342,10 @@ extern "C"
 #else
 #define EXTERN extern
 #endif
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
 
 #undef EXTERN
 #if defined(__cplusplus)

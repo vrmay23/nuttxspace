@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/mld/mld_send.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +40,6 @@
 #include <nuttx/config.h>
 
 #include <string.h>
-#include <assert.h>
 #include <debug.h>
 #include <arpa/inet.h>
 
@@ -61,6 +73,20 @@
 #define RASIZE      sizeof(struct ipv6_router_alert_s)
 #define MLD_HDRLEN  (IPv6_HDRLEN + RASIZE)
 
+/* Buffer layout */
+
+#define IPv6BUF     ((FAR struct ipv6_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev)])
+#define RABUF       ((FAR struct ipv6_router_alert_s *) \
+                     (&dev->d_buf[NET_LL_HDRLEN(dev)] + IPv6_HDRLEN))
+#define QUERYBUF    ((FAR struct mld_mcast_listen_query_s *) \
+                     (&dev->d_buf[NET_LL_HDRLEN(dev)] + MLD_HDRLEN))
+#define V1REPORTBUF ((FAR struct mld_mcast_listen_report_v1_s *) \
+                     (&dev->d_buf[NET_LL_HDRLEN(dev)] + MLD_HDRLEN))
+#define V2REPORTBUF ((FAR struct mld_mcast_listen_report_v2_s *) \
+                     (&dev->d_buf[NET_LL_HDRLEN(dev)] + MLD_HDRLEN))
+#define DONEBUF     ((FAR struct mld_mcast_listen_done_s *) \
+                     (&dev->d_buf[NET_LL_HDRLEN(dev)] + MLD_HDRLEN))
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -89,22 +115,15 @@
 void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
               uint8_t msgtype)
 {
+  FAR struct ipv6_hdr_s *ipv6;
   FAR struct ipv6_router_alert_s *ra;
   FAR const uint16_t *destipaddr;
-  FAR const uint16_t *srcipaddr;
   unsigned int mldsize;
 
   /* Only a general query message can have a NULL group */
 
   DEBUGASSERT(dev != NULL);
   DEBUGASSERT(msgtype == MLD_SEND_GENQUERY || group != NULL);
-
-  /* Prepare device buffer */
-
-  if (netdev_iob_prepare(dev, false, 0) != OK)
-    {
-      return;
-    }
 
   /* Select IPv6 */
 
@@ -149,7 +168,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
 
       default:
         {
-          mlderr("Bad msgtype: %02x\n", msgtype);
+          mlderr("Bad msgtype: %02x \n", msgtype);
           DEBUGPANIC();
         }
 
@@ -169,19 +188,31 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
 
   dev->d_sndlen  = RASIZE + mldsize;
 
-  /* Update device buffer length */
+  /* Set up the IPv6 header */
 
-  iob_update_pktlen(dev->d_iob, dev->d_len, false);
+  ipv6           = IPv6BUF;
+  ipv6->vtc      = 0x60;                     /* Version/traffic class (MS) */
+  ipv6->tcf      = 0;                        /* Traffic class(LS)/Flow label(MS) */
+  ipv6->flow     = 0;                        /* Flow label (LS) */
+  ipv6->len[0]   = (dev->d_sndlen >> 8);     /* Length excludes the IPv6 header */
+  ipv6->len[1]   = (dev->d_sndlen & 0xff);   /* but includes the extension headers */
+  ipv6->proto    = NEXT_HOPBYBOT_EH;         /* Hop-to-hop extension header */
+  ipv6->ttl      = MLD_TTL;                  /* MLD Time-to-live */
 
-  /* Select the IPv6 destination address.
-   * This varies with the type of message being sent:
+  /* Select the IPv6 source address (the local interface assigned to the
+   * network device).
+   */
+
+  net_ipv6addr_hdrcopy(ipv6->srcipaddr, dev->d_ipv6addr);
+
+  /* Select the IPv6 destination address.  This varies with the type of message
+   * being sent:
    *
    *   MESSAGE                 DESTINATION ADDRESS
    *   General Query Message:  The link-local, all nodes multicast address.
    *   MAS Query Messages:     The group multicast address.
    *   V1 Report Message:      The group multicast address.
-   *   V2 Report Message:      The link-local, all MLDv2 router multicast
-   *                           address.
+   *   V2 Report Message:      The link-local, all MLDv2 router multicast address.
    *   Done Message:           The link-local, all routers multicast address.
    */
 
@@ -209,29 +240,17 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
     }
 
   mldinfo("destipaddr: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-          NTOHS(destipaddr[0]), NTOHS(destipaddr[1]), NTOHS(destipaddr[2]),
-          NTOHS(destipaddr[3]), NTOHS(destipaddr[4]), NTOHS(destipaddr[5]),
-          NTOHS(destipaddr[6]), NTOHS(destipaddr[7]));
+          destipaddr[0], destipaddr[1], destipaddr[2], destipaddr[3],
+          destipaddr[4], destipaddr[5], destipaddr[6], destipaddr[7]);
 
-  srcipaddr = netdev_ipv6_lladdr(dev);
-  if (srcipaddr == NULL)
-    {
-      /* Unspecified address is used when link-local address is not
-       * available, as described in RFC 3590, Section 4, Page 2.
-       */
-
-      srcipaddr = g_ipv6_unspecaddr;
-    }
-
-  ipv6_build_header(IPv6BUF, dev->d_sndlen, NEXT_HOPBYBOT_EH,
-                    srcipaddr, destipaddr, MLD_TTL, 0);
+  net_ipv6addr_hdrcopy(ipv6->destipaddr, destipaddr);
 
   /* Add the router alert IP header option.
    *
    * The IPv6 router alert option (type 5) is defined in RFC 2711.
    */
 
-  ra              = IPBUF(IPv6_HDRLEN);
+  ra              = RABUF;
   memset(ra, 0, RASIZE);
 
   ra->hbyh.nxthdr = IP_PROTO_ICMP6;          /* ICMPv6 payload follows extension header */
@@ -247,7 +266,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
       case MLD_SEND_GENQUERY:           /* Send General Query */
       case MLD_SEND_MASQUERY:           /* Send Multicast Address Specific (MAS) Query */
         {
-          FAR struct mld_mcast_listen_query_s *query = IPBUF(MLD_HDRLEN);
+          FAR struct mld_mcast_listen_query_s *query = QUERYBUF;
 
           /* Initialize the Query payload.  In a General Query, both the
            * Multicast Address field and the Number of Sources (N)
@@ -287,10 +306,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
           /* Calculate the ICMPv6 checksum. */
 
           query->chksum = 0;
-
-#ifdef CONFIG_NET_ICMPv6_CHECKSUMS
           query->chksum = ~icmpv6_chksum(dev, MLD_HDRLEN);
-#endif
 
           MLD_STATINCR(g_netstats.mld.query_sent);
 
@@ -304,7 +320,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
             {
               /* Update accumulated membership for all groups. */
 
-              mld_new_pollcycle(dev);
+              mld_new_pollcycle(dev)
             }
           else
             {
@@ -319,8 +335,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
 
       case MLD_SEND_V1REPORT:           /* Send MLDv1 Report message */
         {
-          FAR struct mld_mcast_listen_report_v1_s *report =
-                                                   IPBUF(MLD_HDRLEN);
+          FAR struct mld_mcast_listen_report_v1_s *report = V1REPORTBUF;
 
           /* Initialize the Report payload */
 
@@ -331,10 +346,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
           /* Calculate the ICMPv6 checksum. */
 
           report->chksum  = 0;
-
-#ifdef CONFIG_NET_ICMPv6_CHECKSUMS
           report->chksum  = ~icmpv6_chksum(dev, MLD_HDRLEN);
-#endif
 
           SET_MLD_LASTREPORT(group->flags); /* Remember we were the last to report */
           MLD_STATINCR(g_netstats.mld.v1report_sent);
@@ -343,8 +355,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
 
       case MLD_SEND_V2REPORT:           /* Send MLDv2 Report message */
         {
-          FAR struct mld_mcast_listen_report_v2_s *report =
-                                                   IPBUF(MLD_HDRLEN);
+          FAR struct mld_mcast_listen_report_v2_s *report = V2REPORTBUF;
           FAR struct mld_mcast_addrec_v2_s *addrec;
 
           /* Initialize the Report payload */
@@ -360,10 +371,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
           /* Calculate the ICMPv6 checksum. */
 
           report->chksum  = 0;
-
-#ifdef CONFIG_NET_ICMPv6_CHECKSUMS
           report->chksum  = ~icmpv6_chksum(dev, MLD_HDRLEN);
-#endif
 
           SET_MLD_LASTREPORT(group->flags); /* Remember we were the last to report */
           MLD_STATINCR(g_netstats.mld.v2report_sent);
@@ -372,7 +380,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
 
       case MLD_SEND_DONE:               /* Send Done message */
         {
-          FAR struct mld_mcast_listen_done_s *done = IPBUF(MLD_HDRLEN);
+          FAR struct mld_mcast_listen_done_s *done = DONEBUF;
 
           /* Initialize the Done payload */
 
@@ -383,10 +391,7 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
           /* Calculate the ICMPv6 checksum. */
 
           done->chksum    = 0;
-
-#ifdef CONFIG_NET_ICMPv6_CHECKSUMS
           done->chksum    = ~icmpv6_chksum(dev, MLD_HDRLEN);
-#endif
 
           MLD_STATINCR(g_netstats.mld.done_sent);
         }
@@ -399,7 +404,8 @@ void mld_send(FAR struct net_driver_s *dev, FAR struct mld_group_s *group,
   MLD_STATINCR(g_netstats.icmpv6.sent);
   MLD_STATINCR(g_netstats.ipv6.sent);
 
-  mldinfo("Outgoing ICMPv6 MLD packet length: %d\n", dev->d_len);
+  mldinfo("Outgoing ICMPv6 MLD packet length: %d (%d)\n",
+          dev->d_len, (ipv6->len[0] << 8) | ipv6->len[1]);
 
   mld_dumppkt((FAR const uint8_t *)IPv6BUF, MLD_HDRLEN + mldsize);
 }

@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/samd2l2/samd21-xplained/src/sam_ug2832hsweg04.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -47,10 +60,10 @@
  *  10 DISPLAY_RESET  10 PB05 PORT           10 PB15 PORT
  *  ----------------- ---------------------- ----------------------
  *  11 N/C            11 PA08 SERCOM2 PAD[0] 11 PA08 SERCOM2 PAD[0]
- *                            IÂ²C SDA                IÂ²C SDA
+ *                            I²C SDA                I²C SDA
  *  ----------------- ---------------------- ----------------------
  *  12 N/C            12 PA09 SERCOM2 PAD[1] 12 PA09 SERCOM2 PAD[1]
- *                            IÂ²C SCL                IÂ²C SCL
+ *                            I²C SCL                I²C SCL
  *  ----------------- ---------------------- ----------------------
  *  13 N/C            13 PB09 SERCOM4 PAD[1] 13 PB11 SERCOM4 PAD[1]
  *                            USART RX               USART RX
@@ -145,10 +158,10 @@
  *
  ****************************************************************************/
 
-struct lcd_dev_s *board_graphics_setup(unsigned int devno)
+FAR struct lcd_dev_s *board_graphics_setup(unsigned int devno)
 {
-  struct spi_dev_s *spi;
-  struct lcd_dev_s *dev;
+  FAR struct spi_dev_s *spi;
+  FAR struct lcd_dev_s *dev;
 
   /* Configure the OLED PORTs. This initial configuration is RESET low,
    * putting the OLED into reset state.
@@ -175,7 +188,7 @@ struct lcd_dev_s *board_graphics_setup(unsigned int devno)
       dev = ssd1306_initialize(spi, NULL, devno);
       if (!dev)
         {
-          lcderr("ERROR: Failed to bind SPI port 1 to OLED %d\n", devno);
+          lcderr("ERROR: Failed to bind SPI port 1 to OLED %d: %d\n", devno);
         }
      else
         {

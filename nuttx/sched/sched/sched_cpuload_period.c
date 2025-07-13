@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/sched/sched_cpuload_period.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
+ *   Author: Xiang Xiao <xiaoxiang@pinecone.net>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -32,7 +45,6 @@
 #include <nuttx/arch.h>
 #include <nuttx/clock.h>
 #include <nuttx/lib/xorshift128.h>
-#include <nuttx/power/pm.h>
 #include <nuttx/timers/timer.h>
 
 #ifdef CONFIG_CPULOAD_PERIOD
@@ -42,6 +54,10 @@
  ****************************************************************************/
 
 /* Configuration ************************************************************/
+
+#if !defined(CONFIG_SCHED_CPULOAD) || !defined(CONFIG_SCHED_CPULOAD_EXTCLK)
+#  error CONFIG_SCHED_CPULOAD and CONFIG_SCHED_CPULOAD_EXTCLK must be defined
+#endif
 
 /* CONFIG_SCHED_CPULOAD_TICKSPERSEC is the frequency of the external clock
  * source.
@@ -66,14 +82,7 @@
  * nominal = (1,000,000 usec/sec) / Frequency cycles/sec) = Period usec/cycle
  */
 
-#define CPULOAD_PERIOD_NOMINAL (1000000 / CONFIG_SCHED_CPULOAD_TICKSPERSEC)
-
-/* Calculate the systick for one cpuload tick:
- *
- * tick = (Tick_per_sec) / Cpuload tick_per_sec) = Systick for one cpuload
- */
-
-#define CPULOAD_PERIOD_TICKS   (TICK_PER_SEC / CONFIG_SCHED_CPULOAD_TICKSPERSEC)
+#define CPULOAD_PERIOD_NOMINAL       (1000000 / CONFIG_SCHED_CPULOAD_TICKSPERSEC)
 
 #if CPULOAD_PERIOD_NOMINAL < 1 || CPULOAD_PERIOD_NOMINAL > 0x7fffffff
 #  error CPULOAD_PERIOD_NOMINAL is out of range
@@ -93,20 +102,12 @@
  * Private Types
  ****************************************************************************/
 
-#if CONFIG_CPULOAD_ENTROPY > 0 || defined(CONFIG_PM)
+#if CONFIG_CPULOAD_ENTROPY > 0
 struct sched_period_s
 {
-#if CONFIG_CPULOAD_ENTROPY > 0
   struct xorshift128_state_s prng;
   uint32_t maxtimeout;
   int32_t error;
-#endif
-#ifdef CONFIG_PM
-  FAR struct timer_lowerhalf_s *lower;
-  struct pm_callback_s pm_cb;
-  clock_t idle_start;
-  clock_t idle_ticks;
-#endif
 };
 #endif
 
@@ -121,7 +122,7 @@ static bool nxsched_period_callback(FAR uint32_t *next_interval_us,
  * Private Data
  ****************************************************************************/
 
-#if CONFIG_CPULOAD_ENTROPY > 0 || defined(CONFIG_PM)
+#if CONFIG_CPULOAD_ENTROPY > 0
 static struct sched_period_s g_sched_period;
 #endif
 
@@ -167,9 +168,7 @@ static bool nxsched_period_callback(FAR uint32_t *next_interval_us,
 
   DEBUGASSERT(*next_interval_us > 0); /* Check for overflow to negative or zero */
 
-  /* Make sure that the accumulated value does not exceed the maximum
-   * timeout.
-   */
+  /* Make sure that the accumulated value does not exceed the maximum timeout */
 
   if (*next_interval_us > g_sched_period.maxtimeout)
     {
@@ -185,50 +184,24 @@ static bool nxsched_period_callback(FAR uint32_t *next_interval_us,
 
   /* Perform CPU load measurements */
 
-  nxsched_process_cpuload();
+#ifdef CONFIG_HAVE_WEAKFUNCTIONS
+  if (nxsched_process_cpuload != NULL)
+#endif
+    {
+      nxsched_process_cpuload();
+    }
 
   /* Then continue the timing */
 
   return true;
 }
 
-#ifdef CONFIG_PM
-static void nxsched_period_pmnotify(FAR struct pm_callback_s *cb, int domain,
-                                    enum pm_state_e pmstate)
-{
-  if (domain == PM_IDLE_DOMAIN)
-    {
-      if (pmstate == PM_RESTORE)
-        {
-          g_sched_period.idle_ticks +=
-            clock_systime_ticks() - g_sched_period.idle_start;
-
-          if (g_sched_period.idle_ticks >= CPULOAD_PERIOD_TICKS)
-            {
-              nxsched_process_cpuload_ticks(
-                  g_sched_period.idle_ticks / CPULOAD_PERIOD_TICKS);
-
-              g_sched_period.idle_ticks %= CPULOAD_PERIOD_TICKS;
-            }
-
-          g_sched_period.lower->ops->start(g_sched_period.lower);
-        }
-      else
-        {
-          g_sched_period.lower->ops->stop(g_sched_period.lower);
-
-          g_sched_period.idle_start = clock_systime_ticks();
-        }
-    }
-}
-#endif
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name:  nxsched_period_extclk
+ * Name:  sched_period_extclk
  *
  * Description:
  *   Configure to use a period timer as described in
@@ -244,7 +217,7 @@ static void nxsched_period_pmnotify(FAR struct pm_callback_s *cb, int domain,
  *
  ****************************************************************************/
 
-void nxsched_period_extclk(FAR struct timer_lowerhalf_s *lower)
+void sched_period_extclk(FAR struct timer_lowerhalf_s *lower)
 {
   DEBUGASSERT(lower != NULL && lower->ops != NULL);
   DEBUGASSERT(lower->ops->setcallback != NULL);
@@ -266,15 +239,6 @@ void nxsched_period_extclk(FAR struct timer_lowerhalf_s *lower)
   g_sched_period.prng.x = 101;
   g_sched_period.prng.y = g_sched_period.prng.w << 17;
   g_sched_period.prng.z = g_sched_period.prng.x << 25;
-#endif
-
-#ifdef CONFIG_PM
-  g_sched_period.lower = lower;
-
-  /* Register pm notify */
-
-  g_sched_period.pm_cb.notify = nxsched_period_pmnotify;
-  pm_register(&g_sched_period.pm_cb);
 #endif
 
   /* Then start the period timer */

@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/sama5/sama5d3-xplained/src/sama5d3-xplained.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -66,10 +79,10 @@
 #  undef HAVE_HSMCI
 #endif
 
-/* We need PIO interrupts on PIOE to support card detect interrupts */
+/* We need PIO interrupts on PIOD to support card detect interrupts */
 
-#if defined(HAVE_HSMCI) && !defined(CONFIG_SAMA5_PIOE_IRQ)
-#  warning PIOE interrupts not enabled.  No MMC/SD support.
+#if defined(HAVE_HSMCI) && !defined(CONFIG_SAMA5_PIOD_IRQ)
+#  warning PIOD interrupts not enabled.  No MMC/SD support.
 #  undef HAVE_HSMCI
 #endif
 
@@ -311,12 +324,12 @@
  *  (2) a microSD memory card slot (J11).
  *
  * The full size SD card slot connects via HSMCI0.  The card detect discrete
- * is available on PE0 (pulled high).  The write protect discrete is tied to
+ * is available on PD17 (pulled high).  The write protect discrete is tied to
  * ground (via PP6) and not available to software.  The slot supports 8-bit
  * wide transfer mode, but the NuttX driver currently uses only the 4-bit
  * wide transfer mode
  *
- *   PE0  MCI0_CD
+ *   PD17 MCI0_CD
  *   PD1  MCI0_DA0
  *   PD2  MCI0_DA1
  *   PD3  MCI0_DA2
@@ -330,13 +343,13 @@
  */
 
 #define PIO_MCI0_CD  (PIO_INPUT | PIO_CFG_DEFAULT | PIO_CFG_DEGLITCH | \
-                      PIO_INT_BOTHEDGES | PIO_PORT_PIOE | PIO_PIN0)
-#define IRQ_MCI0_CD   SAM_IRQ_PE0
+                      PIO_INT_BOTHEDGES | PIO_PORT_PIOD | PIO_PIN17)
+#define IRQ_MCI0_CD   SAM_IRQ_PD17
 
 /* The microSD connects vi HSMCI1.  The card detect discrete is available on
- * PE1 (pulled high):
+ * PBD8 (pulled high):
  *
- *   PE1   MCI1_CD
+ *   PD18  MCI1_CD
  *   PB20  MCI1_DA0
  *   PB21  MCI1_DA1
  *   PB22  MCI1_DA2
@@ -346,8 +359,8 @@
  */
 
 #define PIO_MCI1_CD  (PIO_INPUT | PIO_CFG_DEFAULT | PIO_CFG_DEGLITCH | \
-                      PIO_INT_BOTHEDGES | PIO_PORT_PIOE | PIO_PIN1)
-#define IRQ_MCI1_CD   SAM_IRQ_PE1
+                      PIO_INT_BOTHEDGES | PIO_PORT_PIOD | PIO_PIN18)
+#define IRQ_MCI1_CD   SAM_IRQ_PD18
 
 /* USB Ports ****************************************************************/
 
@@ -596,7 +609,7 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Public Data
+ * Public data
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__

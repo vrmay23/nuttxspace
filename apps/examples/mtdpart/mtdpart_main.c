@@ -1,22 +1,35 @@
 /****************************************************************************
- * apps/examples/mtdpart/mtdpart_main.c
+ * examples/mtdpart/mtdpart_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -42,7 +55,6 @@
  ****************************************************************************/
 
 /* Configuration ************************************************************/
-
 /* Make sure that support for MTD partitions is enabled */
 
 #ifndef CONFIG_MTD_PARTITION
@@ -63,9 +75,7 @@
 #    error "CONFIG_RAMMTD is required without CONFIG_EXAMPLES_MTDPART_ARCHINIT"
 #  endif
 
-/* This must exactly match the default configuration in
- * drivers/mtd/rammtd.c
- */
+/* This must exactly match the default configuration in drivers/mtd/rammtd.c */
 
 #  ifndef CONFIG_RAMMTD_ERASESIZE
 #    define CONFIG_RAMMTD_ERASESIZE 4096
@@ -104,7 +114,6 @@ struct mtdpart_filedesc_s
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
 /* Pre-allocated simulated flash */
 
 #ifndef CONFIG_EXAMPLES_MTDPART_ARCHINIT
@@ -199,8 +208,7 @@ int main(int argc, FAR char *argv[])
 
   /* Get the geometry of the FLASH device */
 
-  ret = master->ioctl(master, MTDIOC_GEOMETRY,
-                      (unsigned long)((uintptr_t)&geo));
+  ret = master->ioctl(master, MTDIOC_GEOMETRY, (unsigned long)((uintptr_t)&geo));
   if (ret < 0)
     {
       ferr("ERROR: mtd->ioctl failed: %d\n", ret);
@@ -218,13 +226,11 @@ int main(int argc, FAR char *argv[])
    */
 
   blkpererase = geo.erasesize / geo.blocksize;
-  nblocks     = (geo.neraseblocks / CONFIG_EXAMPLES_MTDPART_NPARTITIONS) *
-                blkpererase;
+  nblocks     = (geo.neraseblocks / CONFIG_EXAMPLES_MTDPART_NPARTITIONS) * blkpererase;
   partsize    = nblocks * geo.blocksize;
 
   printf("  No. partitions: %u\n", CONFIG_EXAMPLES_MTDPART_NPARTITIONS);
-  printf("  Partition size: %ju Blocks (%zu bytes)\n", (uintmax_t)nblocks,
-         partsize);
+  printf("  Partition size: %lu Blocks (%lu bytes)\n", nblocks, partsize);
 
   /* Now create MTD FLASH partitions */
 
@@ -248,12 +254,10 @@ int main(int argc, FAR char *argv[])
           exit(4);
         }
 
-      /* Initialize to provide an FTL block driver on the MTD FLASH
-       * interface
-       */
+      /* Initialize to provide an FTL block driver on the MTD FLASH interface */
 
-      snprintf(blockname, sizeof(blockname), "/dev/mtdblock%d", i);
-      snprintf(charname, sizeof(charname), "/dev/mtd%d", i);
+      snprintf(blockname, 32, "/dev/mtdblock%d", i);
+      snprintf(charname, 32, "/dev/mtd%d", i);
 
       ret = ftl_initialize(i, part[i]);
       if (ret < 0)
@@ -338,7 +342,7 @@ int main(int argc, FAR char *argv[])
 
       /* Open the master MTD partition character driver for writing */
 
-      snprintf(charname, sizeof(charname), "/dev/mtd%d", i);
+      snprintf(charname, 32, "/dev/mtd%d", i);
       fd = open(charname, O_RDWR);
       if (fd < 0)
         {
@@ -396,21 +400,21 @@ int main(int argc, FAR char *argv[])
            * indication.
            */
 
-          else if (nbytes == 0)
-            {
-               printf("ERROR: Unexpected end of file on %s\n", charname);
-               fflush(stdout);
-               exit(15);
-            }
+         else if (nbytes == 0)
+           {
+              printf("ERROR: Unexpected end of file on %s\n", charname);
+              fflush(stdout);
+              exit(15);
+           }
 
-          /* This is not expected at all */
+         /* This is not expected at all */
 
-          else if (nbytes != geo.blocksize)
-            {
-               printf("ERROR: Short read from %s failed: %lu\n",
-                      charname, (unsigned long)nbytes);
-               fflush(stdout);
-               exit(16);
+         else if (nbytes != geo.blocksize)
+           {
+              printf("ERROR: Short read from %s failed: %lu\n",
+                     charname, (unsigned long)nbytes);
+              fflush(stdout);
+              exit(16);
             }
 
           /* Verify the offsets in the block */
@@ -471,7 +475,7 @@ int main(int argc, FAR char *argv[])
       nbytes = read(fd, buffer, geo.blocksize);
       if (nbytes != 0)
         {
-          printf("ERROR: Expected end-of-file from %s failed: %zd %d\n",
+          printf("ERROR: Expected end-of-file from %s failed: %d %d\n",
                  charname, nbytes, errno);
           fflush(stdout);
           exit(22);

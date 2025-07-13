@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/stm32f7/stm32f769i-disco/include/board.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +43,7 @@
 #include <nuttx/config.h>
 
 #ifndef __ASSEMBLY__
-#  include <stdint.h>
+# include <stdint.h>
 #endif
 
 /* Do not include STM32F7 header files here */
@@ -43,8 +56,7 @@
 
 /* The STM32F7 Discovery board provides the following clock sources:
  *
- *   X2:  25 MHz oscillator for STM32F769NIH6 microcontroller
- *        and Ethernet PHY.
+ *   X2:  25 MHz oscillator for STM32F769NIH6 microcontroller and Ethernet PHY.
  *   X1:  32.768 KHz crystal for STM32F769NIH6 embedded RTC
  *
  * So we have these clock source available within the STM32
@@ -164,6 +176,8 @@
 #define STM32_RCC_DCKCFGR1_DFSDM1SRC   0
 #define STM32_RCC_DCKCFGR1_ADFSDM1SRC  0
 
+
+
 /* Configure factors for  PLLI2S clock */
 
 #define STM32_RCC_PLLI2SCFGR_PLLI2SN   RCC_PLLI2SCFGR_PLLI2SN(192)
@@ -202,6 +216,7 @@
 
 #define STM32_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK  /* HCLK  = SYSCLK / 1 */
 #define STM32_HCLK_FREQUENCY    STM32_SYSCLK_FREQUENCY
+#define STM32_BOARD_HCLK        STM32_HCLK_FREQUENCY  /* same as above, to satisfy compiler */
 
 /* APB1 clock (PCLK1) is HCLK/4 (54 MHz) */
 
@@ -247,6 +262,165 @@
 
 #define BOARD_FLASH_WAITSTATES 7
 
+/* LED definitions **********************************************************/
+
+/* The STM32F769I-DISCO board has numerous LEDs but only one, LD1 located near the
+ * reset button, that can be controlled by software (LD2 is a power indicator, LD3-6
+ * indicate USB status, LD7 is controlled by the ST-Link).
+ *
+ * LD1 is controlled by PI1 which is also the SPI2_SCK at the Arduino interface.
+ * One end of LD1 is grounded so a high output on PI1 will illuminate the LED.
+ *
+ * If CONFIG_ARCH_LEDS is not defined, then the user can control the LEDs in any way.
+ * The following definitions are used to access individual LEDs.
+ */
+
+/* LED index values for use with board_userled() */
+
+#define BOARD_LED1        0
+#define BOARD_NLEDS       1
+
+#define BOARD_LD1         BOARD_LED1
+
+/* LED bits for use with board_userled_all() */
+
+#define BOARD_LED1_BIT    (1 << BOARD_LED1)
+
+/* If CONFIG_ARCH_LEDS is defined, the usage by the board port is defined in
+ * include/board.h and src/stm32_leds.c. The LEDs are used to encode OS-related
+ * events as follows:
+ *
+ *   SYMBOL              Meaning                 LD1
+ *   ------------------- ----------------------- ------
+ *   LED_STARTED         NuttX has been started  OFF
+ *   LED_HEAPALLOCATE    Heap has been allocated OFF
+ *   LED_IRQSENABLED     Interrupts enabled      OFF
+ *   LED_STACKCREATED    Idle stack created      ON
+ *   LED_INIRQ           In an interrupt         N/C
+ *   LED_SIGNAL          In a signal handler     N/C
+ *   LED_ASSERTION       An assertion failed     N/C
+ *   LED_PANIC           The system has crashed  FLASH
+ *
+ * Thus is LD1 is statically on, NuttX has successfully  booted and is,
+ * apparently, running normally.  If LD1 is flashing at approximately
+ * 2Hz, then a fatal error has been detected and the system has halted.
+ */
+
+#define LED_STARTED                  0 /* LD1=OFF */
+#define LED_HEAPALLOCATE             0 /* LD1=OFF */
+#define LED_IRQSENABLED              0 /* LD1=OFF */
+#define LED_STACKCREATED             1 /* LD1=ON */
+#define LED_INIRQ                    2 /* LD1=no change */
+#define LED_SIGNAL                   2 /* LD1=no change */
+#define LED_ASSERTION                2 /* LD1=no change */
+#define LED_PANIC                    3 /* LD1=flashing */
+
+/* Button definitions *******************************************************/
+
+/* The STM32F7 Discovery supports one button:  Pushbutton B1, labelled "User", is
+ * connected to GPIO PA0.  A high value will be sensed when the button is depressed.
+ */
+
+#define BUTTON_USER        0
+#define NUM_BUTTONS        1
+#define BUTTON_USER_BIT    (1 << BUTTON_USER)
+
+/* Alternate function pin selections ****************************************/
+
+/* USART6:
+ *
+ * These configurations assume that you are using a standard Arduio RS-232 shield
+ * with the serial interface with RX on pin D0 and TX on pin D1:
+ *
+ *   -------- ---------------
+ *               STM32F7
+ *   ARDUINO  FUNCTION  GPIO
+ *   -- ----- --------- -----
+ *   DO RX    USART6_RX PC7
+ *   D1 TX    USART6_TX PC6
+ *   -- ----- --------- -----
+ */
+
+#define GPIO_USART6_RX GPIO_USART6_RX_1
+#define GPIO_USART6_TX GPIO_USART6_TX_1
+
+/* USART1:
+ * USART1 is connected to the "Virtual Com Port" lines
+ * of the ST-LINK controller.
+ *
+ *   -------- ---------------
+ *               STM32F7
+ *   SIGNAME  FUNCTION  GPIO
+ *   -- ----- --------- -----
+ *   VCP_RX   USART1_RX PA10
+ *   VCP_TX   USART1_TX PA9
+ *   -- ----- --------- -----
+ */
+
+#define GPIO_USART1_RX GPIO_USART1_RX_1
+#define GPIO_USART1_TX GPIO_USART1_TX_1
+
+/* PWM
+ *
+ * The STM32F7 Discovery has no real on-board PWM devices, but the board can be
+ * configured to output a pulse train using TIM1 CH4 on PA11.
+ */
+
+#define GPIO_TIM1_CH4OUT  GPIO_TIM1_CH4OUT_1
+
+/* The STM32 F7 connects to a SMSC LAN8742A PHY using these pins:
+ *
+ *   STM32 F7 BOARD        LAN8742A
+ *   GPIO     SIGNAL       PIN NAME
+ *   -------- ------------ -------------
+ *   PG11     RMII_TX_EN   TXEN
+ *   PG13     RMII_TXD0    TXD0
+ *   PG14     RMII_TXD1    TXD1
+ *   PC4      RMII_RXD0    RXD0/MODE0
+ *   PC5      RMII_RXD1    RXD1/MODE1
+ *   PD5      RMII_RXER    RXER/PHYAD0
+ *   PA7      RMII_CRS_DV  CRS_DV/MODE2
+ *   PC1      RMII_MDC     MDC
+ *   PA2      RMII_MDIO    MDIO
+ *   N/A      NRST         nRST
+ *   PA1      RMII_REF_CLK nINT/REFCLK0
+ *   N/A      OSC_25M      XTAL1/CLKIN
+ *
+ * The PHY address is 0, since RMII_RXER/PHYAD0 features a pull down.
+ * After reset, RMII_RXER/PHYAD0 switches to the RXER function,
+ * receive errors can be detected using GPIO pin PD5
+ */
+
+#define GPIO_ETH_RMII_TX_EN   GPIO_ETH_RMII_TX_EN_2
+#define GPIO_ETH_RMII_TXD0    GPIO_ETH_RMII_TXD0_2
+#define GPIO_ETH_RMII_TXD1    GPIO_ETH_RMII_TXD1_2
+
+/* I2C Mapping
+ * I2C #4 is connected to the LCD daughter board
+ * and the WM8994 audio codec.
+ *
+ * I2C4_SCL - PD12
+ * I2C4_SDA - PB7
+ */
+#define GPIO_I2C4_SCL        GPIO_I2C4_SCL_1
+#define GPIO_I2C4_SDA        GPIO_I2C4_SDA_5
+
+/* SDMMC */
+
+/* Stream selections are arbitrary for now but might become important in the future
+ * if we set aside more DMA channels/streams.
+ *
+ * SDIO DMA
+ *   DMAMAP_SDMMC1_1 = Channel 4, Stream 3
+ *   DMAMAP_SDMMC1_2 = Channel 4, Stream 6
+ *
+ *   DMAMAP_SDMMC2_1 = Channel 11, Stream 0
+ *   DMAMAP_SDMMC2_2 = Channel 11, Stream 5
+ */
+
+// #define DMAMAP_SDMMC1  DMAMAP_SDMMC1_1
+#define DMAMAP_SDMMC2  DMAMAP_SDMMC2_1
+
 /* SDIO dividers.  Note that slower clocking is required when DMA is disabled
  * in order to avoid RX overrun/TX underrun errors due to delayed responses
  * to service FIFOs in interrupt driven mode.  These values have not been
@@ -277,197 +451,6 @@
 #  define STM32_SDMMC_SDXFR_CLKDIV   (2 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 #endif
 
-/* LED definitions **********************************************************/
-
-/* The STM32F769I-DISCO board has numerous LEDs but only one, LD1 located
- * near the reset button, that can be controlled by software
- * (LD2 is a power indicator, LD3-6  indicate USB status, LD7 is controlled
- * by the ST-Link).
- *
- * LD1 is controlled by PI1 which is also the SPI2_SCK at the Arduino
- * interface.  One end of LD1 is grounded so a high output on PI1 will
- * illuminate the LED.
- *
- * If CONFIG_ARCH_LEDS is not defined, then the user can control the LEDs
- *  in any way. The following definitions are used to access individual LEDs.
- */
-
-/* LED index values for use with board_userled() */
-
-#define BOARD_LED1        0
-#define BOARD_NLEDS       1
-
-#define BOARD_LD1         BOARD_LED1
-
-/* LED bits for use with board_userled_all() */
-
-#define BOARD_LED1_BIT    (1 << BOARD_LED1)
-
-/* If CONFIG_ARCH_LEDS is defined, the usage by the board port is defined in
- * include/board.h and src/stm32_leds.c.
- * The LEDs are used to encode OS-related events as follows:
- *
- *   SYMBOL              Meaning                 LD1
- *   ------------------- ----------------------- ------
- *   LED_STARTED         NuttX has been started  OFF
- *   LED_HEAPALLOCATE    Heap has been allocated OFF
- *   LED_IRQSENABLED     Interrupts enabled      OFF
- *   LED_STACKCREATED    Idle stack created      ON
- *   LED_INIRQ           In an interrupt         N/C
- *   LED_SIGNAL          In a signal handler     N/C
- *   LED_ASSERTION       An assertion failed     N/C
- *   LED_PANIC           The system has crashed  FLASH
- *
- * Thus is LD1 is statically on, NuttX has successfully  booted and is,
- * apparently, running normally.  If LD1 is flashing at approximately
- * 2Hz, then a fatal error has been detected and the system has halted.
- */
-
-#define LED_STARTED                  0 /* LD1=OFF */
-#define LED_HEAPALLOCATE             0 /* LD1=OFF */
-#define LED_IRQSENABLED              0 /* LD1=OFF */
-#define LED_STACKCREATED             1 /* LD1=ON */
-#define LED_INIRQ                    2 /* LD1=no change */
-#define LED_SIGNAL                   2 /* LD1=no change */
-#define LED_ASSERTION                2 /* LD1=no change */
-#define LED_PANIC                    3 /* LD1=flashing */
-
-/* Button definitions *******************************************************/
-
-/* The STM32F7 Discovery supports one button:
- *  Pushbutton B1, labelled "User", is connected to GPIO PA0.
- *  A high value will be sensed when the button is depressed.
- */
-
-#define BUTTON_USER        0
-#define NUM_BUTTONS        1
-#define BUTTON_USER_BIT    (1 << BUTTON_USER)
-
-/* LCD definitions **********************************************************/
-
-/* LCD DISPLAY
- * (work in progress as of 2017 07 19)
- */
-
-#define BOARD_LTDC_WIDTH        800
-#define BOARD_LTDC_HEIGHT       472
-
-#define BOARD_LTDC_HSYNC        10
-#define BOARD_LTDC_HFP          10
-#define BOARD_LTDC_HBP          20
-#define BOARD_LTDC_VSYNC        2
-#define BOARD_LTDC_VFP          4
-#define BOARD_LTDC_VBP          2
-
-#define BOARD_LTDC_GCR_PCPOL    0
-#define BOARD_LTDC_GCR_DEPOL    0
-#define BOARD_LTDC_GCR_VSPOL    0
-#define BOARD_LTDC_GCR_HSPOL    0
-
-/* DMA Channel/Stream Selections ********************************************/
-
-/* SDMMC */
-
-/* Stream selections are arbitrary for now but might become important in the
- * future if we set aside more DMA channels/streams.
- *
- * SDIO DMA
- *   DMAMAP_SDMMC1_1 = Channel 4, Stream 3
- *   DMAMAP_SDMMC1_2 = Channel 4, Stream 6
- *
- *   DMAMAP_SDMMC2_1 = Channel 11, Stream 0
- *   DMAMAP_SDMMC2_2 = Channel 11, Stream 5
- */
-
-#define DMAMAP_SDMMC2  DMAMAP_SDMMC2_1
-
-/* Alternate function pin selections ****************************************/
-
-/* USART6:
- *
- * These configurations assume that you are using a standard Arduio RS-232
- * shield with the serial interface with RX on pin D0 and TX on pin D1:
- *
- *   -------- ---------------
- *               STM32F7
- *   ARDUINO  FUNCTION  GPIO
- *   -- ----- --------- -----
- *   DO RX    USART6_RX PC7
- *   D1 TX    USART6_TX PC6
- *   -- ----- --------- -----
- */
-
-#define GPIO_USART6_RX (GPIO_USART6_RX_1|GPIO_SPEED_100MHz)
-#define GPIO_USART6_TX (GPIO_USART6_TX_1|GPIO_SPEED_100MHz)
-
-/* USART1:
- * USART1 is connected to the "Virtual Com Port" lines
- * of the ST-LINK controller.
- *
- *   -------- ---------------
- *               STM32F7
- *   SIGNAME  FUNCTION  GPIO
- *   -- ----- --------- -----
- *   VCP_RX   USART1_RX PA10
- *   VCP_TX   USART1_TX PA9
- *   -- ----- --------- -----
- */
-
-#define GPIO_USART1_RX (GPIO_USART1_RX_1|GPIO_SPEED_100MHz)
-#define GPIO_USART1_TX (GPIO_USART1_TX_1|GPIO_SPEED_100MHz)
-
-/* PWM
- *
- * The STM32F7 Discovery has no real on-board PWM devices, but the board can
- * be configured to output a pulse train using TIM1 CH4 on PA11.
- */
-
-#define GPIO_TIM1_CH4OUT  (GPIO_TIM1_CH4OUT_1|GPIO_SPEED_50MHz)
-
-/* The STM32 F7 connects to a SMSC LAN8742A PHY using these pins:
- *
- *   STM32 F7 BOARD        LAN8742A
- *   GPIO     SIGNAL       PIN NAME
- *   -------- ------------ -------------
- *   PG11     RMII_TX_EN   TXEN
- *   PG13     RMII_TXD0    TXD0
- *   PG14     RMII_TXD1    TXD1
- *   PC4      RMII_RXD0    RXD0/MODE0
- *   PC5      RMII_RXD1    RXD1/MODE1
- *   PD5      RMII_RXER    RXER/PHYAD0
- *   PA7      RMII_CRS_DV  CRS_DV/MODE2
- *   PC1      RMII_MDC     MDC
- *   PA2      RMII_MDIO    MDIO
- *   N/A      NRST         nRST
- *   PA1      RMII_REF_CLK nINT/REFCLK0
- *   N/A      OSC_25M      XTAL1/CLKIN
- *
- * The PHY address is 0, since RMII_RXER/PHYAD0 features a pull down.
- * After reset, RMII_RXER/PHYAD0 switches to the RXER function,
- * receive errors can be detected using GPIO pin PD5
- */
-
-#define GPIO_ETH_MDC          (GPIO_ETH_MDC_0|GPIO_SPEED_100MHz)
-#define GPIO_ETH_MDIO         (GPIO_ETH_MDIO_0|GPIO_SPEED_100MHz)
-#define GPIO_ETH_RMII_CRS_DV  (GPIO_ETH_RMII_CRS_DV_0|GPIO_SPEED_100MHz)
-#define GPIO_ETH_RMII_REF_CLK (GPIO_ETH_RMII_REF_CLK_0|GPIO_SPEED_100MHz)
-#define GPIO_ETH_RMII_RXD0    (GPIO_ETH_RMII_RXD0_0|GPIO_SPEED_100MHz)
-#define GPIO_ETH_RMII_RXD1    (GPIO_ETH_RMII_RXD1_0|GPIO_SPEED_100MHz)
-#define GPIO_ETH_RMII_TX_EN   (GPIO_ETH_RMII_TX_EN_2|GPIO_SPEED_100MHz)
-#define GPIO_ETH_RMII_TXD0    (GPIO_ETH_RMII_TXD0_2|GPIO_SPEED_100MHz)
-#define GPIO_ETH_RMII_TXD1    (GPIO_ETH_RMII_TXD1_2|GPIO_SPEED_100MHz)
-
-/* I2C Mapping
- * I2C #4 is connected to the LCD daughter board
- * and the WM8994 audio codec.
- *
- * I2C4_SCL - PD12
- * I2C4_SDA - PB7
- */
-
-#define GPIO_I2C4_SCL        (GPIO_I2C4_SCL_1|GPIO_SPEED_50MHz)
-#define GPIO_I2C4_SDA        (GPIO_I2C4_SDA_5|GPIO_SPEED_50MHz)
-
 /* SDMMC2 Pin mapping
  *
  * D0 - PG9
@@ -475,12 +458,27 @@
  * D2 - PB3
  * D3 - PB4
  */
+#define GPIO_SDMMC2_D0  GPIO_SDMMC2_D0_2
+#define GPIO_SDMMC2_D1  GPIO_SDMMC2_D1_2
+#define GPIO_SDMMC2_D2  GPIO_SDMMC2_D2_1
+#define GPIO_SDMMC2_D3  GPIO_SDMMC2_D3_1
 
-#define GPIO_SDMMC2_CK  (GPIO_SDMMC2_CK_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC2_CMD (GPIO_SDMMC2_CMD_0|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC2_D0  (GPIO_SDMMC2_D0_2|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC2_D1  (GPIO_SDMMC2_D1_2|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC2_D2  (GPIO_SDMMC2_D2_1|GPIO_SPEED_50MHz)
-#define GPIO_SDMMC2_D3  (GPIO_SDMMC2_D3_1|GPIO_SPEED_50MHz)
+/* LCD DISPLAY
+ * (work in progress as of 2017 07 19)
+ */
+#define	BOARD_LTDC_WIDTH        800
+#define	BOARD_LTDC_HEIGHT       472
+
+#define	BOARD_LTDC_HSYNC        10
+#define	BOARD_LTDC_HFP          10
+#define	BOARD_LTDC_HBP          20
+#define	BOARD_LTDC_VSYNC        2
+#define	BOARD_LTDC_VFP          4
+#define	BOARD_LTDC_VBP          2
+
+#define	BOARD_LTDC_GCR_PCPOL    0
+#define	BOARD_LTDC_GCR_DEPOL    0
+#define	BOARD_LTDC_GCR_VSPOL    0
+#define	BOARD_LTDC_GCR_HSPOL    0
 
 #endif /* __BOARDS_ARM_STM32F7_STM32F769I_DISCO_INCLUDE_BOARD_H */

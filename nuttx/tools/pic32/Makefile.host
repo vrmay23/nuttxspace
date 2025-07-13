@@ -1,8 +1,6 @@
 ############################################################################
 # tools/pic32/Makefile.host
 #
-# SPDX-License-Identifier: Apache-2.0
-#
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.  The
@@ -20,24 +18,19 @@
 #
 ############################################################################
 
--include $(TOPDIR)/Make.defs
 all: mkpichex
 default: mkpichex
 .PHONY: clean
 
 # Add CFLAGS=-g on the make command line to build debug versions
 
-CFLAGS = -O2 -Wall
+CFLAGS = -O2 -Wall -I.
 
 # mkpichex - Convert virtual addresses in nuttx.hex to physical addresses
 
-mkpichex: mkpichex.c
+mkconfig: mkpichex.c mkpichex.c
 	@gcc $(CFLAGS) -o mkpichex mkpichex.c
 
 clean:
-ifneq ($(CONFIG_WINDOWS_NATIVE),y)
-	$(Q) rm -rf *.dSYM
-endif
-	$(call DELFILE, mkpichex)
-	$(call DELFILE, mkpichex.exe)
-	$(call CLEAN)
+	@rm -f *.o *.a *.dSYM *~ .*.swp
+	@rm -f mkpichex mkpichex.exe

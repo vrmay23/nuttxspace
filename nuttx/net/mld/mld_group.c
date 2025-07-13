@@ -1,22 +1,34 @@
 /****************************************************************************
  * net/mld/mld_group.c
+ * MLD group data structure management logic
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of CITEL Technologies Ltd nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY CITEL TECHNOLOGIES AND CONTRIBUTORS ``AS IS''
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL CITEL TECHNOLOGIES OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +41,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
+#include <queue.h>
 #include <debug.h>
 
 #include <arch/irq.h>
@@ -37,7 +49,6 @@
 #include <nuttx/arch.h>
 #include <nuttx/wdog.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/queue.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/net/ip.h>
@@ -60,7 +71,6 @@
  *
  ****************************************************************************/
 
-#ifndef CONFIG_NET_MLD_ROUTER
 static int mld_ngroups(FAR struct net_driver_s *dev)
 {
   FAR struct mld_group_s *group;
@@ -82,7 +92,6 @@ static int mld_ngroups(FAR struct net_driver_s *dev)
 
   return ngroups > 0 ? ngroups - 1 : 0;
 }
-#endif
 
 /****************************************************************************
  * Public Functions
@@ -105,7 +114,7 @@ FAR struct mld_group_s *mld_grpalloc(FAR struct net_driver_s *dev,
   FAR struct mld_group_s *group;
 
   mldinfo("addr: %08x dev: %p\n", *addr, dev);
-  group = kmm_zalloc(sizeof(struct mld_group_s));
+  group = (FAR struct mld_group_s *)kmm_zalloc(sizeof(struct mld_group_s));
 
   mldinfo("group: %p\n", group);
 
@@ -116,7 +125,22 @@ FAR struct mld_group_s *mld_grpalloc(FAR struct net_driver_s *dev,
       /* Initialize the non-zero elements of the group structure */
 
       net_ipv6addr_copy(group->grpaddr, addr);
+
+      /* This semaphore is used for signaling and, hence, should not have
+       * priority inheritance enabled.
+       */
+
       nxsem_init(&group->sem, 0, 0);
+      nxsem_setprotocol(&group->sem, SEM_PRIO_NONE);
+
+      /* Initialize the group timers */
+
+      group->polldog = wd_create();
+      DEBUGASSERT(group->polldog != NULL);
+      if (group->polldog == NULL)
+        {
+          goto errout_with_sem;
+        }
 
       /* Save the interface index */
 
@@ -139,6 +163,11 @@ FAR struct mld_group_s *mld_grpalloc(FAR struct net_driver_s *dev,
     }
 
   return group;
+
+errout_with_sem:
+  nxsem_destroy(&group->sem);
+  kmm_free(group);
+  return NULL;
 }
 
 /****************************************************************************
@@ -158,18 +187,17 @@ FAR struct mld_group_s *mld_grpfind(FAR struct net_driver_s *dev,
   FAR struct mld_group_s *group;
 
   mldinfo("Searching for group: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-          NTOHS(addr[0]), NTOHS(addr[1]), NTOHS(addr[2]), NTOHS(addr[3]),
-          NTOHS(addr[4]), NTOHS(addr[5]), NTOHS(addr[6]), NTOHS(addr[7]));
+          addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6],
+          addr[7]);
 
   for (group = (FAR struct mld_group_s *)dev->d_mld.grplist.head;
        group;
        group = group->next)
     {
       mldinfo("Compare: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-              NTOHS(group->grpaddr[0]), NTOHS(group->grpaddr[1]),
-              NTOHS(group->grpaddr[2]), NTOHS(group->grpaddr[3]),
-              NTOHS(group->grpaddr[4]), NTOHS(group->grpaddr[5]),
-              NTOHS(group->grpaddr[6]), NTOHS(group->grpaddr[7]));
+              group->grpaddr[0], group->grpaddr[1], group->grpaddr[2],
+              group->grpaddr[3], group->grpaddr[4], group->grpaddr[5],
+              group->grpaddr[6], group->grpaddr[7]);
 
       if (net_ipv6addr_cmp(group->grpaddr, addr))
         {
@@ -223,7 +251,7 @@ void mld_grpfree(FAR struct net_driver_s *dev, FAR struct mld_group_s *group)
 
   /* Cancel the timers */
 
-  wd_cancel(&group->polldog);
+  wd_cancel(group->polldog);
 
   /* Remove the group structure from the group list in the device structure */
 
@@ -233,9 +261,9 @@ void mld_grpfree(FAR struct net_driver_s *dev, FAR struct mld_group_s *group)
 
   nxsem_destroy(&group->sem);
 
-  /* Cancel the watchdog timer */
+  /* Destroy the timers */
 
-  wd_cancel(&group->polldog);
+  wd_delete(group->polldog);
 
   /* Then release the group structure resources. */
 
@@ -249,8 +277,8 @@ void mld_grpfree(FAR struct net_driver_s *dev, FAR struct mld_group_s *group)
 
   if (mld_ngroups(dev) == 0)
     {
-      wd_cancel(&dev->d_mld.gendog);
-      wd_cancel(&dev->d_mld.v1dog);
+      wd_cancel(dev->d_mld.gendog);
+      wd_cancel(dev->d_mld.v1dog);
     }
 #endif
 }

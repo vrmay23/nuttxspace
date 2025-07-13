@@ -1,36 +1,50 @@
-/****************************************************************************
+/****************************************************************************************************
  * arch/arm/src/stm32l4/hardware/stm32l4x6xx_otgfs.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2014-2015 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2016 Omni Hoverboards Inc. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *           Paul Alexander Patience <paul-a.patience@polymtl.ca>
+ *           dev@ziggurat29.com
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ****************************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_STM32L4_HARDWARE_STM32L4X6XX_OTGFS_H
 #define __ARCH_ARM_SRC_STM32L4_HARDWARE_STM32L4X6XX_OTGFS_H
 
-/****************************************************************************
+/****************************************************************************************************
  * Included Files
- ****************************************************************************/
-
-/****************************************************************************
+ ****************************************************************************************************/
+/****************************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
-
+ ****************************************************************************************************/
 /* General definitions */
 
 #define OTGFS_EPTYPE_CTRL               (0) /* Control */
@@ -44,8 +58,7 @@
 #define OTGFS_PID_MDATA                 (3) /* Non-control */
 #define OTGFS_PID_SETUP                 (3) /* Control */
 
-/* Register Offsets *********************************************************/
-
+/* Register Offsets *********************************************************************************/
 /* Core global control and status registers */
 
 #define STM32L4_OTGFS_GOTGCTL_OFFSET      0x0000 /* Control and status register */
@@ -141,7 +154,7 @@
 #define STM32L4_OTGFS_DFIFO_DEP_OFFSET(n) (0x1000 + ((n) << 12))
 #define STM32L4_OTGFS_DFIFO_HCH_OFFSET(n) (0x1000 + ((n) << 12))
 
-/* Register Addresses *******************************************************/
+/* Register Addresses *******************************************************************************/
 
 #define STM32L4_OTGFS_GOTGCTL             (STM32L4_OTGFS_BASE+STM32L4_OTGFS_GOTGCTL_OFFSET)
 #define STM32L4_OTGFS_GOTGINT             (STM32L4_OTGFS_BASE+STM32L4_OTGFS_GOTGINT_OFFSET)
@@ -225,8 +238,9 @@
 #define STM32L4_OTGFS_DFIFO_DEP(n)        (STM32L4_OTGFS_BASE+STM32L4_OTGFS_DFIFO_DEP_OFFSET(n))
 #define STM32L4_OTGFS_DFIFO_HCH(n)        (STM32L4_OTGFS_BASE+STM32L4_OTGFS_DFIFO_HCH_OFFSET(n))
 
-/* Register Bitfield Definitions ********************************************/
 
+
+/* Register Bitfield Definitions ********************************************************************/
 /* Core global control and status registers */
 
 /* Control and status register */
@@ -252,12 +266,8 @@
 #define OTGFS_GOTGCTL_OTGVER            (1 << 20) /* Bit 20: OTG version */
 #define OTGFS_GOTGCTL_CURMOD            (1 << 21) /* Bit 21: Current mode of operation */
                                                   /* Bits 22-31: Reserved, must be kept at reset value */
-
 /* Interrupt register */
-
-/*                                                   Bits 1:0 Reserved,
- *                                                must be kept at reset value
- */
+                                                  /* Bits 1:0 Reserved, must be kept at reset value */
 #define OTGFS_GOTGINT_SEDET             (1 << 2)  /* Bit 2: Session end detected */
                                                   /* Bits 3-7: Reserved, must be kept at reset value */
 #define OTGFS_GOTGINT_SRSSCHG           (1 << 8)  /* Bit 8: Session request success status change */
@@ -276,7 +286,6 @@
 #define OTGFS_GAHBCFG_TXFELVL           (1 << 7)  /* Bit 7: TxFIFO empty level */
 #define OTGFS_GAHBCFG_PTXFELVL          (1 << 8)  /* Bit 8: Periodic TxFIFO empty level */
                                                   /* Bits 20-31: Reserved, must be kept at reset value */
-
 /* USB configuration register */
 
 #define OTGFS_GUSBCFG_TOCAL_SHIFT       (0)       /* Bits 0-2: FS timeout calibration */
@@ -293,7 +302,6 @@
 #define OTGFS_GUSBCFG_FHMOD             (1 << 29) /* Bit 29: Force host mode */
 #define OTGFS_GUSBCFG_FDMOD             (1 << 30) /* Bit 30: Force device mode */
                                                   /* Bit 31: Reserved, must be kept at reset value */
-
 /* Reset register */
 
 #define OTGFS_GRSTCTL_CSRST             (1 << 0)  /* Bit 0: Core soft reset */
@@ -309,10 +317,7 @@
 #  define OTGFS_GRSTCTL_TXFNUM_HALL     (16 << OTGFS_GRSTCTL_TXFNUM_SHIFT)  /* Flush all the transmit FIFOs in host mode.*/
 #  define OTGFS_GRSTCTL_TXFNUM_D(n)     ((n) << OTGFS_GRSTCTL_TXFNUM_SHIFT) /* TXFIFO n flush in device mode, n=0-15 */
 #  define OTGFS_GRSTCTL_TXFNUM_DALL     (16 << OTGFS_GRSTCTL_TXFNUM_SHIFT)  /* Flush all the transmit FIFOs in device mode.*/
-
-/*                                                   Bits 11-30: Reserved,
- *                                                must be kept at reset value
- */
+                                                  /* Bits 11-30: Reserved, must be kept at reset value */
 #define OTGFS_GRSTCTL_AHBIDL            (1 << 31) /* Bit 31: AHB master idle */
 
 /* Core interrupt and Interrupt mask registers */
@@ -369,14 +374,9 @@
 #  define OTGFS_GRXSTSH_PKTSTS_INDONE   (3 << OTGFS_GRXSTSH_PKTSTS_SHIFT) /* IN transfer completed */
 #  define OTGFS_GRXSTSH_PKTSTS_DTOGERR  (5 << OTGFS_GRXSTSH_PKTSTS_SHIFT) /* Data toggle error */
 #  define OTGFS_GRXSTSH_PKTSTS_HALTED   (7 << OTGFS_GRXSTSH_PKTSTS_SHIFT) /* Channel halted */
+                                                  /* Bits 21-31: Reserved, must be kept at reset value */
 
-/*                                                   Bits 21-31: Reserved,
- *                                                must be kept at reset value
- */
-
-/* Receive status debug read/OTG status read and pop registers
- * (device mode)
- */
+/* Receive status debug read/OTG status read and pop registers (device mode) */
 
 #define OTGFS_GRXSTSD_EPNUM_SHIFT       (0)       /* Bits 0-3: Endpoint number */
 #define OTGFS_GRXSTSD_EPNUM_MASK        (15 << OTGFS_GRXSTSD_EPNUM_SHIFT)
@@ -395,7 +395,6 @@
 #  define OTGFS_GRXSTSD_PKTSTS_OUTDONE    (3 << OTGFS_GRXSTSD_PKTSTS_SHIFT) /* OUT transfer completed */
 #  define OTGFS_GRXSTSD_PKTSTS_SETUPDONE  (4 << OTGFS_GRXSTSD_PKTSTS_SHIFT) /* SETUP transaction completed */
 #  define OTGFS_GRXSTSD_PKTSTS_SETUPRECVD (6 << OTGFS_GRXSTSD_PKTSTS_SHIFT) /* SETUP data packet received */
-
 #define OTGFS_GRXSTSD_FRMNUM_SHIFT      (21)      /* Bits 21-24: Frame number */
 #define OTGFS_GRXSTSD_FRMNUM_MASK       (15 << OTGFS_GRXSTSD_FRMNUM_SHIFT)
                                                   /* Bits 25-26: Reserved, must be kept at reset value */
@@ -440,7 +439,6 @@
 #    define OTGFS_HNPTXSTS_TYPE_INOUT   (0 << OTGFS_HNPTXSTS_TYPE_SHIFT) /* IN/OUT token */
 #    define OTGFS_HNPTXSTS_TYPE_ZLP     (1 << OTGFS_HNPTXSTS_TYPE_SHIFT) /* Zero-length transmit packet (device IN/host OUT) */
 #    define OTGFS_HNPTXSTS_TYPE_HALT    (3 << OTGFS_HNPTXSTS_TYPE_SHIFT) /* Channel halt command */
-
 #  define OTGFS_HNPTXSTS_CHNUM_SHIFT    (27)      /* Bits 27-30: Channel number */
 #  define OTGFS_HNPTXSTS_CHNUM_MASK     (15 << OTGFS_HNPTXSTS_CHNUM_SHIFT)
 #  define OTGFS_HNPTXSTS_EPNUM_SHIFT    (27)      /* Bits 27-30: Endpoint number */
@@ -449,10 +447,10 @@
 
 /* General core configuration register */
 
-#define OTGFS_GCCFG_DCDET               (1 << 0)  /* Bit 0: Data contact detect */
-#define OTGFS_GCCFG_PDET                (1 << 1)  /* Bit 1: Primary detect */
-#define OTGFS_GCCFG_SDET                (1 << 2)  /* Bit 2: Secondary detect */
-#define OTGFS_GCCFG_PS2DET              (1 << 3)  /* Bit 3: DM pull-up detect */
+#define OTGFS_GCCFG_DCDET               (1 << 0) /* Bit 0: Data contact detect */
+#define OTGFS_GCCFG_PDET                (1 << 1) /* Bit 1: Primary detect */
+#define OTGFS_GCCFG_SDET                (1 << 2) /* Bit 2: Secondary detect */
+#define OTGFS_GCCFG_PS2DET              (1 << 3) /* Bit 3: DM pull-up detect */
                                                   /* Bits 4-15: Reserved, must be kept at reset value */
 #define OTGFS_GCCFG_PWRDWN              (1 << 16) /* Bit 16: Power down */
 #define OTGFS_GCCFG_BCDEN               (1 << 18) /* Bit 17: Battery charging detector enable */
@@ -541,10 +539,8 @@
 #  define OTGFS_HCFG_FSLSPCS_FS48MHz    (1 << OTGFS_HCFG_FSLSPCS_SHIFT) /* FS host mode, PHY clock is running at 48 MHz */
 #  define OTGFS_HCFG_FSLSPCS_LS48MHz    (1 << OTGFS_HCFG_FSLSPCS_SHIFT) /* LS host mode,  Select 48 MHz PHY clock frequency */
 #  define OTGFS_HCFG_FSLSPCS_LS6MHz     (2 << OTGFS_HCFG_FSLSPCS_SHIFT) /* LS host mode, Select 6 MHz PHY clock frequency */
-
 #define OTGFS_HCFG_FSLSS                (1 << 2)  /* Bit 2: FS- and LS-only support */
                                                   /* Bits 31:3 Reserved, must be kept at reset value */
-
 /* Host frame interval register */
 
 #define OTGFS_HFIR_MASK                 (0xffff)
@@ -573,7 +569,6 @@
 #    define OTGFS_HPTXSTS_TYPE_INOUT    (0 << OTGFS_HPTXSTS_TYPE_SHIFT) /* IN/OUT token */
 #    define OTGFS_HPTXSTS_TYPE_ZLP      (1 << OTGFS_HPTXSTS_TYPE_SHIFT) /* Zero-length transmit packet */
 #    define OTGFS_HPTXSTS_TYPE_HALT     (3 << OTGFS_HPTXSTS_TYPE_SHIFT) /* Disable channel command */
-
 #  define OTGFS_HPTXSTS_EPNUM_SHIFT     (27)      /* Bits 27-30: Endpoint number */
 #  define OTGFS_HPTXSTS_EPNUM_MASK      (15 << OTGFS_HPTXSTS_EPNUM_SHIFT)
 #  define OTGFS_HPTXSTS_CHNUM_SHIFT     (27)      /* Bits 27-30: Channel number */
@@ -609,15 +604,11 @@
 #  define OTGFS_HPRT_PTCTL_SE0_NAK      (3 << OTGFS_HPRT_PTCTL_SHIFT) /* Test_SE0_NAK mode */
 #  define OTGFS_HPRT_PTCTL_PACKET       (4 << OTGFS_HPRT_PTCTL_SHIFT) /* Test_Packet mode */
 #  define OTGFS_HPRT_PTCTL_FORCE        (5 << OTGFS_HPRT_PTCTL_SHIFT) /* Test_Force_Enable */
-
 #define OTGFS_HPRT_PSPD_SHIFT           (17)      /* Bits 17-18: Port speed */
 #define OTGFS_HPRT_PSPD_MASK            (3 << OTGFS_HPRT_PSPD_SHIFT)
 #  define OTGFS_HPRT_PSPD_FS            (1 << OTGFS_HPRT_PSPD_SHIFT) /* Full speed */
 #  define OTGFS_HPRT_PSPD_LS            (2 << OTGFS_HPRT_PSPD_SHIFT) /* Low speed */
-
-/*                                                   Bits 19-31: Reserved,
- *                                                must be kept at reset value
- */
+                                                  /* Bits 19-31: Reserved, must be kept at reset value */
 
 /* Host channel-n characteristics register */
 
@@ -636,7 +627,6 @@
 #  define OTGFS_HCCHAR_EPTYP_ISOC       (1 << OTGFS_HCCHAR_EPTYP_SHIFT) /* Isochronous */
 #  define OTGFS_HCCHAR_EPTYP_BULK       (2 << OTGFS_HCCHAR_EPTYP_SHIFT) /* Bulk */
 #  define OTGFS_HCCHAR_EPTYP_INTR       (3 << OTGFS_HCCHAR_EPTYP_SHIFT) /* Interrupt */
-
 #define OTGFS_HCCHAR_MCNT_SHIFT         (20)      /* Bits 20-21: Multicount */
 #define OTGFS_HCCHAR_MCNT_MASK          (3 << OTGFS_HCCHAR_MCNT_SHIFT)
 #define OTGFS_HCCHAR_DAD_SHIFT          (22)      /* Bits 22-28: Device address */
@@ -673,10 +663,7 @@
 #  define OTGFS_HCTSIZ_DPID_DATA1       (2 << OTGFS_HCTSIZ_DPID_SHIFT)
 #  define OTGFS_HCTSIZ_DPID_MDATA       (3 << OTGFS_HCTSIZ_DPID_SHIFT) /* Non-control */
 #  define OTGFS_HCTSIZ_PID_SETUP        (3 << OTGFS_HCTSIZ_DPID_SHIFT) /* Control */
-
-/*                                                   Bit 31 Reserved,
- *                                                must be kept at reset value
- */
+                                                  /* Bit 31 Reserved, must be kept at reset value */
 
 /* Device-mode control and status registers */
 
@@ -685,7 +672,6 @@
 #define OTGFS_DCFG_DSPD_SHIFT           (0)       /* Bits 0-1: Device speed */
 #define OTGFS_DCFG_DSPD_MASK            (3 << OTGFS_DCFG_DSPD_SHIFT)
 #  define OTGFS_DCFG_DSPD_FS            (3 << OTGFS_DCFG_DSPD_SHIFT) /* Full speed */
-
 #define OTGFS_DCFG_NZLSOHSK             (1 << 2)  /* Bit 2:  Non-zero-length status OUT handshake */
                                                   /* Bit 3:  Reserved, must be kept at reset value */
 #define OTGFS_DCFG_DAD_SHIFT            (4)       /* Bits 4-10: Device address */
@@ -696,10 +682,7 @@
 #  define OTGFS_DCFG_PFIVL_85PCT        (1 << OTGFS_DCFG_PFIVL_SHIFT) /* 85% of the frame interval */
 #  define OTGFS_DCFG_PFIVL_90PCT        (2 << OTGFS_DCFG_PFIVL_SHIFT) /* 90% of the frame interval */
 #  define OTGFS_DCFG_PFIVL_95PCT        (3 << OTGFS_DCFG_PFIVL_SHIFT) /* 95% of the frame interval */
-
-/*                                                   Bits 13-14 Reserved,
- *                                                must be kept at reset value
- */
+                                                  /* Bits 13-14 Reserved, must be kept at reset value */
 #define OTGFS_DCFG_ERRATIM              (1 << 15) /* Bit 15:  Erratic error interrupt mask */
                                                   /* Bits 16-31 Reserved, must be kept at reset value */
 
@@ -724,7 +707,6 @@
 #  define OTGFS_DCTL_TCTL_SE0_NAK       (3 << OTGFS_DCTL_TCTL_SHIFT) /* Test_SE0_NAK mode */
 #  define OTGFS_DCTL_TCTL_PACKET        (4 << OTGFS_DCTL_TCTL_SHIFT) /* Test_Packet mode */
 #  define OTGFS_DCTL_TCTL_FORCE         (5 << OTGFS_DCTL_TCTL_SHIFT) /* Test_Force_Enable */
-
 #define OTGFS_DCTL_SGINAK               (1 << 7)  /* Bit 7:  Set global IN NAK */
 #define OTGFS_DCTL_CGINAK               (1 << 8)  /* Bit 8:  Clear global IN NAK */
 #define OTGFS_DCTL_SGONAK               (1 << 9)  /* Bit 9:  Set global OUT NAK */
@@ -733,14 +715,12 @@
                                                   /* Bit 12-17: Reserved, must be kept at reset value */
 #define OTGFS_DCTL_DSBESLRJCT           (1 << 18) /* Bit 18: Deep sleep BESL reject */
                                                   /* Bits 19-31: Reserved, must be kept at reset value */
-
 /* Device status register */
 
 #define OTGFS_DSTS_SUSPSTS              (1 << 0)  /* Bit 0: Suspend status */
 #define OTGFS_DSTS_ENUMSPD_SHIFT        (1)       /* Bits 1-2: Enumerated speed */
 #define OTGFS_DSTS_ENUMSPD_MASK         (3 << OTGFS_DSTS_ENUMSPD_SHIFT)
 #  define OTGFS_DSTS_ENUMSPD_FS         (3 << OTGFS_DSTS_ENUMSPD_MASK) /* Full speed */
-
 #define OTGFS_DSTS_EERR                 (1 << 3)  /* Bit 3: Erratic error */
                                                   /* Bits 4-7: Reserved, must be kept at reset value */
 #define OTGFS_DSTS_SOFFN_SHIFT          (8)       /* Bits 8-21: Frame number of the received SOF */
@@ -783,11 +763,9 @@
 #define OTGFS_DOEPMSK_NYETMSK           (1 << 14) /* Bit 14: NYET interrupt mask */
                                                   /* Bits 15-31: Reserved, must be kept at reset value */
 
-/* Device all endpoints interrupt and All endpoints interrupt mask
- * registers
- */
+/* Device all endpoints interrupt and All endpoints interrupt mask registers */
 
-#define OTGFS_DAINT_IEP_SHIFT           (0)       /* Bits 0-15: IN endpoint interrupt bits */
+#define OTGFS_DAINT_IEP_SHIFT           (0)      /* Bits 0-15: IN endpoint interrupt bits */
 #define OTGFS_DAINT_IEP_MASK            (0xffff << OTGFS_DAINT_IEP_SHIFT)
 #  define OTGFS_DAINT_IEP(n)            (1 << (n))
 #define OTGFS_DAINT_OEP_SHIFT           (16)      /* Bits 16-31: OUT endpoint interrupt bits */
@@ -814,20 +792,14 @@
 #  define OTGFS_DIEPCTL0_MPSIZ_32       (1 << OTGFS_DIEPCTL0_MPSIZ_SHIFT) /* 32 bytes */
 #  define OTGFS_DIEPCTL0_MPSIZ_16       (2 << OTGFS_DIEPCTL0_MPSIZ_SHIFT) /* 16 bytes */
 #  define OTGFS_DIEPCTL0_MPSIZ_8        (3 << OTGFS_DIEPCTL0_MPSIZ_SHIFT) /* 8 bytes */
-
-/*                                                   Bits 2-14: Reserved,
- *                                                must be kept at reset value
- */
+                                                  /* Bits 2-14: Reserved, must be kept at reset value */
 #define OTGFS_DIEPCTL0_USBAEP           (1 << 15) /* Bit 15: USB active endpoint */
                                                   /* Bit 16: Reserved, must be kept at reset value */
 #define OTGFS_DIEPCTL0_NAKSTS           (1 << 17) /* Bit 17: NAK status */
 #define OTGFS_DIEPCTL0_EPTYP_SHIFT      (18)      /* Bits 18-19: Endpoint type */
 #define OTGFS_DIEPCTL0_EPTYP_MASK       (3 << OTGFS_DIEPCTL0_EPTYP_SHIFT)
 #  define OTGFS_DIEPCTL0_EPTYP_CTRL     (0 << OTGFS_DIEPCTL0_EPTYP_SHIFT) /* Control (hard-coded) */
-
-/*                                                   Bit 20: Reserved,
- *                                                must be kept at reset value
- */
+                                                  /* Bit 20: Reserved, must be kept at reset value */
 #define OTGFS_DIEPCTL0_STALL            (1 << 21) /* Bit 21: STALL handshake */
 #define OTGFS_DIEPCTL0_TXFNUM_SHIFT     (22)      /* Bits 22-25: TxFIFO number */
 #define OTGFS_DIEPCTL0_TXFNUM_MASK      (15 << OTGFS_DIEPCTL0_TXFNUM_SHIFT)
@@ -855,10 +827,7 @@
 #  define OTGFS_DIEPCTL_EPTYP_ISOC      (1 << OTGFS_DIEPCTL_EPTYP_SHIFT) /* Isochronous */
 #  define OTGFS_DIEPCTL_EPTYP_BULK      (2 << OTGFS_DIEPCTL_EPTYP_SHIFT) /* Bulk */
 #  define OTGFS_DIEPCTL_EPTYP_INTR      (3 << OTGFS_DIEPCTL_EPTYP_SHIFT) /* Interrupt */
-
-/*                                                   Bit 20: Reserved,
- *                                                must be kept at reset value
- */
+                                                  /* Bit 20: Reserved, must be kept at reset value */
 #define OTGFS_DIEPCTL_STALL             (1 << 21) /* Bit 21: STALL handshake */
 #define OTGFS_DIEPCTL_TXFNUM_SHIFT      (22)      /* Bits 22-25: TxFIFO number */
 #define OTGFS_DIEPCTL_TXFNUM_MASK       (15 << OTGFS_DIEPCTL_TXFNUM_SHIFT)
@@ -918,17 +887,13 @@
 #  define OTGFS_DOEPCTL0_MPSIZ_32       (1 << OTGFS_DOEPCTL0_MPSIZ_SHIFT) /* 32 bytes */
 #  define OTGFS_DOEPCTL0_MPSIZ_16       (2 << OTGFS_DOEPCTL0_MPSIZ_SHIFT) /* 16 bytes */
 #  define OTGFS_DOEPCTL0_MPSIZ_8        (3 << OTGFS_DOEPCTL0_MPSIZ_SHIFT) /* 8 bytes */
-
-/*                                                   Bits 2-14: Reserved,
- *                                               must be kept at reset value
- */
+                                                  /* Bits 2-14: Reserved, must be kept at reset value */
 #define OTGFS_DOEPCTL0_USBAEP           (1 << 15) /* Bit 15: USB active endpoint */
                                                   /* Bit 16: Reserved, must be kept at reset value */
 #define OTGFS_DOEPCTL0_NAKSTS           (1 << 17) /* Bit 17: NAK status */
 #define OTGFS_DOEPCTL0_EPTYP_SHIFT      (18)      /* Bits 18-19: Endpoint type */
 #define OTGFS_DOEPCTL0_EPTYP_MASK       (3 << OTGFS_DOEPCTL0_EPTYP_SHIFT)
 #  define OTGFS_DOEPCTL0_EPTYP_CTRL     (0 << OTGFS_DOEPCTL0_EPTYP_SHIFT) /* Control (hard-coded) */
-
 #define OTGFS_DOEPCTL0_SNPM             (1 << 20) /* Bit 20: Snoop mode */
 #define OTGFS_DOEPCTL0_STALL            (1 << 21) /* Bit 21: STALL handshake */
                                                   /* Bits 22-25: Reserved, must be kept at reset value */
@@ -957,7 +922,6 @@
 #  define OTGFS_DOEPCTL_EPTYP_ISOC      (1 << OTGFS_DOEPCTL_EPTYP_SHIFT) /* Isochronous */
 #  define OTGFS_DOEPCTL_EPTYP_BULK      (2 << OTGFS_DOEPCTL_EPTYP_SHIFT) /* Bulk */
 #  define OTGFS_DOEPCTL_EPTYP_INTR      (3 << OTGFS_DOEPCTL_EPTYP_SHIFT) /* Interrupt */
-
 #define OTGFS_DOEPCTL_SNPM              (1 << 20) /* Bit 20: Snoop mode */
 #define OTGFS_DOEPCTL_STALL             (1 << 21) /* Bit 21: STALL handshake */
                                                   /* Bits 22-25: Reserved, must be kept at reset value */

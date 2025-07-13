@@ -1,9 +1,8 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/tiva/tiva_pwm.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016 Young Mu. All rights reserved.
- * SPDX-FileContributor: Young Mu <young.mu@aliyun.com>
+ *   Copyright (C) 2016 Young Mu. All rights reserved.
+ *   Author: Young Mu <young.mu@aliyun.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,14 +31,14 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_TIVA_TIVA_PWM_H
 #define __ARCH_ARM_SRC_TIVA_TIVA_PWM_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/timers/pwm.h>
 
@@ -47,7 +46,7 @@
  * Public Function Prototypes
  ****************************************************************************/
 
-struct pwm_lowerhalf_s *tiva_pwm_initialize(int channel);
+FAR struct pwm_lowerhalf_s *tiva_pwm_initialize(int channel);
 void tm4c_pwm_register(int channel);
 
 #endif /* __ARCH_ARM_SRC_TIVA_TIVA_PWM_H */

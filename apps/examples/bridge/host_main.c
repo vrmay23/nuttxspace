@@ -1,22 +1,36 @@
 /****************************************************************************
- * apps/examples/bridge/host_main.c
+ * examples/bridge/host_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -65,6 +79,7 @@ int main(int argc, char *argv[])
   struct sockaddr_in fromaddr;
   struct sockaddr_in toaddr;
   socklen_t addrlen;
+  in_addr_t tmpaddr;
   ssize_t nrecvd;
   ssize_t nsent;
   int optval;
@@ -81,18 +96,16 @@ int main(int argc, char *argv[])
   sndsd = socket(PF_INET, SOCK_DGRAM, 0);
   if (sndsd < 0)
     {
-      fprintf(stderr, LABEL "ERROR: Failed to create send socket: %d\n",
-              errno);
+      fprintf(stderr, LABEL "ERROR: Failed to create send socket: %d\n", errno);
       return EXIT_FAILURE;
     }
 
   /* Set socket to reuse address */
 
   optval = 1;
-  if (setsockopt(sndsd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) < 0)
+  if (setsockopt(sndsd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int)) < 0)
     {
-      fprintf(stderr,
-              LABEL "ERROR: setsockopt SO_REUSEADDR failure: %d\n", errno);
+      fprintf(stderr, LABEL "ERROR: setsockopt SO_REUSEADDR failure: %d\n", errno);
       goto errout_with_sendsd;
     }
 
@@ -102,8 +115,7 @@ int main(int argc, char *argv[])
   sender.sin_port        = 0;
   sender.sin_addr.s_addr = htonl(EXAMPLES_BRIDGE_SEND_IPHOST);
 
-  if (bind(sndsd, (struct sockaddr *)&sender,
-           sizeof(struct sockaddr_in)) < 0)
+  if (bind(sndsd, (struct sockaddr*)&sender, sizeof(struct sockaddr_in)) < 0)
     {
       printf(LABEL "bind failure: %d\n", errno);
       goto errout_with_sendsd;
@@ -117,18 +129,16 @@ int main(int argc, char *argv[])
   recvsd = socket(PF_INET, SOCK_DGRAM, 0);
   if (recvsd < 0)
     {
-      fprintf(stderr,
-              LABEL "ERROR: Failed to create receive socket: %d\n", errno);
+      fprintf(stderr, LABEL "ERROR: Failed to create receive socket: %d\n", errno);
       goto errout_with_sendsd;
     }
 
   /* Set socket to reuse address */
 
   optval = 1;
-  if (setsockopt(recvsd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) < 0)
+  if (setsockopt(recvsd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int)) < 0)
     {
-      fprintf(stderr,
-              LABEL "ERROR: setsockopt SO_REUSEADDR failure: %d\n", errno);
+      fprintf(stderr, LABEL "ERROR: setsockopt SO_REUSEADDR failure: %d\n", errno);
       goto errout_with_recvsd;
     }
 
@@ -138,8 +148,7 @@ int main(int argc, char *argv[])
   receiver.sin_port        = htons(EXAMPLES_BRIDGE_SEND_HOSTPORT);
   receiver.sin_addr.s_addr = htonl(EXAMPLES_BRIDGE_RECV_IPHOST);
 
-  if (bind(recvsd, (struct sockaddr *)&receiver,
-           sizeof(struct sockaddr_in)) < 0)
+  if (bind(recvsd, (struct sockaddr*)&receiver, sizeof(struct sockaddr_in)) < 0)
     {
       fprintf(stderr, LABEL "ERROR: bind failure: %d\n", errno);
       goto errout_with_recvsd;
@@ -155,8 +164,8 @@ int main(int argc, char *argv[])
   toaddr.sin_port        = htons(EXAMPLES_BRIDGE_RECV_RECVPORT);
   toaddr.sin_addr.s_addr = htonl(EXAMPLES_BRIDGE_RECV_IPADDR);
 
-  nsent = sendto(sndsd, g_sndmessage, sizeof(g_sndmessage), 0,
-                 (struct sockaddr *)&toaddr, sizeof(struct sockaddr_in));
+   nsent = sendto(sndsd, g_sndmessage,  sizeof(g_sndmessage), 0,
+                 (struct sockaddr*)&toaddr, sizeof(struct sockaddr_in));
 
   /* Check for send errors */
 
@@ -176,15 +185,17 @@ int main(int argc, char *argv[])
 
   /* Read a packet */
 
-  printf(LABEL "Receiving up to %d bytes\n", EXAMPLES_BRIDGE_SEND_IOBUFIZE);
+  printf(LABEL "Receiving up to %d bytes\n",  EXAMPLES_BRIDGE_SEND_IOBUFIZE);
 
   addrlen = sizeof(struct sockaddr_in);
   nrecvd = recvfrom(recvsd, g_rdbuffer, EXAMPLES_BRIDGE_SEND_IOBUFIZE, 0,
-                    (struct sockaddr *)&fromaddr, &addrlen);
+                    (struct sockaddr*)&fromaddr, &addrlen);
 
-  printf(LABEL "Received %ld bytes from %s:%u\n",
+  tmpaddr = ntohl(fromaddr.sin_addr.s_addr);
+  printf(LABEL "Received %ld bytes from %d.%d.%d.%d:%d\n",
          (long)nrecvd,
-         inet_ntoa(fromaddr.sin_addr),
+         tmpaddr >> 24, (tmpaddr >> 16) & 0xff,
+         (tmpaddr >> 8) & 0xff, tmpaddr & 0xff,
          ntohs(fromaddr.sin_port));
 
   /* Check for a receive error or zero bytes received.  The negative
@@ -212,7 +223,7 @@ int main(int argc, char *argv[])
 
   for (i = 0, j = 0; i < nrecvd; i++)
     {
-      if (g_rdbuffer[i] == ' ' && j >= 64)
+      if ( g_rdbuffer[i] == ' ' && j >= 64)
         {
           putchar('\n');
           j = 0;
@@ -239,8 +250,8 @@ int main(int argc, char *argv[])
   return EXIT_SUCCESS;
 
 errout_with_recvsd:
-  close(recvsd);
+   close(recvsd);
 errout_with_sendsd:
-  close(sndsd);
-  return EXIT_FAILURE;
+   close(sndsd);
+   return EXIT_FAILURE;
 }

@@ -16,6 +16,7 @@ config WL_CC1101
 	default n
 	select SPI
 	select SCHED_HPWORK
+	select SCHED_LPWORK
 
 if WL_CC1101
 
@@ -33,15 +34,8 @@ config WL_GS2200M
 	default n
 	select SPI
 	select LIBC_SCANSET
-	select SCHED_LPWORK
-	select DRIVERS_IEEE80211
-	select NFS_DONT_BIND_TCP_SOCKET if NFS && NET_TCP
 
 if WL_GS2200M
-
-config WL_GS2200M_ENABLE_WEP
-	bool "WEP support in AP mode"
-	default false
 
 config WL_GS2200M_SPI_FREQUENCY
 	int "SPI frequency for GS2200M"
@@ -56,17 +50,6 @@ config WL_GS2200M_CHECK_VERSION
 	bool "Check the version of GS2200M"
 	default n
 
-config WL_GS2200M_SYNC_INTERVAL
-	int "Sync loss interval in station mode (100ms)"
-	default 100
-	range 1 63325
-	---help---
-		Time interval to recognize dis-association situation.
-		The value indicate n times of Wi-Fi beacon. If the node
-		lost receiving beacon n times, behave as dis-associtaion.
-		Time difference between 2 beacons are approximately 100 msec.
-		So the unit of the value is 100 ms.
-
 config WL_GS2200M_LOGLEVEL
 	int "Log level"
 	default 0
@@ -76,7 +59,7 @@ config WL_GS2200M_LOGLEVEL
 
 endif
 
-source "drivers/wireless/spirit/Kconfig"
+source drivers/wireless/spirit/Kconfig
 
 menuconfig DRIVERS_IEEE802154
 	bool "IEEE 802.15.4 Device Support"
@@ -84,7 +67,7 @@ menuconfig DRIVERS_IEEE802154
 	---help---
 		Select to enable building of IEEE802.15.4 device drivers.
 
-source "drivers/wireless/ieee802154/Kconfig"
+source drivers/wireless/ieee802154/Kconfig
 
 menuconfig DRIVERS_IEEE80211
 	bool "IEEE 802.11 Device Support"
@@ -92,15 +75,16 @@ menuconfig DRIVERS_IEEE80211
 	---help---
 		Select to enable building of IEEE802.11 device drivers.
 
-source "drivers/wireless/ieee80211/Kconfig"
+source drivers/wireless/ieee80211/Kconfig
 
 menuconfig DRIVERS_BLUETOOTH
 	bool "Bluetooth Device Support"
 	default n
+	depends on WIRELESS_BLUETOOTH
 	---help---
 		Select to enable building of Bluetooth device drivers.
 
-source "drivers/wireless/bluetooth/Kconfig"
+source drivers/wireless/bluetooth/Kconfig
 
 menuconfig DRIVERS_LPWAN
 	bool "LPWAN Device Support"
@@ -108,7 +92,7 @@ menuconfig DRIVERS_LPWAN
 	---help---
 		Select to enable building of LPWAN device drivers.
 
-source "drivers/wireless/lpwan/Kconfig"
+source drivers/wireless/lpwan/Kconfig
 
 config WL_NRF24L01
 	bool "nRF24l01+ transceiver support"

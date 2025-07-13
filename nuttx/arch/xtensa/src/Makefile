@@ -1,61 +1,76 @@
 ############################################################################
 # arch/xtensa/src/Makefile
 #
-# SPDX-License-Identifier: Apache-2.0
+#   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+#   Author: Gregory Nutt <gnutt@nuttx.org>
 #
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.  The
-# ASF licenses this file to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance with the
-# License.  You may obtain a copy of the License at
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the
+#    distribution.
+# 3. Neither the name NuttX nor the names of its contributors may be
+#    used to endorse or promote products derived from this software
+#    without specific prior written permission.
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
-# License for the specific language governing permissions and limitations
-# under the License.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
 
-include $(TOPDIR)/tools/Make.defs
-include chip/Make.defs
+-include $(TOPDIR)/Make.defs
+-include chip/Make.defs
 
 ifeq ($(CONFIG_ARCH_FAMILY_LX6),y)
 ARCH_SUBDIR = lx6
 endif
 
-ifeq ($(CONFIG_ARCH_FAMILY_LX7),y)
-ARCH_SUBDIR = lx7
+CPPFLAGS += $(EXTRAFLAGS)
+CFLAGS += $(EXTRAFLAGS)
+CXXFLAGS += $(EXTRAFLAGS)
+
+ifeq ($(CONFIG_WINDOWS_NATIVE),y)
+  ARCH_SRCDIR = $(TOPDIR)\arch\$(CONFIG_ARCH)\src
+  NUTTX = $(TOPDIR)\nuttx$(EXEEXT)
+  CFLAGS += -I$(ARCH_SRCDIR)\chip
+  CFLAGS += -I$(ARCH_SRCDIR)\common
+  CFLAGS += -I$(ARCH_SRCDIR)\$(ARCH_SUBDIR)
+  CFLAGS += -I$(TOPDIR)\sched
+else
+  ARCH_SRCDIR = $(TOPDIR)/arch/$(CONFIG_ARCH)/src
+ifeq ($(WINTOOL),y)
+  NUTTX = "${shell cygpath -w $(TOPDIR)/nuttx$(EXEEXT)}"
+  CFLAGS += -I "${shell cygpath -w $(ARCH_SRCDIR)/chip}"
+  CFLAGS += -I "${shell cygpath -w $(ARCH_SRCDIR)/common}"
+  CFLAGS += -I "${shell cygpath -w $(ARCH_SRCDIR)/$(ARCH_SUBDIR)}"
+  CFLAGS += -I "${shell cygpath -w $(TOPDIR)/sched}"
+else
+  NUTTX = $(TOPDIR)/nuttx$(EXEEXT)
+  CFLAGS += -I$(ARCH_SRCDIR)/chip
+  CFLAGS += -I$(ARCH_SRCDIR)/common
+  CFLAGS += -I$(ARCH_SRCDIR)/$(ARCH_SUBDIR)
+  CFLAGS += -I$(TOPDIR)/sched
 endif
-
-ARCH_SRCDIR = $(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src
-
-INCLUDES += ${INCDIR_PREFIX}$(ARCH_SRCDIR)$(DELIM)chip
-INCLUDES += ${INCDIR_PREFIX}$(ARCH_SRCDIR)$(DELIM)common
-INCLUDES += ${INCDIR_PREFIX}$(ARCH_SRCDIR)$(DELIM)$(ARCH_SUBDIR)
-INCLUDES += ${INCDIR_PREFIX}$(TOPDIR)$(DELIM)sched
-
-CPPFLAGS += $(INCLUDES)
-CFLAGS += $(INCLUDES)
-CXXFLAGS += $(INCLUDES)
-AFLAGS += $(INCLUDES)
-
-NUTTX = $(call CONVERT_PATH,$(TOPDIR)$(DELIM)nuttx$(EXEEXT))
-
-# Additional rules for system call wrapper
-
-ifeq ($(CONFIG_SCHED_INSTRUMENTATION_SYSCALL),y)
-  EXTRALINKCMDS += @$(TOPDIR)/syscall/syscall_wraps.ldcmd
 endif
 
 HEAD_AOBJ = $(HEAD_ASRC:.S=$(OBJEXT))
 HEAD_COBJ = $(HEAD_CSRC:.c=$(OBJEXT))
 STARTUP_OBJS ?= $(HEAD_AOBJ) $(HEAD_COBJ)
-
-# Flat build or kernel-mode objects
 
 ASRCS = $(CHIP_ASRCS) $(CMN_ASRCS)
 AOBJS = $(ASRCS:.S=$(OBJEXT))
@@ -66,62 +81,37 @@ COBJS = $(CSRCS:.c=$(OBJEXT))
 SRCS = $(ASRCS) $(CSRCS)
 OBJS = $(AOBJS) $(COBJS)
 
-# User-mode objects
-
-UASRCS = $(CHIP_UASRCS) $(CMN_UASRCS)
-UAOBJS = $(UASRCS:.S=$(OBJEXT))
-
-UCSRCS = $(CHIP_UCSRCS) $(CMN_UCSRCS)
-UCOBJS = $(UCSRCS:.c=$(OBJEXT))
-
-USRCS = $(UASRCS) $(UCSRCS)
-UOBJS = $(UAOBJS) $(UCOBJS)
-
-KBIN = libkarch$(LIBEXT)
-BIN  = libarch$(LIBEXT)
-
 # Override in Make.defs if linker is not 'ld'
 
-ARCHSCRIPT := $(call CONVERT_PATH,$(ARCHSCRIPT))
-LDFLAGS += $(addprefix -T,$(addsuffix .tmp,$(ARCHSCRIPT))) $(EXTRALINKCMDS)
+LDSTARTGROUP ?= --start-group
+LDENDGROUP ?= --end-group
 
-$(foreach lib,$(notdir $(wildcard $(APPDIR)$(DELIM)staging$(DELIM)*$(LIBEXT))), \
-  $(foreach elib,$(EXTRA_LIBS), \
-    $(if $(filter $(notdir $(elib)),$(lib)), \
-      $(eval NAMEFULL_LIBS+=$(elib)), \
-      $(if $(filter $(notdir $(elib)),$(patsubst lib%$(LIBEXT),-l%,$(lib))), \
-        $(eval NAMESPEC_LIBS+=$(elib)) \
-       ) \
-     ) \
-   ) \
- )
+LDFLAGS += $(ARCHSCRIPT)
+EXTRA_LIBS ?=
+LINKLIBS ?=
 
-EXTRA_LIBS := $(filter-out $(NAMEFULL_LIBS) $(NAMESPEC_LIBS),$(EXTRA_LIBS))
-EXTRA_LIBS += $(wildcard $(APPDIR)$(DELIM)staging$(DELIM)*$(LIBEXT))
-
-ifeq ($(LD),$(CC))
-  ifeq ($(CONFIG_STACK_CANARIES),y)
-    # filter out ssp(Stack Smashing Protector) related flags:
-    #  -fstack-protector
-    #  -fstack-protector-all
-    #  -fstack-protector-strong
-    #  -fstack-protector-explicit
-    STRIPCFLAGS = $(filter -fstack-protector%,$(CFLAGS))
-  endif
-  LDSTARTGROUP ?= -Wl,--start-group
-  LDENDGROUP   ?= -Wl,--end-group
-  LDFLAGS      := $(addprefix -Xlinker ,$(LDFLAGS))
-  LDFLAGS      += $(filter-out $(STRIPCFLAGS),$(CFLAGS))
-else
-  LDSTARTGROUP ?= --start-group
-  LDENDGROUP   ?= --end-group
+ifeq ($(CONFIG_WINDOWS_NATIVE),y)
+  BOARDMAKE = $(if $(wildcard .\board\Makefile),y,)
+  LIBPATHS += -L"$(TOPDIR)\staging"
+ifeq ($(BOARDMAKE),y)
+  LIBPATHS += -L"$(TOPDIR)\arch\$(CONFIG_ARCH)\src\board"
 endif
 
-BOARDMAKE = $(if $(wildcard board$(DELIM)Makefile),y,)
+else
+  BOARDMAKE = $(if $(wildcard ./board/Makefile),y,)
 
-LIBPATHS += -L $(call CONVERT_PATH,$(TOPDIR)$(DELIM)staging)
+ifeq ($(WINTOOL),y)
+  LIBPATHS += -L"${shell cygpath -w "$(TOPDIR)/staging"}"
 ifeq ($(BOARDMAKE),y)
-  LIBPATHS += -L $(call CONVERT_PATH,$(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src$(DELIM)board)
+  LIBPATHS += -L"${shell cygpath -w "$(TOPDIR)/arch/$(CONFIG_ARCH)/src/board"}"
+endif
+
+else
+  LIBPATHS += -L"$(TOPDIR)/staging"
+ifeq ($(BOARDMAKE),y)
+  LIBPATHS += -L"$(TOPDIR)/arch/$(CONFIG_ARCH)/src/board"
+endif
+endif
 endif
 
 LDLIBS = $(patsubst %.a,%,$(patsubst lib%,-l%,$(LINKLIBS)))
@@ -129,75 +119,39 @@ ifeq ($(BOARDMAKE),y)
   LDLIBS += -lboard
 endif
 
-VPATH += chip
-VPATH += common
-VPATH += common/espressif
-VPATH += $(ARCH_SUBDIR)
-VPATH += $(CHIP_DIR)
+LIBGCC = "${shell "$(CC)" $(ARCHCPUFLAGS) -print-libgcc-file-name}"
+
+VPATH = chip:common:$(ARCH_SUBDIR)
 
 all: $(STARTUP_OBJS) libarch$(LIBEXT)
 
 .PHONY: board/libboard$(LIBEXT)
 
-$(AOBJS) $(UAOBJS) $(HEAD_AOBJ): %$(OBJEXT): %.S
+$(AOBJS) $(HEAD_AOBJ): %$(OBJEXT): %.S
 	$(call ASSEMBLE, $<, $@)
 
-$(COBJS) $(UCOBJS) $(HEAD_COBJ): %$(OBJEXT): %.c
+$(COBJS) $(HEAD_COBJ): %$(OBJEXT): %.c
 	$(call COMPILE, $<, $@)
 
-$(STARTUP_ELF_OBJS): %$(OBJEXT): %.c
-	$(Q) $(CC) $(CELFFLAGS) -c common$(DELIM)crt0.c -o crt0$(OBJEXT)
-
-ifeq ($(CONFIG_BUILD_FLAT),y)
-$(BIN): $(STARTUP_ELF_OBJS) $(OBJS)
-	$(call ARCHIVE, $@, $(OBJS))
-else
-$(BIN): $(STARTUP_ELF_OBJS) $(UOBJS)
-	$(call ARCHIVE, $@, $(UOBJS))
-endif
-
-$(KBIN): $(OBJS)
+libarch$(LIBEXT): $(OBJS)
 	$(call ARCHIVE, $@, $(OBJS))
 
 board/libboard$(LIBEXT):
-	$(Q) $(MAKE) -C board libboard$(LIBEXT) EXTRAFLAGS="$(EXTRAFLAGS)"
+	$(Q) $(MAKE) -C board TOPDIR="$(TOPDIR)" libboard$(LIBEXT) EXTRAFLAGS="$(EXTRAFLAGS)"
 
-define LINK_ALLSYMS
-	$(Q) $(TOPDIR)/tools/mkallsyms.py $(NUTTX) allsyms.tmp --orderbyname $(CONFIG_SYMTAB_ORDEREDBYNAME)
-	$(Q) $(call COMPILE, allsyms.tmp, allsyms$(OBJEXT), -x c)
-	$(Q) $(LD) --entry=__start $(LDFLAGS) $(LIBPATHS) $(EXTRA_LIBPATHS) \
-		-o $(NUTTX) $(STARTUP_OBJS) allsyms$(OBJEXT) $(EXTRA_OBJS) \
-		$(LDSTARTGROUP) $(LDLIBS) $(EXTRA_LIBS) $(LDENDGROUP)
-	$(Q) $(call DELFILE, allsyms.tmp allsyms$(OBJEXT))
-endef
-
-$(addsuffix .tmp,$(ARCHSCRIPT)): $(ARCHSCRIPT)
-	$(call PREPROCESS, $(patsubst %.tmp,%,$@), $@)
-
-nuttx$(EXEEXT): $(STARTUP_OBJS) board/libboard$(LIBEXT) $(addsuffix .tmp,$(ARCHSCRIPT))
-	$(Q) echo "LD: nuttx"
-ifneq ($(CONFIG_ALLSYMS),y)
-	$(Q) $(LD) --entry=__start $(LDFLAGS) $(LIBPATHS) $(EXTRA_LIBPATHS) \
-		-o $(NUTTX) $(STARTUP_OBJS) $(EXTRA_OBJS) \
-		$(LDSTARTGROUP) $(LDLIBS) $(EXTRA_LIBS) $(LDENDGROUP)
-else
-	$(Q) # Link and generate default table
-	$(Q) $(if $(wildcard $(shell echo $(NUTTX))),,$(call LINK_ALLSYMS,$^))
-	$(Q) # Extract all symbols
-	$(Q) $(call LINK_ALLSYMS, $^)
-	$(Q) # Extract again since the table offset may changed
-	$(Q) $(call LINK_ALLSYMS, $^)
-endif
+nuttx$(EXEEXT): $(STARTUP_OBJS) board/libboard$(LIBEXT)
+	@echo "LD: nuttx"
+	$(Q) $(LD) --entry=__start $(LDFLAGS) $(LIBPATHS) -o $(NUTTX)$(EXEEXT) $(STARTUP_OBJS) $(EXTRA_OBJS) \
+		$(LDSTARTGROUP) $(LDLIBS) $(EXTRA_LIBS) $(LIBGCC) $(LDENDGROUP)
 ifneq ($(CONFIG_WINDOWS_NATIVE),y)
-	$(Q) $(NM) $(NUTTX) | \
+	$(Q) $(NM) $(NUTTX)$(EXEEXT) | \
 	grep -v '\(compiled\)\|\(\$(OBJEXT)$$\)\|\( [aUw] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | \
 	sort > $(TOPDIR)/System.map
 endif
-	$(Q) $(call DELFILE, $(addsuffix .tmp,$(ARCHSCRIPT)))
 
 # This is part of the top-level export target
 
-export_startup: $(STARTUP_OBJS)
+export_startup: board/libboard$(LIBEXT) $(STARTUP_OBJS)
 	$(Q) if [ -d "$(EXPORT_DIR)/startup" ]; then \
 		cp -f $(STARTUP_OBJS) "$(EXPORT_DIR)/startup"; \
 	 else \
@@ -207,33 +161,26 @@ export_startup: $(STARTUP_OBJS)
 
 # Dependencies
 
-makedepfile: $(CSRCS:.c=.ddc) $(ASRCS:.S=.dds) $(HEAD_CSRC:.c=.ddc) $(HEAD_ASRC:.S=.dds)
-	$(call CATFILE, Make.dep, $^)
-	$(call DELFILE, $^)
-
-.depend: Makefile chip/Make.defs $(SRCS) $(TOPDIR)$(DELIM).config
+.depend: Makefile chip/Make.defs $(SRCS)
 ifeq ($(BOARDMAKE),y)
-	$(Q) $(MAKE) -C board depend
+	$(Q) $(MAKE) -C board TOPDIR="$(TOPDIR)" depend
 endif
-	$(Q) $(MAKE) makedepfile DEPPATH="$(patsubst %,--dep-path %,$(subst :, ,$(VPATH)))"
+	$(Q) $(MKDEP) --dep-path chip --dep-path common --dep-path $(ARCH_SUBDIR) \
+	 "$(CC)" -- $(CFLAGS) -- $(SRCS) >Make.dep
 	$(Q) touch $@
 
 depend: .depend
 
-context::
-
 clean:
 ifeq ($(BOARDMAKE),y)
-	$(Q) $(MAKE) -C board clean
+	$(Q) $(MAKE) -C board TOPDIR="$(TOPDIR)" clean
 endif
-	$(call DELFILE, $(addsuffix .tmp,$(ARCHSCRIPT)))
-	$(call DELFILE, $(KBIN))
-	$(call DELFILE, $(BIN))
+	$(call DELFILE, libarch$(LIBEXT))
 	$(call CLEAN)
 
-distclean:: clean
+distclean: clean
 ifeq ($(BOARDMAKE),y)
-	$(Q) $(MAKE) -C board distclean
+	$(Q) $(MAKE) -C board TOPDIR="$(TOPDIR)" distclean
 endif
 	$(call DELFILE, Make.dep)
 	$(call DELFILE, .depend)

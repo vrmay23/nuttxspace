@@ -1,22 +1,36 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_dvfs2.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2015,2016,2017,2018 Sony Video & Sound Products Inc.
+ *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
+ *   Author: Masatoshi Tateishi <Masatoshi.Tateishi@jp.sony.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,12 +41,12 @@
 #include <nuttx/config.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/spinlock.h>
 #include <nuttx/clock.h>
 #include <arch/board/board.h>
 #include <string.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "lc823450_clockconfig.h"
 #include "lc823450_syscontrol.h"
 #include "lc823450_intc.h"
@@ -56,6 +70,10 @@
 #define UP_THRESHOLD 20
 #define DN_THRESHOLD 60
 
+#ifndef CONFIG_SMP_NCPUS
+#  define CONFIG_SMP_NCPUS 1
+#endif
+
 #ifdef CONFIG_DVFS_CHANGE_VOLTAGE
 #  define CORE12V_PIN (GPIO_PORT2 | GPIO_PIN1)
 #endif
@@ -67,8 +85,6 @@
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-static spinlock_t g_dvfs_lock = SP_UNLOCKED;
 
 typedef struct freq_entry
 {
@@ -123,14 +139,18 @@ uint32_t g_dvfs_freq_stat[3] =
  ****************************************************************************/
 
 /****************************************************************************
- * Name: _get_current_time64()
+ * Name: up_get_current_time()
  ****************************************************************************/
 
 static uint64_t _get_current_time64(void)
 {
   struct timespec ts;
 
-  clock_systime_timespec(&ts);
+#ifdef CONFIG_CLOCK_MONOTONIC
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+#else
+  clock_gettime(CLOCK_REALTIME, &ts);
+#endif
   return (uint64_t)ts.tv_sec * NSEC_PER_SEC + (uint64_t)ts.tv_nsec;
 }
 
@@ -162,7 +182,7 @@ static int _dvfs_another_cpu_state(int me)
  * Callback for 1 shot timer
  ****************************************************************************/
 
-int lc823450_dvfs_oneshot(int irq, uint32_t *regs, void *arg)
+int lc823450_dvfs_oneshot(int irq, uint32_t *regs, FAR void *arg)
 {
   /* voltage has reached at 1.2V */
 
@@ -199,6 +219,7 @@ static void lc832450_set_core_voltage(bool high)
     }
 }
 #endif
+
 
 /****************************************************************************
  * Name: lc823450_dvfs_set_div
@@ -242,7 +263,7 @@ static void lc823450_dvfs_set_div(int idx, int tbl)
       modifyreg32(MEMEN4, 0, MEMEN4_HWAIT);
     }
 
-  /* adjust AHB */
+    /* adjust AHB */
 
   if (t_hdiv > _dvfs_cur_hdiv)
     {
@@ -255,9 +276,8 @@ static void lc823450_dvfs_set_div(int idx, int tbl)
 
   uint32_t regval = getreg32(OSCCNT);
 
-  /* NOTE: In LC823450, MCSEL is reflected first then MAINDIV
-   * To avoid spec violation, 2-step clock change is needed
-   */
+  /* NOTE: In LC823450, MCSEL is reflected first then MAINDIV */
+  /* To avoid spec violation, 2-step clock change is needed */
 
   /* step 1 : change MAINDIV if needed */
 
@@ -271,7 +291,7 @@ static void lc823450_dvfs_set_div(int idx, int tbl)
       putreg32(regval, OSCCNT);
     }
 
-  /* step 2 : change MCSEL and MAINDIV */
+    /* step 2 : change MCSEL and MAINDIV */
 
   regval = getreg32(OSCCNT);
   regval &= ~(OSCCNT_MCSEL | OSCCNT_MAINDIV_MASK);
@@ -318,6 +338,7 @@ static void lc823450_dvfs_set_div(int idx, int tbl)
   _dvfs_cur_mdiv  = t_mdiv;
   g_dvfs_cur_freq = target;
 
+
 #ifdef CONFIG_DVFS_CHANGE_VOLTAGE
   /* NOTE: check the index instead of the target freq */
 
@@ -335,6 +356,7 @@ static void lc823450_dvfs_set_div(int idx, int tbl)
 
       modifyreg32(MEMEN4, MEMEN4_HWAIT, 0);
     }
+
 }
 
 /****************************************************************************
@@ -374,6 +396,7 @@ static void lc823450_dvfs_change_idx(int up)
     {
       lc823450_dvfs_set_div(idx, 0);
     }
+
 }
 
 /****************************************************************************
@@ -430,14 +453,14 @@ static void lc823450_dvfs_do_auto(uint32_t idle[])
 
 void lc823450_dvfs_get_idletime(uint64_t idletime[])
 {
-  irqstate_t flags = spin_lock_irqsave(&g_dvfs_lock);
+  irqstate_t flags = spin_lock_irqsave();
 
   /* First, copy g_idle_totaltime to the caller */
 
   memcpy(idletime, g_idle_totaltime, sizeof(g_idle_totaltime));
 
 #if CONFIG_SMP_NCPUS == 2
-  int me = this_cpu();
+  int me = up_cpu_index();
 
   if (0 == _dvfs_another_cpu_state(me))
     {
@@ -450,7 +473,7 @@ void lc823450_dvfs_get_idletime(uint64_t idletime[])
     }
 #endif
 
-  spin_unlock_irqrestore(&g_dvfs_lock, flags);
+  spin_unlock_irqrestore(flags);
 }
 
 /****************************************************************************
@@ -482,8 +505,8 @@ void lc823450_dvfs_tick_callback(void)
 
       for (i = 0; i < CONFIG_SMP_NCPUS; i++)
         {
-          idle[i] = 100 *
-            (tmp_idle_total[i] - g_idle_totaltime0[i]) / NSEC_PER_TICK;
+          idle[i] = 100 * (tmp_idle_total[i] - g_idle_totaltime0[i])
+            / NSEC_PER_TICK;
         }
 
       /* Update g_idle_totaltime0 */
@@ -506,9 +529,9 @@ void lc823450_dvfs_tick_callback(void)
 
 void lc823450_dvfs_enter_idle(void)
 {
-  irqstate_t flags = spin_lock_irqsave(&g_dvfs_lock);
+  irqstate_t flags = spin_lock_irqsave();
 
-  int me = this_cpu();
+  int me = up_cpu_index();
 
   /* Update my state first : 0 (idle) */
 
@@ -546,19 +569,19 @@ void lc823450_dvfs_enter_idle(void)
   lc823450_dvfs_set_div(_dvfs_cur_idx, 1);
 
 exit_with_error:
-  spin_unlock_irqrestore(&g_dvfs_lock, flags);
+  spin_unlock_irqrestore(flags);
 }
 
 /****************************************************************************
  * Name: lc823450_dvfs_exit_idle
- * This API is called in arm_ack_irq() (i.e. interrupt context)
+ * This API is called in up_ack_irq() (i.e. interrupt context)
  ****************************************************************************/
 
 void lc823450_dvfs_exit_idle(int irq)
 {
-  irqstate_t flags = spin_lock_irqsave(&g_dvfs_lock);
+  irqstate_t flags = spin_lock_irqsave();
 
-  int me = this_cpu();
+  int me = up_cpu_index();
   uint64_t d;
   uint64_t now;
 
@@ -583,11 +606,11 @@ void lc823450_dvfs_exit_idle(int irq)
   lc823450_dvfs_set_div(_dvfs_cur_idx, 0);
 
 exit_with_error:
+
   if (0 == _dvfs_cpu_is_active[me])
     {
-      /* In case of idle to active transition
-       * Accumulate idle total time on this CPU
-       */
+      /* In case of idle to active transition */
+      /* Accumulate idle total time on this CPU */
 
       now = _get_current_time64();
       d = now - g_idle_starttime[me];
@@ -598,7 +621,7 @@ exit_with_error:
 
   _dvfs_cpu_is_active[me] = 1;
 
-  spin_unlock_irqrestore(&g_dvfs_lock, flags);
+  spin_unlock_irqrestore(flags);
 }
 
 /****************************************************************************
@@ -610,7 +633,6 @@ exit_with_error:
 int lc823450_dvfs_boost(int timeout)
 {
   /* TODO */
-
   return 0;
 }
 
@@ -630,7 +652,7 @@ int lc823450_dvfs_set_freq(int freq)
       return -1;
     }
 
-  flags = spin_lock_irqsave(&g_dvfs_lock);
+  flags = spin_lock_irqsave();
 
   switch (freq)
     {
@@ -658,6 +680,6 @@ int lc823450_dvfs_set_freq(int freq)
       lc823450_dvfs_set_div(idx, 0);
     }
 
-  spin_unlock_irqrestore(&g_dvfs_lock, flags);
+  spin_unlock_irqrestore(flags);
   return ret;
 }

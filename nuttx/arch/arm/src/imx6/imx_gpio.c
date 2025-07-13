@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/imx6/imx_gpio.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,10 +44,9 @@
 #include <errno.h>
 
 #include <nuttx/irq.h>
-#include <nuttx/spinlock.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "imx_iomuxc.h"
 #include "imx_gpio.h"
 
@@ -47,8 +59,6 @@
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-static spinlock_t g_imx_gpio_lock = SP_UNLOCKED;
 
 static const uint8_t g_gpio1_padmux[IMX_GPIO_NPINS] =
 {
@@ -323,7 +333,7 @@ static const uint8_t g_gpio7_padmux[IMX_GPIO_NPINS] =
   IMX_PADMUX_INVALID,                /* GPIO6 Pin 31 */
 };
 
-static const uint8_t *g_gpio_padmux[IMX_GPIO_NPORTS + 1] =
+static FAR const uint8_t *g_gpio_padmux[IMX_GPIO_NPORTS+1] =
 {
   g_gpio1_padmux,                    /* GPIO1 */
   g_gpio2_padmux,                    /* GPIO2 */
@@ -404,7 +414,7 @@ static int imx_gpio_configinput(gpio_pinset_t pinset)
 {
   int port = (pinset & GPIO_PORT_MASK) >> GPIO_PORT_SHIFT;
   int pin  = (pinset & GPIO_PIN_MASK) >> GPIO_PIN_SHIFT;
-  const uint8_t *table;
+  FAR const uint8_t *table;
   iomux_pinset_t ioset;
   uintptr_t regaddr;
   unsigned int index;
@@ -517,7 +527,7 @@ int imx_config_gpio(gpio_pinset_t pinset)
 
   /* Configure the pin as an input initially to avoid any spurious outputs */
 
-  flags = spin_lock_irqsave(&g_imx_gpio_lock);
+  flags = enter_critical_section();
 
   /* Configure based upon the pin mode */
 
@@ -560,17 +570,17 @@ int imx_config_gpio(gpio_pinset_t pinset)
         break;
     }
 
-  spin_unlock_irqrestore(&g_imx_gpio_lock, flags);
+  leave_critical_section(flags);
   return ret;
 }
 
-/****************************************************************************
+/************************************************************************************
  * Name: imx_gpio_write
  *
  * Description:
  *   Write one or zero to the selected GPIO pin
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 void imx_gpio_write(gpio_pinset_t pinset, bool value)
 {
@@ -578,18 +588,18 @@ void imx_gpio_write(gpio_pinset_t pinset, bool value)
   int port = (pinset & GPIO_PORT_MASK) >> GPIO_PORT_SHIFT;
   int pin  = (pinset & GPIO_PIN_MASK) >> GPIO_PIN_SHIFT;
 
-  flags = spin_lock_irqsave(&g_imx_gpio_lock);
+  flags = enter_critical_section();
   imx_gpio_setoutput(port, pin, value);
-  spin_unlock_irqrestore(&g_imx_gpio_lock, flags);
+  leave_critical_section(flags);
 }
 
-/****************************************************************************
+/************************************************************************************
  * Name: imx_gpio_read
  *
  * Description:
  *   Read one or zero from the selected GPIO pin
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 bool imx_gpio_read(gpio_pinset_t pinset)
 {
@@ -598,8 +608,8 @@ bool imx_gpio_read(gpio_pinset_t pinset)
   int pin  = (pinset & GPIO_PIN_MASK) >> GPIO_PIN_SHIFT;
   bool value;
 
-  flags = spin_lock_irqsave(&g_imx_gpio_lock);
+  flags = enter_critical_section();
   value = imx_gpio_getinput(port, pin);
-  spin_unlock_irqrestore(&g_imx_gpio_lock, flags);
+  leave_critical_section(flags);
   return value;
 }

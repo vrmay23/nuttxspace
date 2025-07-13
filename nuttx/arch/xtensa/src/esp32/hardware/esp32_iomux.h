@@ -1,22 +1,26 @@
 /****************************************************************************
- * arch/xtensa/src/esp32/hardware/esp32_iomux.h
+ * arch/xtensa/src/esp32/hardware/esp32_gpio.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Developed for NuttX by:
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Derives from sample code provided by Espressif Systems:
+ *
+ *   Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  ****************************************************************************/
 
@@ -27,7 +31,7 @@
  * Included Files
  ****************************************************************************/
 
-#include "esp32_soc.h"
+#include "hardware/esp32_soc.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -44,13 +48,9 @@
 #define FUN_PU                            (BIT(8))
 #define FUN_IE                            (BIT(9))
 #define FUN_DRV                           0x3
-#define FUN_DRV_V                         0x3
 #define FUN_DRV_S                         10
-#define FUN_DRV_M                         ((FUN_DRV_V) << (FUN_DRV_S))
 #define MCU_SEL                           0x7
-#define MCU_SEL_V                         0x7
 #define MCU_SEL_S                         12
-#define MCU_SEL_M                         ((MCU_SEL_V) << (MCU_SEL_S))
 
 #define PIN_INPUT_ENABLE(PIN_NAME)        SET_PERI_REG_MASK(PIN_NAME,FUN_IE)
 #define PIN_INPUT_DISABLE(PIN_NAME)       CLEAR_PERI_REG_MASK(PIN_NAME,FUN_IE)
@@ -63,7 +63,7 @@
 
 #define PIN_FUNC_GPIO                     2
 
-#define PIN_CTRL                          (DR_REG_IO_MUX_BASE + 0x00)
+#define PIN_CTRL                          (DR_REG_IO_MUX_BASE +0x00)
 #define CLK_OUT3                          0xf
 #define CLK_OUT3_S                        8
 #define CLK_OUT2                          0xf

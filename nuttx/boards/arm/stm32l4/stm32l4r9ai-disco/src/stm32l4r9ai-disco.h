@@ -1,22 +1,38 @@
 /****************************************************************************
- * boards/arm/stm32l4/stm32l4r9ai-disco/src/stm32l4r9ai-disco.h
+ * boards/arm/stm32l4/stm32l476vg-disco/src/stm32l476vg-disco.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016, 2019 Gregory Nutt. All rights reserved.
+ *   Authors: Frank Bennett
+ *            Gregory Nutt <gnutt@nuttx.org>
+ *            Sebastien Lorquet <sebastien@lorquet.fr>
+ *            dev@ziggurat29.com
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -70,12 +86,14 @@
 #ifndef CONFIG_STM32L4_OTGFS
 #  undef HAVE_USBDEV
 #  undef HAVE_USBHOST
+#  undef HAVE_USBMONITOR
 #endif
 
-/* Can't support USB device if USB device is not enabled */
+/* Can't support USB device monitor if USB device is not enabled */
 
 #ifndef CONFIG_USBDEV
 #  undef HAVE_USBDEV
+#  undef HAVE_USBMONITOR
 #endif
 
 /* Can't support USB host is USB host is not enabled */
@@ -86,19 +104,7 @@
 
 /* Check if we should enable the USB monitor before starting NSH */
 
-#ifndef CONFIG_USBMONITOR
-#  undef HAVE_USBMONITOR
-#endif
-
-#ifndef HAVE_USBDEV
-#  undef CONFIG_USBDEV_TRACE
-#endif
-
-#ifndef HAVE_USBHOST
-#  undef CONFIG_USBHOST_TRACE
-#endif
-
-#if !defined(CONFIG_USBDEV_TRACE) && !defined(CONFIG_USBHOST_TRACE)
+#if !defined(CONFIG_USBDEV_TRACE) || !defined(CONFIG_SYSTEM_USBMONITOR)
 #  undef HAVE_USBMONITOR
 #endif
 
@@ -163,7 +169,6 @@
   (GPIO_INPUT |GPIO_PULLDOWN |GPIO_EXTI | GPIO_PORTB | GPIO_PIN1)
 
 /* SPI1 off */
-
 /* XXX is this used on disco? */
 
 #define GPIO_SPI1_MOSI_OFF (GPIO_INPUT | GPIO_PULLDOWN | \
@@ -196,24 +201,8 @@ extern struct spi_dev_s *g_spi2;
 #endif
 
 /****************************************************************************
- * Public Functions Definitions
+ * Public Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: stm32_bringup
- *
- * Description:
- *   Perform architecture-specific initialization
- *
- *   CONFIG_BOARD_LATE_INITIALIZE=y :
- *     Called from board_late_initialize().
- *
- *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_BOARDCTL=y :
- *     Called from the NSH library
- *
- ****************************************************************************/
-
-int stm32_bringup(void);
 
 /****************************************************************************
  * Name: stm32l4_adc_setup
@@ -233,9 +222,7 @@ int stm32l4_adc_setup(void);
  *
  ****************************************************************************/
 
-int stm32l4_adc_measure_voltages(uint32_t *vrefint,
-                                 uint32_t *vbat,
-                                 uint32_t *vext);
+int stm32l4_adc_measure_voltages(uint32_t *vrefint, uint32_t *vbat, uint32_t *vext);
 
 /****************************************************************************
  * Name: stm32l4_dac_setup

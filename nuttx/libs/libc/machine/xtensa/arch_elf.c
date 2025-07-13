@@ -1,8 +1,6 @@
 /****************************************************************************
  * libs/libc/machine/xtensa/arch_elf.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -31,7 +29,7 @@
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/arch.h>
+#include <arch/elf.h>
 #include <nuttx/elf.h>
 
 /****************************************************************************
@@ -46,7 +44,7 @@
  * Private Functions
  ****************************************************************************/
 
-static bool is_l32r(const unsigned char *p)
+static bool is_l32r(FAR const unsigned char *p)
 {
   return (p[0] & 0xf) == 1;
 }
@@ -71,7 +69,7 @@ static bool is_l32r(const unsigned char *p)
  *
  ****************************************************************************/
 
-bool up_checkarch(const Elf32_Ehdr *ehdr)
+bool up_checkarch(FAR const Elf32_Ehdr *ehdr)
 {
   /* Make sure it's an Xtensa executable */
 
@@ -111,7 +109,7 @@ bool up_checkarch(const Elf32_Ehdr *ehdr)
  * Name: up_relocate and up_relocateadd
  *
  * Description:
- *   Perform an architecture-specific ELF relocation.  Every architecture
+ *   Perform on architecture-specific ELF relocation.  Every architecture
  *   that uses the ELF loader must provide this function.
  *
  * Input Parameters:
@@ -129,8 +127,8 @@ bool up_checkarch(const Elf32_Ehdr *ehdr)
  *
  ****************************************************************************/
 
-int up_relocate(const Elf32_Rel *rel, const Elf32_Sym *sym, uintptr_t addr,
-                void *arch_data)
+int up_relocate(FAR const Elf32_Rel *rel, FAR const Elf32_Sym *sym,
+                uintptr_t addr)
 {
   unsigned int relotype;
 
@@ -162,8 +160,8 @@ int up_relocate(const Elf32_Rel *rel, const Elf32_Sym *sym, uintptr_t addr,
   return OK;
 }
 
-int up_relocateadd(const Elf32_Rela *rel, const Elf32_Sym *sym,
-                   uintptr_t addr, void *arch_data)
+int up_relocateadd(FAR const Elf32_Rela *rel, FAR const Elf32_Sym *sym,
+                   uintptr_t addr)
 {
   unsigned int relotype;
   unsigned char *p;
@@ -194,7 +192,7 @@ int up_relocateadd(const Elf32_Rela *rel, const Elf32_Sym *sym,
       break;
 
     case R_XTENSA_32:
-      (*(uint32_t *)addr) += value;
+      (*(FAR uint32_t *)addr) += value;
       break;
 
     case R_XTENSA_ASM_EXPAND:
@@ -203,7 +201,7 @@ int up_relocateadd(const Elf32_Rela *rel, const Elf32_Sym *sym,
       break;
 
     case R_XTENSA_SLOT0_OP:
-      p = (unsigned char *)up_textheap_data_address((void *)addr);
+      p = (FAR unsigned char *)addr;
       if (is_l32r(p))
         {
           /* Xtensa ISA:

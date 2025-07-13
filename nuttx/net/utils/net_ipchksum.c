@@ -1,22 +1,36 @@
 /****************************************************************************
  * net/utils/net_ipchksum.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2010, 2012, 2014-2015, 2017-2019 Gregory Nutt.  All
+ *     rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,91 +50,15 @@
 #ifdef CONFIG_NET
 
 /****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#define IPv4BUF  ((struct ipv4_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev)])
+#define IPv6BUF  ((struct ipv6_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev)])
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
-
-#if !defined(CONFIG_NET_ARCH_CHKSUM) && \
-    defined(CONFIG_NET_IPv4) && defined(CONFIG_MM_IOB)
-
-/****************************************************************************
- * Name: ipv4_upperlayer_header_chksum
- *
- * Description:
- *   Perform the checksum calculation over the IPv4, protocol headers,
- *   IP source and destination addresses
- *
- * Input Parameters:
- *   dev   - The network driver instance. The packet data is in the d_buf
- *           of the device.
- *   proto - The protocol being supported
- *
- * Returned Value:
- *   The calculated checksum with pseudo-header and IP source and
- *   destination addresses
- *
- ****************************************************************************/
-
-uint16_t ipv4_upperlayer_header_chksum(FAR struct net_driver_s *dev,
-                                       uint8_t proto)
-{
-  FAR struct ipv4_hdr_s *ipv4 = IPv4BUF;
-  uint16_t upperlen;
-  uint16_t iphdrlen;
-  uint16_t sum;
-
-  /* Get the IP header length (accounting for possible options). */
-
-  iphdrlen = (ipv4->vhl & IPv4_HLMASK) << 2;
-
-  /* The length reported in the IPv4 header is the length of both the IPv4
-   * header and the payload that follows the header.  We need to subtract
-   * the size of the IPv4 header to get the size of the payload.
-   */
-
-  upperlen = (((uint16_t)(ipv4->len[0]) << 8) + ipv4->len[1]) - iphdrlen;
-
-  /* First sum pseudo-header.
-   *
-   * IP protocol and length fields. This addition cannot carry.
-   */
-
-  sum = upperlen + proto;
-
-  /* Sum IP source and destination addresses. */
-
-  return chksum(sum, (FAR uint8_t *)&ipv4->srcipaddr, 2 * sizeof(in_addr_t));
-}
-
-/****************************************************************************
- * Name: ipv4_upperlayer_payload_chksum
- *
- * Description:
- *   Perform the checksum calculation over the iob data payload
- *
- * Input Parameters:
- *   dev   - The network driver instance. The packet data is in the d_buf
- *           of the device.
- *   sum   - The default checksum
- *
- * Returned Value:
- *   The calculated checksum with iob data payload and default checksum
- *
- ****************************************************************************/
-
-uint16_t ipv4_upperlayer_payload_chksum(FAR struct net_driver_s *dev,
-                                        uint16_t sum)
-{
-  FAR struct ipv4_hdr_s *ipv4 = IPv4BUF;
-  uint16_t iphdrlen;
-
-  /* Get the IP header length (accounting for possible options). */
-
-  iphdrlen = (ipv4->vhl & IPv4_HLMASK) << 2;
-
-  /* Sum IP payload data. */
-
-  return chksum_iob(sum, dev->d_iob, iphdrlen);
-}
 
 /****************************************************************************
  * Name: ipv4_upperlayer_chksum
@@ -139,105 +77,49 @@ uint16_t ipv4_upperlayer_payload_chksum(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
+#if !defined(CONFIG_NET_ARCH_CHKSUM) && defined(CONFIG_NET_IPv4)
 uint16_t ipv4_upperlayer_chksum(FAR struct net_driver_s *dev, uint8_t proto)
 {
-  uint16_t sum;
-
-  /* Sum pseudo-header IP source and destination addresses. */
-
-  sum = ipv4_upperlayer_header_chksum(dev, proto);
-
-  /* Sum IP payload data. */
-
-  sum = ipv4_upperlayer_payload_chksum(dev, sum);
-
-  return (sum == 0) ? 0xffff : HTONS(sum);
-}
-#endif /* CONFIG_NET_ARCH_CHKSUM */
-
-#if !defined(CONFIG_NET_ARCH_CHKSUM) && \
-    defined(CONFIG_NET_IPv6) && defined(CONFIG_MM_IOB)
-
-/****************************************************************************
- * Name: ipv6_upperlayer_header_chksum
- *
- * Description:
- *   Perform the checksum calculation over the IPv6, protocol headers,
- *   IP source and destination addresses.
- *
- * Input Parameters:
- *   dev   - The network driver instance.  The packet data is in the d_buf
- *           of the device.
- *   proto - The protocol being supported
- *   iplen - The size of the IPv6 header.  This may be larger than
- *           IPv6_HDRLEN the IPv6 header if IPv6 extension headers are
- *           present.
- *
- * Returned Value:
- *   The calculated checksum
- *
- ****************************************************************************/
-
-uint16_t ipv6_upperlayer_header_chksum(FAR struct net_driver_s *dev,
-                                       uint8_t proto, unsigned int iplen)
-{
-  FAR struct ipv6_hdr_s *ipv6 = IPv6BUF;
+  FAR struct ipv4_hdr_s *ipv4 = IPv4BUF;
   uint16_t upperlen;
+  uint16_t iphdrlen;
   uint16_t sum;
 
-  DEBUGASSERT(dev != NULL && iplen >= IPv6_HDRLEN);
+  /* Get the IP header length (accounting for possible options). */
 
-  /* The length reported in the IPv6 header is the length of the payload
-   * that follows the header.  If extension headers are present, then this
-   * size includes the size of the IPv6 extension headers.
+  iphdrlen = (ipv4->vhl & IPv4_HLMASK) << 2;
+
+  /* The length reported in the IPv4 header is the length of both the IPv4
+   * header and the payload that follows the header.  We need to subtract
+   * the size of the IPv4 header to get the size of the payload.
    */
 
-  upperlen = ((uint16_t)ipv6->len[0] << 8) + ipv6->len[1];
+  upperlen = (((uint16_t)(ipv4->len[0]) << 8) + ipv4->len[1]) - iphdrlen;
 
-  /* Adjust for the presence of any extension headers */
+  /* Verify some minimal assumptions */
 
-  upperlen -= (iplen - IPv6_HDRLEN);
+  if (upperlen > NETDEV_PKTSIZE(dev))
+    {
+      return 0;
+    }
 
-  /* The checksum is calculated starting with a pseudo-header of IPv6 header
-   * fields according to the IPv6 standard, which consists of the source
-   * and destination addresses, the packet length and the next header field.
+  /* First sum pseudo-header.
+   *
+   * IP protocol and length fields. This addition cannot carry.
    */
 
   sum = upperlen + proto;
 
   /* Sum IP source and destination addresses. */
 
-  return chksum(sum, (FAR uint8_t *)&ipv6->srcipaddr,
-                2 * sizeof(net_ipv6addr_t));
-}
+  sum = chksum(sum, (FAR uint8_t *)&ipv4->srcipaddr, 2 * sizeof(in_addr_t));
 
-/****************************************************************************
- * Name: ipv6_upperlayer_payload_chksum
- *
- * Description:
- *   Perform the checksum calculation over the IPv6, protocol headers,
- *   IP source and destination addresses.
- *
- * Input Parameters:
- *   dev   - The network driver instance.  The packet data is in the d_buf
- *           of the device.
- *   proto - The protocol being supported
- *   iplen - The size of the IPv6 header.  This may be larger than
- *           IPv6_HDRLEN the IPv6 header if IPv6 extension headers are
- *           present.
- *
- * Returned Value:
- *   The calculated checksum
- *
- ****************************************************************************/
-
-uint16_t ipv6_upperlayer_payload_chksum(FAR struct net_driver_s *dev,
-                                        unsigned int iplen, uint16_t sum)
-{
   /* Sum IP payload data. */
 
-  return chksum_iob(sum, dev->d_iob, iplen);
+  sum = chksum(sum, &dev->d_buf[iphdrlen + NET_LL_HDRLEN(dev)], upperlen);
+  return (sum == 0) ? 0xffff : htons(sum);
 }
+#endif /* CONFIG_NET_ARCH_CHKSUM */
 
 /****************************************************************************
  * Name: ipv6_upperlayer_chksum
@@ -259,20 +141,50 @@ uint16_t ipv6_upperlayer_payload_chksum(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
+#if !defined(CONFIG_NET_ARCH_CHKSUM) && defined(CONFIG_NET_IPv6)
 uint16_t ipv6_upperlayer_chksum(FAR struct net_driver_s *dev,
                                 uint8_t proto, unsigned int iplen)
 {
+  FAR struct ipv6_hdr_s *ipv6 = IPv6BUF;
+  uint16_t upperlen;
   uint16_t sum;
+
+  DEBUGASSERT(dev != NULL && iplen >= IPv6_HDRLEN);
+
+  /* The length reported in the IPv6 header is the length of the payload
+   * that follows the header.  If extension heders are present, then this
+   * size includes the size of the IPv6 extension headers.
+   */
+
+  upperlen = ((uint16_t)ipv6->len[0] << 8) + ipv6->len[1];
+
+  /* Adjust for the presence of any extension headers */
+
+  upperlen -= (iplen - IPv6_HDRLEN);
+
+  /* Verify some minimal assumptions */
+
+  if (upperlen > NETDEV_PKTSIZE(dev))
+    {
+      return 0;
+    }
+
+  /* The checksum is calculated starting with a pseudo-header of IPv6 header
+   * fields according to the IPv6 standard, which consists of the source
+   * and destination addresses, the packet length and the next header field.
+   */
+
+  sum = upperlen + proto;
 
   /* Sum IP source and destination addresses. */
 
-  sum = ipv6_upperlayer_header_chksum(dev, proto, iplen);
+  sum = chksum(sum, (FAR uint8_t *)&ipv6->srcipaddr,
+               2 * sizeof(net_ipv6addr_t));
 
   /* Sum IP payload data. */
 
-  sum = ipv6_upperlayer_payload_chksum(dev, iplen, sum);
-
-  return (sum == 0) ? 0xffff : HTONS(sum);
+  sum = chksum(sum, &dev->d_buf[NET_LL_HDRLEN(dev) + iplen], upperlen);
+  return (sum == 0) ? 0xffff : htons(sum);
 }
 #endif /* CONFIG_NET_ARCH_CHKSUM */
 
@@ -294,8 +206,9 @@ uint16_t ipv6_upperlayer_chksum(FAR struct net_driver_s *dev,
  ****************************************************************************/
 
 #if defined(CONFIG_NET_IPv4) && !defined(CONFIG_NET_ARCH_CHKSUM)
-uint16_t ipv4_chksum(FAR struct ipv4_hdr_s *ipv4)
+uint16_t ipv4_chksum(FAR struct net_driver_s *dev)
 {
+  FAR struct ipv4_hdr_s *ipv4 = IPv4BUF;
   uint16_t iphdrlen;
   uint16_t sum;
 
@@ -303,8 +216,8 @@ uint16_t ipv4_chksum(FAR struct ipv4_hdr_s *ipv4)
 
   iphdrlen = (ipv4->vhl & IPv4_HLMASK) << 2;
 
-  sum = chksum(0, (FAR const uint8_t *)ipv4, iphdrlen);
-  return (sum == 0) ? 0xffff : HTONS(sum);
+  sum = chksum(0, &dev->d_buf[NET_LL_HDRLEN(dev)], iphdrlen);
+  return (sum == 0) ? 0xffff : htons(sum);
 }
 #endif /* CONFIG_NET_ARCH_CHKSUM */
 

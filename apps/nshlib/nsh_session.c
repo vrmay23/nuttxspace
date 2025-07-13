@@ -1,22 +1,36 @@
 /****************************************************************************
  * apps/nshlib/nsh_session.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2011-2014, 2016, 2019 Gregory Nutt. All rights
+ *     reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name Gregory Nutt nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,9 +42,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <termios.h>
 
 #ifdef CONFIG_NSH_CLE
 #  include "system/cle.h"
@@ -68,185 +79,112 @@
  *
  ****************************************************************************/
 
-int nsh_session(FAR struct console_stdio_s *pstate,
-                int login, int argc, FAR char *argv[])
+int nsh_session(FAR struct console_stdio_s *pstate)
 {
   FAR struct nsh_vtbl_s *vtbl;
-  int ret = EXIT_FAILURE;
+  int ret;
 
   DEBUGASSERT(pstate);
   vtbl = &pstate->cn_vtbl;
 
 #ifdef CONFIG_NSH_CONSOLE_LOGIN
-  if (login == NSH_LOGIN_LOCAL)
-    {
-      /* Login User and Password Check */
+  /* Login User and Password Check */
 
-      if (nsh_login(pstate) != OK)
-        {
-          nsh_exit(vtbl, 1);
-          return -1; /* nsh_exit does not return */
-        }
+  if (nsh_login(pstate) != OK)
+    {
+      nsh_exit(vtbl, 1);
+      return -1; /* nsh_exit does not return */
     }
-  else
 #endif /* CONFIG_NSH_CONSOLE_LOGIN */
-#ifdef CONFIG_NSH_TELNET_LOGIN
-  if (login == NSH_LOGIN_TELNET)
-    {
-      /* Login User and Password Check */
 
-      if (nsh_telnetlogin(pstate) != OK)
-        {
-          nsh_exit(vtbl, 1);
-          return -1; /* nsh_exit does not return */
-        }
-    }
-#endif /* CONFIG_NSH_TELNET_LOGIN */
+  /* Present a greeting and possibly a Message of the Day (MOTD) */
 
-  if (login != NSH_LOGIN_NONE)
-    {
-      /* Present a greeting and possibly a Message of the Day (MOTD) */
-
-      write(OUTFD(pstate), g_nshgreeting, strlen(g_nshgreeting));
+  fputs(g_nshgreeting, pstate->cn_outstream);
 
 #ifdef CONFIG_NSH_MOTD
-#  ifdef CONFIG_NSH_PLATFORM_MOTD
-      /* Output the platform message of the day */
+#ifdef CONFIG_NSH_PLATFORM_MOTD
+  /* Output the platform message of the day */
 
-      platform_motd(vtbl->iobuffer, IOBUFFERSIZE);
-      dprintf(OUTFD(pstate), "%s\n", vtbl->iobuffer);
-#  else
-      /* Output the fixed message of the day */
+  platform_motd(vtbl->iobuffer, IOBUFFERSIZE);
+  fprintf(pstate->cn_outstream, "%s\n", vtbl->iobuffer);
 
-      dprintf(OUTFD(pstate), "%s\n", g_nshmotd);
-#  endif
+#else
+  /* Output the fixed message of the day */
+
+  fprintf(pstate->cn_outstream, "%s\n", g_nshmotd);
+#endif
 #endif
 
-      /* Execute the login script */
+  fflush(pstate->cn_outstream);
+
+  /* Execute the login script */
 
 #ifdef CONFIG_NSH_ROMFSRC
-      nsh_loginscript(vtbl);
-#endif
-    }
-
-  /* Process the command line option */
-
-  if (argc > 1)
-    {
-      if (strcmp(argv[1], "-h") == 0)
-        {
-          nsh_output(vtbl, "Usage: %s [<script-path>|-c <command>]\n",
-                     argv[0]);
-          return EXIT_SUCCESS;
-        }
-      else if (strcmp(argv[1], "-c") == 0)
-        {
-          /* Process the inline command */
-
-          if (argc > 2)
-            {
-              return nsh_parse(vtbl, argv[2]);
-            }
-          else
-            {
-              nsh_error(vtbl, g_fmtargrequired, argv[0]);
-              return EXIT_FAILURE;
-            }
-        }
-      else if (argv[1][0] == '-')
-        {
-          /* Unknown option */
-
-          nsh_error(vtbl, g_fmtsyntax, argv[0]);
-          return EXIT_FAILURE;
-        }
-      else
-        {
-#ifndef CONFIG_NSH_DISABLESCRIPT
-          /* Execute the shell script */
-
-          return nsh_script(vtbl, argv[0], argv[1], true);
-#else
-          return EXIT_FAILURE;
-#endif
-        }
-    }
-
-#ifdef CONFIG_NSH_DISABLE_ECHOBACK
-  /* Disable echoback */
-
-  if (isatty(INFD(pstate)))
-    {
-      struct termios cfg;
-
-      if (tcgetattr(INFD(pstate), &cfg) == 0)
-        {
-          cfg.c_lflag &= ~ECHO;
-          tcsetattr(INFD(pstate), TCSANOW, &cfg);
-        }
-    }
+  nsh_loginscript(vtbl);
 #endif
 
   /* Then enter the command line parsing loop */
 
   for (; ; )
     {
-      /* For the case of debugging the USB console...
-       * dump collected USB trace data
-       */
+      /* For the case of debugging the USB console... dump collected USB trace data */
 
 #ifdef CONFIG_NSH_USBDEV_TRACE
       nsh_usbtrace();
 #endif
 
-      /* Get the next line of input. readline() returns EOF
-       * on end-of-file or any read failure.
+      /* Get the next line of input. readline() returns EOF on end-of-file
+       * or any read failure.
        */
 
 #ifdef CONFIG_NSH_CLE
       /* cle() normally returns the number of characters read, but will
-       * return a negated errno value on end of file or if an error
-       * occurs. Either  will cause the session to terminate.
+       * return a negated errno value on end of file or if an error occurs.
+       * Either  will cause the session to terminate.
        */
 
-      ret = cle_fd(pstate->cn_line, nsh_prompt(), LINE_MAX,
-                   INFD(pstate), OUTFD(pstate));
+      ret = cle(pstate->cn_line, g_nshprompt, CONFIG_NSH_LINELEN,
+                INSTREAM(pstate), OUTSTREAM(pstate));
       if (ret < 0)
         {
-          dprintf(ERRFD(pstate), g_fmtcmdfailed, "nsh_session",
+          fprintf(pstate->cn_errstream, g_fmtcmdfailed, "nsh_session",
                   "cle", NSH_ERRNO_OF(-ret));
           continue;
         }
 #else
       /* Display the prompt string */
 
-      write(OUTFD(pstate), nsh_prompt(), strlen(nsh_prompt()));
+      fputs(g_nshprompt, pstate->cn_outstream);
+      fflush(pstate->cn_outstream);
 
-      /* readline() normally returns the number of characters read, but
-       * will return EOF on end of file or if an error occurs.  EOF
+      /* readline() normally returns the number of characters read, but will
+       * return EOF on end of file or if an error occurs.  EOF
        * will cause the session to terminate.
        */
 
-      ret = readline_fd(pstate->cn_line, LINE_MAX,
-                        INFD(pstate), OUTFD(pstate));
+      ret = readline(pstate->cn_line, CONFIG_NSH_LINELEN,
+                     INSTREAM(pstate), OUTSTREAM(pstate));
       if (ret == EOF)
         {
-          /* NOTE: readline() does not set the errno variable, but
-           * perhaps we will be lucky and it will still be valid.
+          /* NOTE: readline() does not set the errno variable, but perhaps we
+           * will be lucky and it will still be valid.
            */
 
-          dprintf(ERRFD(pstate), g_fmtcmdfailed, "nsh_session",
+          fprintf(pstate->cn_errstream, g_fmtcmdfailed, "nsh_session",
                   "readline", NSH_ERRNO);
-          ret = EXIT_SUCCESS;
-          break;
+          return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
         }
 #endif
 
       /* Parse process the command */
 
       nsh_parse(vtbl, pstate->cn_line);
-      nsh_update_prompt();
+      fflush(pstate->cn_outstream);
     }
 
-  return ret;
+  /* We do not get here, but this is necessary to keep some compilers happy.
+   * But others will complain that this code is not reachable.
+   */
+
+  return EXIT_SUCCESS;
 }

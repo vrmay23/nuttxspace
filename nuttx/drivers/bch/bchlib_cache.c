@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/bch/bchlib_cache.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2014, 2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,7 +38,6 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/kmalloc.h>
 
 #include <sys/types.h>
 #include <stdbool.h>
@@ -36,7 +48,7 @@
 #include "bch.h"
 
 #if defined(CONFIG_BCH_ENCRYPTION)
-#  include <nuttx/crypto/crypto.h>
+#  include <crypto/crypto.h>
 #endif
 
 /****************************************************************************
@@ -106,7 +118,7 @@ static int bch_cypher(FAR struct bchlib_s *bch, int encrypt)
  *
  ****************************************************************************/
 
-int bchlib_flushsector(FAR struct bchlib_s *bch, bool discard)
+int bchlib_flushsector(FAR struct bchlib_s *bch)
 {
   FAR struct inode *inode;
   ssize_t ret = OK;
@@ -115,7 +127,7 @@ int bchlib_flushsector(FAR struct bchlib_s *bch, bool discard)
    * media.
    */
 
-  if (bch->dirty && bch->buffer != NULL)
+  if (bch->dirty)
     {
       inode = bch->inode;
 
@@ -130,8 +142,7 @@ int bchlib_flushsector(FAR struct bchlib_s *bch, bool discard)
       ret = inode->u.i_bops->write(inode, bch->buffer, bch->sector, 1);
       if (ret < 0)
         {
-          ferr("Write failed: %zd\n", ret);
-          return (int)ret;
+          ferr("Write failed: %d\n");
         }
 
 #if defined(CONFIG_BCH_ENCRYPTION)
@@ -147,11 +158,6 @@ int bchlib_flushsector(FAR struct bchlib_s *bch, bool discard)
       bch->dirty = false;
     }
 
-  if (discard)
-    {
-      bch->sector = (size_t)-1;
-    }
-
   return (int)ret;
 }
 
@@ -159,7 +165,7 @@ int bchlib_flushsector(FAR struct bchlib_s *bch, bool discard)
  * Name: bchlib_readsector
  *
  * Description:
- *   Read the current sector contents into buffer
+ *   Flush the current contents of the sector buffer (if dirty)
  *
  * Assumptions:
  *   Caller must assume mutual exclusion
@@ -171,36 +177,17 @@ int bchlib_readsector(FAR struct bchlib_s *bch, size_t sector)
   FAR struct inode *inode;
   ssize_t ret = OK;
 
-  if (bch->buffer == NULL)
-    {
-#if CONFIG_BCH_BUFFER_ALIGNMENT != 0
-      bch->buffer = kmm_memalign(CONFIG_BCH_BUFFER_ALIGNMENT, bch->sectsize);
-#else
-      bch->buffer = kmm_malloc(bch->sectsize);
-#endif
-      if (bch->buffer == NULL)
-        {
-          ferr("Failed to allocate sector buffer\n");
-          return -ENOMEM;
-        }
-    }
-
   if (bch->sector != sector)
     {
       inode = bch->inode;
 
-      ret = bchlib_flushsector(bch, true);
-      if (ret < 0)
-        {
-          ferr("Flush failed: %zd\n", ret);
-          return (int)ret;
-        }
+      bchlib_flushsector(bch);
+      bch->sector = (size_t)-1;
 
       ret = inode->u.i_bops->read(inode, bch->buffer, sector, 1);
       if (ret < 0)
         {
-          ferr("Read failed: %zd\n", ret);
-          return (int)ret;
+          ferr("Read failed: %d\n");
         }
 
       bch->sector = sector;

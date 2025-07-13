@@ -1,8 +1,6 @@
 /****************************************************************************
  * arch/risc-v/src/litex/litex_irq.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,13 +26,16 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/irq.h>
+#include <nuttx/board.h>
+#include <arch/irq.h>
+#include <arch/board/board.h>
 
-#include "riscv_internal.h"
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "litex.h"
 
 /****************************************************************************
@@ -53,41 +54,25 @@ void up_irqinitialize(void)
 
   /* Disable all global interrupts */
 
-#ifdef CONFIG_ARCH_USE_S_MODE
-  putreg32(0x0, LITEX_PLIC_ENABLE1);
-#else
   asm volatile ("csrw %0, %1" :: "i"(LITEX_MMASK_CSR), "r"(0));
-#endif
 
   /* Colorize the interrupt stack for debug purposes */
 
-#if defined(CONFIG_STACK_COLORATION) && CONFIG_ARCH_INTERRUPTSTACK > 15
-  size_t intstack_size = (CONFIG_ARCH_INTERRUPTSTACK & ~15);
-  riscv_stack_color(g_intstackalloc, intstack_size);
+#if defined(CONFIG_STACK_COLORATION) && CONFIG_ARCH_INTERRUPTSTACK > 3
+  size_t intstack_size = (CONFIG_ARCH_INTERRUPTSTACK & ~3);
+  up_stack_color((FAR void *)((uintptr_t)&g_intstackbase - intstack_size),
+                 intstack_size);
 #endif
 
   /* litex vexriscv dont have priority and threshold control */
 
-#ifdef CONFIG_LITEX_CORE_VEXRISCV_SMP
-  /* litex vexriscv_smp does. */
+  /* currents_regs is non-NULL only while processing an interrupt */
 
-  /* Set priority for all global interrupts to 1 (lowest) */
+  g_current_regs = NULL;
 
-  int id;
+  /* Attach the ecall interrupt handler */
 
-  for (id = 1; id <= 31; id++)
-    {
-      putreg32(1, (uintptr_t)(LITEX_PLIC_PRIORITY + 4 * id));
-    }
-
-  /* Set irq threshold to 0 (permits all global interrupts) */
-
-  putreg32(0, LITEX_PLIC_THRESHOLD);
-#endif
-
-  /* Attach the common interrupt handler */
-
-  riscv_exception_attach();
+  irq_attach(LITEX_IRQ_ECALLM, up_swint, NULL);
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
 
@@ -105,61 +90,27 @@ void up_irqinitialize(void)
  *
  ****************************************************************************/
 
-#ifdef CONFIG_LITEX_CORE_VEXRISCV_SMP
-void up_disable_irq(int irq)
-{
-  int extirq;
-
-  if (irq == RISCV_IRQ_SOFT)
-    {
-      /* Read m/sstatus & clear machine software interrupt enable in m/sie */
-
-      CLEAR_CSR(CSR_IE, IE_SIE);
-    }
-  else if (irq == RISCV_IRQ_TIMER)
-    {
-      /* Read m/sstatus & clear timer interrupt enable in m/sie */
-
-      CLEAR_CSR(CSR_IE, IE_TIE);
-    }
-  else if (irq > RISCV_IRQ_EXT)
-    {
-      extirq = irq - RISCV_IRQ_EXT;
-
-      /* Clear enable bit for the irq */
-
-      if (1 <= extirq && extirq <= 31)
-        {
-          modifyreg32(LITEX_PLIC_ENABLE1 + (4 * (extirq / 32)),
-                      1 << (extirq % 32), 0);
-        }
-      else
-        {
-          PANIC();
-        }
-    }
-}
-#else
 void up_disable_irq(int irq)
 {
   int extirq;
   int mask;
+  uint32_t oldstat;
 
-  if (irq == RISCV_IRQ_MSOFT)
+  if (irq == LITEX_IRQ_MSOFT)
     {
       /* Read mstatus & clear machine software interrupt enable in mie */
 
-      CLEAR_CSR(CSR_MIE, MIE_MSIE);
+      asm volatile ("csrrc %0, mie, %1": "=r" (oldstat) : "r"(MIE_MSIE));
     }
-  else if (irq == RISCV_IRQ_MTIMER)
+  else if (irq == LITEX_IRQ_MTIMER)
     {
       /* Read mstatus & clear machine timer interrupt enable in mie */
 
-      CLEAR_CSR(CSR_MIE, MIE_MTIE);
+      asm volatile ("csrrc %0, mie, %1": "=r" (oldstat) : "r"(MIE_MTIE));
     }
-  else if (irq > RISCV_IRQ_MEXT)
+  else if (irq > LITEX_IRQ_MEXT)
     {
-      extirq = irq - RISCV_IRQ_MEXT;
+      extirq = irq - LITEX_IRQ_MEXT;
       extirq--;
 
       /* Clear enable bit for the irq */
@@ -172,11 +123,10 @@ void up_disable_irq(int irq)
         }
       else
         {
-          PANIC();
+          ASSERT(false);
         }
     }
 }
-#endif
 
 /****************************************************************************
  * Name: up_enable_irq
@@ -186,61 +136,27 @@ void up_disable_irq(int irq)
  *
  ****************************************************************************/
 
-#ifdef CONFIG_LITEX_CORE_VEXRISCV_SMP
-void up_enable_irq(int irq)
-{
-  int extirq;
-
-  if (irq == RISCV_IRQ_SOFT)
-    {
-      /* Read sstatus and set supervisor software interrupt enable in sie */
-
-      SET_CSR(CSR_IE, IE_SIE);
-    }
-  else if (irq == RISCV_IRQ_TIMER)
-    {
-      /* Read sstatus & set timer interrupt enable in sie */
-
-      SET_CSR(CSR_IE, IE_TIE);
-    }
-  else if (irq >= RISCV_IRQ_EXT)
-    {
-      extirq = irq - RISCV_IRQ_EXT;
-
-      /* Set enable bit for the irq in plic */
-
-      if (0 <= extirq && extirq <= 31)
-        {
-          modifyreg32(LITEX_PLIC_ENABLE1 + (4 * (extirq / 32)),
-                      0, 1 << (extirq % 32));
-        }
-      else
-        {
-          PANIC();
-        }
-    }
-}
-#else
 void up_enable_irq(int irq)
 {
   int extirq;
   int mask;
+  uint32_t oldstat;
 
-  if (irq == RISCV_IRQ_MSOFT)
+  if (irq == LITEX_IRQ_MSOFT)
     {
       /* Read mstatus & set machine software interrupt enable in mie */
 
-      SET_CSR(CSR_MIE, MIE_MSIE);
+      asm volatile ("csrrs %0, mie, %1": "=r" (oldstat) : "r"(MIE_MSIE));
     }
-  else if (irq == RISCV_IRQ_MTIMER)
+  else if (irq == LITEX_IRQ_MTIMER)
     {
       /* Read mstatus & set machine timer interrupt enable in mie */
 
-      SET_CSR(CSR_MIE, MIE_MTIE);
+      asm volatile ("csrrs %0, mie, %1": "=r" (oldstat) : "r"(MIE_MTIE));
     }
-  else if (irq > RISCV_IRQ_MEXT)
+  else if (irq > LITEX_IRQ_MEXT)
     {
-      extirq = irq - RISCV_IRQ_MEXT;
+      extirq = irq - LITEX_IRQ_MEXT;
       extirq--;
 
       /* Set enable bit for the irq */
@@ -253,22 +169,71 @@ void up_enable_irq(int irq)
         }
       else
         {
-          PANIC();
+          ASSERT(false);
         }
     }
 }
-#endif
 
 /****************************************************************************
- * Name: riscv_ack_irq
+ * Name: up_get_newintctx
+ *
+ * Description:
+ *   Return initial mstatus when a task is created.
+ *
+ ****************************************************************************/
+
+uint32_t up_get_newintctx(void)
+{
+  /* Set machine previous privilege mode to machine mode.
+   * Also set machine previous interrupt enable
+   */
+
+  return (MSTATUS_MPPM | MSTATUS_MPIE);
+}
+
+/****************************************************************************
+ * Name: up_ack_irq
  *
  * Description:
  *   Acknowledge the IRQ
  *
  ****************************************************************************/
 
-void riscv_ack_irq(int irq)
+void up_ack_irq(int irq)
 {
+}
+
+/****************************************************************************
+ * Name: up_irq_save
+ *
+ * Description:
+ *   Return the current interrupt state and disable interrupts
+ *
+ ****************************************************************************/
+
+irqstate_t up_irq_save(void)
+{
+  uint32_t oldstat;
+
+  /* Read mstatus & clear machine interrupt enable (MIE) in mstatus */
+
+  asm volatile ("csrrc %0, mstatus, %1": "=r" (oldstat) : "r"(MSTATUS_MIE));
+  return oldstat;
+}
+
+/****************************************************************************
+ * Name: up_irq_restore
+ *
+ * Description:
+ *   Restore previous IRQ mask state
+ *
+ ****************************************************************************/
+
+void up_irq_restore(irqstate_t flags)
+{
+  /* Write flags to mstatus */
+
+  asm volatile("csrw mstatus, %0" : /* no output */ : "r" (flags));
 }
 
 /****************************************************************************
@@ -281,18 +246,18 @@ void riscv_ack_irq(int irq)
 
 irqstate_t up_irq_enable(void)
 {
-  irqstate_t oldstat;
+  uint32_t oldstat;
 
 #if 1
-  /* Enable EIE (machine/supervisor external interrupt enable) */
+  /* Enable MEIE (machine external interrupt enable) */
 
   /* TODO: should move to up_enable_irq() */
 
-  SET_CSR(CSR_IE, IE_EIE);
+  asm volatile ("csrrs %0, mie, %1": "=r" (oldstat) : "r"(MIE_MEIE));
 #endif
 
-  /* Read s/mstatus & set interrupt enable (S/MIE) in s/mstatus */
+  /* Read mstatus & set machine interrupt enable (MIE) in mstatus */
 
-  oldstat = READ_AND_SET_CSR(CSR_STATUS, STATUS_IE);
+  asm volatile ("csrrs %0, mstatus, %1": "=r" (oldstat) : "r"(MSTATUS_MIE));
   return oldstat;
 }

@@ -1,24 +1,38 @@
 /****************************************************************************
  * libs/libc/string/lib_memset.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2011 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
+
 
 /****************************************************************************
  * Included Files
@@ -32,30 +46,26 @@
 #include <string.h>
 #include <assert.h>
 
-#include "libc.h"
-
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Can't support CONFIG_LIBC_MEMSET_64BIT if the platform does not
- * have 64-bit integer types.
+/* Can't support CONFIG_MEMSET_64BIT if the platform does not have 64-bit
+ * integer types.
  */
 
 #ifndef CONFIG_HAVE_LONG_LONG
-#  undef CONFIG_LIBC_MEMSET_64BIT
+#  undef CONFIG_MEMSET_64BIT
 #endif
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-#if !defined(CONFIG_LIBC_ARCH_MEMSET) && defined(LIBC_BUILD_MEMSET)
-#undef memset /* See mm/README.txt */
-no_builtin("memset")
+#ifndef CONFIG_LIBC_ARCH_MEMSET
 FAR void *memset(FAR void *s, int c, size_t n)
 {
-#ifdef CONFIG_LIBC_MEMSET_OPTSPEED
+#ifdef CONFIG_MEMSET_OPTSPEED
   /* This version is optimized for speed (you could do better
    * still by exploiting processor caching or memory burst
    * knowledge.)
@@ -64,7 +74,7 @@ FAR void *memset(FAR void *s, int c, size_t n)
   uintptr_t addr  = (uintptr_t)s;
   uint16_t  val16 = ((uint16_t)c << 8) | (uint16_t)c;
   uint32_t  val32 = ((uint32_t)val16 << 16) | (uint32_t)val16;
-#ifdef CONFIG_LIBC_MEMSET_64BIT
+#ifdef CONFIG_MEMSET_64BIT
   uint64_t  val64 = ((uint64_t)val32 << 32) | (uint64_t)val32;
 #endif
 
@@ -96,19 +106,7 @@ FAR void *memset(FAR void *s, int c, size_t n)
               n    -= 2;
             }
 
-#ifndef CONFIG_LIBC_MEMSET_64BIT
-          /* Loop while there are at least 16-bytes left to be written */
-
-          while (n >= 16)
-            {
-              *(FAR uint32_t *)(addr +  0) = val32;
-              *(FAR uint32_t *)(addr +  4) = val32;
-              *(FAR uint32_t *)(addr +  8) = val32;
-              *(FAR uint32_t *)(addr + 12) = val32;
-              addr += 16;
-              n    -= 16;
-            }
-
+#ifndef CONFIG_MEMSET_64BIT
           /* Loop while there are at least 32-bits left to be written */
 
           while (n >= 4)
@@ -133,22 +131,6 @@ FAR void *memset(FAR void *s, int c, size_t n)
                   n    -= 4;
                 }
 
-              /* Loop while there are at least 64-bytes left to be written */
-
-              while (n >= 64)
-                {
-                  *(FAR uint64_t *)(addr +  0) = val64;
-                  *(FAR uint64_t *)(addr +  8) = val64;
-                  *(FAR uint64_t *)(addr + 16) = val64;
-                  *(FAR uint64_t *)(addr + 24) = val64;
-                  *(FAR uint64_t *)(addr + 32) = val64;
-                  *(FAR uint64_t *)(addr + 40) = val64;
-                  *(FAR uint64_t *)(addr + 48) = val64;
-                  *(FAR uint64_t *)(addr + 56) = val64;
-                  addr += 64;
-                  n    -= 64;
-                }
-
               /* Loop while there are at least 64-bits left to be written */
 
               while (n >= 8)
@@ -161,7 +143,7 @@ FAR void *memset(FAR void *s, int c, size_t n)
 #endif
         }
 
-#ifdef CONFIG_LIBC_MEMSET_64BIT
+#ifdef CONFIG_MEMSET_64BIT
       /* We may get here with n in the range 0..7.  If n >= 4, then we should
        * have 64-bit alignment.
        */
@@ -197,7 +179,7 @@ FAR void *memset(FAR void *s, int c, size_t n)
 #else
   /* This version is optimized for size */
 
-  FAR unsigned char *p = (FAR unsigned char *)s;
+  FAR unsigned char *p = (FAR unsigned char*)s;
   while (n-- > 0) *p++ = c;
 #endif
   return s;

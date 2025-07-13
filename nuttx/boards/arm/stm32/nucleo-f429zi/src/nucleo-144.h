@@ -1,7 +1,5 @@
 /****************************************************************************
- * boards/arm/stm32/nucleo-f429zi/src/nucleo-144.h
- *
- * SPDX-License-Identifier: Apache-2.0
+ * boards/arm/stm32f4/nucleo-f429zi/src/nucleo-144.h
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -87,21 +85,36 @@
 #define GPIO_SPI_CS    (GPIO_OUTPUT | GPIO_PUSHPULL | GPIO_SPEED_50MHz | \
                         GPIO_OUTPUT_SET)
 
-#define GPIO_SPI1_CS0  (GPIO_SPI_CS | GPIO_PORTA | GPIO_PIN15)
-#define GPIO_SPI1_CS1  (GPIO_SPI_CS | GPIO_PORTC | GPIO_PIN15)
-#define GPIO_SPI1_CS2  (GPIO_SPI_CS | GPIO_PORTC | GPIO_PIN14)
-#define GPIO_SPI1_CS3  (GPIO_SPI_CS | GPIO_PORTC | GPIO_PIN2)
-#define GPIO_SPI2_CS0  (GPIO_SPI_CS | GPIO_PORTD | GPIO_PIN7)
-#define GPIO_SPI2_CS1  (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN1)
-#define GPIO_SPI2_CS2  (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN2)
-#define GPIO_SPI2_CS3  (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN3)
-#define GPIO_SPI3_CS0  (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN4)
-#define GPIO_SPI3_CS1  (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN5)
-#define GPIO_SPI3_CS2  (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN6)
-#define GPIO_SPI3_CS3  (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN7)
+#define GPIO_SPI1_CS0   (GPIO_SPI_CS | GPIO_PORTA | GPIO_PIN15)
+#define GPIO_SPI1_CS1   (GPIO_SPI_CS | GPIO_PORTC | GPIO_PIN15)
+#define GPIO_SPI1_CS2   (GPIO_SPI_CS | GPIO_PORTC | GPIO_PIN14)
+#define GPIO_SPI1_CS3   (GPIO_SPI_CS | GPIO_PORTC | GPIO_PIN2)
+#define GPIO_SPI2_CS0   (GPIO_SPI_CS | GPIO_PORTD | GPIO_PIN7)
+#define GPIO_SPI2_CS1   (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN1)
+#define GPIO_SPI2_CS2   (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN2)
+#define GPIO_SPI2_CS3   (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN3)
+#define GPIO_SPI3_CS0   (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN4)
+#define GPIO_SPI3_CS1   (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN5)
+#define GPIO_SPI3_CS2   (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN6)
+#define GPIO_SPI3_CS3   (GPIO_SPI_CS | GPIO_PORTG | GPIO_PIN7)
 
-#if defined(CONFIG_STM32_SDMMC1) || defined(CONFIG_STM32_SDMMC2)
-#  define HAVE_SDIO
+/* Logical SPI Chip Selects used to index */
+
+#define NUCLEO_SPI_BUS1_CS0  0
+#define NUCLEO_SPI_BUS1_CS1  1
+#define NUCLEO_SPI_BUS1_CS2  2
+#define NUCLEO_SPI_BUS1_CS3  3
+#define NUCLEO_SPI_BUS2_CS0  4
+#define NUCLEO_SPI_BUS2_CS1  5
+#define NUCLEO_SPI_BUS2_CS2  6
+#define NUCLEO_SPI_BUS2_CS3  7
+#define NUCLEO_SPI_BUS3_CS0  8
+#define NUCLEO_SPI_BUS3_CS1  9
+#define NUCLEO_SPI_BUS3_CS2  10
+#define NUCLEO_SPI_BUS3_CS3  11
+
+#if defined(CONFIG_STM32F4_SDMMC1) || defined(CONFIG_STM32F4_SDMMC2)
+# define HAVE_SDIO
 #endif
 
 #if defined(CONFIG_DISABLE_MOUNTPOINT) || !defined(CONFIG_MMCSD_SDIO)
@@ -111,7 +124,7 @@
 #define SDIO_SLOTNO 0  /* Only one slot */
 
 #ifdef HAVE_SDIO
-#  if defined(CONFIG_STM32_SDMMC1)
+#  if defined(CONFIG_STM32F4_SDMMC1)
 #    define GPIO_SDMMC1_NCD (GPIO_INPUT|GPIO_FLOAT|GPIO_EXTI | GPIO_PORTC | GPIO_PIN6)
 #  endif
 
@@ -162,7 +175,7 @@
 #define GPIO_INT1         (GPIO_INPUT | GPIO_FLOAT | GPIO_PORTB | GPIO_PIN2)
 
 /****************************************************************************
- * Public Data
+ * Public data
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
@@ -226,12 +239,12 @@ int stm32_sdio_initialize(void);
  * Name: stm32_usbinitialize
  *
  * Description:
- *   Called from stm32_usbinitialize very early in initialization to
+ *   Called from stm32_usbinitialize very early in inialization to
  *   setup USB-related GPIO pins for the nucleo-144 board.
  *
  ****************************************************************************/
 
-#ifdef CONFIG_STM32_OTGFS
+#ifdef CONFIG_STM32F4_OTGFS
 void stm32_usbinitialize(void);
 #endif
 
@@ -263,7 +276,7 @@ int stm32_adc_setup(void);
  * Name: stm32_bbsram_int
  ****************************************************************************/
 
-#ifdef CONFIG_STM32_BBSRAM
+#ifdef CONFIG_STM32F4_BBSRAM
 int stm32_bbsram_int(void);
 #endif
 

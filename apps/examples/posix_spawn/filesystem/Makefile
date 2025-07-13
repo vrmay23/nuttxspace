@@ -1,35 +1,48 @@
 ############################################################################
 # apps/examples/posix_spawn/filesystem/Makefile
 #
-# SPDX-License-Identifier: Apache-2.0
+#   Copyright (C) 2013 Gregory Nutt. All rights reserved.
+#   Author: Gregory Nutt <gnutt@nuttx.org>
 #
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.  The
-# ASF licenses this file to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance with the
-# License.  You may obtain a copy of the License at
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the
+#    distribution.
+# 3. Neither the name NuttX nor the names of its contributors may be
+#    used to endorse or promote products derived from this software
+#    without specific prior written permission.
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
-# License for the specific language governing permissions and limitations
-# under the License.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
 
-include $(APPDIR)/Make.defs
+-include $(TOPDIR)/Make.defs
 
 SPAWN_DIR = $(APPDIR)$(DELIM)examples$(DELIM)posix_spawn
 FILESYSTEM_DIR = $(SPAWN_DIR)$(DELIM)filesystem
 ROMFS_DIR = $(FILESYSTEM_DIR)$(DELIM)romfs
 ROMFS_IMG = $(FILESYSTEM_DIR)$(DELIM)romfs.img
-ROMFS_SRC = $(FILESYSTEM_DIR)$(DELIM)romfs.c
+ROMFS_HDR = $(FILESYSTEM_DIR)$(DELIM)romfs.h
 SYMTAB_SRC = $(FILESYSTEM_DIR)$(DELIM)symtab.c
 
-all: $(ROMFS_SRC) $(SYMTAB_SRC)
+all: $(ROMFS_HDR) $(SYMTAB_SRC)
 .PHONY: all hello/hello redirect/redirect clean
 
 # Build the hello test program
@@ -52,16 +65,15 @@ $(ROMFS_IMG): hello/hello redirect/redirect testdata.txt
 	$(Q) genromfs -f $@.tmp -d $(ROMFS_DIR) -V "POSIXSPAWN"
 	$(Q) $(call TESTANDREPLACEFILE, $@.tmp, $@)
 
-# Create the romfs.c file from the romfs.img file
+# Create the romfs.h header file from the romfs.img file
 
-$(ROMFS_SRC): $(ROMFS_IMG)
-	$(Q) (cd $(FILESYSTEM_DIR) && echo "#include <nuttx/compiler.h>" >$@ && \
-		xxd -i romfs.img | sed -e "s/^unsigned char/const unsigned char aligned_data(4)/g" >>$@)
+$(ROMFS_HDR): $(ROMFS_IMG)
+	$(Q) (cd $(FILESYSTEM_DIR); xxd -i romfs.img | sed -e "s/^unsigned/static const unsigned/g" >$@)
 
 # Create the exported symbol table
 
 $(SYMTAB_SRC): $(ROMFS_IMG)
-	$(Q) $(APPDIR)$(DELIM)tools$(DELIM)mksymtab.sh $(ROMFS_DIR) g_spawn >$@.tmp
+	$(Q) $(FILESYSTEM_DIR)$(DELIM)mksymtab.sh $(ROMFS_DIR) >$@.tmp
 	$(Q) $(call TESTANDREPLACEFILE, $@.tmp, $@)
 
 # Clean each subdirectory
@@ -69,5 +81,5 @@ $(SYMTAB_SRC): $(ROMFS_IMG)
 clean:
 	$(Q) $(MAKE) -C hello clean TOPDIR="$(TOPDIR)" APPDIR="$(APPDIR)" ROMFS_DIR="$(ROMFS_DIR)"
 	$(Q) $(MAKE) -C redirect clean TOPDIR="$(TOPDIR)" APPDIR="$(APPDIR)" ROMFS_DIR="$(ROMFS_DIR)"
-	$(Q) rm -f $(ROMFS_SRC) $(ROMFS_IMG) $(SYMTAB_SRC)
+	$(Q) rm -f $(ROMFS_HDR) $(ROMFS_IMG) $(SYMTAB_SRC)
 	$(Q) rm -rf $(ROMFS_DIR)

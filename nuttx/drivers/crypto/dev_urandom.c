@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/crypto/dev_urandom.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Author: David S. Alessio
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,7 +44,6 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -82,6 +94,8 @@ union xorshift128_state_u
  * Private Function Prototypes
  ****************************************************************************/
 
+#define min(a, b)   (((a) < (b)) ? (a) : (b))
+
 static ssize_t devurand_read(FAR struct file *filep, FAR char *buffer,
                              size_t buflen);
 static ssize_t devurand_write(FAR struct file *filep, FAR const char *buffer,
@@ -101,9 +115,10 @@ static const struct file_operations g_urand_fops =
   devurand_write,               /* write */
   NULL,                         /* seek */
   NULL,                         /* ioctl */
-  NULL,                         /* mmap */
-  NULL,                         /* truncate */
   devurand_poll                 /* poll */
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  , NULL                        /* unlink */
+#endif
 };
 
 #ifdef CONFIG_DEV_URANDOM_XORSHIFT128
@@ -150,8 +165,9 @@ static ssize_t devurand_read(FAR struct file *filep, FAR char *buffer,
 #ifdef CONFIG_DEV_URANDOM_RANDOM_POOL
   if (len > 0)
     {
-      up_rngbuf(buffer, len);
+      getrandom(buffer, len);
     }
+
 #else
   size_t n;
   uint32_t rnd;
@@ -183,7 +199,7 @@ static ssize_t devurand_read(FAR struct file *filep, FAR char *buffer,
 
   while (n >= 4)
     {
-      *(FAR uint32_t *)buffer = PRNG();
+      *(uint32_t *)buffer = PRNG();
       buffer += 4;
       n -= 4;
     }
@@ -220,7 +236,7 @@ static ssize_t devurand_write(FAR struct file *filep, FAR const char *buffer,
 #ifdef CONFIG_DEV_URANDOM_CONGRUENTIAL
   unsigned int seed = 0;
 
-  len = MIN(len, sizeof(unsigned int));
+  len = min(len, sizeof(unsigned int));
   memcpy(&seed, buffer, len);
   srand(seed);
   return len;
@@ -242,7 +258,7 @@ static ssize_t devurand_write(FAR struct file *filep, FAR const char *buffer,
     {
       /* Make unaligned input aligned. */
 
-      currlen = MIN(sizeof(uint32_t) - ((uintptr_t)buffer & alignmask), len);
+      currlen = min(sizeof(uint32_t) - ((uintptr_t)buffer & alignmask), len);
       memcpy(&tmp, buffer, currlen);
       up_rngaddint(RND_SRC_SW, tmp);
 
@@ -276,7 +292,7 @@ static ssize_t devurand_write(FAR struct file *filep, FAR const char *buffer,
 
   return initlen;
 #else
-  len = MIN(len, sizeof(g_prng.u));
+  len = min(len, sizeof(g_prng.u));
   memcpy(&g_prng.u, buffer, len);
   return len;
 #endif
@@ -291,7 +307,11 @@ static int devurand_poll(FAR struct file *filep, FAR struct pollfd *fds,
 {
   if (setup)
     {
-      poll_notify(&fds, 1, POLLIN | POLLOUT);
+      fds->revents |= (fds->events & (POLLIN | POLLOUT));
+      if (fds->revents != 0)
+        {
+          nxsem_post(fds->sem);
+        }
     }
 
   return OK;

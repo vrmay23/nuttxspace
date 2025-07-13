@@ -1,7 +1,5 @@
 /****************************************************************************
- * arch/arm/src/tiva/common/tiva_hciuart.c
- *
- * SPDX-License-Identifier: Apache-2.0
+ * arch/arm/src/tiva/tiva_hciuart.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -31,18 +29,18 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/spinlock.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/wireless/bluetooth/bt_uart.h>
 #include <nuttx/power/pm.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "chip.h"
 #include "tiva_hciuart.h"
 #include "tiva_enablepwr.h"
@@ -67,6 +65,10 @@
 
 #if defined(CONFIG_PM) && !defined(CONFIG_TIVA_PM_SERIAL_ACTIVITY)
 #  define CONFIG_TIVA_PM_SERIAL_ACTIVITY 10
+#endif
+
+#if defined(CONFIG_PM)
+#  define PM_IDLE_DOMAIN 0 /* Revisit */
 #endif
 
 /****************************************************************************
@@ -103,7 +105,6 @@ struct hciuart_config_s
 {
   struct btuart_lowerhalf_s lower;   /* Generic HCI-UART lower half */
   struct hciuart_state_s *state;     /* Reference to variable state */
-  spinlock_t lock;                   /* Spinlock */
   uint8_t *rxbuffer;                 /* Rx buffer start */
   uint8_t *txbuffer;                 /* Tx buffer start */
   uint16_t rxbufsize;                /* Size of the Rx buffer */
@@ -185,28 +186,23 @@ static uint8_t g_uart0_txbuffer[CONFIG_TIVA_HCIUART0_TXBUFSIZE];
 
 /* HCI UART0 variable state information */
 
-static struct hciuart_state_s g_hciuart0_state =
-{
-  .rxwait = SEM_INITIALIZER(0),
-  .txwait = SEM_INITIALIZER(0),
-};
+static struct hciuart_state_s g_hciuart0_state;
 
 /* HCI UART0 constant configuration information */
 
 static const struct hciuart_config_s g_hciuart0_config =
 {
   .lower         =
-  {
-    .rxattach    = hciuart_rxattach,
-    .rxenable    = hciuart_rxenable,
-    .setbaud     = hciuart_setbaud,
-    .read        = hciuart_read,
-    .write       = hciuart_write,
-    .rxdrain     = hciuart_rxdrain,
-  },
+    {
+      .rxattach  = hciuart_rxattach,
+      .rxenable  = hciuart_rxenable,
+      .setbaud   = hciuart_setbaud,
+      .read      = hciuart_read,
+      .write     = hciuart_write,
+      .rxdrain   = hciuart_rxdrain,
+    },
 
   .state         = &g_hciuart0_state,
-  .lock          = SP_UNLOCKED,
 
   .rxbuffer      = g_uart0_rxbuffer,
   .txbuffer      = g_uart0_txbuffer,
@@ -236,28 +232,23 @@ static uint8_t g_uart1_txbuffer[CONFIG_TIVA_HCIUART1_TXBUFSIZE];
 
 /* HCI UART1 variable state information */
 
-static struct hciuart_state_s g_hciuart1_state =
-{
-  .rxwait = SEM_INITIALIZER(0),
-  .txwait = SEM_INITIALIZER(0),
-};
+static struct hciuart_state_s g_hciuart1_state;
 
 /* HCI UART1 constant configuration information */
 
 static const struct hciuart_config_s g_hciuart1_config =
 {
   .lower         =
-  {
-    .rxattach    = hciuart_rxattach,
-    .rxenable    = hciuart_rxenable,
-    .setbaud     = hciuart_setbaud,
-    .read        = hciuart_read,
-    .write       = hciuart_write,
-    .rxdrain     = hciuart_rxdrain,
-  },
+    {
+      .rxattach  = hciuart_rxattach,
+      .rxenable  = hciuart_rxenable,
+      .setbaud   = hciuart_setbaud,
+      .read      = hciuart_read,
+      .write     = hciuart_write,
+      .rxdrain   = hciuart_rxdrain,
+    },
 
   .state         = &g_hciuart1_state,
-  .lock          = SP_UNLOCKED,
 
   .rxbuffer      = g_uart1_rxbuffer,
   .txbuffer      = g_uart1_txbuffer,
@@ -287,28 +278,23 @@ static uint8_t g_uart2_txbuffer[CONFIG_TIVA_HCIUART2_TXBUFSIZE];
 
 /* HCI UART2 variable state information */
 
-static struct hciuart_state_s g_hciuart2_state =
-{
-  .rxwait = SEM_INITIALIZER(0),
-  .txwait = SEM_INITIALIZER(0),
-};
+static struct hciuart_state_s g_hciuart2_state;
 
 /* HCI UART2 constant configuration information */
 
 static const struct hciuart_config_s g_hciuart2_config =
 {
   .lower         =
-  {
-    .rxattach    = hciuart_rxattach,
-    .rxenable    = hciuart_rxenable,
-    .setbaud     = hciuart_setbaud,
-    .read        = hciuart_read,
-    .write       = hciuart_write,
-    .rxdrain     = hciuart_rxdrain,
-  },
+    {
+      .rxattach  = hciuart_rxattach,
+      .rxenable  = hciuart_rxenable,
+      .setbaud   = hciuart_setbaud,
+      .read      = hciuart_read,
+      .write     = hciuart_write,
+      .rxdrain   = hciuart_rxdrain,
+    },
 
   .state         = &g_hciuart2_state,
-  .lock          = SP_UNLOCKED,
 
   .rxbuffer      = g_uart2_rxbuffer,
   .txbuffer      = g_uart2_txbuffer,
@@ -338,28 +324,23 @@ static uint8_t g_uart3_txbuffer[CONFIG_TIVA_HCIUART3_TXBUFSIZE];
 
 /* HCI UART3 variable state information */
 
-static struct hciuart_state_s g_hciuart3_state =
-{
-  .rxwait = SEM_INITIALIZER(0),
-  .txwait = SEM_INITIALIZER(0),
-};
+static struct hciuart_state_s g_hciuart3_state;
 
 /* HCI UART3 constant configuration information */
 
 static const struct hciuart_config_s g_hciuart3_config =
 {
   .lower         =
-  {
-    .rxattach    = hciuart_rxattach,
-    .rxenable    = hciuart_rxenable,
-    .setbaud     = hciuart_setbaud,
-    .read        = hciuart_read,
-    .write       = hciuart_write,
-    .rxdrain     = hciuart_rxdrain,
-  },
+    {
+      .rxattach  = hciuart_rxattach,
+      .rxenable  = hciuart_rxenable,
+      .setbaud   = hciuart_setbaud,
+      .read      = hciuart_read,
+      .write     = hciuart_write,
+      .rxdrain   = hciuart_rxdrain,
+    },
 
   .state         = &g_hciuart3_state,
-  .lock          = SP_UNLOCKED,
 
   .rxbuffer      = g_uart3_rxbuffer,
   .txbuffer      = g_uart3_txbuffer,
@@ -390,27 +371,22 @@ static uint8_t g_uart4_txbuffer[CONFIG_TIVA_HCIUART4_TXBUFSIZE];
 /* HCI UART4 variable state information */
 
 static struct hciuart_state_s g_hciuart4_state;
-{
-  .rxwait = SEM_INITIALIZER(0),
-  .txwait = SEM_INITIALIZER(0),
-};
 
 /* HCI UART4 constant configuration information */
 
 static const struct hciuart_config_s g_hciuart4_config =
 {
   .lower         =
-  {
-    .rxattach    = hciuart_rxattach,
-    .rxenable    = hciuart_rxenable,
-    .setbaud     = hciuart_setbaud,
-    .read        = hciuart_read,
-    .write       = hciuart_write,
-    .rxdrain     = hciuart_rxdrain,
-  },
+    {
+      .rxattach  = hciuart_rxattach,
+      .rxenable  = hciuart_rxenable,
+      .setbaud   = hciuart_setbaud,
+      .read      = hciuart_read,
+      .write     = hciuart_write,
+      .rxdrain   = hciuart_rxdrain,
+    },
 
   .state         = &g_hciuart4_state,
-  .lock          = SP_UNLOCKED,
 
   .rxbuffer      = g_uart4_rxbuffer,
   .txbuffer      = g_uart4_txbuffer,
@@ -440,28 +416,23 @@ static uint8_t g_uart5_txbuffer[CONFIG_TIVA_HCIUART5_TXBUFSIZE];
 
 /* HCI UART5 variable state information */
 
-static struct hciuart_state_s g_hciuart5_state =
-{
-  .rxwait = SEM_INITIALIZER(0),
-  .txwait = SEM_INITIALIZER(0),
-};
+static struct hciuart_state_s g_hciuart5_state;
 
 /* HCI UART5 constant configuration information */
 
 static const struct hciuart_config_s g_hciuart5_config =
 {
   .lower         =
-  {
-    .rxattach    = hciuart_rxattach,
-    .rxenable    = hciuart_rxenable,
-    .setbaud     = hciuart_setbaud,
-    .read        = hciuart_read,
-    .write       = hciuart_write,
-    .rxdrain     = hciuart_rxdrain,
-  },
+    {
+      .rxattach  = hciuart_rxattach,
+      .rxenable  = hciuart_rxenable,
+      .setbaud   = hciuart_setbaud,
+      .read      = hciuart_read,
+      .write     = hciuart_write,
+      .rxdrain   = hciuart_rxdrain,
+    },
 
   .state         = &g_hciuart5_state,
-  .lock          = SP_UNLOCKED,
 
   .rxbuffer      = g_uart5_rxbuffer,
   .txbuffer      = g_uart5_txbuffer,
@@ -491,28 +462,23 @@ static uint8_t g_uart6_txbuffer[CONFIG_TIVA_HCIUART6_TXBUFSIZE];
 
 /* HCI UART6 variable state information */
 
-static struct hciuart_state_s g_hciuart6_state =
-{
-  .rxwait = SEM_INITIALIZER(0),
-  .txwait = SEM_INITIALIZER(0),
-};
+static struct hciuart_state_s g_hciuart6_state;
 
 /* HCI UART6 constant configuration information */
 
 static const struct hciuart_config_s g_hciuart6_config =
 {
   .lower         =
-  {
-    .rxattach    = hciuart_rxattach,
-    .rxenable    = hciuart_rxenable,
-    .setbaud     = hciuart_setbaud,
-    .read        = hciuart_read,
-    .write       = hciuart_write,
-    .rxdrain     = hciuart_rxdrain,
-  },
+    {
+      .rxattach  = hciuart_rxattach,
+      .rxenable  = hciuart_rxenable,
+      .setbaud   = hciuart_setbaud,
+      .read      = hciuart_read,
+      .write     = hciuart_write,
+      .rxdrain   = hciuart_rxdrain,
+    },
 
   .state         = &g_hciuart6_state,
-  .lock          = SP_UNLOCKED,
 
   .rxbuffer      = g_uart6_rxbuffer,
   .txbuffer      = g_uart6_txbuffer,
@@ -542,28 +508,23 @@ static uint8_t g_uart7_txbuffer[CONFIG_TIVA_HCIUART7_TXBUFSIZE];
 
 /* HCI UART7 variable state information */
 
-static struct hciuart_state_s g_hciuart7_state =
-{
-  .rxwait = SEM_INITIALIZER(0),
-  .txwait = SEM_INITIALIZER(0),
-};
+static struct hciuart_state_s g_hciuart7_state;
 
 /* HCI UART7 constant configuration information */
 
 static const struct hciuart_config_s g_hciuart7_config =
 {
   .lower         =
-  {
-    .rxattach    = hciuart_rxattach,
-    .rxenable    = hciuart_rxenable,
-    .setbaud     = hciuart_setbaud,
-    .read        = hciuart_read,
-    .write       = hciuart_write,
-    .rxdrain     = hciuart_rxdrain,
-  },
+    {
+      .rxattach  = hciuart_rxattach,
+      .rxenable  = hciuart_rxenable,
+      .setbaud   = hciuart_setbaud,
+      .read      = hciuart_read,
+      .write     = hciuart_write,
+      .rxdrain   = hciuart_rxdrain,
+    },
 
   .state         = &g_hciuart7_state,
-  .lock          = SP_UNLOCKED,
 
   .rxbuffer      = g_uart7_rxbuffer,
   .txbuffer      = g_uart7_txbuffer,
@@ -1079,7 +1040,7 @@ static int hciuart_configure(const struct hciuart_config_s *config)
   config->state->im = hciuart_getreg32(config, TIVA_UART_IM_OFFSET);
 
   hciuart_putreg32(config, TIVA_UART_IFLS_OFFSET,
-                   UART_IFLS_TXIFLSEL_18TH | UART_IFLS_RXIFLSEL_78TH);
+                   UART_IFLS_TXIFLSEL_18th | UART_IFLS_RXIFLSEL_78th);
 
   hciuart_putreg32(config, TIVA_UART_IM_OFFSET, UART_IM_RXIM | UART_IM_RTIM);
 
@@ -1109,7 +1070,7 @@ static int hciuart_configure(const struct hciuart_config_s *config)
  *
  * Description:
  *   This is the UART interrupt callback.  It will be invoked when an
- *   interrupt received on the 'irq'.  It should call hciuart_copytorxbuffer
+ *   interrupt received on the 'irq'  It should call hciuart_copytorxbuffer
  *   or hciuart_copytotxfifo to perform the appropriate data transfers.  The
  *   interrupt handling logic must be able to map the 'irq' number into the
  *   appropriate btuart_lowerhalf_s structure in order to call these
@@ -1281,7 +1242,7 @@ static void hciuart_rxattach(const struct btuart_lowerhalf_s *lower,
 
   /* If the callback is NULL, then we are detaching */
 
-  flags = spin_lock_irqsave(&config->lock);
+  flags = spin_lock_irqsave();
   if (callback == NULL)
     {
       uint32_t intset;
@@ -1303,7 +1264,7 @@ static void hciuart_rxattach(const struct btuart_lowerhalf_s *lower,
       state->callback = callback;
     }
 
-  spin_unlock_irqrestore(&config->lock, flags);
+  spin_unlock_irqrestore(flags);
 }
 
 /****************************************************************************
@@ -1331,7 +1292,7 @@ static void hciuart_rxenable(const struct btuart_lowerhalf_s *lower,
       uint32_t intset;
       irqstate_t flags;
 
-      flags = spin_lock_irqsave(&config->lock);
+      flags = spin_lock_irqsave();
       if (enable)
         {
           /* Receive an interrupt when their is anything in the Rx data
@@ -1347,7 +1308,7 @@ static void hciuart_rxenable(const struct btuart_lowerhalf_s *lower,
           hciuart_disableints(config, intset);
         }
 
-      spin_unlock_irqrestore(&config->lock, flags);
+      spin_unlock_irqrestore(flags);
     }
 }
 
@@ -1533,9 +1494,9 @@ static ssize_t hciuart_write(const struct btuart_lowerhalf_s *lower,
 
   /* Make sure that the Tx Interrupts are disabled. */
 
-  flags = spin_lock_irqsave(&config->lock);
+  flags = spin_lock_irqsave();
   hciuart_disableints(config, UART_IM_TXIM);
-  spin_unlock_irqrestore(&config->lock, flags);
+  spin_unlock_irqrestore(flags);
 
   /* Loop until all of the user data have been moved to the Tx buffer */
 
@@ -1624,15 +1585,13 @@ static ssize_t hciuart_write(const struct btuart_lowerhalf_s *lower,
         }
     }
 
-  /* If the Tx buffer is not empty, then exit with the Tx interrupts
-   * enabled.
-   */
+  /* If the Tx buffer is not empty, then exit with the Tx interrupts enabled. */
 
   if (state->txhead != state->txtail)
     {
-      flags = spin_lock_irqsave(&config->lock);
+      flags = spin_lock_irqsave();
       hciuart_enableints(config, UART_IM_TXIM);
-      spin_unlock_irqrestore(&config->lock, flags);
+      spin_unlock_irqrestore(flags);
     }
 
   return ntotal;
@@ -1885,6 +1844,14 @@ void hciuart_initialize(void)
           /* Disable UART interrupts */
 
           hciuart_disableints(config, HCIUART_ALLINTS);
+
+          /* Initialize signalling semaphores */
+
+          nxsem_init(&state->rxwait, 0, 0);
+          nxsem_setprotocol(&state->rxwait, SEM_PRIO_NONE);
+
+          nxsem_init(&state->txwait, 0, 0);
+          nxsem_setprotocol(&state->txwait, SEM_PRIO_NONE);
 
           /* Attach and enable the HCI UART IRQ */
 

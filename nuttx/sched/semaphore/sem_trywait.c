@@ -1,22 +1,35 @@
 /****************************************************************************
  * sched/semaphore/sem_trywait.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007-2009, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,10 +41,8 @@
 
 #include <stdbool.h>
 #include <sched.h>
-#include <assert.h>
 #include <errno.h>
 
-#include <nuttx/init.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 
@@ -43,15 +54,21 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: nxsem_trywait_slow
+ * Name: nxsem_trywait
  *
  * Description:
- *   This function locks the specified semaphore in slow mode.
+ *   This function locks the specified semaphore only if the semaphore is
+ *   currently not locked.  In either case, the call returns without
+ *   blocking.
  *
  * Input Parameters:
  *   sem - the semaphore descriptor
  *
  * Returned Value:
+ *   This is an internal OS interface and should not be used by applications.
+ *   It follows the NuttX internal error return policy:  Zero (OK) is
+ *   returned on success.  A negated errno value is returned on failure.
+ *   Possible returned errors:
  *
  *     EINVAL - Invalid attempt to get the semaphore
  *     EAGAIN - The semaphore is not available.
@@ -60,77 +77,86 @@
  *
  ****************************************************************************/
 
-int nxsem_trywait_slow(FAR sem_t *sem)
+int nxsem_trywait(FAR sem_t *sem)
 {
+  FAR struct tcb_s *rtcb = this_task();
   irqstate_t flags;
-  int ret = -EAGAIN;
-  bool mutex = NXSEM_IS_MUTEX(sem);
-  FAR atomic_t *val = mutex ? NXSEM_MHOLDER(sem) : NXSEM_COUNT(sem);
-  int32_t old;
-  int32_t new;
+  int ret;
 
-  /* The following operations must be performed with interrupts disabled
-   * because sem_post() may be called from an interrupt handler.
-   */
+  /* This API should not be called from interrupt handlers */
 
-  flags = enter_critical_section();
+  DEBUGASSERT(sem != NULL && up_interrupt_context() == false);
 
-  /* If the semaphore is available, give it to the requesting task */
-
-  if (mutex)
+  if (sem != NULL)
     {
-      new = nxsched_gettid();
-    }
+      /* The following operations must be performed with interrupts disabled
+       * because sem_post() may be called from an interrupt handler.
+       */
 
-  old = atomic_read(val);
-  do
-    {
-      if (mutex)
+      flags = enter_critical_section();
+
+      /* If the semaphore is available, give it to the requesting task */
+
+      if (sem->semcount > 0)
         {
-          if (NXSEM_MACQUIRED(old))
-            {
-              goto out;
-            }
+          /* It is, let the task take the semaphore */
+
+          sem->semcount--;
+          rtcb->waitsem = NULL;
+          ret = OK;
         }
       else
         {
-          if (old <= 0)
-            {
-              goto out;
-            }
+          /* Semaphore is not available */
 
-          new = old - 1;
+          ret = -EAGAIN;
         }
-    }
-  while (!atomic_try_cmpxchg_acquire(val, &old, new));
 
-  /* It is, let the task take the semaphore */
-
-  ret = nxsem_protect_wait(sem);
-  if (ret < 0)
-    {
-      if (mutex)
-        {
-          atomic_set(NXSEM_MHOLDER(sem), NXSEM_NO_MHOLDER);
-        }
-      else
-        {
-          atomic_fetch_add(NXSEM_COUNT(sem), 1);
-        }
+      /* Interrupts may now be enabled. */
 
       leave_critical_section(flags);
-      goto out;
     }
-
-  if (!mutex)
+  else
     {
-      nxsem_add_holder(sem);
+      ret = -EINVAL;
     }
 
-out:
+  return ret;
+}
 
-  /* Interrupts may now be enabled. */
+/****************************************************************************
+ * Name: sem_trywait
+ *
+ * Description:
+ *   This function locks the specified semaphore only if the semaphore is
+ *   currently not locked.  In either case, the call returns without
+ *   blocking.
+ *
+ * Input Parameters:
+ *   sem - the semaphore descriptor
+ *
+ * Returned Value:
+ *   Zero (OK) on success or -1 (ERROR) if unsuccessful. If this function
+ *   returns -1(ERROR), then the cause of the failure will be reported in
+ *   errno variable as:
+ *
+ *     EINVAL - Invalid attempt to get the semaphore
+ *     EAGAIN - The semaphore is not available.
+ *
+ ****************************************************************************/
 
-  leave_critical_section(flags);
+int sem_trywait(FAR sem_t *sem)
+{
+  int ret;
+
+  /* Let nxsem_trywait do the real work */
+
+  ret = nxsem_trywait(sem);
+  if (ret < 0)
+    {
+      set_errno(-ret);
+      ret = ERROR;
+    }
+
   return ret;
 }

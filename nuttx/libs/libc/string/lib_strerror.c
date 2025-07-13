@@ -1,22 +1,35 @@
 /****************************************************************************
  * libs/libc/string/lib_strerror.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2009, 2011-2012 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +40,6 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 #include <errno.h>
 
@@ -35,17 +47,14 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define STRERROR_UNKNOWN "Unknown error"
-#define STRERROR_BUFSIZE sizeof(STRERROR_UNKNOWN " 2000")
-
 /****************************************************************************
  * Private Types
  ****************************************************************************/
 
 struct errno_strmap_s
 {
-  uint8_t   errnum;
-  FAR char *str;
+  uint8_t     errnum;
+  const char *str;
 };
 
 /****************************************************************************
@@ -102,12 +111,6 @@ static const struct errno_strmap_s g_errnomap[] =
   { EPIPE,               EPIPE_STR           },
   { EDOM,                EDOM_STR            },
   { ERANGE,              ERANGE_STR          },
-  { EDEADLK,             EDEADLK_STR         },
-  { ENAMETOOLONG,        ENAMETOOLONG_STR    },
-  { ENOLCK,              ENOLCK_STR          },
-  { ENOSYS,              ENOSYS_STR          },
-  { ENOTEMPTY,           ENOTEMPTY_STR       },
-  { ELOOP,               ELOOP_STR           },
   { ENOMSG,              ENOMSG_STR          },
   { EIDRM,               EIDRM_STR           },
   { ECHRNG,              ECHRNG_STR          },
@@ -118,12 +121,15 @@ static const struct errno_strmap_s g_errnomap[] =
   { EUNATCH,             EUNATCH_STR         },
   { ENOCSI,              ENOCSI_STR          },
   { EL2HLT,              EL2HLT_STR          },
+  { EDEADLK,             EDEADLK_STR         },
+  { ENOLCK,              ENOLCK_STR          },
   { EBADE,               EBADE_STR           },
   { EBADR,               EBADR_STR           },
   { EXFULL,              EXFULL_STR          },
   { ENOANO,              ENOANO_STR          },
   { EBADRQC,             EBADRQC_STR         },
   { EBADSLT,             EBADSLT_STR         },
+  { EDEADLOCK,           EDEADLOCK_STR       },
   { EBFONT,              EBFONT_STR          },
   { ENOSTR,              ENOSTR_STR          },
   { ENODATA,             ENODATA_STR         },
@@ -138,9 +144,10 @@ static const struct errno_strmap_s g_errnomap[] =
   { ECOMM,               ECOMM_STR           },
   { EPROTO,              EPROTO_STR          },
   { EMULTIHOP,           EMULTIHOP_STR       },
+  { ELBIN,               ELBIN_STR           },
   { EDOTDOT,             EDOTDOT_STR         },
   { EBADMSG,             EBADMSG_STR         },
-  { EOVERFLOW,           EOVERFLOW_STR       },
+  { EFTYPE,              EFTYPE_STR         },
   { ENOTUNIQ,            ENOTUNIQ_STR        },
   { EBADFD,              EBADFD_STR          },
   { EREMCHG,             EREMCHG_STR         },
@@ -149,63 +156,53 @@ static const struct errno_strmap_s g_errnomap[] =
   { ELIBSCN,             ELIBSCN_STR         },
   { ELIBMAX,             ELIBMAX_STR         },
   { ELIBEXEC,            ELIBEXEC_STR        },
-  { EILSEQ,              EILSEQ_STR          },
-  { ERESTART,            ERESTART_STR        },
-  { ESTRPIPE,            ESTRPIPE_STR        },
-  { EUSERS,              EUSERS_STR          },
-  { ENOTSOCK,            ENOTSOCK_STR        },
-  { EDESTADDRREQ,        EDESTADDRREQ_STR    },
-  { EMSGSIZE,            EMSGSIZE_STR        },
-  { EPROTOTYPE,          EPROTOTYPE_STR      },
-  { ENOPROTOOPT,         ENOPROTOOPT_STR     },
-  { EPROTONOSUPPORT,     EPROTONOSUPPORT_STR },
-  { ESOCKTNOSUPPORT,     ESOCKTNOSUPPORT_STR },
+  { ENOSYS,              ENOSYS_STR          },
+  { ENMFILE,             ENMFILE_STR         },
+  { ENOTEMPTY,           ENOTEMPTY_STR       },
+  { ENAMETOOLONG,        ENAMETOOLONG_STR    },
+  { ELOOP,               ELOOP_STR           },
   { EOPNOTSUPP,          EOPNOTSUPP_STR      },
   { EPFNOSUPPORT,        EPFNOSUPPORT_STR    },
-  { EAFNOSUPPORT,        EAFNOSUPPORT_STR    },
-  { EADDRINUSE,          EADDRINUSE_STR      },
-  { EADDRNOTAVAIL,       EADDRNOTAVAIL_STR   },
-  { ENETDOWN,            ENETDOWN_STR        },
-  { ENETUNREACH,         ENETUNREACH_STR     },
-  { ENETRESET,           ENETRESET_STR       },
-  { ECONNABORTED,        ECONNABORTED_STR    },
   { ECONNRESET,          ECONNRESET_STR      },
   { ENOBUFS,             ENOBUFS_STR         },
-  { EISCONN,             EISCONN_STR         },
-  { ENOTCONN,            ENOTCONN_STR        },
+  { EAFNOSUPPORT,        EAFNOSUPPORT_STR    },
+  { EPROTOTYPE,          EPROTOTYPE_STR      },
+  { ENOTSOCK,            ENOTSOCK_STR        },
+  { ENOPROTOOPT,         ENOPROTOOPT_STR     },
   { ESHUTDOWN,           ESHUTDOWN_STR       },
-  { ETOOMANYREFS,        ETOOMANYREFS_STR    },
-  { ETIMEDOUT,           ETIMEDOUT_STR       },
   { ECONNREFUSED,        ECONNREFUSED_STR    },
+  { EADDRINUSE,          EADDRINUSE_STR      },
+  { ECONNABORTED,        ECONNABORTED_STR    },
+  { ENETUNREACH,         ENETUNREACH_STR     },
+  { ENETDOWN,            ENETDOWN_STR        },
+  { ETIMEDOUT,           ETIMEDOUT_STR       },
   { EHOSTDOWN,           EHOSTDOWN_STR       },
   { EHOSTUNREACH,        EHOSTUNREACH_STR    },
-  { EALREADY,            EALREADY_STR        },
   { EINPROGRESS,         EINPROGRESS_STR     },
-  { ESTALE,              ESTALE_STR          },
-  { EUCLEAN,             EUCLEAN_STR         },
-  { ENOTNAM,             ENOTNAM_STR         },
-  { ENAVAIL,             ENAVAIL_STR         },
-  { EISNAM,              EISNAM_STR          },
-  { EREMOTEIO,           EREMOTEIO_STR       },
-  { EDQUOT,              EDQUOT_STR          },
-  { ENOMEDIUM,           ENOMEDIUM_STR       },
-  { EMEDIUMTYPE,         EMEDIUMTYPE_STR     },
-  { ECANCELED,           ECANCELED_STR       },
-  { ENOKEY,              ENOKEY_STR          },
-  { EKEYEXPIRED,         EKEYEXPIRED_STR     },
-  { EKEYREVOKED,         EKEYREVOKED_STR     },
-  { EKEYREJECTED,        EKEYREJECTED_STR    },
-  { EOWNERDEAD,          EOWNERDEAD_STR      },
-  { ENOTRECOVERABLE,     ENOTRECOVERABLE_STR },
-  { ERFKILL,             ERFKILL_STR         },
-  { EHWPOISON,           EHWPOISON_STR       },
-  { ELBIN,               ELBIN_STR           },
-  { EFTYPE,              EFTYPE_STR          },
-  { ENMFILE,             ENMFILE_STR         },
+  { EALREADY,            EALREADY_STR        },
+  { EDESTADDRREQ,        EDESTADDRREQ_STR    },
+  { EMSGSIZE,            EMSGSIZE_STR        },
+  { EPROTONOSUPPORT,     EPROTONOSUPPORT_STR },
+  { ESOCKTNOSUPPORT,     ESOCKTNOSUPPORT_STR },
+  { EADDRNOTAVAIL,       EADDRNOTAVAIL_STR   },
+  { ENETRESET,           ENETRESET_STR       },
+  { EISCONN,             EISCONN_STR         },
+  { ENOTCONN,            ENOTCONN_STR        },
+  { ETOOMANYREFS,        ETOOMANYREFS_STR    },
   { EPROCLIM,            EPROCLIM_STR        },
+  { EUSERS,              EUSERS_STR          },
+  { EDQUOT,              EDQUOT_STR          },
+  { ESTALE,              ESTALE_STR          },
   { ENOTSUP,             ENOTSUP_STR         },
+  { ENOMEDIUM,           ENOMEDIUM_STR       },
   { ENOSHARE,            ENOSHARE_STR        },
   { ECASECLASH,          ECASECLASH_STR      },
+  { EILSEQ,              EILSEQ_STR          },
+  { EOVERFLOW,           EOVERFLOW_STR       },
+  { ECANCELED,           ECANCELED_STR       },
+  { ENOTRECOVERABLE,     ENOTRECOVERABLE_STR },
+  { EOWNERDEAD,          EOWNERDEAD_STR      },
+  { ESTRPIPE,            ESTRPIPE_STR        }
 };
 
 #else /* CONFIG_LIBC_STRERROR_SHORT */
@@ -247,12 +244,6 @@ static const struct errno_strmap_s g_errnomap[] =
   { EPIPE,               "EPIPE"             },
   { EDOM,                "EDOM"              },
   { ERANGE,              "ERANGE"            },
-  { EDEADLK,             "EDEADLK"           },
-  { ENAMETOOLONG,        "ENAMETOOLONG"      },
-  { ENOLCK,              "ENOLCK"            },
-  { ENOSYS,              "ENOSYS"            },
-  { ENOTEMPTY,           "ENOTEMPTY"         },
-  { ELOOP,               "ELOOP"             },
   { ENOMSG,              "ENOMSG"            },
   { EIDRM,               "EIDRM"             },
   { ECHRNG,              "ECHRNG"            },
@@ -263,12 +254,15 @@ static const struct errno_strmap_s g_errnomap[] =
   { EUNATCH,             "EUNATCH"           },
   { ENOCSI,              "ENOCSI"            },
   { EL2HLT,              "EL2HLT"            },
+  { EDEADLK,             "EDEADLK"           },
+  { ENOLCK,              "ENOLCK"            },
   { EBADE,               "EBADE"             },
   { EBADR,               "EBADR"             },
   { EXFULL,              "EXFULL"            },
   { ENOANO,              "ENOANO"            },
   { EBADRQC,             "EBADRQC"           },
   { EBADSLT,             "EBADSLT"           },
+  { EDEADLOCK,           "EDEADLOCK"         },
   { EBFONT,              "EBFONT"            },
   { ENOSTR,              "ENOSTR"            },
   { ENODATA,             "ENODATA"           },
@@ -283,9 +277,10 @@ static const struct errno_strmap_s g_errnomap[] =
   { ECOMM,               "ECOMM"             },
   { EPROTO,              "EPROTO"            },
   { EMULTIHOP,           "EMULTIHOP"         },
+  { ELBIN,               "ELBIN"             },
   { EDOTDOT,             "EDOTDOT"           },
   { EBADMSG,             "EBADMSG"           },
-  { EOVERFLOW,           "EOVERFLOW"         },
+  { EFTYPE,              "EFTYPE"            },
   { ENOTUNIQ,            "ENOTUNIQ"          },
   { EBADFD,              "EBADFD"            },
   { EREMCHG,             "EREMCHG"           },
@@ -294,63 +289,53 @@ static const struct errno_strmap_s g_errnomap[] =
   { ELIBSCN,             "ELIBSCN"           },
   { ELIBMAX,             "ELIBMAX"           },
   { ELIBEXEC,            "ELIBEXEC"          },
-  { EILSEQ,              "EILSEQ"            },
-  { ERESTART,            "ERESTART"          },
-  { ESTRPIPE,            "ESTRPIPE"          },
-  { EUSERS,              "EUSERS"            },
-  { ENOTSOCK,            "ENOTSOCK"          },
-  { EDESTADDRREQ,        "EDESTADDRREQ"      },
-  { EMSGSIZE,            "EMSGSIZE"          },
-  { EPROTOTYPE,          "EPROTOTYPE"        },
-  { ENOPROTOOPT,         "ENOPROTOOPT"       },
-  { EPROTONOSUPPORT,     "EPROTONOSUPPORT"   },
-  { ESOCKTNOSUPPORT,     "ESOCKTNOSUPPORT"   },
+  { ENOSYS,              "ENOSYS"            },
+  { ENMFILE,             "ENMFILE"           },
+  { ENOTEMPTY,           "ENOTEMPTY"         },
+  { ENAMETOOLONG,        "ENAMETOOLONG"      },
+  { ELOOP,               "ELOOP"             },
   { EOPNOTSUPP,          "EOPNOTSUPP"        },
   { EPFNOSUPPORT,        "EPFNOSUPPORT"      },
-  { EAFNOSUPPORT,        "EAFNOSUPPORT"      },
-  { EADDRINUSE,          "EADDRINUSE"        },
-  { EADDRNOTAVAIL,       "EADDRNOTAVAIL"     },
-  { ENETDOWN,            "ENETDOWN"          },
-  { ENETUNREACH,         "ENETUNREACH"       },
-  { ENETRESET,           "ENETRESET"         },
-  { ECONNABORTED,        "ECONNABORTED"      },
   { ECONNRESET,          "ECONNRESET"        },
   { ENOBUFS,             "ENOBUFS"           },
-  { EISCONN,             "EISCONN"           },
-  { ENOTCONN,            "ENOTCONN"          },
+  { EAFNOSUPPORT,        "EAFNOSUPPORT"      },
+  { EPROTOTYPE,          "EPROTOTYPE"        },
+  { ENOTSOCK,            "ENOTSOCK"          },
+  { ENOPROTOOPT,         "ENOPROTOOPT"       },
   { ESHUTDOWN,           "ESHUTDOWN"         },
-  { ETOOMANYREFS,        "ETOOMANYREFS"      },
-  { ETIMEDOUT,           "ETIMEDOUT"         },
   { ECONNREFUSED,        "ECONNREFUSED"      },
+  { EADDRINUSE,          "EADDRINUSE"        },
+  { ECONNABORTED,        "ECONNABORTED"      },
+  { ENETUNREACH,         "ENETUNREACH"       },
+  { ENETDOWN,            "ENETDOWN"          },
+  { ETIMEDOUT,           "ETIMEDOUT"         },
   { EHOSTDOWN,           "EHOSTDOWN"         },
   { EHOSTUNREACH,        "EHOSTUNREACH"      },
-  { EALREADY,            "EALREADY"          },
   { EINPROGRESS,         "EINPROGRESS"       },
-  { ESTALE,              "ESTALE"            },
-  { EUCLEAN,             "EUCLEAN"           },
-  { ENOTNAM,             "ENOTNAM"           },
-  { ENAVAIL,             "ENAVAIL"           },
-  { EISNAM,              "EISNAM"            },
-  { EREMOTEIO,           "EREMOTEIO"         },
-  { EDQUOT,              "EDQUOT"            },
-  { ENOMEDIUM,           "ENOMEDIUM"         },
-  { EMEDIUMTYPE,         "EMEDIUMTYPE"       },
-  { ECANCELED,           "ECANCELED"         },
-  { ENOKEY,              "ENOKEY"            },
-  { EKEYEXPIRED,         "EKEYEXPIRED"       },
-  { EKEYREVOKED,         "EKEYREVOKED"       },
-  { EKEYREJECTED,        "EKEYREJECTED"      },
-  { EOWNERDEAD,          "EOWNERDEAD"        },
-  { ENOTRECOVERABLE,     "ENOTRECOVERABLE"   },
-  { ERFKILL,             "ERFKILL"           },
-  { EHWPOISON,           "EHWPOISON"         },
-  { ELBIN,               "ELBIN"             },
-  { EFTYPE,              "EFTYPE"            },
-  { ENMFILE,             "ENMFILE"           },
+  { EALREADY,            "EALREADY"          },
+  { EDESTADDRREQ,        "EDESTADDRREQ"      },
+  { EMSGSIZE,            "EMSGSIZE"          },
+  { EPROTONOSUPPORT,     "EPROTONOSUPPORT"   },
+  { ESOCKTNOSUPPORT,     "ESOCKTNOSUPPORT"   },
+  { EADDRNOTAVAIL,       "EADDRNOTAVAIL"     },
+  { ENETRESET,           "ENETRESET"         },
+  { EISCONN,             "EISCONN"           },
+  { ENOTCONN,            "ENOTCONN"          },
+  { ETOOMANYREFS,        "ETOOMANYREFS"      },
   { EPROCLIM,            "EPROCLIM"          },
+  { EUSERS,              "EUSERS"            },
+  { EDQUOT,              "EDQUOT"            },
+  { ESTALE,              "ESTALE"            },
   { ENOTSUP,             "ENOTSUP"           },
+  { ENOMEDIUM,           "ENOMEDIUM"         },
   { ENOSHARE,            "ENOSHARE"          },
-  { ECASECLASH,          "ECASECLASH"        }
+  { ECASECLASH,          "ECASECLASH"        },
+  { EILSEQ,              "EILSEQ"            },
+  { EOVERFLOW,           "EOVERFLOW"         },
+  { ECANCELED,           "ECANCELED"         },
+  { ENOTRECOVERABLE,     "ENOTRECOVERABLE"   },
+  { EOWNERDEAD,          "EOWNERDEAD"        },
+  { ESTRPIPE,            "ESTRPIPE"          }
 };
 
 #endif /* CONFIG_LIBC_STRERROR_SHORT */
@@ -371,11 +356,8 @@ static const struct errno_strmap_s g_errnomap[] =
  * Name: strerror
  ****************************************************************************/
 
-FAR char *strerror(int errnum)
+FAR const char *strerror(int errnum)
 {
-#ifdef CONFIG_LIBC_STRERROR_ERRNUM
-  static char s_err[STRERROR_BUFSIZE];
-#endif
 #ifdef CONFIG_LIBC_STRERROR
   int ndxlow = 0;
   int ndxhi  = NERRNO_STRS - 1;
@@ -399,15 +381,5 @@ FAR char *strerror(int errnum)
     }
   while (ndxlow <= ndxhi);
 #endif
-#ifdef CONFIG_LIBC_STRERROR_ERRNUM
-  if (snprintf(s_err, sizeof(s_err), STRERROR_UNKNOWN " %d", errnum)
-      < sizeof(s_err))
-    {
-      return s_err;
-    }
-#elif !defined(CONFIG_LIBC_STRERROR)
-  UNUSED(errnum);
-#endif
-
-  return STRERROR_UNKNOWN;
+  return "Unknown error";
 }

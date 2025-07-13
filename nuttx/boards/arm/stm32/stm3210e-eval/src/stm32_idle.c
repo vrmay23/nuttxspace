@@ -1,22 +1,36 @@
 /****************************************************************************
  * boards/arm/stm32/stm3210e-eval/src/stm32_idle.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2012, 2015-2016 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Diego Sanchez <dsanchez@nx-engineering.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -37,7 +51,7 @@
 #include <nuttx/board.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_internal.h"
 #include "stm32_pm.h"
 #include "stm32_rcc.h"
 #include "stm32_exti.h"
@@ -48,9 +62,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
 /* Configuration ************************************************************/
-
 /* Does the board support an IDLE LED to indicate that the board is in the
  * IDLE state?
  */
@@ -93,10 +105,10 @@
 #    error "CONFIG_RTC_ALARM should be enabled to use CONFIG_PM_SLEEP_WAKEUP"
 #  endif
 
-/* If CONFIG_PM_SLEEP_WAKEUP is defined, then CONFIG_PM_SLEEP_WAKEUP_SEC
- * and CONFIG_PM_SLEEP_WAKEUP_NSEC define the delay until the STM32
- * awakens from PM_SLEEP mode.
- */
+   /* If CONFIG_PM_SLEEP_WAKEUP is defined, then CONFIG_PM_SLEEP_WAKEUP_SEC
+    * and CONFIG_PM_SLEEP_WAKEUP_NSEC define the delay until the STM32
+    * awakens from PM_SLEEP mode.
+    */
 
 #  ifndef CONFIG_PM_SLEEP_WAKEUP_SEC
 #    define CONFIG_PM_SLEEP_WAKEUP_SEC 10
@@ -106,6 +118,8 @@
 #    define CONFIG_PM_SLEEP_WAKEUP_NSEC 0
 #  endif
 #endif
+
+#define PM_IDLE_DOMAIN 0 /* Revisit */
 
 /****************************************************************************
  * Private Data
@@ -145,7 +159,7 @@ static void stm32_alarmcb(void)
  ****************************************************************************/
 
 #if defined(CONFIG_PM) && defined(CONFIG_RTC_ALARM)
-static int stm32_alarm_exti(int irq, void *context, void *arg)
+static int stm32_alarm_exti(int irq, FAR void *context, FAR void *arg)
 {
   stm32_alarmcb();
   return OK;
@@ -316,7 +330,7 @@ static void stm32_idlepm(void)
                  */
 
 #ifdef CONFIG_RTC
-                clock_synchronize(NULL);
+                clock_synchronize();
 #endif
               }
           }
@@ -355,7 +369,6 @@ static void stm32_idlepm(void)
                 swarn("WARNING: Cancel alarm failed\n");
               }
 #endif
-
             /* Note:  See the additional PM_STANDBY related logic at the
              * beginning of this function.  That logic is executed after
              * this point.
@@ -372,8 +385,7 @@ static void stm32_idlepm(void)
             /* Configure the RTC alarm to Auto Reset the system */
 
 #ifdef CONFIG_PM_SLEEP_WAKEUP
-            stm32_rtc_alarm(CONFIG_PM_SLEEP_WAKEUP_SEC,
-                            CONFIG_PM_SLEEP_WAKEUP_NSEC, false);
+            stm32_rtc_alarm(CONFIG_PM_SLEEP_WAKEUP_SEC, CONFIG_PM_SLEEP_WAKEUP_NSEC, false);
 #endif
             /* Wait 10ms */
 

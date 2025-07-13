@@ -26,13 +26,6 @@ config ARCH_CHIP_PIC32MZ2048ECM
 		the ARCH_CHIP_PIC32MZ2048ECM144-I/PH used with the PIC32MZ EC
 		STARTER KIT DM320006-C (no longer available)
 
-config ARCH_CHIP_PIC32MZ2048EFG
-	bool "PIC32MZ2048EFG"
-	select ARCH_CHIP_PIC32MZEF
-	---help---
-		Microchip PIC32MZ2048EFG (MIPS32 M5150) such as the
-		PIC32MZ2048EFG100 used in the chipKIT Wi-FIRE.
-
 config ARCH_CHIP_PIC32MZ2048EFH
 	bool "PIC32MZ2048EFH"
 	select ARCH_CHIP_PIC32MZEF
@@ -260,27 +253,6 @@ config PIC32MZ_UART6
 	default n
 	select UART6_SERIALDRIVER
 	select ARCH_HAVE_SERIAL_TERMIOS
-
-config PIC32MZ_UART_BREAKS
-	bool "Add TIOxSBRK to support sending Breaks"
-	depends on PIC32MZ_UART1 || PIC32MZ_UART2 || PIC32MZ_UART3 || PIC32MZ_UART4 || PIC32MZ_UART5 || PIC32MZ_UART6
-	default n
-	---help---
-		Add TIOCxBRK routines to send a line break per the PIC32MZ manual.
-		The break consists of a start bit, 12 zero bits, and a stop bit.
-		This is not a BSD compatible break.
-
-config PIC32MZ_SERIALBRK_BSDCOMPAT
-	bool "Use GPIO to send Break"
-	depends on PIC32MZ_UART_BREAKS
-	default n
-	---help---
-		Enable using GPIO on the TX pin to send a BSD compatible break:
-		TIOCSBRK will start the break and TIOCCBRK will end the break. The
-		current PIC32MZ UARTS have no way to leave the break on (TX=LOW)
-		because software starts the break and then the hardware
-		automatically clears the break. This makes it difficult to send a
-		long break.
 
 config PIC32MZ_ADC
 	bool "ADC1"
@@ -914,6 +886,7 @@ config PIC32MZ_T9_EXTERNALCLOCK
 endmenu
 endif # PIC32MZ_T9
 
+
 endmenu # Timer Configuration
 
 menuconfig PIC32MZ_GPIOIRQ
@@ -1128,7 +1101,7 @@ config PIC32MZ_ETH_PRIORITY
 
 config PIC32MZ_MULTICAST
 	bool "Multicast"
-	default NET_MCASTGROUP
+	default y if NET_MCASTGROUP
 	depends on PIC32MZ_ETHERNET
 	---help---
 		Enable receipt of multicast (and unicast) frames. Automatically set if
@@ -1147,7 +1120,8 @@ menu "Device Configuration 0 (DEVCFG0)"
 
 config PIC32MZ_DEBUGGER_ENABLE
 	bool "Background debugger enable"
-	default DEBUG_FEATURES
+	default y if DEBUG_FEATURES
+	default n if !DEBUG_FEATURES
 	---help---
 		Background Debugger Enable
 
@@ -1165,7 +1139,8 @@ config PIC32MZ_ICESEL_CH2
 
 config PIC32MZ_TRACE_ENABLE
 	bool "Trace enable"
-	default DEBUG_FEATURES
+	default y if DEBUG_FEATURES
+	default n if !DEBUG_FEATURES
 	---help---
 		Trace Enable
 

@@ -1,70 +1,63 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/stm32l4/hardware/stm32l4_flash.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009, 2011, 2015, 2017 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            David Sidrane <david_s5@nscdg.com>
+ *            Juha Niskanen <juha.niskanen@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_STM32L4_HARDWARE_STM32L4_FLASH_H
 #define __ARCH_ARM_SRC_STM32L4_HARDWARE_STM32L4_FLASH_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
 /* Flash size is known from the chip selection:
  *
- *  When CONFIG_STM32L4_FLASH_OVERRIDE_DEFAULT is set the
- *  CONFIG_STM32L4_FLASH_CONFIG_x selects the default FLASH size based
- *  on the chip part number. This value can be overridden with
- *  CONFIG_STM32L4_FLASH_OVERRIDE_x. For example:
+ *   When CONFIG_STM32L4_FLASH_OVERRIDE_DEFAULT is set the
+ *   CONFIG_STM32L4_FLASH_CONFIG_x selects the default FLASH size based on the chip
+ *   part number. This value can be overridden with CONFIG_STM32L4_FLASH_OVERRIDE_x
  *
- *  Parts STM32L4xxE have 512Kb of FLASH
- *  Parts STM32L4xxG have 1024Kb of FLASH
- *  Parts STM32L4xxI have 2048Kb of FLASH
+ *   Parts STM32L4xxE have 512Kb of FLASH
+ *   Parts STM32L4xxG have 1024Kb of FLASH
  *
- * The STM32L4x5/STM32L4x6 devices have two banks, but on 512 and 256 Kb
- * devices an option byte is available to map all pages to the first bank.
- *
- * The STM32L43x/44x/45x/46x chips (CONFIG_STM32L4_STM32L4X3) have a
- * single bank only.
- *
- * STM32L4+ devices (CONFIG_STM32L4_STM32L4XR) have single and dual bank
- * operating modes.
- *
- *  The STM32L4R/Sxx devices have 1 Mb or 2 Mb of flash
- *  The STM32L4P/Q5x devices have 512 Kb or 1 Mb of flash
- *
- * STM32L4+ flash page size is 4 Kb (dual mode) or 8 Kb (single mode).
- * Dual bank mode is the default and this flash driver does not support
- * single bank mode on these devices.
- *
- * For STM32L+ bank mode is controlled by two different bits
- * in option bytes:
- *
- *  In 2 Mb devices bit 22 (DBANK) controls dual bank mode.
- *  In 1 Mb devices bit 21 (DB1M) controls dual bank mode.
+ *   N.B. Only Single bank mode is supported
  */
 
 #define _K(x) ((x)*1024)
@@ -127,9 +120,9 @@
 #elif defined(CONFIG_STM32L4_FLASH_CONFIG_G) /* 1 MB */
 #  define STM32L4_FLASH_NPAGES      512
 #  define STM32L4_FLASH_PAGESIZE    2048
-#elif defined(CONFIG_STM32L4_FLASH_CONFIG_I) /* 2 MB, STM32L4+ only */
-#  define STM32L4_FLASH_NPAGES      512
-#  define STM32L4_FLASH_PAGESIZE    4096
+#elif defined(CONFIG_STM32L4_FLASH_CONFIG_I) /* 2 MB */
+#  define STM32L4_FLASH_NPAGES      256
+#  define STM32L4_FLASH_PAGESIZE    8192
 #else
 #  error "unknown flash configuration!"
 #endif
@@ -138,7 +131,7 @@
 #  define STM32L4_FLASH_SIZE            (STM32L4_FLASH_NPAGES * STM32L4_FLASH_PAGESIZE)
 #endif
 
-/* Register Offsets *********************************************************/
+/* Register Offsets *****************************************************************/
 
 #define STM32L4_FLASH_ACR_OFFSET      0x0000
 #define STM32L4_FLASH_PDKEYR_OFFSET   0x0004
@@ -163,7 +156,7 @@
 #  define STM32L4_FLASH_CFGR_OFFSET     0x0130
 #endif
 
-/* Register Addresses *******************************************************/
+/* Register Addresses ***************************************************************/
 
 #define STM32L4_FLASH_ACR            (STM32L4_FLASHIF_BASE+STM32L4_FLASH_ACR_OFFSET)
 #define STM32L4_FLASH_PDKEYR         (STM32L4_FLASHIF_BASE+STM32L4_FLASH_PDKEYR_OFFSET)
@@ -188,8 +181,7 @@
 #  define STM32L4_FLASH_CFGR         (STM32L4_FLASHIF_BASE+STM32L4_FLASH_CFGR_OFFSET)
 #endif
 
-/* Register Bitfield Definitions ********************************************/
-
+/* Register Bitfield Definitions ****************************************************/
 /* Flash Access Control Register (ACR) */
 
 #define FLASH_ACR_LATENCY_SHIFT   (0)
@@ -245,7 +237,7 @@
 #endif
 #define FLASH_CR_START              (1 << 16)               /* Bit 16: Start Erase */
 #define FLASH_CR_OPTSTRT            (1 << 17)               /* Bit 17: Options modification Start */
-#define FLASH_CR_FSTPG              (1 << 18)               /* Bit 18: Fast programming */
+#define FLASH_CR_FSTPG              (1 << 23)               /* Bit 23: Fast programming */
 #define FLASH_CR_EOPIE              (1 << 24)               /* Bit 24: End of operation interrupt enable */
 #define FLASH_CR_ERRIE              (1 << 25)               /* Bit 25: Error interrupt enable */
 #define FLASH_CR_RDERRIE            (1 << 26)               /* Bit 26: PCROP read error interrupt enable */
@@ -255,7 +247,7 @@
 
 /* Flash ECC Register (ECCR) */
 
-#define FLASH_ECCR_ADDR_ECC_SHIFT   (0)                    /* Bits 0-18: ECC fail address */
+#define FLASH_ECCR_ADDR_ECC_SHIFT   (0)                    /* Bits 8-15: Read protect */
 #define FLASH_ECCR_ADDR_ECC_MASK    (0x07ffff << FLASH_ECCR_ADDR_ECC_SHIFT)
 #if defined(CONFIG_STM32L4_STM32L4X5) || defined(CONFIG_STM32L4_STM32L4X6) || \
     defined(CONFIG_STM32L4_STM32L4XR)
@@ -280,14 +272,10 @@
 #  define FLASH_OPTCR_BFB2          (1 << 20)               /* Bit 20: Dual bank boot */
 #  define FLASH_OPTCR_DUALBANK      (1 << 21)               /* Bit 21: Dual bank enable */
 #endif
-#if defined(CONFIG_STM32L4_STM32L4XR)
-#  define FLASH_OPTCR_DBANK         (1 << 22)               /* Bit 22: Dual bank mode for 2MB devices */
-#endif
 #define FLASH_OPTCR_NBOOT1          (1 << 23)               /* Bit 23: Boot configuration */
 #define FLASH_OPTCR_SRAM2_PE        (1 << 24)               /* Bit 24: SRAM2 parity check enable */
 #define FLASH_OPTCR_SRAM2_RST       (1 << 25)               /* Bit 25: SRAM2 Erase when system reset */
-#if defined(CONFIG_STM32L4_STM32L4X3) || defined(CONFIG_STM32L4_STM32L496XX) || \
-    defined(CONFIG_STM32L4_STM32L4XR)
+#if defined(CONFIG_STM32L4_STM32L4X3) || defined(CONFIG_STM32L4_STM32L496XX) || defined(CONFIG_STM32L4_STM32L4XR)
 #  define FLASH_OPTCR_NSWBOOT0      (1 << 26)               /* Bit 26: Software BOOT0 */
 #  define FLASH_OPTCR_NBOOT0        (1 << 27)               /* Bit 27: nBOOT0 option bit */
 #endif
@@ -299,7 +287,6 @@
 #define FLASH_OPTCR_VBOR2           (2 << FLASH_OPTCR_BORLEV_SHIFT) /* 010: BOR Level 2 (2.2 V) */
 #define FLASH_OPTCR_VBOR3           (3 << FLASH_OPTCR_BORLEV_SHIFT) /* 011: BOR Level 3 (2.5 V) */
 #define FLASH_OPTCR_VBOR4           (4 << FLASH_OPTCR_BORLEV_SHIFT) /* 100: BOR Level 4 (2.8 V) */
-
 #define FLASH_OPTCR_RDP_SHIFT       (0)                     /* Bits 0-7: Read Protection Level */
 #define FLASH_OPTCR_RDP_MASK        (0xFF << FLASH_OPTCR_RDP_SHIFT)
 #define FLASH_OPTCR_RDP_NONE        (0xAA << FLASH_OPTCR_RDP_SHIFT)

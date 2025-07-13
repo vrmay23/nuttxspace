@@ -1,43 +1,46 @@
 /****************************************************************************
- * arch/arm/src/tiva/cc13xx/cc13xx_prcm.c
+ * arch/arm/src/tiva/cc13xx/cc13x_start.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2015-2017, Texas Instruments Incorporated
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This is a port of TI's prcm.c file (revision 49363) which has a fully
+ * compatible BSD license:
+ *
+ *    Copyright (c) 2015-2017, Texas Instruments Incorporated
+ *    All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
- *  modification, are permitted provided that the following conditions are
- *  met:
+ *  modification, are permitted provided that the following conditions are met:
  *
- *  1) Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
+ *  1) Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
  *
- *  2) Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
+ *  2) Redistributions in binary form must reproduce the above copyright notice,
+ *     this list of conditions and the following disclaimer in the documentation
+ *     and/or other materials provided with the distribution.
  *
- *  3) Neither the name NuttX nor the names of its contributors may be used
- *     to endorse or promote products derived from this software without
- *     specific prior written permission.
+ *  3) Neither the name NuttX nor the names of its contributors may be used to
+ *     endorse or promote products derived from this software without specific
+ *     prior written permission.
  *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
- *  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- *  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- *  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *  HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
- *  TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- *  LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- *  NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- *  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ *  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ *  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ *  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ *  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ *  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ *  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ******************************************************************************/
 
-/****************************************************************************
+/******************************************************************************
  * Included Files
- ****************************************************************************/
+ ******************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -45,13 +48,13 @@
 #include <stdbool.h>
 #include <assert.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "hardware/tiva_prcm.h"
 #include "cc13xx/cc13xx_prcm.h"
 
-/****************************************************************************
+/******************************************************************************
  * Private Data
- ****************************************************************************/
+ ******************************************************************************/
 
 /* Arrays that maps the "peripheral set" number (which is stored in
  * bits[11:8] of the PRCM_PERIPH_* defines) to the PRCM register that
@@ -98,29 +101,28 @@ static const uintptr_t g_dcgcr_base[PRCM_NPERIPH] =
   TIVA_PRCM_I2SCLKGDS              /* Index 6 */
 };
 
-/****************************************************************************
+/******************************************************************************
  * Public Functions
- ****************************************************************************/
+ ******************************************************************************/
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_infclock_configure
  *
  * Description:
  *   Configure the infrastructure clock.
  *
  *   Each System CPU power mode has its own infrastructure clock division
- *   factor. This function can be used for setting up the division factor
- *   for the infrastructure clock in the available power modes for the
- *   System CPU. The infrastructure clock is used for all internal logic in
- *   the PRCM, and is always running as long as power is on in the MCU
- *   voltage domain.  This can be enabled and disabled from the AON Wake Up
- *   Controller.
+ *   factor. This function can be used for setting up the division factor for
+ *   the infrastructure clock in the available power modes for the System CPU.
+ *   The infrastructure clock is used for all internal logic in the PRCM, and
+ *   is always running as long as power is on in the MCU voltage domain.  This
+ *   can be enabled and disabled from the AON Wake Up Controller.
  *
  *   NOTE:  If source clock is 48 MHz, minimum clock divider is 2.
  *
  * Input Parameters:
- *    clockdiv  - Determines the division ratio for the infrastructure clock
- *                when the device is in the specified mode.  Allowed
+ *    clockdiv  - Determines the division ratio for the infrastructure
+ *                clock when the device is in the specified mode.  Allowed
  *                division factors for all three System CPU power modes are:
  *                {1, 2, 8, or 32}
  *    powermode - Determines the System CPU operation mode for which to
@@ -131,7 +133,7 @@ static const uintptr_t g_dcgcr_base[PRCM_NPERIPH] =
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 void prcm_infclock_configure(enum prcm_clkdivider_e clkdiv,
                              enum prcm_powermode_e powermode)
@@ -182,15 +184,13 @@ void prcm_infclock_configure(enum prcm_clkdivider_e clkdiv,
     }
 }
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_audioclock_manual
  *
  * Description:
- *   Configure the audio clock generation with manual setting of clock
- *   divider.
+ *   Configure the audio clock generation with manual setting of clock divider.
  *
- *   NOTE: See hardware documentation before setting audio clock dividers
- *   manually.
+ *   NOTE: See hardware documentation before setting audio clock dividers manually.
  *
  * Input Parameters:
  *   clkconfig - The audio clock configuration.  The parameter is a bitwise
@@ -208,7 +208,7 @@ void prcm_infclock_configure(enum prcm_clkdivider_e clkdiv,
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 #ifdef CONFIG_TIVA_I2S
 void prcm_audioclock_manual(uint32_t clkconfig, uint32_t mstdiv,
@@ -224,8 +224,7 @@ void prcm_audioclock_manual(uint32_t clkconfig, uint32_t mstdiv,
   prcm_audioclock_disable();
 
   /* Make sure to compensate the Frame clock division factor if using single
-   * phase format.
-   */
+   * phase format. */
 
   if ((clkconfig & PRCM_I2SCLKCTL_WCLKPHASE_MASK) ==
       PRCM_I2SCLKCTL_WCLKPHASE_SINGLE)
@@ -247,18 +246,18 @@ void prcm_audioclock_manual(uint32_t clkconfig, uint32_t mstdiv,
 }
 #endif
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_audioclock_configure
  *
  * Description:
  *   Configure the audio clock generation
  *
- *   Use this function to set the sample rate when using internal audio
- *   clock generation for the I2S module.
+ *   Use this function to set the sample rate when using internal audio clock
+ *   generation for the I2S module.
  *
- *   NOTE:  While other clocks are possible, the stability of the four
- *   sample rates defined here are only guaranteed if the clock input to the
- *   I2S module is 48MHz.
+ *   NOTE:  While other clocks are possible, the stability of the four sample
+ *   rates defined here are only guaranteed if the clock input to the I2S module
+ *   is 48MHz.
  *
  * Input Parameters:
  *   clkconfig - The audio clock configuration.  The parameter is a bitwise
@@ -277,7 +276,7 @@ void prcm_audioclock_manual(uint32_t clkconfig, uint32_t mstdiv,
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 #ifdef CONFIG_TIVA_I2S
 void prcm_audioclock_configure(uint32_t clkconfig,
@@ -329,21 +328,20 @@ void prcm_audioclock_configure(uint32_t clkconfig,
 }
 #endif
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_powerdomain_on
  *
  * Description:
  *   Turn power on in power domains in the MCU domain
- *   Use this function to turn on power domains inside the MCU voltage
- *   domain.
+ *   Use this function to turn on power domains inside the MCU voltage domain.
  *
  *   Power on and power off request has different implications for the
  *   different power domains.
  *   - RF Core power domain:
  *     - Power On  : Domain is on or in the process of turning on.
- *     - Power Off : Domain is powered down when System CPU is in deep
- *                   sleep. The third option for the RF Core is to power
- *                   down when the it is idle.  prcm_rfpowerdown_whenidle()
+ *     - Power Off : Domain is powered down when System CPU is in deep sleep.
+ *                   The third option for the RF Core is to power down when
+ *                   the it is idle.  prcm_rfpowerdown_whenidle()
  *   - SERIAL power domain:
  *     - Power on  : Domain is powered on.
  *     - Power off : Domain is powered off.
@@ -361,13 +359,13 @@ void prcm_audioclock_configure(uint32_t clkconfig,
  *     - Power On  : Domain is on.
  *     - Power Off : Domain is powering down if System CPU is idle. This
  *                   will also initiate a power down of the SRAM and BUS
- *                   power domains, unless RF Core is requesting them to be
- *                   on.
+ *                   power domains, unless RF Core is requesting them to
+ *                   be on.
  *
  *   NOTE:  After a call to this function the status of the power domain
- *   should be checked using either prcm_powerdomain_status(). Any write
- *   operation to a power domain which is still not operational can result
- *   in unexpected behavior.
+ *   should be checked using either prcm_powerdomain_status().
+ *   Any write operation to a power domain which is still not operational can
+ *   result in unexpected behavior.
  *
  * Input Parameters:
  *   domains - Determines which power domains to turn on.  The domains that
@@ -383,7 +381,7 @@ void prcm_audioclock_configure(uint32_t clkconfig,
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 void prcm_powerdomain_on(uint32_t domains)
 {
@@ -402,10 +400,10 @@ void prcm_powerdomain_on(uint32_t domains)
       putreg32(PRCM_PDCTL0RFC_ON, TIVA_PRCM_PDCTL0RFC);
 
 #ifdef CONFIG_ARCH_CHIP_CC13X0
-      /* The PDCTL1RFC access is meant to "be used by RFC in autonomous
-       * mode", but keeping it for compatibility on already ROM'ed products
-       * (since this is a ROM function). RFC power domain is on if
-       * (PRCM_O_PDCTL0RFC || PRCM_O_PDCTL1RFC).
+      /* The PDCTL1RFC access is meant to "be used by RFC in autonomous mode",
+       * but keeping it for compatibility on already ROM'ed products (since
+       * this is a ROM function). RFC power domain is on if (PRCM_O_PDCTL0RFC
+       * || PRCM_O_PDCTL1RFC).
        */
 
       putreg32(PRCM_PDCTL1RFC_ON, TIVA_PRCM_PDCTL1RFC);
@@ -433,7 +431,7 @@ void prcm_powerdomain_on(uint32_t domains)
     }
 }
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_powerdomain_off
  *
  * Description:
@@ -457,7 +455,7 @@ void prcm_powerdomain_on(uint32_t domains)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 void prcm_powerdomain_off(uint32_t domains)
 {
@@ -476,10 +474,10 @@ void prcm_powerdomain_off(uint32_t domains)
       putreg32(0, TIVA_PRCM_PDCTL0RFC);
 
 #ifdef CONFIG_ARCH_CHIP_CC13X0
-      /* The PDCTL1RFC access is meant to "be used by RFC in autonomous
-       * mode", but keeping it for compatibility on already ROM'ed products
-       * (since this is a ROM function). RFC power domain is on if
-       * (PRCM_O_PDCTL0RFC || PRCM_O_PDCTL1RFC).
+      /* The PDCTL1RFC access is meant to "be used by RFC in autonomous mode",
+       * but keeping it for compatibility on already ROM'ed products (since
+       * this is a ROM function). RFC power domain is on if (PRCM_O_PDCTL0RFC
+       * || PRCM_O_PDCTL1RFC).
        */
 
       putreg32(0, TIVA_PRCM_PDCTL1RFC);
@@ -517,7 +515,7 @@ void prcm_powerdomain_off(uint32_t domains)
     }
 }
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_powerdomain_status
  *
  * Description:
@@ -529,8 +527,8 @@ void prcm_powerdomain_off(uint32_t domains)
  *              parameter must be an OR'ed combination of one or several of:
  *              1) PRCM_DOMAIN_RFCORE : RF Core.
  *              2) PRCM_DOMAIN_SERIAL : SSI0, UART0, I2C0
- *              3) PRCM_DOMAIN_PERIPH : GPT0, GPT1, GPT2, GPT3, GPIO, SSI1,
- *                 I2S, DMA, UART1
+ *              3) PRCM_DOMAIN_PERIPH : GPT0, GPT1, GPT2, GPT3, GPIO, SSI1, I2S,
+ *                 DMA, UART1
  *
  * Returned Value
  *    - True:  The specified domains are all powered up.
@@ -539,7 +537,7 @@ void prcm_powerdomain_off(uint32_t domains)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 bool prcm_powerdomain_status(uint32_t domains)
 {
@@ -577,37 +575,37 @@ bool prcm_powerdomain_status(uint32_t domains)
   return status;
 }
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_periph_runenable
  *
  * Description:
  *   Enables a peripheral in Run mode
  *
- *   Peripherals are enabled with this function.  At power-up, some
- *   peripherals are disabled; they must be enabled in order to operate or
- *   respond to register reads/writes.
+ *   Peripherals are enabled with this function.  At power-up, some peripherals
+ *   are disabled; they must be enabled in order to operate or respond to
+ *   register reads/writes.
  *
  *   NOTE:  The actual enabling of the peripheral may be delayed until some
- *   time after this function returns. Care should be taken to ensure that
- *   the peripheral is not accessed until it is enabled.
+ *   time after this function returns. Care should be taken to ensure that the
+ *   peripheral is not accessed until it is enabled.
  *
  *   When enabling Timers always make sure that the division factor for the
  *   PERBUSCPUCLK is set. This will guarantee that the timers run at a
  *   continuous rate even if the SYSBUSCLK is gated.
  *
- *   NOTE: A call to this function will only setup the shadow registers in
- *   the MCU domain for the PRCM module. For the changes to propagate to the
- *   system controller in the AON domain a call to this function should
- *   always be followed by a call to prcm_load_set().
+ *   NOTE: A call to this function will only setup the shadow registers in the
+ *   MCU domain for the PRCM module. For the changes to propagate to the
+ *   system controller in the AON domain a call to this function should always
+ *   be followed by a call to prcm_load_set().
  *
  * Input Parameters:
- *   peripheral - The peripheral to enable. This is an encoded value.  See
- *                the PRCRM_PERIPH_* definitions for available encodings.
+ *   peripheral - The peripheral to enable. This is an encoded value.  See the
+ *                PRCRM_PERIPH_* definitions for available encodings.
  *
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 void prcm_periph_runenable(uint32_t peripheral)
 {
@@ -623,33 +621,33 @@ void prcm_periph_runenable(uint32_t peripheral)
   modifyreg32(g_rcgcr_base[index], 0, PRCM_PERIPH_MASKBIT(peripheral));
 }
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_periph_rundisable
  *
  * Description:
  *   Disables a peripheral in Run mode
  *
- *   Peripherals are disabled with this function. Once disabled, they will
- *   not operate or respond to register reads/writes.
+ *   Peripherals are disabled with this function. Once disabled, they will not
+ *   operate or respond to register reads/writes.
  *
- *   NOTE: A call to this function will only setup the shadow registers in
- *   the MCU domain for the PRCM module. For the changes to propagate to the
- *   system controller in the AON domain a call to this function should
- *   always be followed by a call to prcm_load_set().
+ *   NOTE: A call to this function will only setup the shadow registers in the
+ *   MCU domain for the PRCM module. For the changes to propagate to the system
+ *   controller in the AON domain a call to this function should always be
+ *   followed by a call to prcm_load_set().
  *
  *   NOTE: The actual disabling of the peripheral may be delayed until some
  *   time after this function returns. Care should be taken by the user to
- *   ensure that the peripheral is not accessed in this interval as this
- *   might cause the system to hang.
+ *   ensure that the peripheral is not accessed in this interval as this might
+ *   cause the system to hang.
  *
  * Input Parameters:
- *   peripheral - The peripheral to disable. This is an encoded value.  See
- *                the PRCRM_PERIPH_* definitions for available encodings.
+ *   peripheral - The peripheral to disable. This is an encoded value.  See the
+ *                PRCRM_PERIPH_* definitions for available encodings.
  *
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 void prcm_periph_rundisable(uint32_t peripheral)
 {
@@ -665,22 +663,22 @@ void prcm_periph_rundisable(uint32_t peripheral)
   modifyreg32(g_rcgcr_base[index], PRCM_PERIPH_MASKBIT(peripheral), 0);
 }
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_periph_sleepenable
  *
  * Description:
  *   Enables a peripheral in sleep mode
  *
- *   This function allows a peripheral to continue operating when the
- *   processor goes into sleep mode. Since the clocking configuration of the
- *   device does not change, any peripheral can safely continue operating
- *   while the processor is in sleep mode, and can therefore wake the
- *   processor from sleep mode.
+ *   This function allows a peripheral to continue operating when the processor
+ *   goes into sleep mode. Since the clocking configuration of the device does
+ *   not change, any peripheral can safely continue operating while the
+ *   processor is in sleep mode, and can therefore wake the processor from sleep
+ *   mode.
  *
- *   NOTE: A call to this function will only setup the shadow registers in
- *   the MCU domain for the PRCM module. For the changes to propagate to the
- *   system controller in the AON domain a call to this function should
- *   always be followed by a call to prcm_load_set().
+ *   NOTE: A call to this function will only setup the shadow registers in the
+ *   MCU domain for the PRCM module. For the changes to propagate to the system
+ *   controller in the AON domain a call to this function should always be
+ *   followed by a call to prcm_load_set().
  *
  * Input Parameters:
  *   peripheral - The peripheral to enable in sleep mode. This is an encoded
@@ -690,7 +688,7 @@ void prcm_periph_rundisable(uint32_t peripheral)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 void prcm_periph_sleepenable(uint32_t peripheral)
 {
@@ -706,33 +704,33 @@ void prcm_periph_sleepenable(uint32_t peripheral)
   modifyreg32(g_scgcr_base[index], 0, PRCM_PERIPH_MASKBIT(peripheral));
 }
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_periph_sleepdisable
  *
  * Description:
  *   Disables a peripheral in sleep mode
  *
- *   This function causes a peripheral to stop operating when the processor
- *   goes into sleep mode. Disabling peripherals while in sleep mode helps
- *   to lower the current draw of the device. If enabled (via
- *   prcm_periph_runenable()), the peripheral will automatically resume
- *   operation when the processor leaves sleep mode, maintaining its entire
- *   state from before sleep mode was entered.
+ *   This function causes a peripheral to stop operating when the processor goes
+ *   into sleep mode. Disabling peripherals while in sleep mode helps to lower
+ *   the current draw of the device. If enabled (via prcm_periph_runenable()),
+ *   the peripheral will automatically resume operation when the processor
+ *   leaves sleep mode, maintaining its entire state from before sleep mode was
+ *   entered.
  *
- *   NOTE: A call to this function will only setup the shadow registers in
- *   the MCU domain for the PRCM module. For the changes to propagate to the
- *   system controller in the AON domain a call to this function should
- *   always be followed by a call to prcm_load_set().
+ *   NOTE: A call to this function will only setup the shadow registers in the
+ *   MCU domain for the PRCM module. For the changes to propagate to the system
+ *   controller in the AON domain a call to this function should always be
+ *   followed by a call to prcm_load_set().
  *
  * Input Parameters:
- *   peripheral - The peripheral to disable in sleep mode. This is an
- *                encoded value.  See the PRCRM_PERIPH_* definitions for
- *                available encodings.
+ *   peripheral - The peripheral to disable in sleep mode. This is an encoded
+ *                value.  See the PRCRM_PERIPH_* definitions for available
+ *                encodings.
  *
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 void prcm_periph_sleepdisable(uint32_t peripheral)
 {
@@ -748,23 +746,22 @@ void prcm_periph_sleepdisable(uint32_t peripheral)
   modifyreg32(g_scgcr_base[index], PRCM_PERIPH_MASKBIT(peripheral), 0);
 }
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_periph_deepsleepenable
  *
  * Description:
  *   Enables a peripheral in deep-sleep mode
  *
- *   This function allows a peripheral to continue operating when the
- *   processor goes into deep-sleep mode.  Since the clocking configuration
- *   of the device may change, not all peripherals can safely continue
- *   operating while the processor is in sleep mode. This in turn depends on
- *   the chosen power mode. It is the responsibility of the caller to make
- *   sensible choices.
+ *   This function allows a peripheral to continue operating when the processor
+ *   goes into deep-sleep mode.  Since the clocking configuration of the device
+ *   may change, not all peripherals can safely continue operating while the
+ *   processor is in sleep mode. This in turn depends on the chosen power mode.
+ *   It is the responsibility of the caller to make sensible choices.
  *
- *   NOTE: A call to this function will only setup the shadow registers in
- *   the MCU domain for the PRCM module. For the changes to propagate to the
- *   system controller in the AON domain a call to this function should
- *   always be followed by a call to prcm_load_set().
+ *   NOTE: A call to this function will only setup the shadow registers in the
+ *   MCU domain for the PRCM module. For the changes to propagate to the system
+ *   controller in the AON domain a call to this function should always be
+ *   followed by a call to prcm_load_set().
  *
  * Input Parameters:
  *   peripheral - The peripheral to ensable in deep sleep mode. This is an
@@ -774,7 +771,7 @@ void prcm_periph_sleepdisable(uint32_t peripheral)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 void prcm_periph_deepsleepenable(uint32_t peripheral)
 {
@@ -790,26 +787,25 @@ void prcm_periph_deepsleepenable(uint32_t peripheral)
   modifyreg32(g_dcgcr_base[index], 0, PRCM_PERIPH_MASKBIT(peripheral));
 }
 
-/****************************************************************************
+/******************************************************************************
  * Name: prcm_periph_deepsleepdisable
  *
  * Description:
  *   Disables a peripheral in deep-sleep mode
  *
- *   This function causes a peripheral to stop operating when the processor
- *   goes into deep-sleep mode.  Disabling peripherals while in deep-sleep
- *   mode helps to lower the current draw of the device, and can keep
- *   peripherals that require a particular clock frequency from operating
- *   when the clock changes as a result of entering deep-sleep mode.  If
- *   enabled (via prcm_periph_runenable()), the peripheral will
- *   automatically resume operation when the processor leaves deep-sleep
- *   mode, maintaining its entire state from before deep-sleep mode was
- *   entered.
+ *   This function causes a peripheral to stop operating when the processor goes
+ *   into deep-sleep mode.  Disabling peripherals while in deep-sleep mode helps
+ *   to lower the current draw of the device, and can keep peripherals that
+ *   require a particular clock frequency from operating when the clock changes
+ *   as a result of entering deep-sleep mode.  If enabled (via
+ *   prcm_periph_runenable()), the peripheral will automatically resume
+ *   operation when the processor leaves deep-sleep mode, maintaining its entire
+ *   state from before deep-sleep mode was entered.
  *
- *   NOTE: A call to this function will only setup the shadow registers in
- *   the MCU domain for the PRCM module. For the changes to propagate to the
- *   system controller in the AON domain a call to this function should
- *   always be followed by a call to prcm_load_set().
+ *   NOTE: A call to this function will only setup the shadow registers in the
+ *   MCU domain for the PRCM module. For the changes to propagate to the system
+ *   controller in the AON domain a call to this function should always be
+ *   followed by a call to prcm_load_set().
  *
  * Input Parameters:
  *   peripheral - The peripheral to disable in deep sleep mode. This is an
@@ -819,7 +815,7 @@ void prcm_periph_deepsleepenable(uint32_t peripheral)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ******************************************************************************/
 
 void prcm_periph_deepsleepdisable(uint32_t peripheral)
 {

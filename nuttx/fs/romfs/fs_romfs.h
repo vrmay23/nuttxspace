@@ -1,22 +1,37 @@
 /****************************************************************************
  * fs/romfs/fs_romfs.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009, 2011 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References: Linux/Documentation/filesystems/romfs.txt
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -28,10 +43,11 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/list.h>
 
 #include <stdint.h>
 #include <stdbool.h>
+
+#include <nuttx/fs/dirent.h>
 
 #include "inode/inode.h"
 
@@ -84,11 +100,6 @@
 #define IS_HARDLINK(rfn)   IS_MODE(rfn,RFNEXT_HARDLINK)
 #define IS_DIRECTORY(rfn)  IS_MODE(rfn,RFNEXT_DIRECTORY)
 #define IS_FILE(rfn)       IS_MODE(rfn,RFNEXT_FILE)
-#define IS_SOFTLINK(rfn)   IS_MODE(rfn,RFNEXT_SOFTLINK)
-#define IS_BLOCKDEV(rfn)   IS_MODE(rfn,RFNEXT_BLOCKDEV)
-#define IS_CHARDEV(rfn)    IS_MODE(rfn,RFNEXT_CHARDEV)
-#define IS_SOCKET(rfn)     IS_MODE(rfn,RFNEXT_SOCKET)
-#define IS_FIFO(rfn)       IS_MODE(rfn,RFNEXT_FIFO)
 #define IS_EXECUTABLE(rfn) (((rfn) & RFNEXT_EXEC) != 0)
 
 /* RFNEXT_SOFTLINK, RFNEXT_BLOCKDEV, RFNEXT_CHARDEV, RFNEXT_SOCKET, and
@@ -109,7 +120,7 @@
 #define SEC_NSECTORS(r,o)    ((o) / (r)->rm_hwsectorsize)
 #define SEC_ALIGN(r,o)       ((o) & ~SEC_NDXMASK(r))
 
-/* Maximum number of links that will be followed before we decide that there
+/* Maximum numbr of links that will be followed before we decide that there
  * is a problem.
  */
 
@@ -119,48 +130,26 @@
  * Public Types
  ****************************************************************************/
 
-#ifdef CONFIG_FS_ROMFS_WRITEABLE
-/* This structure represents the spare list.  An instance of this
- * structure is retained as file header and file data size on each mountpoint
- * that is mounted with a romfs filesystem.
- */
-
-struct romfs_sparenode_s
-{
-  struct list_node node;
-  uint32_t start;
-  uint32_t end;
-};
-#endif
-
 /* This structure represents the overall mountpoint state.  An instance of
  * this structure is retained as inode private data on each mountpoint that
- * is mounted with a romfs filesystem.
+ * is mounted with a fat32 filesystem.
  */
 
 struct romfs_file_s;
 struct romfs_mountpt_s
 {
-  FAR struct inode *rm_blkdriver; /* The block driver inode that hosts the romfs */
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-  FAR struct romfs_nodeinfo_s *rm_root; /* The node for root node */
-#else
-  uint32_t rm_rootoffset;         /* Saved offset to the first root directory entry */
-#endif
-  bool     rm_mounted;            /* true: The file system is ready */
-  uint16_t rm_hwsectorsize;       /* HW: Sector size reported by block driver */
-  rmutex_t rm_lock;               /* Used to assume thread-safe access */
-  uint32_t rm_refs;               /* The references for all files opened on this mountpoint */
-  uint32_t rm_hwnsectors;         /* HW: The number of sectors reported by the hardware */
-  uint32_t rm_volsize;            /* Size of the ROMFS volume */
-  uint32_t rm_cachesector;        /* Current sector in the rm_buffer */
-  FAR uint8_t *rm_xipbase;        /* Base address of directly accessible media */
-  FAR uint8_t *rm_buffer;         /* Device sector buffer, allocated if rm_xipbase==0 */
-  FAR uint8_t *rm_devbuffer;      /* Device sector buffer, allocated for write if rm_xipbase != 0 */
-#ifdef CONFIG_FS_ROMFS_WRITEABLE
-  struct list_node rm_sparelist;  /* The list of spare space */
-  sem_t            rm_sem;        /* The semaphore to assume write safe */
-#endif
+  struct inode        *rm_blkdriver; /* The block driver inode that hosts the FAT32 fs */
+  struct romfs_file_s *rm_head;      /* A list to all files opened on this mountpoint */
+
+  bool     rm_mounted;              /* true: The file system is ready */
+  uint16_t rm_hwsectorsize;         /* HW: Sector size reported by block driver */
+  sem_t    rm_sem;                  /* Used to assume thread-safe access */
+  uint32_t rm_rootoffset;           /* Saved offset to the first root directory entry */
+  uint32_t rm_hwnsectors;           /* HW: The number of sectors reported by the hardware */
+  uint32_t rm_volsize;              /* Size of the ROMFS volume */
+  uint32_t rm_cachesector;          /* Current sector in the rm_buffer */
+  uint8_t *rm_xipbase;              /* Base address of directly accessible media */
+  uint8_t *rm_buffer;               /* Device sector buffer, allocated if rm_xipbase==0 */
 };
 
 /* This structure represents on open file under the mountpoint.  An instance
@@ -170,28 +159,31 @@ struct romfs_mountpt_s
 
 struct romfs_file_s
 {
-  uint32_t rf_startoffset;        /* Offset to the start of the file data */
-  uint32_t rf_endsector;          /* Last sector of the file data */
-  uint32_t rf_size;               /* Size of the file in bytes */
-  uint32_t rf_cachesector;        /* First sector in the rf_buffer */
-  uint32_t rf_ncachesector;       /* Number of sectors in the rf_buffer */
-  FAR uint8_t *rf_buffer;         /* File sector buffer, allocated if rm_xipbase==0 */
-  uint8_t rf_type;                /* File type (for fstat()) */
-  char rf_path[1];                /* Path of open file */
+  FAR struct romfs_file_s *rf_next; /* Retained in a singly linked list */
+  uint32_t rf_startoffset;          /* Offset to the start of the file data */
+  uint32_t rf_size;                 /* Size of the file in bytes */
+  uint32_t rf_cachesector;          /* Current sector in the rf_buffer */
+  uint8_t *rf_buffer;               /* File sector buffer, allocated if rm_xipbase==0 */
+  uint8_t rf_type;                  /* File type (for fstat()) */
 };
 
-struct romfs_nodeinfo_s
+/* This structure is used internally for describing the result of
+ * walking a path
+ */
+
+struct romfs_dirinfo_s
 {
-  uint32_t rn_offset;                      /* Offset of real file header */
-  uint32_t rn_next;                        /* Offset of the next file header+flags */
-  uint32_t rn_size;                        /* Size (if file) */
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-  uint32_t rn_origoffset;                  /* Offset of origin file header */
-  FAR struct romfs_nodeinfo_s **rn_child;  /* The node array for link to lower level */
-  uint16_t rn_count;                       /* The count of node in rn_child level */
-  uint8_t  rn_namesize;                    /* The length of name of the entry */
-  char     rn_name[1];                     /* The name to the entry */
-#endif
+  /* These values describe the directory containing the terminal
+   * path component (of the terminal component itself if it is
+   * a directory.
+   */
+
+  struct fs_romfsdir_s rd_dir;    /* Describes directory. */
+
+  /* Values from the ROMFS file entry */
+
+  uint32_t rd_next;               /* Offset of the next file header+flags */
+  uint32_t rd_size;               /* Size (if file) */
 };
 
 /****************************************************************************
@@ -211,33 +203,27 @@ extern "C"
  * Public Function Prototypes
  ****************************************************************************/
 
+int  romfs_semtake(FAR struct romfs_mountpt_s *rm);
+void romfs_semgive(FAR struct romfs_mountpt_s *rm);
 int  romfs_hwread(FAR struct romfs_mountpt_s *rm, FAR uint8_t *buffer,
-                  uint32_t sector, unsigned int nsectors);
+       uint32_t sector, unsigned int nsectors);
 int  romfs_filecacheread(FAR struct romfs_mountpt_s *rm,
-                         FAR struct romfs_file_s *rf, uint32_t sector);
+       FAR struct romfs_file_s *rf, uint32_t sector);
 int  romfs_hwconfigure(FAR struct romfs_mountpt_s *rm);
-int  romfs_fsconfigure(FAR struct romfs_mountpt_s *rm, FAR const void *data);
+int  romfs_fsconfigure(FAR struct romfs_mountpt_s *rm);
 int  romfs_fileconfigure(FAR struct romfs_mountpt_s *rm,
-                         FAR struct romfs_file_s *rf);
+       FAR struct romfs_file_s *rf);
 int  romfs_checkmount(FAR struct romfs_mountpt_s *rm);
 int  romfs_finddirentry(FAR struct romfs_mountpt_s *rm,
-                        FAR struct romfs_nodeinfo_s *nodeinfo,
-                        FAR const char *path);
-int  romfs_parsedirentry(FAR struct romfs_mountpt_s *rm, uint32_t offset,
-                         FAR uint32_t *poffset, FAR uint32_t *pnext,
-                         FAR uint32_t *pinfo, FAR uint32_t *psize);
+       FAR struct romfs_dirinfo_s *dirinfo,
+       FAR const char *path);
+int  romfs_parsedirentry(FAR struct romfs_mountpt_s *rm,
+       uint32_t offset, FAR uint32_t *poffset, FAR uint32_t *pnext,
+       FAR uint32_t *pinfo, FAR uint32_t *psize);
 int  romfs_parsefilename(FAR struct romfs_mountpt_s *rm, uint32_t offset,
-                         FAR char *pname);
-int  romfs_datastart(FAR struct romfs_mountpt_s *rm,
-                     FAR struct romfs_nodeinfo_s *nodeinfo,
-                     FAR uint32_t *start);
-#ifdef CONFIG_FS_ROMFS_CACHE_NODE
-void romfs_freenode(FAR struct romfs_nodeinfo_s *node);
-#endif
-#ifdef CONFIG_FS_ROMFS_WRITEABLE
-int romfs_mkfs(FAR struct romfs_mountpt_s *rm);
-void romfs_free_sparelist(FAR struct list_node *list);
-#endif
+       FAR char *pname);
+int  romfs_datastart(FAR struct romfs_mountpt_s *rm, uint32_t offset,
+       FAR uint32_t *start);
 
 #undef EXTERN
 #if defined(__cplusplus)

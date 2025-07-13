@@ -1,7 +1,6 @@
 /****************************************************************************
  * net/tcp/tcp_devpoll.c
- *
- * SPDX-License-Identifier: BSD-3-Clause
+ * Driver poll for the availability of TCP TX data
  *
  *   Copyright (C) 2007-2009, 2016-2017 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
@@ -75,10 +74,7 @@
  *   None
  *
  * Assumptions:
- *   It is called with the network locked.
- *   dev is not NULL.
- *   conn is not NULL.
- *   The connection (conn) is bound to the polling device (dev).
+ *   Called with the network locked.
  *
  ****************************************************************************/
 
@@ -86,23 +82,7 @@ void tcp_poll(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn)
 {
   uint16_t result;
 
-  DEBUGASSERT(dev != NULL && conn != NULL && dev == conn->dev);
-
-  /* Prepare device buffer */
-
-  if (netdev_iob_prepare(dev, false, 0) != OK)
-    {
-      return;
-    }
-
   /* Discard any currently buffered data */
-
-  if (conn->timeout)
-    {
-      conn->timeout = false;
-      tcp_timer(dev, conn);
-      return;
-    }
 
   dev->d_len     = 0;
   dev->d_sndlen  = 0;
@@ -111,20 +91,43 @@ void tcp_poll(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn)
 
   if ((conn->tcpstateflags & TCP_STATE_MASK) == TCP_ESTABLISHED)
     {
-      /* Set up for the callback.  We can't know in advance if the
-       * application is going to send a IPv4 or an IPv6 packet, so this
-       * setup may not actually be used.
+      /* The TCP connection is established and, hence, should be bound
+       * to a device. Make sure that the polling device is the one that
+       * we are bound to.
        */
 
-      tcp_ip_select(conn);
+      DEBUGASSERT(conn->dev != NULL);
+      if (dev == conn->dev)
+        {
+          /* Set up for the callback.  We can't know in advance if the
+           * application is going to send a IPv4 or an IPv6 packet, so this
+           * setup may not actually be used.
+           */
 
-      /* Perform the callback */
+#if defined(CONFIG_NET_IPv6) && defined(CONFIG_NET_IPv4)
+          if (conn->domain == PF_INET)
+            {
+              tcp_ipv4_select(dev);
+            }
+          else
+            {
+              tcp_ipv6_select(dev);
+            }
 
-      result = tcp_callback(dev, conn, TCP_POLL);
+#elif defined(CONFIG_NET_IPv4)
+          tcp_ipv4_select(dev);
 
-      /* Handle the callback response */
+#else /* if defined(CONFIG_NET_IPv6) */
+          tcp_ipv6_select(dev);
+#endif
+          /* Perform the callback */
 
-      tcp_appsend(dev, conn, result);
+          result = tcp_callback(dev, conn, TCP_POLL);
+
+          /* Handle the callback response */
+
+          tcp_appsend(dev, conn, result);
+        }
     }
 }
 

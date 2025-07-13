@@ -1,10 +1,13 @@
-/****************************************************************************
+/********************************************************************************************
  * arch/arm/src/tiva/hardware/cc13x2_cc26x2/cc13x2_cc26x2_i2c.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2018 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2015-2017, Texas Instruments Incorporated
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Technical content derives from a TI header file that has a compatible BSD license:
+ *
+ *   Copyright (c) 2015-2017, Texas Instruments Incorporated
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,16 +36,16 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ********************************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X2_CC26X2_CC13X2_CC26X2_I2C_H
-#define __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X2_CC26X2_CC13X2_CC26X2_I2C_H
+#ifndef __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X20_CC26X2_CC13X20_CC26X2_I2C_H
+#define __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X20_CC26X2_CC13X20_CC26X2_I2C_H
 
-/****************************************************************************
+/********************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ********************************************************************************************/
 
-/* I2C register offsets *****************************************************/
+/* I2C register offsets *********************************************************************/
 
 #define TIVA_I2C_SOAR_OFFSET                    0x0000  /* Slave Own Address */
 #define TIVA_I2C_SSTAT_OFFSET                   0x0004  /* Slave Status */
@@ -64,7 +67,7 @@
 #define TIVA_I2C_MICR_OFFSET                    0x081c  /* Master Interrupt Clear */
 #define TIVA_I2C_MCR_OFFSET                     0x0820  /* Master Configuration */
 
-/* I2C register addresses ***************************************************/
+/* I2C register addresses *******************************************************************/
 
 #define TIVA_I2C0_SOAR                          (TIVA_I2C0_BASE + TIVA_I2C_SOAR_OFFSET)
 #define TIVA_I2C0_SSTAT                         (TIVA_I2C0_BASE + TIVA_I2C_SSTAT_OFFSET)
@@ -86,7 +89,7 @@
 #define TIVA_I2C0_MICR                          (TIVA_I2C0_BASE + TIVA_I2C_MICR_OFFSET)
 #define TIVA_I2C0_MCR                           (TIVA_I2C0_BASE + TIVA_I2C_MCR_OFFSET)
 
-/* I2C bitfield definitions *************************************************/
+/* I2C bitfield definitions *****************************************************************/
 
 /* Slave Own Address */
 
@@ -205,4 +208,4 @@
 #define I2C_MCR_MFE                             (1 << 4)  /* Bit 4:  I2C master function enable */
 #define I2C_MCR_SFE                             (1 << 5)  /* Bit 5:  I2C slave function enable */
 
-#endif /* __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X2_CC26X2_CC13X2_CC26X2_I2C_H */
+#endif /* __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X20_CC26X2_CC13X20_CC26X2_I2C_H */

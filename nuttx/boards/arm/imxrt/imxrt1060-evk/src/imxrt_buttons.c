@@ -1,22 +1,36 @@
 /****************************************************************************
  * boards/arm/imxrt/imxrt1060-evk/src/imxrt_buttons.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            David Sidrane <david_s5@nscdg.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,7 +47,8 @@
 #include <nuttx/irq.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "imxrt_config.h"
 #include "imxrt_irq.h"
 #include "imxrt_gpio.h"
@@ -50,15 +65,6 @@
  * 1. SW8 (IRQ88)   GPIO5-00
  */
 
-const uint32_t gpio_pins[NUM_BUTTONS]     =
-                                            {
-                                              GPIO_SW8
-                                            };
-const uint32_t gpio_pins_int[NUM_BUTTONS] =
-                                            {
-                                              GPIO_SW8_INT
-                                            };
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -74,18 +80,11 @@ const uint32_t gpio_pins_int[NUM_BUTTONS] =
  *
  ****************************************************************************/
 
-uint32_t board_button_initialize(void)
+void board_button_initialize(void)
 {
-  uint32_t i;
+  /* Configure the button as input */
 
-  /* Configure the buttons as input */
-
-  for (i = 0; i < NUM_BUTTONS; i++)
-    {
-      imxrt_config_gpio(gpio_pins[i]);
-    }
-
-  return NUM_BUTTONS;
+  imxrt_config_gpio(GPIO_SW8);
 }
 
 /****************************************************************************
@@ -102,11 +101,10 @@ uint32_t board_button_initialize(void)
 uint8_t board_buttons(void)
 {
   uint8_t ret = 0;
-  uint8_t i   = 0;
 
-  for (i = 0; i < NUM_BUTTONS; i++)
+  if (!imxrt_gpio_read(GPIO_SW8))
     {
-      ret |= ((!imxrt_gpio_read(gpio_pins[i])) << i);
+      ret |= BUTTON_SW8_BIT;
     }
 
   return ret;
@@ -125,7 +123,7 @@ uint8_t board_buttons(void)
  ****************************************************************************/
 
 #ifdef CONFIG_ARCH_IRQBUTTONS
-int board_button_irq(int id, xcpt_t irqhandler, void *arg)
+int board_button_irq(int id, xcpt_t irqhandler)
 {
   int ret = -EINVAL;
 
@@ -135,26 +133,11 @@ int board_button_irq(int id, xcpt_t irqhandler, void *arg)
    * Attach the new button handler.
    */
 
-  if (id < NUM_BUTTONS)
-    {
-      uint32_t irqnum = gpio_pins_int[id];
-      if (irqhandler)
-        {
-          ret = irq_attach(irqnum, irqhandler, arg);
-          imxrt_gpioirq_enable (irqnum);
+  ret = irq_attach(id, irqhandler, NULL);
 
-          /* Then make sure that interrupts are enabled on the pin */
+  /* Then make sure that interrupts are enabled on the pin */
 
-          up_enable_irq(irqnum);
-        }
-      else
-        {
-          up_disable_irq(irqnum);
-          imxrt_gpioirq_disable(irqnum);
-          ret = OK;
-        }
-    }
-
+  up_enable_irq(id);
   return ret;
 }
 #endif

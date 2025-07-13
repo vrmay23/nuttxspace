@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/stm32/olimex-stm32-p407/src/stm32_bringup.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,13 +39,13 @@
 
 #include <nuttx/config.h>
 
+#include <sys/mount.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <syslog.h>
 #include <errno.h>
 
 #include <nuttx/board.h>
-#include <nuttx/fs/fs.h>
 #include <nuttx/mmcsd.h>
 #include <nuttx/input/buttons.h>
 
@@ -41,7 +54,8 @@
 #endif
 
 #ifdef CONFIG_MODULE
-#  include <nuttx/lib/elf.h>
+#  include "nuttx/symtab.h"
+#  include "nuttx/lib/modlib.h"
 #endif
 
 #ifdef CONFIG_STM32_OTGFS
@@ -50,10 +64,6 @@
 
 #include "stm32.h"
 #include "olimex-stm32-p407.h"
-
-#ifdef CONFIG_SENSORS_DHTXX
-#include "stm32_dhtxx.h"
-#endif
 
 /****************************************************************************
  * Public Data
@@ -77,7 +87,7 @@ extern const int MODSYMS_NSYMBOLS_VAR;
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_LIB_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -85,14 +95,14 @@ extern const int MODSYMS_NSYMBOLS_VAR;
 int stm32_bringup(void)
 {
 #ifdef HAVE_MMCSD
-  struct sdio_dev_s *sdio;
+  FAR struct sdio_dev_s *sdio;
 #endif
   int ret;
 
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
 
-  ret = nx_mount(NULL, "/proc", "procfs", 0, NULL);
+  ret = mount(NULL, "/proc", "procfs", 0, NULL);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to mount procfs at /proc: %d\n", ret);
@@ -102,12 +112,11 @@ int stm32_bringup(void)
 #ifdef HAVE_MODSYMS
   /* Install the module symbol table */
 
-  libelf_setsymtab(MODSYMS_SYMTAB_ARRAY, MODSYMS_NSYMBOLS_VAR);
+  modlib_setsymtab(MODSYMS_SYMTAB_ARRAY, MODSYMS_NSYMBOLS_VAR);
 #endif
 
 #ifdef HAVE_MMCSD
   /* Mount the SDIO-based MMC/SD block driver */
-
   /* First, get an instance of the SDIO interface */
 
   sdio = sdio_initialize(MMCSD_SLOTNO);
@@ -135,10 +144,10 @@ int stm32_bringup(void)
    * the slot so we are reduced to guessing.
    */
 
-  sdio_mediachange(sdio, true);
+   sdio_mediachange(sdio, true);
 #endif
 
-#ifdef CONFIG_STM32_CAN_CHARDRIVER
+#ifdef CONFIG_CAN
   /* Initialize CAN and register the CAN driver. */
 
   ret = stm32_can_setup();
@@ -181,7 +190,7 @@ int stm32_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_INPUT_BUTTONS
+#ifdef CONFIG_BUTTONS
   /* Register the BUTTON driver */
 
   ret = btn_lower_initialize("/dev/buttons");
@@ -192,28 +201,10 @@ int stm32_bringup(void)
 #endif
 
 #ifdef CONFIG_SENSORS_DHTXX
-  ret = board_dhtxx_initialize(0);
+  ret = stm32_dhtxx_initialize("/dev/dht0");
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: stm32_dhtxx_initialize() failed: %d\n", ret);
-    }
-#endif
-
-#ifdef HAVE_CS4344
-  /* Configure CS4344 audio */
-
-  ret = stm32_cs4344_initialize(1);
-  if (ret != OK)
-    {
-      syslog(LOG_ERR, "Failed to initialize CS4344 audio: %d\n", ret);
-    }
-#endif
-
-#ifdef CONFIG_INPUT_DJOYSTICK
-  ret = stm32_djoy_initialize();
-  if (ret != OK)
-    {
-      syslog(LOG_ERR, "Failed to register djoystick driver: %d\n", ret);
     }
 #endif
 

@@ -6,8 +6,6 @@
 config EXAMPLES_POWERLED
 	tristate "Powerled example"
 	default n
-	depends on DRIVERS_POWERLED
-	depends on LIBC_FLOATINGPOINT
 	---help---
 		Enable the powerled driver example
 

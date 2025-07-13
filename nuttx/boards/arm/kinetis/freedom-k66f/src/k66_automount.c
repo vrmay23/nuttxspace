@@ -1,22 +1,36 @@
 /****************************************************************************
  * boards/arm/kinetis/freedom-k66f/src/k66_automount.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            David Sidrane <david_s5@nscdg.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +44,6 @@
 #  define CONFIG_DEBUG_FS 1
 #endif
 
-#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -42,6 +55,18 @@
 #ifdef HAVE_AUTOMOUNTER
 
 /****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#ifndef NULL
+#  define NULL (FAR void *)0
+#endif
+
+#ifndef OK
+#  define OK 0
+#endif
+
+/****************************************************************************
  * Private Types
  ****************************************************************************/
 
@@ -49,10 +74,10 @@
 
 struct k66_automount_state_s
 {
-  volatile automount_handler_t handler; /* Upper half handler */
-  void *arg;                            /* Handler argument */
-  bool enable;                          /* Fake interrupt enable */
-  bool pending;                         /* Set if there an event while disabled */
+  volatile automount_handler_t handler;    /* Upper half handler */
+  FAR void *arg;                           /* Handler argument */
+  bool enable;                             /* Fake interrupt enable */
+  bool pending;                            /* Set if there an event while disabled */
 };
 
 /* This structure represents the static configuration of an automounter */
@@ -63,19 +88,19 @@ struct k66_automount_config_s
    * struct automount_lower_s to struct k66_automount_config_s
    */
 
-  struct automount_lower_s lower;      /* Publicly visible part */
-  struct k66_automount_state_s *state; /* Changeable state */
+  struct automount_lower_s lower;          /* Publicly visible part */
+  FAR struct k66_automount_state_s *state; /* Changeable state */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static int  k66_attach(const struct automount_lower_s *lower,
-                       automount_handler_t isr, void *arg);
-static void k66_enable(const struct automount_lower_s *lower,
+static int  k66_attach(FAR const struct automount_lower_s *lower,
+                       automount_handler_t isr, FAR void *arg);
+static void k66_enable(FAR const struct automount_lower_s *lower,
                        bool enable);
-static bool k66_inserted(const struct automount_lower_s *lower);
+static bool k66_inserted(FAR const struct automount_lower_s *lower);
 
 /****************************************************************************
  * Private Data
@@ -118,15 +143,15 @@ static const struct k66_automount_config_s g_sdhc_config =
  *
  ****************************************************************************/
 
-static int k66_attach(const struct automount_lower_s *lower,
-                      automount_handler_t isr, void *arg)
+static int k66_attach(FAR const struct automount_lower_s *lower,
+                      automount_handler_t isr, FAR void *arg)
 {
-  const struct k66_automount_config_s *config;
-  struct k66_automount_state_s *state;
+  FAR const struct k66_automount_config_s *config;
+  FAR struct k66_automount_state_s *state;
 
   /* Recover references to our structure */
 
-  config = (struct k66_automount_config_s *)lower;
+  config = (FAR struct k66_automount_config_s *)lower;
   DEBUGASSERT(config != NULL && config->state != NULL);
 
   state = config->state;
@@ -157,16 +182,15 @@ static int k66_attach(const struct automount_lower_s *lower,
  *
  ****************************************************************************/
 
-static void k66_enable(const struct automount_lower_s *lower,
-                       bool enable)
+static void k66_enable(FAR const struct automount_lower_s *lower, bool enable)
 {
-  const struct k66_automount_config_s *config;
-  struct k66_automount_state_s *state;
+  FAR const struct k66_automount_config_s *config;
+  FAR struct k66_automount_state_s *state;
   irqstate_t flags;
 
   /* Recover references to our structure */
 
-  config = (struct k66_automount_config_s *)lower;
+  config = (FAR struct k66_automount_config_s *)lower;
   DEBUGASSERT(config != NULL && config->state != NULL);
 
   state = config->state;
@@ -180,7 +204,7 @@ static void k66_enable(const struct automount_lower_s *lower,
 
   if (enable && state->pending)
     {
-      /* Yes.. perform the fake interrupt if the interrupt is attached */
+      /* Yes.. perform the fake interrupt if the interrutp is attached */
 
       if (state->handler)
         {
@@ -208,7 +232,7 @@ static void k66_enable(const struct automount_lower_s *lower,
  *
  ****************************************************************************/
 
-static bool k66_inserted(const struct automount_lower_s *lower)
+static bool k66_inserted(FAR const struct automount_lower_s *lower)
 {
   return k66_cardinserted();
 }
@@ -233,7 +257,7 @@ static bool k66_inserted(const struct automount_lower_s *lower)
 
 void k66_automount_initialize(void)
 {
-  void *handle;
+  FAR void *handle;
 
   finfo("Initializing automounter(s)\n");
 
@@ -246,12 +270,11 @@ void k66_automount_initialize(void)
     }
 }
 
-/****************************************************************************
+/*****************************************************************************
  * Name:  k66_automount_event
  *
  * Description:
- *   The SDHC card detection logic has detected an insertion or removal
- *   event.
+ *   The SDHC card detection logic has detected an insertion or removal event.
  *   It has already scheduled the MMC/SD block driver operations.
  *   Now we need to schedule the auto-mount event which will occur with a
  *   substantial delay to make sure that everything has settle down.
@@ -269,12 +292,12 @@ void k66_automount_initialize(void)
  *  Assumptions:
  *    Interrupts are disabled.
  *
- ****************************************************************************/
+ *****************************************************************************/
 
 void k66_automount_event(bool inserted)
 {
-  const struct k66_automount_config_s *config = &g_sdhc_config;
-  struct k66_automount_state_s *state = &g_sdhc_state;
+  FAR const struct k66_automount_config_s *config = &g_sdhc_config;
+  FAR struct k66_automount_state_s *state = &g_sdhc_state;
 
   /* Is the auto-mounter interrupt attached? */
 

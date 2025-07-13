@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/mmcsd/mmcsd_csd.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2008-2009 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -78,7 +91,7 @@
 
 #define MMCSD_CSD_CCC(csd) ((csd[2] >> 4) & 0x0fff)
 
-/* READ_BL_LEN 80-83 = Max. read data block length */
+ /* READ_BL_LEN 80-83 = Max. read data block length */
 
 #define MMCSD_CSD_READBLLEN(csd) (csd[2] & 0x0f)
 
@@ -118,8 +131,6 @@
 
 #define MMCSD_CSD_VDDWCURRMAX(csd) ((csd[4] >> 2) & 7)
 
-#define MMCSD_CSD_CSIZE_THRESHOLD   0xfff
-
 /* C_SIZE_MULT 47-49 Device size multiplier */
 
 #define MMCSD_CSD_CSIZEMULT(csd) (((csd[4] & 3) << 1) | (csd[5] >> 15))
@@ -136,7 +147,7 @@
 
 #define MMC_CSD_SECTORSIZE(csd) ((csd[5] >> 10) & 0x1f)
 
-/* ER_GRP_SIZE 37-41 = Erase group size (MMC) */
+/* ER_GRP_SIZE 37-41 = Erase group size (MMC)*/
 
 #define MMC_CSD_ERGRPSIZE(csd) ((csd[5] >> 5) & 0x1f)
 
@@ -210,7 +221,7 @@
 
 #define MMC_CSD_SPECVERS(csd) ((csd[0] >> 2) & 0x0f)
 
-/* Reserved 120-121 */
+/* Reserved 120-155 */
 
 /* TAAC 112-119 = Data read access-time-1
  *   TIME_VALUE 3-6 = Time mantissa
@@ -244,7 +255,7 @@
 #define MMCSD_CSD_CCC(csd) (((uint16_t)csd[4] << 4) | ((uint16_t)csd[5] >> 4))
 #define SD20_CSD_CCC(csd) MMCSD_CSD_CCC(csd)
 
-/* READ_BL_LEN 80-83 = Max. read data block length */
+ /* READ_BL_LEN 80-83 = Max. read data block length */
 
 #define MMCSD_CSD_READBLLEN(csd) (csd[5] & 0x0f)
 #define SD20_CSD_READBLLEN(csd) (9)
@@ -294,8 +305,6 @@
 #define MMCSD_CSD_VDDWCURRMAX(csd) ((csd[9] >> 2) & 7)
 #define SD20_CSD_VDDWCURRMAX(csd) (6)
 
-#define MMCSD_CSD_CSIZE_THRESHOLD   0xfff
-
 /* C_SIZE_MULT 47-49 Device size multiplier */
 
 #define MMCSD_CSD_CSIZEMULT(csd) (((csd[9] & 3) << 1) | (csd[10] >> 7))
@@ -315,7 +324,7 @@
 
 #define MMC_CSD_SECTORSIZE(csd) ((csd[10] >> 2) & 0x1f)
 
-/* ER_GRP_SIZE 37-41 = Erase group size (MMC) */
+/* ER_GRP_SIZE 37-41 = Erase group size (MMC)*/
 
 #define MMC_CSD_ERGRPSIZE(csd) (((csd[10] & 3) << 3) | (csd[11] > 5))
 
@@ -397,14 +406,13 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Public Functions Definitions
+ * Public Functions
  ****************************************************************************/
 
 #undef EXTERN
 #if defined(__cplusplus)
 #define EXTERN extern "C"
-extern "C"
-{
+extern "C" {
 #else
 #define EXTERN extern
 #endif

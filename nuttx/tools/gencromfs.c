@@ -1,22 +1,43 @@
 /****************************************************************************
  * tools/gencromfs.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * The function lzf_compress() comes from the file lzf_c.c (which substantial
+ * modification):
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   Copyright (c) 2000-2010 Marc Alexander Lehmann <schmorp@schmorp.de>
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * Which has a compatible BSD license and included here under the NuttX BSD
+ * license:
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,7 +46,6 @@
  ****************************************************************************/
 
 #define _GNU_SOURCE 1
-
 #include <sys/stat.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -66,30 +86,31 @@
 #  define TMP_NAME         "/tmp/gencromfs-%06u"
 #endif
 
-#define NUTTX_IXOTH        (1 << 0)   /* Must match NuttX's S_IXOTH */
-#define NUTTX_IWOTH        (1 << 1)   /* Must match NuttX's S_IWOTH */
-#define NUTTX_IROTH        (1 << 2)   /* Must match NuttX's S_IROTH */
+#define NUTTX_IXOTH        (1 << 0)   /* Bits 0-2: Permissions for others: RWX */
+#define NUTTX_IWOTH        (1 << 1)
+#define NUTTX_IROTH        (1 << 2)
 
 #define NUTTX_IRXOTH       (NUTTX_IROTH | NUTTX_IXOTH)
 
-#define NUTTX_IXGRP        (1 << 3)   /* Must match NuttX's S_IXGRP */
-#define NUTTX_IWGRP        (1 << 4)   /* Must match NuttX's S_IWGRP */
-#define NUTTX_IRGRP        (1 << 5)   /* Must match NuttX's S_IRGRP */
+#define NUTTX_IXGRP        (1 << 3)   /* Bits 3-5: Group permissions: RWX */
+#define NUTTX_IWGRP        (1 << 4)
+#define NUTTX_IRGRP        (1 << 5)
 
 #define NUTTX_IRXGRP       (NUTTX_IRGRP | NUTTX_IXGRP)
 
-#define NUTTX_IXUSR        (1 << 6)   /* Must match NuttX's S_IXUSR */
-#define NUTTX_IWUSR        (1 << 7)   /* Must match NuttX's S_IWUSR */
-#define NUTTX_IRUSR        (1 << 8)   /* Must match NuttX's S_IRUSR */
+#define NUTTX_IXUSR        (1 << 6)   /* Bits 6-8: Owner permissions: RWX */
+#define NUTTX_IWUSR        (1 << 7)
+#define NUTTX_IRUSR        (1 << 8)
 
 #define NUTTX_IRXUSR       (NUTTX_IRUSR | NUTTX_IXUSR)
 
-#define NUTTX_IFDIR        (4 << 12)   /* Must match NuttX's S_IFDIR */
-#define NUTTX_IFREG        (8 << 12)   /* Must match NuttX's S_IFREG */
-#define NUTTX_IFLNK        (10 << 12)  /* Must match NuttX's S_IFLNK */
+#define NUTTX_IFDIR        (2 << 11)
+#define NUTTX_IFREG        (4 << 11)
+
+#define NUTTX_IFLNK        (1 << 15)  /* Bit 15: Symbolic link */
 
 #define DIR_MODEFLAGS      (NUTTX_IFDIR | NUTTX_IRXUSR | NUTTX_IRXGRP | NUTTX_IRXOTH)
-#define DIRLINK_MODEFLAGS  (NUTTX_IFLNK | NUTTX_IRXUSR | NUTTX_IRXGRP | NUTTX_IRXOTH)
+#define DIRLINK_MODEFLAGS  (NUTTX_IFLNK | DIR_MODEFLAGS)
 #define FILE_MODEFLAGS     (NUTTX_IFREG | NUTTX_IRUSR | NUTTX_IRGRP | NUTTX_IROTH)
 
 #define CROMFS_MAGIC       0x4d4f5243
@@ -112,7 +133,8 @@
 #define LZF_MAX_OFF        (1 << LZF_HLOG)
 #define LZF_MAX_REF        ((1 << 8) + (1 << 3))
 
-#define HEX_PER_LINE       8
+#define HEX_PER_BREAK      8
+#define HEX_PER_LINE       16
 
 /****************************************************************************
  * Private Types
@@ -225,26 +247,8 @@ static FILE *g_outstream;      /* Main output stream */
 static FILE *g_tmpstream;      /* Temporary file output stream */
 
 static const char g_delim[] =
-  "**************************************"
-  "**************************************";
-
-static const char g_license[] =
-  " *\n"
-  " * Licensed to the Apache Software Foundation (ASF) under one or more\n"
-  " * contributor license agreements. See the NOTICE file distributed with\n"
-  " * this work for additional information regarding copyright ownership.\n"
-  " * The ASF licenses this file to you under the Apache License, Version\n"
-  " * 2.0 (the \"License\"); you mayn`t use this file except in compliance\n"
-  " * with the License. You may obtain a copy of the License at\n"
-  " *\n"
-  " *   http://www.apache.org/licenses/LICENSE-2.0\n"
-  " *\n"
-  " * Unless required by applicable law or agreed to in writing, software\n"
-  " * distributed under the License is distributed on an \"AS IS\" BASIS,\n"
-  " * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or\n"
-  " * implied. See the License for the specific language governing\n"
-  " * permissions and limitations under the License.\n"
-  " *\n";
+  "*************************************************************************"
+  "***********************";
 
 static uint32_t g_offset;        /* Current image offset */
 static uint32_t g_diroffset;     /* Offset for '.' */
@@ -270,8 +274,7 @@ static FILE *open_tmpfile(void);
 static void unlink_tmpfiles(void);
 #endif
 static void append_tmpfile(FILE *dest, FILE *src);
-static void dump_hexbuffer(FILE *stream, const void *buffer,
-                           unsigned int nbytes);
+static void dump_hexbuffer(FILE *stream, const void *buffer, unsigned int nbytes);
 static void dump_nextline(FILE *stream);
 static size_t lzf_compress(const uint8_t *inbuffer, unsigned int inlen,
                            union lzf_result_u *result);
@@ -316,9 +319,9 @@ static void verify_directory(void)
   /* Trim any trailing '/' characters from the directory path. */
 
   len = strlen(g_dirname);
-  while (len > 1 && g_dirname[len - 1] == '/')
+  while (len > 1 && g_dirname[len-1] == '/')
     {
-      g_dirname[len - 1] = '\0';
+      g_dirname[len-1] = '\0';
       len--;
     }
 
@@ -343,7 +346,7 @@ static void verify_directory(void)
       else
         {
           fprintf(stderr, "ERROR: stat(%s) failed: %s\n",
-                  g_dirname, strerror(errcode));
+                 g_dirname, strerror(errcode));
         }
 
       show_usage();
@@ -372,14 +375,12 @@ static void verify_outfile(void)
       if (errcode != ENOENT)
         {
           fprintf(stderr, "ERROR: stat(%s) failed: %s\n",
-                  g_outname, strerror(errcode));
+                 g_outname, strerror(errcode));
           show_usage();
         }
     }
 
-  /* Something exists at this path.  Verify that the destination is a regular
-   * file
-   */
+  /* Something exists at this path.  Verify that the destination is a regular file */
 
   else if (!S_ISREG(buf.st_mode))
     {
@@ -397,12 +398,44 @@ static void init_outfile(void)
 {
   fprintf(g_outstream, "/%s\n", g_delim);
   fprintf(g_outstream, " * %s\n", g_outname);
-  fprintf(g_outstream, "%s", g_license);
+  fprintf(g_outstream, " *\n");
+  fprintf(g_outstream, " *   Copyright (C) 2018 Gregory Nutt. All rights reserved.\n");
+  fprintf(g_outstream, " *   Author: Gregory Nutt <gnutt@nuttx.org>\n");
+  fprintf(g_outstream, " *\n");
+  fprintf(g_outstream, " * Redistribution and use in source and binary forms, with or without\n");
+  fprintf(g_outstream, " * modification, are permitted provided that the following conditions\n");
+  fprintf(g_outstream, " * are met:\n");
+  fprintf(g_outstream, " *\n");
+  fprintf(g_outstream, " * 1. Redistributions of source code must retain the above copyright\n");
+  fprintf(g_outstream, " *    notice, this list of conditions and the following disclaimer.\n");
+  fprintf(g_outstream, " * 2. Redistributions in binary form must reproduce the above copyright\n");
+  fprintf(g_outstream, " *    notice, this list of conditions and the following disclaimer in\n");
+  fprintf(g_outstream, " *    the documentation and/or other materials provided with the\n");
+  fprintf(g_outstream, " *    distribution.\n");
+  fprintf(g_outstream, " * 3. Neither the name NuttX nor the names of its contributors may be\n");
+  fprintf(g_outstream, " *    used to endorse or promote products derived from this software\n");
+  fprintf(g_outstream, " *    without specific prior written permission.\n");
+  fprintf(g_outstream, " *\n");
+  fprintf(g_outstream, " * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS\n");
+  fprintf(g_outstream, " * \"AS IS\" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT\n");
+  fprintf(g_outstream, " * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS\n");
+  fprintf(g_outstream, " * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE\n");
+  fprintf(g_outstream, " * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,\n");
+  fprintf(g_outstream, " * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,\n");
+  fprintf(g_outstream, " * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS\n");
+  fprintf(g_outstream, " * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED\n");
+  fprintf(g_outstream, " * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT\n");
+  fprintf(g_outstream, " * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN\n");
+  fprintf(g_outstream, " * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE\n");
+  fprintf(g_outstream, " * POSSIBILITY OF SUCH DAMAGE.\n");
+  fprintf(g_outstream, " *\n");
   fprintf(g_outstream, " %s/\n\n", g_delim);
 
   fprintf(g_outstream, "/%s\n", g_delim);
   fprintf(g_outstream, " * Included Files\n");
   fprintf(g_outstream, " %s/\n\n", g_delim);
+
+  fprintf(g_outstream, "#include <nuttx/config.h>\n\n");
   fprintf(g_outstream, "#include <stdint.h>\n\n");
 
   fprintf(g_outstream, "/%s\n", g_delim);
@@ -419,8 +452,7 @@ static FILE *open_tmpfile(void)
   fd = mkstemp(TMP_NAME);
   if (fd < 0)
     {
-      fprintf(stderr, "Failed to create temporary file: %s\n",
-              strerror(errno));
+      fprintf(stderr, "Failed to create temporary file: %s\n", strerror(errno));
       exit(1);
     }
 
@@ -498,7 +530,7 @@ static void dump_hexbuffer(FILE *stream, const void *buffer,
 
   while (nbytes > 0)
     {
-      if (g_nhex == 0)
+      if (g_nhex == 0 || g_nhex == HEX_PER_BREAK)
         {
           fprintf(stream, " ");
         }
@@ -583,10 +615,10 @@ static size_t lzf_compress(const uint8_t *inbuffer, unsigned int inlen,
                 }
             }
 
-          outptr[(-lit) - 1] = lit - 1; /* Stop run */
-          outptr -= !lit;               /* Undo run if length is zero */
+          outptr[- lit - 1] = lit - 1; /* Stop run */
+          outptr -= !lit;              /* Undo run if length is zero */
 
-          for (; ; )
+          for (;;)
             {
               if (maxlen > 16)
                 {
@@ -705,7 +737,7 @@ static size_t lzf_compress(const uint8_t *inbuffer, unsigned int inlen,
             }
           else
             {
-              *outptr++ = (off >> 8) + (7 << 5);
+              *outptr++ = (off >> 8) + (  7 << 5);
               *outptr++ = len - 7;
             }
 
@@ -745,8 +777,8 @@ static size_t lzf_compress(const uint8_t *inbuffer, unsigned int inlen,
 
           if (lit == LZF_MAX_LIT)
             {
-              outptr[(-lit) - 1] = lit - 1; /* Stop run */
-              lit = 0;                      /* Start run */
+              outptr[- lit - 1] = lit - 1; /* Stop run */
+              lit = 0;;                /* Start run */
               outptr++;
             }
         }
@@ -766,14 +798,14 @@ static size_t lzf_compress(const uint8_t *inbuffer, unsigned int inlen,
 
       if (lit == LZF_MAX_LIT)
         {
-          outptr[(-lit) - 1] = lit - 1; /* Stop run */
-          lit = 0;                      /* Start run */
+          outptr[- lit - 1] = lit - 1; /* Stop run */
+          lit = 0;                 /* Start run */
           outptr++;
         }
     }
 
-  outptr[(-lit) - 1] = lit - 1; /* End run */
-  outptr -= !lit;               /* Undo run if length is zero */
+  outptr[- lit - 1] = lit - 1; /* End run */
+  outptr -= !lit;              /* Undo run if length is zero */
 
   cs = outptr - (uint8_t *)result->compressed.lzf_buffer;
 
@@ -793,7 +825,7 @@ genhdr:
     }
   else
     {
-      /* Write uncompressed header */
+      /* Write uncompressed header*/
 
       result->uncompressed.lzf_magic[0] = 'Z';
       result->uncompressed.lzf_magic[1] = 'V';
@@ -875,6 +907,7 @@ static void gen_dirlink(const char *name, uint32_t tgtoffs, bool dirempty)
 
   /* Generate the hardlink node */
 
+  dump_nextline(g_tmpstream);
   fprintf(g_tmpstream, "\n  /* Offset %6lu:  Hard link %s */\n\n",
           (unsigned long)g_offset, name);
 
@@ -891,7 +924,6 @@ static void gen_dirlink(const char *name, uint32_t tgtoffs, bool dirempty)
 
   dump_hexbuffer(g_tmpstream, &node, sizeof(struct cromfs_node_s));
   dump_hexbuffer(g_tmpstream, name, namlen);
-  dump_nextline(g_tmpstream);
 
   g_nnodes++;
 }
@@ -903,7 +935,7 @@ static void gen_directory(const char *path, const char *name, mode_t mode,
   uint32_t save_offset        = g_offset;
   uint32_t save_diroffset     = g_diroffset;
   uint32_t save_parent_offset = g_parent_offset;
-  FILE *save_tmpstream        = g_tmpstream;
+  FILE *save_tmpstream      = g_tmpstream;
   FILE *subtree_stream;
   int namlen;
   int result;
@@ -945,9 +977,9 @@ static void gen_directory(const char *path, const char *name, mode_t mode,
       traverse_directory(path, process_direntry, NULL);
     }
 
-  /* When traverse_directory() returns, all of the nodes in the sub-tree
-   * under 'name' will have been written to the new tmpfile.  g_offset is
-   * correct, but other settings are not.
+  /* When traverse_directory() returns, all of the nodes in the sub-tree under
+   * 'name' will have been written to the new tmpfile.  g_offset is correct,
+   * but other settings are not.
    *
    * Restore the state.
    */
@@ -958,6 +990,7 @@ static void gen_directory(const char *path, const char *name, mode_t mode,
 
   /* Generate the directory node */
 
+  dump_nextline(g_tmpstream);
   fprintf(g_tmpstream, "\n  /* Offset %6lu:  Directory %s */\n\n",
           (unsigned long)save_offset, path);
 
@@ -974,13 +1007,10 @@ static void gen_directory(const char *path, const char *name, mode_t mode,
 
   dump_hexbuffer(g_tmpstream, &node, sizeof(struct cromfs_node_s));
   dump_hexbuffer(g_tmpstream, name, namlen);
-  dump_nextline(g_tmpstream);
 
   g_nnodes++;
 
-  /* Now append the sub-tree nodes in the new tmpfile to the previous
-   * tmpfile
-   */
+  /* Now append the sub-tree nodes in the new tmpfile to the previous tmpfile */
 
   append_tmpfile(g_tmpstream, subtree_stream);
 }
@@ -1050,13 +1080,13 @@ static void gen_file(const char *path, const char *name, mode_t mode,
                      (uint16_t)result.compressed.lzf_clen[1];
             }
 
+          dump_nextline(g_tmpstream);
           fprintf(g_tmpstream,
                   "\n  /* Offset %6lu:  "
-                  "Block %u blklen=%lu Uncompressed=%lu Compressed=%u "
-                  "*/\n\n",  (unsigned long)g_offset, blkno, (long)blklen,
+                  "Block %u blklen=%lu Uncompressed=%lu Compressed=%u */\n\n",
+                  (unsigned long)g_offset, blkno, (long)blklen,
                   (long)nread, clen);
           dump_hexbuffer(g_tmpstream, &result, blklen);
-          dump_nextline(g_tmpstream);
 
           ntotal   += nread;
           blktotal += blklen;
@@ -1073,6 +1103,8 @@ static void gen_file(const char *path, const char *name, mode_t mode,
   g_tmpstream        = save_tmpstream;
 
   /* Now we have enough information to generate the file node */
+
+  dump_nextline(g_tmpstream);
 
   fprintf(g_tmpstream, "\n  /* Offset %6lu:  File %s:  "
           "Uncompressed=%lu Compressed=%lu */\n\n",
@@ -1095,13 +1127,10 @@ static void gen_file(const char *path, const char *name, mode_t mode,
 
   dump_hexbuffer(g_tmpstream, &node, sizeof(struct cromfs_node_s));
   dump_hexbuffer(g_tmpstream, name, namlen);
-  dump_nextline(g_tmpstream);
 
   g_nnodes++;
 
-  /* Now append the sub-tree nodes in the new tmpfile to the previous
-   * tmpfiles
-   */
+  /* Now append the sub-tree nodes in the new tmpfile to the previous tmpfile */
 
   append_tmpfile(g_tmpstream, outstream);
 }
@@ -1114,11 +1143,7 @@ static int dir_notempty(const char *dirpath, const char *name,
   int ret;
 
   ret = asprintf(&path, "%s/%s", dirpath, name);
-  if (ret < 0)
-    {
-      fprintf(stderr, "ERROR: asprintf() failed\n");
-      exit(1);
-    }
+  UNUSED(ret);
 
   /* stat() should not fail for any reason */
 
@@ -1148,11 +1173,7 @@ static int process_direntry(const char *dirpath, const char *name,
   int ret;
 
   ret = asprintf(&path, "%s/%s", dirpath, name);
-  if (ret < 0)
-    {
-      fprintf(stderr, "ERROR: asprintf() failed\n");
-      exit(1);
-    }
+  UNUSED(ret);
 
   ret = stat(path, &buf);
   if (ret < 0)
@@ -1160,8 +1181,7 @@ static int process_direntry(const char *dirpath, const char *name,
       int errcode = errno;
       if (errcode == ENOENT)
         {
-          fprintf(stderr, "ERROR: Directory entry %s does not exist\n",
-                  path);
+          fprintf(stderr, "ERROR: Directory entry %s does not exist\n", path);
         }
       else
         {
@@ -1270,7 +1290,7 @@ int main(int argc, char **argv, char **envp)
   g_outname  = argv[2];
 
   verify_directory();
-  verify_outfile();
+  verify_outfile();;
 
   g_outstream = fopen(g_outname, "w");
   if (!g_outstream)
@@ -1312,9 +1332,9 @@ int main(int argc, char **argv, char **envp)
   /* Now append the volume header to output file */
 
   fprintf(g_outstream, "/* CROMFS image */\n\n");
-  fprintf(g_outstream, "const uint8_t aligned_data(4) g_cromfs_image[] =\n");
+  fprintf(g_outstream, "const uint8_t g_cromfs_image[] =\n");
   fprintf(g_outstream, "{\n");
-  fprintf(g_outstream, "  /* Offset %6lu:  Volume header */\n\n", 0ul);
+  fprintf(g_outstream, "\n  /* Offset %6lu:  Volume header */\n\n", 0ul);
 
   vol.cv_magic    = TGT_UINT32(CROMFS_MAGIC);
   vol.cv_nnodes   = TGT_UINT16(g_nnodes);
@@ -1323,15 +1343,17 @@ int main(int argc, char **argv, char **envp)
   vol.cv_fsize    = TGT_UINT32(g_offset);
   vol.cv_bsize    = TGT_UINT32(CROMFS_BLOCKSIZE);
 
+  g_nhex          = 0;
   dump_hexbuffer(g_outstream, &vol, sizeof(struct cromfs_volume_s));
+
   dump_nextline(g_outstream);
   fprintf(g_outstream, "\n  /* Offset %6lu:  Root directory */\n",
           (unsigned long)sizeof(struct cromfs_volume_s));
 
   /* Finally append the nodes to the output file */
 
-  append_tmpfile(g_outstream, g_tmpstream);
-  fprintf(g_outstream, "};\n");
+  append_tmpfile(g_outstream,g_tmpstream);
+  fprintf(g_outstream, "\n};\n");
 
   fclose(g_outstream);
 #ifndef USE_MKSTEMP

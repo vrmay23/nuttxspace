@@ -1,10 +1,13 @@
-/****************************************************************************
- * arch/arm/src/tiva/cc13xx/cc13x2_cc26x2_v2_rom.h
+/************************************************************************************
+ * arch/arm/src/tiva/cc13xx/cc13x2_cc26xx2_v1_rom.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2015-2017, Texas Instruments Incorporated
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This is a port of TI's rom.h file which has a fully compatible BSD license:
+ *
+ *    Copyright (c) 2015-2017, Texas Instruments Incorporated
+ *    All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,17 +36,17 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_TIVA_CC13XX_CC13X2_CC26X2_V2_ROM_H
 #define __ARCH_ARM_SRC_TIVA_CC13XX_CC13X2_CC26X2_V2_ROM_H
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
-/* Start address of the ROM hard API access table
- * (located after the ROM FW rev field)
+/* Start address of the ROM hard API access table (located after the ROM FW rev
+ * field)
  */
 
 #define ROM_HAPI_TABLE_ADDR 0x10000048
@@ -965,14 +968,14 @@
     ((uint32_t (*)(uint32_t irqFlags)) \
     ROM_API_SHA2_TABLE[5])
 
-/****************************************************************************
+/************************************************************************************
  * Public Types
- ****************************************************************************/
+ ************************************************************************************/
 
 /* ROM Hard-API function interface types */
 
-typedef uint32_t (*fptr_crc32_t)              (uint8_t *     /* data        */,
-                                               uint32_t      /* bytecount   */,
+typedef uint32_t (*fptr_crc32_t)              (uint8_t *     /* data        */,\
+                                               uint32_t      /* bytecount   */,\
                                                uint32_t      /* repeatcount */);
 
 typedef uint32_t (*fptr_getflsize_t)          (void);
@@ -983,26 +986,26 @@ typedef uint32_t (*fptr_reserved1_t)          (uint32_t);
 
 typedef uint32_t (*fptr_reserved2_t)          (void);
 
-typedef uint32_t (*fptr_reserved3_t)          (uint8_t *,
-                                               uint32_t,
+typedef uint32_t (*fptr_reserved3_t)          (uint8_t *,\
+                                               uint32_t,\
                                                uint32_t);
 
 typedef void     (*fptr_resetdev_t)           (void);
 
-typedef uint32_t (*fptr_fletcher32_t)         (uint16_t *    /* data        */,
-                                               uint16_t      /* wordcount   */,
+typedef uint32_t (*fptr_fletcher32_t)         (uint16_t *    /* data        */,\
+                                               uint16_t      /* wordcount   */,\
                                                uint16_t      /* repeatcount */);
 
-typedef uint32_t (*fptr_minval_t)             (uint32_t *    /* data   */,
+typedef uint32_t (*fptr_minval_t)             (uint32_t *    /* data   */,\
                                                uint32_t      /* count  */);
 
-typedef uint32_t (*fptr_maxval_t)             (uint32_t *    /* buffer */,
+typedef uint32_t (*fptr_maxval_t)             (uint32_t *    /* buffer */,\
                                                uint32_t      /* count  */);
 
-typedef uint32_t (*fptr_meanval_t)            (uint32_t *    /* buffer */,
+typedef uint32_t (*fptr_meanval_t)            (uint32_t *    /* buffer */,\
                                                uint32_t      /* count  */);
 
-typedef uint32_t (*fptr_stddval_t)            (uint32_t *    /* buffer */,
+typedef uint32_t (*fptr_stddval_t)            (uint32_t *    /* buffer */,\
                                                uint32_t      /* count  */);
 
 typedef void     (*fptr_hfsourcesafeswitch_t) (void);
@@ -1046,16 +1049,15 @@ struct hard_api_s
 
 typedef struct hard_api_s hard_api_t;
 
-/****************************************************************************
+/************************************************************************************
  * Inline Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Name: rom_signextend_vddrtrim
  *
  * Description:
- *   Sign extend the VDDR_TRIM setting
- *   (special format ranging from -10 to +21)
+ *   Sign extend the VDDR_TRIM setting (special format ranging from -10 to +21)
  *
  * Input Parameters
  *   vddrtrim - VDDR_TRIM setting
@@ -1063,7 +1065,7 @@ typedef struct hard_api_s hard_api_t;
  * Returned Value:
  *  Returns sign extended VDDR_TRIM setting.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 static inline int32_t rom_signextend_vddrtrim(uint32_t vddrtrim)
 {

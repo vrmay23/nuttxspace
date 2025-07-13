@@ -1,12 +1,14 @@
 /****************************************************************************
  * arch/arm/src/lpc54xx/lpc54_i2c_master.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2016 Freescale Semiconductor Inc.
- * SPDX-FileCopyrightText: 2016 - 2017, NXP
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * All rights reserved.
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Parts of this file were adapted from sample code provided for the LPC54xx
+ * family from NXP which has a compatible BSD license.
+ *
+ *   Copyright (c) 2016, Freescale Semiconductor, Inc.
+ *   Copyright 2016-2017 NXP
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,19 +46,16 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/wdog.h>
 #include <nuttx/clock.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/i2c/i2c_master.h>
 
@@ -64,7 +63,9 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "hardware/lpc54_pinmux.h"
 #include "hardware/lpc54_syscon.h"
 #include "hardware/lpc54_flexcomm.h"
@@ -127,7 +128,7 @@ struct lpc54_i2cdev_s
   struct i2c_master_s dev;  /* Generic I2C device */
   uintptr_t base;           /* Base address of Flexcomm registers */
 
-  struct wdog_s timeout;    /* Watchdog to timeout when bus hung */
+  WDOG_ID timeout;          /* Watchdog to timeout when bus hung */
   uint32_t frequency;       /* Current I2C frequency */
   uint32_t fclock;          /* Flexcomm function clock frequency */
 
@@ -135,7 +136,7 @@ struct lpc54_i2cdev_s
   int16_t nmsgs;            /* Number of transfer remaining */
   int16_t result;           /* The result of the transfer */
 
-  mutex_t lock;             /* Only one thread can access at a time */
+  sem_t exclsem;            /* Only one thread can access at a time */
 #ifndef CONFIG_I2C_POLLED
   sem_t waitsem;            /* Supports wait for state machine completion */
   uint16_t irq;             /* Flexcomm IRQ number */
@@ -155,19 +156,19 @@ static inline uint32_t lpc54_i2c_getreg(struct lpc54_i2cdev_s *priv,
 
 static void lpc54_i2c_setfrequency(struct lpc54_i2cdev_s *priv,
               uint32_t frequency);
-static void lpc54_i2c_timeout(wdparm_t arg);
+static void lpc54_i2c_timeout(int argc, uint32_t arg, ...);
 static void lpc54_i2c_xfrsetup(struct lpc54_i2cdev_s *priv);
 static bool lpc54_i2c_nextmsg(struct lpc54_i2cdev_s *priv);
 static bool lpc54_i2c_statemachine(struct lpc54_i2cdev_s *priv);
 #ifndef CONFIG_I2C_POLLED
-static int  lpc54_i2c_interrupt(int irq, void *context, void *arg);
+static int  lpc54_i2c_interrupt(int irq, FAR void *context, FAR void *arg);
 #else
 static int  lpc54_i2c_poll(struct lpc54_i2cdev_s *priv);
 #endif
-static int  lpc54_i2c_transfer(struct i2c_master_s *dev,
-              struct i2c_msg_s *msgs, int count);
+static int  lpc54_i2c_transfer(FAR struct i2c_master_s *dev,
+              FAR struct i2c_msg_s *msgs, int count);
 #ifdef CONFIG_I2C_RESET
-static int  lpc54_i2c_reset(struct i2c_master_s *dev);
+static int  lpc54_i2c_reset(FAR struct i2c_master_s * dev);
 #endif
 
 /****************************************************************************
@@ -183,103 +184,34 @@ struct i2c_ops_s lpc54_i2c_ops =
 };
 
 #ifdef CONFIG_LPC54_I2C0_MASTER
-static struct lpc54_i2cdev_s g_i2c0_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c0_dev;
 #endif
-
 #ifdef CONFIG_LPC54_I2C1_MASTER
-static struct lpc54_i2cdev_s g_i2c1_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c1_dev;
 #endif
-
 #ifdef CONFIG_LPC54_I2C2_MASTER
-static struct lpc54_i2cdev_s g_i2c2_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c2_dev;
 #endif
-
 #ifdef CONFIG_LPC54_I2C3_MASTER
-static struct lpc54_i2cdev_s g_i2c3_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c3_dev;
 #endif
-
 #ifdef CONFIG_LPC54_I2C4_MASTER
-static struct lpc54_i2cdev_s g_i2c4_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c4_dev;
 #endif
-
 #ifdef CONFIG_LPC54_I2C5_MASTER
-static struct lpc54_i2cdev_s g_i2c5_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c5_dev;
 #endif
-
 #ifdef CONFIG_LPC54_I2C6_MASTER
-static struct lpc54_i2cdev_s g_i2c6_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c6_dev;
 #endif
-
 #ifdef CONFIG_LPC54_I2C7_MASTER
-static struct lpc54_i2cdev_s g_i2c7_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c7_dev;
 #endif
-
 #ifdef CONFIG_LPC54_I2C8_MASTER
-static struct lpc54_i2cdev_s g_i2c8_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c8_dev;
 #endif
-
 #ifdef CONFIG_LPC54_I2C9_MASTER
-static struct lpc54_i2cdev_s g_i2c9_dev =
-{
-  .lock = NXMUTEX_INITIALIZER,
-#  ifndef CONFIG_I2C_POLLED
-  .waitsem = SEM_INITIALIZER(0),
-#  endif
-};
+static struct lpc54_i2cdev_s g_i2c9_dev;
 #endif
 
 /****************************************************************************
@@ -376,8 +308,8 @@ static void lpc54_i2c_setfrequency(struct lpc54_i2cdev_s *priv,
 
           if (err == 0 || divider >= 0x10000)
             {
-              /* Break out of the loop early ifeither exact value was found
-               * or the divider is at its maximum value.
+              /* Break out of the loop early ifeither exact value was found or
+               * the divider is at its maximum value.
                */
 
               break;
@@ -404,7 +336,7 @@ static void lpc54_i2c_setfrequency(struct lpc54_i2cdev_s *priv,
  *
  ****************************************************************************/
 
-static void lpc54_i2c_timeout(wdparm_t arg)
+static void lpc54_i2c_timeout(int argc, uint32_t arg, ...)
 {
   struct lpc54_i2cdev_s *priv = (struct lpc54_i2cdev_s *)arg;
 
@@ -540,11 +472,10 @@ static bool lpc54_i2c_nextmsg(struct lpc54_i2cdev_s *priv)
     }
   else
     {
-      /* That was the last message... we are done.
-       * Cancel any timeout
-       */
+      /* That was the last message... we are done. */
+      /* Cancel any timeout */
 
-      wd_cancel(&priv->timeout);
+      wd_cancel(priv->timeout);
 
       /* Disable further I2C interrupts  and return to the IDLE state */
 
@@ -609,7 +540,7 @@ static bool lpc54_i2c_statemachine(struct lpc54_i2cdev_s *priv)
   /* Get the state of the I2C module */
 
   mstate = (status & I2C_STAT_MSTSTATE_MASK) >> I2C_STAT_MSTSTATE_SHIFT;
-  i2cinfo("mstate=%" PRIu32 "\n", mstate);
+  i2cinfo("mstate=%u\n", mstate);
 
   if ((mstate == I2C_MASTER_STATE_ADDRNAK) ||
       (mstate == I2C_MASTER_STATE_DATANAK))
@@ -663,7 +594,7 @@ static bool lpc54_i2c_statemachine(struct lpc54_i2cdev_s *priv)
         {
           if (mstate != I2C_MASTER_STATE_TXOK)
             {
-              i2cerr("ERROR bad state=%" PRIu32 ", expected %u\n",
+              i2cerr("ERROR bad state=%u, expected %u\n",
                      mstate, I2C_MASTER_STATE_TXOK);
 
               priv->result = -EINVAL;
@@ -689,7 +620,7 @@ static bool lpc54_i2c_statemachine(struct lpc54_i2cdev_s *priv)
         {
           if (mstate != I2C_MASTER_STATE_RXAVAIL)
             {
-              i2cerr("ERROR bad state=%" PRIu32 ", expected %u\n",
+              i2cerr("ERROR bad state=%u, expected %u\n",
                      mstate, I2C_MASTER_STATE_RXAVAIL);
 
               priv->result = -EINVAL;
@@ -780,7 +711,7 @@ static bool lpc54_i2c_statemachine(struct lpc54_i2cdev_s *priv)
  ****************************************************************************/
 
 #ifndef CONFIG_I2C_POLLED
-static int lpc54_i2c_interrupt(int irq, void *context, void *arg)
+static int lpc54_i2c_interrupt(int irq, FAR void *context, FAR void *arg)
 {
   struct lpc54_i2cdev_s *priv = (struct lpc54_i2cdev_s *)arg;
   bool done;
@@ -813,8 +744,8 @@ static int lpc54_i2c_interrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-static int lpc54_i2c_transfer(struct i2c_master_s *dev,
-                              struct i2c_msg_s *msgs, int count)
+static int lpc54_i2c_transfer(FAR struct i2c_master_s *dev,
+                              FAR struct i2c_msg_s *msgs, int count)
 {
   struct lpc54_i2cdev_s *priv = (struct lpc54_i2cdev_s *)dev;
   int ret;
@@ -824,7 +755,7 @@ static int lpc54_i2c_transfer(struct i2c_master_s *dev,
 
   /* Get exclusive access to the I2C bus */
 
-  nxmutex_lock(&priv->lock);
+  nxsem_wait(&priv->exclsem);
 
   /* Set up for the transfer */
 
@@ -835,8 +766,8 @@ static int lpc54_i2c_transfer(struct i2c_master_s *dev,
 
   /* Set up the transfer timeout */
 
-  wd_start(&priv->timeout, priv->nmsgs * I2C_WDOG_TIMEOUT,
-           lpc54_i2c_timeout, (wdparm_t)priv);
+  wd_start(priv->timeout, priv->nmsgs * I2C_WDOG_TIMEOUT,
+           lpc54_i2c_timeout, 1, (uint32_t)priv);
 
   /* Initiate the transfer */
 
@@ -857,11 +788,11 @@ static int lpc54_i2c_transfer(struct i2c_master_s *dev,
   ret = priv->result;
   i2cinfo("Done, result=%d\n", ret);
 
-  nxmutex_unlock(&priv->lock);
+  nxsem_post(&priv->exclsem);
   return ret;
 }
 
-/****************************************************************************
+/************************************************************************************
  * Name: lpc54_i2c_reset
  *
  * Description:
@@ -873,10 +804,10 @@ static int lpc54_i2c_transfer(struct i2c_master_s *dev,
  * Returned Value:
  *   Zero (OK) on success; a negated errno value on failure.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifdef CONFIG_I2C_RESET
-static int lpc54_i2c_reset(struct i2c_master_s *dev)
+static int lpc54_i2c_reset(FAR struct i2c_master_s * dev)
 {
 #warning Missing logic
   return OK;
@@ -905,8 +836,7 @@ struct i2c_master_s *lpc54_i2cbus_initialize(int port)
 
   flags = enter_critical_section();
 
-  /* Configure the requesting I2C peripheral */
-
+  /* Configure the requestin I2C peripheral */
   /* NOTE:  The basic FLEXCOMM initialization was performed in
    * lpc54_lowputc.c.
    */
@@ -1253,7 +1183,6 @@ struct i2c_master_s *lpc54_i2cbus_initialize(int port)
 #endif
     {
       i2cerr("ERROR: Unsupported port=%d\n", port);
-      leave_critical_section(flags);
       return NULL;
     }
 
@@ -1273,6 +1202,24 @@ struct i2c_master_s *lpc54_i2cbus_initialize(int port)
   /* Set the default I2C frequency */
 
   lpc54_i2c_setfrequency(priv, I2C_DEFAULT_FREQUENCY);
+
+  /* Initialize semaphores */
+
+  nxsem_init(&priv->exclsem, 0, 1);
+#ifndef CONFIG_I2C_POLLED
+  nxsem_init(&priv->waitsem, 0, 0);
+
+  /* The waitsem semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
+  nxsem_setprotocol(&priv->waitsem, SEM_PRIO_NONE);
+#endif
+
+  /* Allocate a watchdog timer */
+
+  priv->timeout = wd_create();
+  DEBUGASSERT(priv->timeout != 0);
 
 #ifndef CONFIG_I2C_POLLED
   /* Attach Interrupt Handler */
@@ -1300,9 +1247,9 @@ struct i2c_master_s *lpc54_i2cbus_initialize(int port)
  *
  ****************************************************************************/
 
-int lpc54_i2cbus_uninitialize(struct i2c_master_s *dev)
+int lpc54_i2cbus_uninitialize(FAR struct i2c_master_s * dev)
 {
-  struct lpc54_i2cdev_s *priv = (struct lpc54_i2cdev_s *)dev;
+  struct lpc54_i2cdev_s *priv = (struct lpc54_i2cdev_s *) dev;
   uint32_t regval;
 
   /* Disable I2C interrupts */

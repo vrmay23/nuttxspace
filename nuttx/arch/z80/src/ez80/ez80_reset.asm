@@ -1,8 +1,6 @@
 ;**************************************************************************
 ; arch/z80/src/ez80/ez80_reset.asm
 ;
-; SPDX-License-Identifier: Apache-2.0
-;
 ; Licensed to the Apache Software Foundation (ASF) under one or more
 ; contributor license agreements.  See the NOTICE file distributed with
 ; this work for additional information regarding copyright ownership.  The
@@ -71,7 +69,7 @@ _rst30:
 	rstvector
 _rst38:
 	rstvector
-	ds 026h
+	ds %26
 _nmi:
 	retn
 	end

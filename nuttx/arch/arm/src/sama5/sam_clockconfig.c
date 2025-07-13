@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_clockconfig.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013-2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,7 +46,9 @@
 #include <arch/board/board.h>
 #include <arch/sama5/chip.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "sam_periphclks.h"
 #include "sam_clockconfig.h"
 #include "hardware/sam_pmc.h"
@@ -278,9 +293,7 @@ static void __ramfunc__ sam_plladivider(void)
 
   putreg32(regval, SAM_PMC_MCKR);
 
-  /* We changed the PLLA divider.
-   * Wait for the main clock to be ready again
-   */
+  /* We changed the PLLA divider.  Wait for the main clock to be ready again */
 
   sam_pmcwait(PMC_INT_MCKRDY);
 }
@@ -434,7 +447,6 @@ static inline void sam_usbclockconfig(void)
    *   1) Enable UHP peripheral clock, bit (1 << AT91C_ID_UHPHS) in
    *      PMC_PCER register.
    *   2) Write CKGR_PLLCOUNT field in PMC_UCKR register.
-   *      Set CLKTRIM register if required.
    *   3) Enable UPLL, bit AT91C_CKGR_UPLLEN in PMC_UCKR register.
    *   4) Wait until UTMI_PLL is locked. LOCKU bit in PMC_SR register
    *   5) Enable BIAS, bit AT91C_CKGR_BIASEN in PMC_UCKR register.
@@ -450,28 +462,6 @@ static inline void sam_usbclockconfig(void)
    */
 
   /* 2) Write CKGR_PLLCOUNT field in PMC_UCKR register. */
-
-#if defined(ATSAMA5D2) || defined(ATSAMA5D3)
-
-  /* get UTMI timing register */
-
-  regval = getreg32(SAM_SFR_VBASE + SAM_SFR_UTMICKTRIM_OFFSET);
-  regval &= ~SFR_UTMICKTRIM_FREQ_MASK;
-
-#if BOARD_MAINOSC_FREQUENCY == (12000000)
-  regval |= SFR_UTMICKTRIM_FREQ_12MHZ;
-#elif BOARD_MAINOSC_FREQUENCY == (16000000)
-  regval |= SFR_UTMICKTRIM_FREQ_16MHZ;
-#elif BOARD_MAINOSC_FREQUENCY == (24000000)
-  regval |= SFR_UTMICKTRIM_FREQ_24MHZ;
-#elif (BOARD_MAINOSC_FREQUENCY == (48000000)) && defined(ATSAMA5D3)
-  regval |= SFR_UTMICKTRIM_FREQ_48MHZ;
-#else
-#  error Board oscillator frequency not compatible with use of UPLL
-#endif
-
-  putreg32(regval, (SAM_SFR_VBASE + SAM_SFR_UTMICKTRIM_OFFSET));
-#endif
 
   regval = PMC_CKGR_UCKR_UPLLCOUNT(BOARD_CKGR_UCKR_UPLLCOUNT);
   putreg32(regval, SAM_PMC_CKGR_UCKR);

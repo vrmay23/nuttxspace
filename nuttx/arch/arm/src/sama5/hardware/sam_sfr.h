@@ -1,40 +1,52 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/sama5/hardware/sam_sfr.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013-2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_SAMA5_HARDWARE_SAM_SFR_H
 #define __ARCH_ARM_SRC_SAMA5_HARDWARE_SAM_SFR_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/sam_memorymap.h"
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
-
-/* SFR Register Offsets *****************************************************/
+ ************************************************************************************/
+/* SFR Register Offsets *************************************************************/
 
                                            /* 0x0000: Reserved */
 #define SAM_SFR_DDRCFG_OFFSET       0x0004 /* DDR Configuration register */
@@ -73,7 +85,7 @@
 #endif
                                            /* 0x0098-0x3ffc: Reserved */
 
-/* SFR Register Addresses ***************************************************/
+/* SFR Register Addresses ***********************************************************/
 
 #define SAM_SFR_DDRCFG              (SAM_SFR_VBASE+SAM_SFR_DDRCFG_OFFSET) /* REVISIT */
 #define SAM_SFR_OHCIICR             (SAM_SFR_VBASE+SAM_SFR_OHCIICR_OFFSET)
@@ -106,7 +118,7 @@
 #  define SAM_SFR_QSPICLK           (SAM_SFR_VBASE+SAM_SFR_QSPICLK_OFFSET)
 #endif
 
-/* SFR Register Bit Definitions *********************************************/
+/* SFR Register Bit Definitions *****************************************************/
 
 /* DDR Configuration register */
 
@@ -116,11 +128,11 @@
 /* OHCI Interrupt Configuration Register */
 
 #define SFR_OHCIICR_RES(n)          (1 << (n)) /* Bit 0:  USB port n reset, n=0..2 */
-#  define SFR_OHCIICR_RES0          (1 << 0)   /* Bit 0:  USB port 0 reset */
-#  define SFR_OHCIICR_RES1          (1 << 1)   /* Bit 1:  USB port 1 reset */
-#  define SFR_OHCIICR_RES2          (1 << 2)   /* Bit 2:  USB port 2 reset */
-#define SFR_OHCIICR_ARIE            (1 << 4)   /* Bit 4:  OHCI asynchronous resume interrupt enable */
-#define SFR_OHCIICR_APPSTART        (0)        /* Bit 5:  Reserved, must write 0 */
+#  define SFR_OHCIICR_RES0          (1 << 0)  /* Bit 0:  USB port 0 reset */
+#  define SFR_OHCIICR_RES1          (1 << 1)  /* Bit 1:  USB port 1 reset */
+#  define SFR_OHCIICR_RES2          (1 << 2)  /* Bit 2:  USB port 2 reset */
+#define SFR_OHCIICR_ARIE            (1 << 4)  /* Bit 4:  OHCI asynchronous resume interrupt enable */
+#define SFR_OHCIICR_APPSTART        (0)       /* Bit 5:  Reserved, must write 0 */
 
 #ifdef ATSAMA5D2
 #  define SFR_OHCIICR_SUSPEND(n)    (1 << ((n)+8))
@@ -146,8 +158,6 @@
 #define SFR_SECURE_ROM              (1 << 0)  /* Bit 0:  Disable Access to ROM Code */
 #define SFR_SECURE_FUSE             (1 << 8)  /* Bit 8:  Disable Access to Fuse Controller */
 
-#if defined(ATSAMA5D2) || defined(ATSAMA5D3)
-
 /* UTMI Clock Trimming Register */
 
 #define SFR_UTMICKTRIM_FREQ_SHIFT   (0)       /* Bits 0-1: UTMI Reference Clock Frequency */
@@ -155,14 +165,17 @@
 #  define SFR_UTMICKTRIM_FREQ_12MHZ (0 << SFR_UTMICKTRIM_FREQ_SHIFT) /* 12 MHz reference clock */
 #  define SFR_UTMICKTRIM_FREQ_16MHZ (1 << SFR_UTMICKTRIM_FREQ_SHIFT) /* 16 MHz reference clock */
 #  define SFR_UTMICKTRIM_FREQ_24MHZ (2 << SFR_UTMICKTRIM_FREQ_SHIFT) /* 24 MHz reference clock */
-#ifdef ATSAMA5D3
+#ifndef ATSAMA5D2
 #  define SFR_UTMICKTRIM_FREQ_48MHZ (3 << SFR_UTMICKTRIM_FREQ_SHIFT) /* 48 MHz reference clock */
 #endif
 
+#if defined(ATSAMA5D2) || defined(ATSAMA5D4)
 #  define SFR_UTMICKTRIM_VBG_SHIFT  (16)     /* Bits 16-19: UTMI Band Gap Voltage Trimming */
 #  define SFR_UTMICKTRIM_VBG_MASK   (15 << SFR_UTMICKTRIM_VBG_SHIFT)
 #    define SFR_UTMICKTRIM_VBG(n)   ((uint32_t)(n) << SFR_UTMICKTRIM_VBG_SHIFT)
+#endif
 
+#if defined(ATSAMA5D2) || defined(ATSAMA5D4)
 /* UTMI High Speed Trimming Register */
 
 #  define SFR_UTMIHSTRIM_SQUELCH_SHIFT (0)   /* Bits 0-2: UTMI HS SQUELCH Voltage Trimming */
@@ -180,7 +193,9 @@
 #  define SFR_UTMIHSTRIM_SLOPE2_SHIFT  (16)  /* Bits 16-18: UTMI HS PORT2 Transceiver Slope Trimming */
 #  define SFR_UTMIHSTRIM_SLOPE2_MASK   (7 << SFR_UTMIHSTRIM_SLOPE2_SHIFT)
 #    define SFR_UTMIHSTRIM_SLOPE2(n)   ((uint32_t)(n) << SFR_UTMIHSTRIM_SLOPE2_SHIFT)
+#endif
 
+#if defined(ATSAMA5D2) || defined(ATSAMA5D4)
 /* UTMI Full Speed Trimming Register */
 
 #  define SFR_UTMIFSTRIM_RISE_SHIFT (0)      /* Bits 0-2: FS Transceiver Output Rising Slope Trimming */
@@ -198,15 +213,16 @@
 #  define SFR_UTMIFSTRIM_ZP_SHIFT   (20)     /* Bits 20-22: FS Transceiver PMOS Impedance Trimming */
 #  define SFR_UTMIFSTRIM_ZP_MASK    (7 << SFR_UTMIHSTRIM_SLOPE2_SHIFT)
 #    define SFR_UTMIFSTRIM_ZP(n)    ((uint32_t)(n) << SFR_UTMIHSTRIM_SLOPE2_SHIFT)
+#endif
 
+#if defined(ATSAMA5D2) || defined(ATSAMA5D4)
 /* UTMI DP/DM Pin Swapping Register */
 
 #  define SFR_UTMISWAP_PORT(n)     (1 << (n)) /* Bit n:  PORT n DP/DM Pin Swapping */
-#    define SFR_UTMISWAP_PORT0     (1 << 0)   /* Bit 0:  PORT 0 DP/DM Pin Swapping */
-#    define SFR_UTMISWAP_PORT1     (1 << 1)   /* Bit 1:  PORT 1 DP/DM Pin Swapping */
-#    define SFR_UTMISWAP_PORT2     (1 << 2)   /* Bit 2:  PORT 2 DP/DM Pin Swapping */
-
-#endif /* if defined(ATSAMA5D2) || defined(ATSAMA5D3) */
+#    define SFR_UTMISWAP_PORT0     (1 << 0)  /* Bit 0:  PORT 0 DP/DM Pin Swapping */
+#    define SFR_UTMISWAP_PORT1     (1 << 1)  /* Bit 1:  PORT 1 DP/DM Pin Swapping */
+#    define SFR_UTMISWAP_PORT2     (1 << 2)  /* Bit 2:  PORT 2 DP/DM Pin Swapping */
+#endif
 
 /* EBI Configuration Register */
 
@@ -255,9 +271,7 @@
 #endif
 
 #if defined(ATSAMA5D2) || defined(ATSAMA5D4)
-
 /* Serial Number 0 Register (32-bit value) */
-
 /* Serial Number 1 Register (32-bit value) */
 
 /* AIC Redirection Register */

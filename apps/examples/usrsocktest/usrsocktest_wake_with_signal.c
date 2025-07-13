@@ -1,22 +1,36 @@
 /****************************************************************************
- * apps/examples/usrsocktest/usrsocktest_wake_with_signal.c
+ * examples/usrsocktest/usrsocktest_wake_with_signal.c
+ * Wake blocked IO with signal or daemon abort
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
+ *   Authors: Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,15 +44,16 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <poll.h>
-#include <unistd.h>
-
-#include <nuttx/clock.h>
 
 #include "defines.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+#ifndef ARRAY_SIZE
+#  define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
 
 #define TEST_FLAG_PAUSE_USRSOCK_HANDLING (1 << 0)
 #define TEST_FLAG_DAEMON_ABORT           (1 << 1)
@@ -63,71 +78,19 @@ enum e_test_type
   __TEST_TYPE_MAX,
 };
 
-struct thread_func
-{
-  pthread_startroutine_t fn;
-  bool stop_only_on_hang;
-};
-
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static FAR void *usrsock_blocking_socket_thread(FAR void *param);
-static FAR void *usrsock_blocking_close_thread(FAR void *param);
-static FAR void *usrsock_blocking_connect_thread(FAR void *param);
-static FAR void *usrsock_blocking_setsockopt_thread(FAR void *param);
-static FAR void *usrsock_blocking_getsockopt_thread(FAR void *param);
-static FAR void *usrsock_blocking_recv_thread(FAR void *param);
-static FAR void *usrsock_blocking_send_thread(FAR void *param);
-static FAR void *usrsock_blocking_poll_thread(FAR void *param);
-
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
 static pthread_t tid[MAX_THREADS];
 static sem_t tid_startsem;
 static sem_t tid_releasesem;
 static int test_sd[MAX_THREADS];
 static enum e_test_type test_type;
 static int test_flags;
-
-static struct thread_func thread_funcs[__TEST_TYPE_MAX] =
-{
-  [TEST_TYPE_SOCKET]      =
-  {
-    usrsock_blocking_socket_thread, false
-  },
-  [TEST_TYPE_CLOSE]       =
-  {
-    usrsock_blocking_close_thread, false
-  },
-  [TEST_TYPE_CONNECT]     =
-  {
-    usrsock_blocking_connect_thread, true
-  },
-  [TEST_TYPE_SETSOCKOPT]  =
-  {
-    usrsock_blocking_setsockopt_thread, false
-  },
-  [TEST_TYPE_GETSOCKOPT]  =
-  {
-    usrsock_blocking_getsockopt_thread, false
-  },
-  [TEST_TYPE_RECV]        =
-  {
-    usrsock_blocking_recv_thread, true
-  },
-  [TEST_TYPE_SEND]        =
-  {
-    usrsock_blocking_send_thread, true
-  },
-  [TEST_TYPE_POLL]        =
-  {
-    usrsock_blocking_poll_thread, true
-  },
-};
 
 /****************************************************************************
  * Public Data
@@ -159,7 +122,7 @@ static void do_usrsock_blocking_socket_thread(FAR void *param)
   TEST_ASSERT_EQUAL(ENETDOWN, errno);
 }
 
-static FAR void *usrsock_blocking_socket_thread(FAR void *param)
+static FAR void * usrsock_blocking_socket_thread(FAR void *param)
 {
   do_usrsock_blocking_socket_thread(param);
   return NULL;
@@ -198,7 +161,7 @@ static void do_usrsock_blocking_close_thread(FAR void *param)
   test_sd[tidx] = -1;
 }
 
-static FAR void *usrsock_blocking_close_thread(FAR void *param)
+static FAR void * usrsock_blocking_close_thread(FAR void *param)
 {
   do_usrsock_blocking_close_thread(param);
   return NULL;
@@ -242,7 +205,7 @@ static void do_usrsock_blocking_connect_thread(FAR void *param)
   test_sd[tidx] = -1;
 }
 
-static FAR void *usrsock_blocking_connect_thread(FAR void *param)
+static FAR void * usrsock_blocking_connect_thread(FAR void *param)
 {
   do_usrsock_blocking_connect_thread(param);
   return NULL;
@@ -288,7 +251,7 @@ static void do_usrsock_blocking_setsockopt_thread(FAR void *param)
   test_sd[tidx] = -1;
 }
 
-static FAR void *usrsock_blocking_setsockopt_thread(FAR void *param)
+static FAR void * usrsock_blocking_setsockopt_thread(FAR void *param)
 {
   do_usrsock_blocking_setsockopt_thread(param);
   return NULL;
@@ -326,8 +289,7 @@ static void do_usrsock_blocking_getsockopt_thread(FAR void *param)
   sem_post(&tid_startsem);
   value = -1;
   valuelen = sizeof(value);
-  ret = getsockopt(test_sd[tidx], SOL_SOCKET, SO_REUSEADDR, &value,
-                   &valuelen);
+  ret = getsockopt(test_sd[tidx], SOL_SOCKET, SO_REUSEADDR, &value, &valuelen);
   TEST_ASSERT_EQUAL(-1, ret);
 
   /* Close socket */
@@ -336,7 +298,7 @@ static void do_usrsock_blocking_getsockopt_thread(FAR void *param)
   test_sd[tidx] = -1;
 }
 
-static FAR void *usrsock_blocking_getsockopt_thread(FAR void *param)
+static FAR void * usrsock_blocking_getsockopt_thread(FAR void *param)
 {
   do_usrsock_blocking_getsockopt_thread(param);
   return NULL;
@@ -363,8 +325,7 @@ static void do_usrsock_blocking_send_thread(FAR void *param)
 
   /* Connect socket. */
 
-  ret = connect(test_sd[tidx], (FAR const struct sockaddr *)&addr,
-                sizeof(addr));
+  ret = connect(test_sd[tidx], (FAR const struct sockaddr *)&addr, sizeof(addr));
   TEST_ASSERT_EQUAL(0, ret);
 
   /* Allow main thread to hang usrsock daemon at this point. */
@@ -385,7 +346,7 @@ static void do_usrsock_blocking_send_thread(FAR void *param)
   test_sd[tidx] = -1;
 }
 
-static FAR void *usrsock_blocking_send_thread(FAR void *param)
+static FAR void * usrsock_blocking_send_thread(FAR void *param)
 {
   do_usrsock_blocking_send_thread(param);
   return NULL;
@@ -412,8 +373,7 @@ static void do_usrsock_blocking_recv_thread(FAR void *param)
 
   /* Connect socket. */
 
-  ret = connect(test_sd[tidx], (FAR const struct sockaddr *)&addr,
-                sizeof(addr));
+  ret = connect(test_sd[tidx], (FAR const struct sockaddr *)&addr, sizeof(addr));
   TEST_ASSERT_EQUAL(0, ret);
 
   /* Allow main thread to hang usrsock daemon at this point. */
@@ -434,7 +394,7 @@ static void do_usrsock_blocking_recv_thread(FAR void *param)
   test_sd[tidx] = -1;
 }
 
-static FAR void *usrsock_blocking_recv_thread(FAR void *param)
+static FAR void * usrsock_blocking_recv_thread(FAR void *param)
 {
   do_usrsock_blocking_recv_thread(param);
   return NULL;
@@ -445,9 +405,7 @@ static void do_usrsock_blocking_poll_thread(FAR void *param)
   intptr_t tidx = (intptr_t)param;
   struct sockaddr_in addr;
   int ret;
-  struct pollfd pfd = {
-  };
-
+  struct pollfd pfd = {};
   bool test_abort = !!(test_flags & TEST_FLAG_DAEMON_ABORT);
   bool test_hang = !!(test_flags & TEST_FLAG_PAUSE_USRSOCK_HANDLING);
 
@@ -465,8 +423,7 @@ static void do_usrsock_blocking_poll_thread(FAR void *param)
 
   /* Connect socket. */
 
-  ret = connect(test_sd[tidx], (FAR const struct sockaddr *)&addr,
-                sizeof(addr));
+  ret = connect(test_sd[tidx], (FAR const struct sockaddr *)&addr, sizeof(addr));
   TEST_ASSERT_EQUAL(0, ret);
 
   /* Allow main thread to hang usrsock daemon at this point. */
@@ -496,7 +453,7 @@ static void do_usrsock_blocking_poll_thread(FAR void *param)
   test_sd[tidx] = -1;
 }
 
-static FAR void *usrsock_blocking_poll_thread(FAR void *param)
+static FAR void * usrsock_blocking_poll_thread(FAR void *param)
 {
   do_usrsock_blocking_poll_thread(param);
   return NULL;
@@ -504,6 +461,21 @@ static FAR void *usrsock_blocking_poll_thread(FAR void *param)
 
 static void do_wake_test(enum e_test_type type, int flags)
 {
+  static const struct
+  {
+    pthread_startroutine_t fn;
+    bool stop_only_on_hang;
+  } thread_funcs[__TEST_TYPE_MAX] =
+    {
+      [TEST_TYPE_SOCKET]      = { usrsock_blocking_socket_thread, false },
+      [TEST_TYPE_CLOSE]       = { usrsock_blocking_close_thread, false },
+      [TEST_TYPE_CONNECT]     = { usrsock_blocking_connect_thread, true },
+      [TEST_TYPE_SETSOCKOPT]  = { usrsock_blocking_setsockopt_thread, false },
+      [TEST_TYPE_GETSOCKOPT]  = { usrsock_blocking_getsockopt_thread, false },
+      [TEST_TYPE_RECV]        = { usrsock_blocking_recv_thread, true },
+      [TEST_TYPE_SEND]        = { usrsock_blocking_send_thread, true },
+      [TEST_TYPE_POLL]        = { usrsock_blocking_poll_thread, true },
+    };
   int ret;
   int nthreads = (flags & TEST_FLAG_MULTI_THREAD) ? MAX_THREADS : 1;
   int tidx;
@@ -512,8 +484,7 @@ static void do_wake_test(enum e_test_type type, int flags)
 
   /* Start test daemon. */
 
-  TEST_ASSERT_EQUAL(OK,
-                    usrsocktest_daemon_start(&usrsocktest_daemon_config));
+  TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(&usrsocktest_daemon_config));
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_active_sockets());
 
   /* Launch worker threads. */
@@ -527,7 +498,7 @@ static void do_wake_test(enum e_test_type type, int flags)
       TEST_ASSERT_EQUAL(OK, ret);
     }
 
-  /* Let workers to start. */
+/* Let workers to start. */
 
   for (tidx = 0; tidx < nthreads; tidx++)
     {
@@ -543,7 +514,6 @@ static void do_wake_test(enum e_test_type type, int flags)
     {
       sem_post(&tid_releasesem);
     }
-
   for (tidx = 0; tidx < nthreads; tidx++)
     {
       sem_wait(&tid_startsem);
@@ -560,7 +530,7 @@ static void do_wake_test(enum e_test_type type, int flags)
 
       for (tidx = 0; tidx < nthreads; tidx++)
         {
-          pthread_kill(tid[tidx], SIGUSR1);
+          pthread_kill(tid[tidx], 1);
 
           /* Wait threads to complete work. */
 
@@ -568,7 +538,6 @@ static void do_wake_test(enum e_test_type type, int flags)
           TEST_ASSERT_EQUAL(OK, ret);
           tid[tidx] = -1;
         }
-
       TEST_ASSERT_FALSE(usrsocktest_test_failed);
 
       /* Stopping daemon should succeed. */
@@ -595,13 +564,12 @@ static void do_wake_test(enum e_test_type type, int flags)
           TEST_ASSERT_EQUAL(OK, ret);
           tid[tidx] = -1;
         }
-
       TEST_ASSERT_FALSE(usrsocktest_test_failed);
     }
 }
 
 /****************************************************************************
- * Name: wake_with_signal test group setup
+ * Name: WakeWithSignal test group setup
  *
  * Description:
  *   Setup function executed before each testcase in this test group
@@ -617,7 +585,7 @@ static void do_wake_test(enum e_test_type type, int flags)
  *
  ****************************************************************************/
 
-TEST_SETUP(wake_with_signal)
+TEST_SETUP(WakeWithSignal)
 {
   int i;
 
@@ -626,13 +594,12 @@ TEST_SETUP(wake_with_signal)
       tid[i] = -1;
       test_sd[i] = -1;
     }
-
   sem_init(&tid_startsem, 0, 0);
   sem_init(&tid_releasesem, 0, 0);
 }
 
 /****************************************************************************
- * Name: wake_with_signal test group teardown
+ * Name: WakeWithSignal test group teardown
  *
  * Description:
  *   Setup function executed after each testcase in this test group
@@ -648,9 +615,9 @@ TEST_SETUP(wake_with_signal)
  *
  ****************************************************************************/
 
-TEST_TEAR_DOWN(wake_with_signal)
+TEST_TEAR_DOWN(WakeWithSignal)
 {
-  int unused_data ret;
+  int ret;
   int i;
 
   for (i = 0; i < MAX_THREADS; i++)
@@ -658,24 +625,22 @@ TEST_TEAR_DOWN(wake_with_signal)
       if (tid[i] != -1)
         {
           ret = pthread_cancel(tid[i]);
-          TEST_ASSERT_EQUAL(ret, OK);
+          assert(ret == OK);
           ret = pthread_join(tid[i], NULL);
-          TEST_ASSERT_EQUAL(ret, OK);
+          assert(ret == OK);
         }
-
       if (test_sd[i] != -1)
         {
           close(test_sd[i]);
           test_sd[i] = -1;
         }
     }
-
   sem_destroy(&tid_startsem);
   sem_destroy(&tid_releasesem);
 }
 
 /****************************************************************************
- * Name: wake_blocking_connect
+ * Name: WakeBlockingConnect
  *
  * Description:
  *   Wake blocking connect with signal
@@ -691,7 +656,7 @@ TEST_TEAR_DOWN(wake_with_signal)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, wake_blocking_connect)
+TEST(WakeWithSignal, WakeBlockingConnect)
 {
   /* Configure test daemon. */
 
@@ -708,7 +673,7 @@ TEST(wake_with_signal, wake_blocking_connect)
 }
 
 /****************************************************************************
- * Name: wake_blocking_connect_multithread
+ * Name: WakeBlockingConnectMultiThread
  *
  * Description:
  *   Wake multiple blocking connect with signal
@@ -724,7 +689,7 @@ TEST(wake_with_signal, wake_blocking_connect)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, wake_blocking_connect_multithread)
+TEST(WakeWithSignal, WakeBlockingConnectMultiThread)
 {
   /* Configure test daemon. */
 
@@ -741,7 +706,7 @@ TEST(wake_with_signal, wake_blocking_connect_multithread)
 }
 
 /****************************************************************************
- * Name: wake_blocking_send
+ * Name: WakeBlockingSend
  *
  * Description:
  *   Wake blocking send with signal
@@ -757,7 +722,7 @@ TEST(wake_with_signal, wake_blocking_connect_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, wake_blocking_send)
+TEST(WakeWithSignal, WakeBlockingSend)
 {
   /* Configure test daemon. */
 
@@ -774,7 +739,7 @@ TEST(wake_with_signal, wake_blocking_send)
 }
 
 /****************************************************************************
- * Name: wake_blocking_send_multithread
+ * Name: WakeBlockingSendMultiThread
  *
  * Description:
  *   Wake multiple blocking send with signal
@@ -790,7 +755,7 @@ TEST(wake_with_signal, wake_blocking_send)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, wake_blocking_send_multithread)
+TEST(WakeWithSignal, WakeBlockingSendMultiThread)
 {
   /* Configure test daemon. */
 
@@ -805,9 +770,8 @@ TEST(wake_with_signal, wake_blocking_send_multithread)
 
   do_wake_test(TEST_TYPE_SEND, TEST_FLAG_MULTI_THREAD);
 }
-
 /****************************************************************************
- * Name: wake_blocking_recv
+ * Name: WakeBlockingRecv
  *
  * Description:
  *   Wake blocking recv with signal
@@ -823,7 +787,7 @@ TEST(wake_with_signal, wake_blocking_send_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, wake_blocking_recv)
+TEST(WakeWithSignal, WakeBlockingRecv)
 {
   /* Configure test daemon. */
 
@@ -841,7 +805,7 @@ TEST(wake_with_signal, wake_blocking_recv)
 }
 
 /****************************************************************************
- * Name: wake_blocking_recv_multithread
+ * Name: WakeBlockingRecvMultiThread
  *
  * Description:
  *   Wake multiple blocking recv with signal
@@ -857,7 +821,7 @@ TEST(wake_with_signal, wake_blocking_recv)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, wake_blocking_recv_multithread)
+TEST(WakeWithSignal, WakeBlockingRecvMultiThread)
 {
   /* Configure test daemon. */
 
@@ -875,7 +839,7 @@ TEST(wake_with_signal, wake_blocking_recv_multithread)
 }
 
 /****************************************************************************
- * Name: abort_blocking_connect
+ * Name: AbortBlockingConnect
  *
  * Description:
  *   Wake blocking connect with daemon abort
@@ -891,7 +855,7 @@ TEST(wake_with_signal, wake_blocking_recv_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, abort_blocking_connect)
+TEST(WakeWithSignal, AbortBlockingConnect)
 {
   /* Configure test daemon. */
 
@@ -908,7 +872,7 @@ TEST(wake_with_signal, abort_blocking_connect)
 }
 
 /****************************************************************************
- * Name: abort_blocking_connect_multithread
+ * Name: AbortBlockingConnectMultiThread
  *
  * Description:
  *   Wake multiple blocking connect with daemon abort
@@ -924,7 +888,7 @@ TEST(wake_with_signal, abort_blocking_connect)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, abort_blocking_connect_multithread)
+TEST(WakeWithSignal, AbortBlockingConnectMultiThread)
 {
   /* Configure test daemon. */
 
@@ -942,7 +906,7 @@ TEST(wake_with_signal, abort_blocking_connect_multithread)
 }
 
 /****************************************************************************
- * Name: abort_blocking_send
+ * Name: AbortBlockingSend
  *
  * Description:
  *   Wake blocking send with daemon abort
@@ -958,7 +922,7 @@ TEST(wake_with_signal, abort_blocking_connect_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, abort_blocking_send)
+TEST(WakeWithSignal, AbortBlockingSend)
 {
   /* Configure test daemon. */
 
@@ -975,7 +939,7 @@ TEST(wake_with_signal, abort_blocking_send)
 }
 
 /****************************************************************************
- * Name: abort_blocking_send_multithread
+ * Name: AbortBlockingSendMultiThread
  *
  * Description:
  *   Wake multiple blocking send with daemon abort
@@ -991,7 +955,7 @@ TEST(wake_with_signal, abort_blocking_send)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, abort_blocking_send_multithread)
+TEST(WakeWithSignal, AbortBlockingSendMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1009,7 +973,7 @@ TEST(wake_with_signal, abort_blocking_send_multithread)
 }
 
 /****************************************************************************
- * Name: abort_blocking_recv
+ * Name: AbortBlockingRecv
  *
  * Description:
  *   Wake blocking recv with daemon abort
@@ -1025,7 +989,7 @@ TEST(wake_with_signal, abort_blocking_send_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, abort_blocking_recv)
+TEST(WakeWithSignal, AbortBlockingRecv)
 {
   /* Configure test daemon. */
 
@@ -1043,7 +1007,7 @@ TEST(wake_with_signal, abort_blocking_recv)
 }
 
 /****************************************************************************
- * Name: abort_blocking_recv_multithread
+ * Name: AbortBlockingRecvMultiThread
  *
  * Description:
  *   Wake multiple blocking recv with daemon abort
@@ -1059,7 +1023,7 @@ TEST(wake_with_signal, abort_blocking_recv)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, abort_blocking_recv_multithread)
+TEST(WakeWithSignal, AbortBlockingRecvMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1078,7 +1042,7 @@ TEST(wake_with_signal, abort_blocking_recv_multithread)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_connect
+ * Name: PendingRequestBlockingConnect
  *
  * Description:
  *   Wake blocking connect with daemon abort (and daemon not handling pending
@@ -1095,7 +1059,7 @@ TEST(wake_with_signal, abort_blocking_recv_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_connect)
+TEST(WakeWithSignal, PendingRequestBlockingConnect)
 {
   /* Configure test daemon. */
 
@@ -1113,11 +1077,11 @@ TEST(wake_with_signal, pending_request_blocking_connect)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_connect_multithread
+ * Name: PendingRequestBlockingConnectMultiThread
  *
  * Description:
- *   Wake multiple blocking connect with daemon abort (and daemon not
- *   handling pending requests before abort)
+ *   Wake multiple blocking connect with daemon abort (and daemon not handling
+ *   pending requests before abort)
  *
  * Input Parameters:
  *   None
@@ -1130,7 +1094,7 @@ TEST(wake_with_signal, pending_request_blocking_connect)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_connect_multithread)
+TEST(WakeWithSignal, PendingRequestBlockingConnectMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1149,7 +1113,7 @@ TEST(wake_with_signal, pending_request_blocking_connect_multithread)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_send
+ * Name: PendingRequestBlockingSend
  *
  * Description:
  *   Wake blocking send with daemon abort (and daemon not handling pending
@@ -1166,7 +1130,7 @@ TEST(wake_with_signal, pending_request_blocking_connect_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_send)
+TEST(WakeWithSignal, PendingRequestBlockingSend)
 {
   /* Configure test daemon. */
 
@@ -1184,7 +1148,7 @@ TEST(wake_with_signal, pending_request_blocking_send)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_send_multithread
+ * Name: PendingRequestBlockingSendMultiThread
  *
  * Description:
  *   Wake multiple blocking send with daemon abort (and daemon not handling
@@ -1201,7 +1165,7 @@ TEST(wake_with_signal, pending_request_blocking_send)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_send_multithread)
+TEST(WakeWithSignal, PendingRequestBlockingSendMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1220,7 +1184,7 @@ TEST(wake_with_signal, pending_request_blocking_send_multithread)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_recv
+ * Name: PendingRequestBlockingRecv
  *
  * Description:
  *   Wake blocking recv with daemon abort (and daemon not handling pending
@@ -1237,7 +1201,7 @@ TEST(wake_with_signal, pending_request_blocking_send_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_recv)
+TEST(WakeWithSignal, PendingRequestBlockingRecv)
 {
   /* Configure test daemon. */
 
@@ -1256,7 +1220,7 @@ TEST(wake_with_signal, pending_request_blocking_recv)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_recv_multithread
+ * Name: PendingRequestBlockingRecvMultiThread
  *
  * Description:
  *   Wake multiple blocking recv with daemon abort (and daemon not handling
@@ -1273,7 +1237,7 @@ TEST(wake_with_signal, pending_request_blocking_recv)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_recv_multithread)
+TEST(WakeWithSignal, PendingRequestBlockingRecvMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1293,7 +1257,7 @@ TEST(wake_with_signal, pending_request_blocking_recv_multithread)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_open
+ * Name: PendingRequestBlockingOpen
  *
  * Description:
  *   Wake blocking open with daemon abort (and daemon not handling pending
@@ -1310,7 +1274,7 @@ TEST(wake_with_signal, pending_request_blocking_recv_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_open)
+TEST(WakeWithSignal, PendingRequestBlockingOpen)
 {
   /* Configure test daemon. */
 
@@ -1329,7 +1293,7 @@ TEST(wake_with_signal, pending_request_blocking_open)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_open_multithread
+ * Name: PendingRequestBlockingOpenMultiThread
  *
  * Description:
  *   Wake multiple blocking open with daemon abort (and daemon not handling
@@ -1346,7 +1310,7 @@ TEST(wake_with_signal, pending_request_blocking_open)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_open_multithread)
+TEST(WakeWithSignal, PendingRequestBlockingOpenMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1366,7 +1330,7 @@ TEST(wake_with_signal, pending_request_blocking_open_multithread)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_close
+ * Name: PendingRequestBlockingClose
  *
  * Description:
  *   Wake blocking close with daemon abort (and daemon not handling pending
@@ -1382,8 +1346,7 @@ TEST(wake_with_signal, pending_request_blocking_open_multithread)
  *   None
  *
  ****************************************************************************/
-
-TEST(wake_with_signal, pending_request_blocking_close)
+TEST(WakeWithSignal, PendingRequestBlockingClose)
 {
   /* Configure test daemon. */
 
@@ -1402,7 +1365,7 @@ TEST(wake_with_signal, pending_request_blocking_close)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_close_multithread
+ * Name: PendingRequestBlockingCloseMultiThread
  *
  * Description:
  *   Wake multiple blocking close with daemon abort (and daemon not handling
@@ -1419,7 +1382,7 @@ TEST(wake_with_signal, pending_request_blocking_close)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_close_multithread)
+TEST(WakeWithSignal, PendingRequestBlockingCloseMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1439,7 +1402,7 @@ TEST(wake_with_signal, pending_request_blocking_close_multithread)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_poll
+ * Name: PendingRequestBlockingPoll
  *
  * Description:
  *   Wake blocking poll with daemon abort (and daemon not handling pending
@@ -1456,7 +1419,7 @@ TEST(wake_with_signal, pending_request_blocking_close_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_poll)
+TEST(WakeWithSignal, PendingRequestBlockingPoll)
 {
   /* Configure test daemon. */
 
@@ -1475,7 +1438,7 @@ TEST(wake_with_signal, pending_request_blocking_poll)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_poll_multithread
+ * Name: PendingRequestBlockingPollMultiThread
  *
  * Description:
  *   Wake multiple blocking poll with daemon abort (and daemon not handling
@@ -1492,7 +1455,7 @@ TEST(wake_with_signal, pending_request_blocking_poll)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_poll_multithread)
+TEST(WakeWithSignal, PendingRequestBlockingPollMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1512,11 +1475,11 @@ TEST(wake_with_signal, pending_request_blocking_poll_multithread)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_setsockopt
+ * Name: PendingRequestBlockingSetSockOpt
  *
  * Description:
- *   Wake blocking setsockopt with daemon abort (and daemon not handling
- *   pending request before abort)
+ *   Wake blocking setsockopt with daemon abort (and daemon not handling pending
+ *   request before abort)
  *
  * Input Parameters:
  *   None
@@ -1529,7 +1492,7 @@ TEST(wake_with_signal, pending_request_blocking_poll_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_setsockopt)
+TEST(WakeWithSignal, PendingRequestBlockingSetSockOpt)
 {
   /* Configure test daemon. */
 
@@ -1548,7 +1511,7 @@ TEST(wake_with_signal, pending_request_blocking_setsockopt)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_setsockopt_multithread
+ * Name: PendingRequestBlockingSetSockOptMultiThread
  *
  * Description:
  *   Wake multiple blocking setsockopt with daemon abort (and daemon not
@@ -1565,7 +1528,7 @@ TEST(wake_with_signal, pending_request_blocking_setsockopt)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_setsockopt_multithread)
+TEST(WakeWithSignal, PendingRequestBlockingSetSockOptMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1585,11 +1548,11 @@ TEST(wake_with_signal, pending_request_blocking_setsockopt_multithread)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_getsockopt
+ * Name: PendingRequestBlockingGetSockOpt
  *
  * Description:
- *   Wake blocking getsockopt with daemon abort (and daemon not handling
- *   pending request before abort)
+ *   Wake blocking getsockopt with daemon abort (and daemon not handling pending
+ *   request before abort)
  *
  * Input Parameters:
  *   None
@@ -1602,7 +1565,7 @@ TEST(wake_with_signal, pending_request_blocking_setsockopt_multithread)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_getsockopt)
+TEST(WakeWithSignal, PendingRequestBlockingGetSockOpt)
 {
   /* Configure test daemon. */
 
@@ -1621,7 +1584,7 @@ TEST(wake_with_signal, pending_request_blocking_getsockopt)
 }
 
 /****************************************************************************
- * Name: pending_request_blocking_getsockopt_multithread
+ * Name: PendingRequestBlockingGetSockOptMultiThread
  *
  * Description:
  *   Wake multiple blocking getsockopt with daemon abort (and daemon not
@@ -1638,7 +1601,7 @@ TEST(wake_with_signal, pending_request_blocking_getsockopt)
  *
  ****************************************************************************/
 
-TEST(wake_with_signal, pending_request_blocking_getsockopt_multithread)
+TEST(WakeWithSignal, PendingRequestBlockingGetSockOptMultiThread)
 {
   /* Configure test daemon. */
 
@@ -1661,42 +1624,34 @@ TEST(wake_with_signal, pending_request_blocking_getsockopt_multithread)
  * Public Functions
  ****************************************************************************/
 
-TEST_GROUP(wake_with_signal)
+TEST_GROUP(WakeWithSignal)
 {
-  RUN_TEST_CASE(wake_with_signal, wake_blocking_connect);
-  RUN_TEST_CASE(wake_with_signal, wake_blocking_connect_multithread);
-  RUN_TEST_CASE(wake_with_signal, wake_blocking_send);
-  RUN_TEST_CASE(wake_with_signal, wake_blocking_send_multithread);
-  RUN_TEST_CASE(wake_with_signal, wake_blocking_recv);
-  RUN_TEST_CASE(wake_with_signal, wake_blocking_recv_multithread);
-  RUN_TEST_CASE(wake_with_signal, abort_blocking_connect);
-  RUN_TEST_CASE(wake_with_signal, abort_blocking_connect_multithread);
-  RUN_TEST_CASE(wake_with_signal, abort_blocking_send);
-  RUN_TEST_CASE(wake_with_signal, abort_blocking_send_multithread);
-  RUN_TEST_CASE(wake_with_signal, abort_blocking_recv);
-  RUN_TEST_CASE(wake_with_signal, abort_blocking_recv_multithread);
-  RUN_TEST_CASE(wake_with_signal, pending_request_blocking_connect);
-  RUN_TEST_CASE(wake_with_signal,
-                pending_request_blocking_connect_multithread);
-  RUN_TEST_CASE(wake_with_signal, pending_request_blocking_send);
-  RUN_TEST_CASE(wake_with_signal,
-                pending_request_blocking_send_multithread);
-  RUN_TEST_CASE(wake_with_signal, pending_request_blocking_recv);
-  RUN_TEST_CASE(wake_with_signal,
-                pending_request_blocking_recv_multithread);
-  RUN_TEST_CASE(wake_with_signal, pending_request_blocking_open);
-  RUN_TEST_CASE(wake_with_signal,
-                pending_request_blocking_open_multithread);
-  RUN_TEST_CASE(wake_with_signal, pending_request_blocking_close);
-  RUN_TEST_CASE(wake_with_signal,
-                pending_request_blocking_close_multithread);
-  RUN_TEST_CASE(wake_with_signal, pending_request_blocking_poll);
-  RUN_TEST_CASE(wake_with_signal,
-                pending_request_blocking_poll_multithread);
-  RUN_TEST_CASE(wake_with_signal, pending_request_blocking_setsockopt);
-  RUN_TEST_CASE(wake_with_signal,
-                pending_request_blocking_setsockopt_multithread);
-  RUN_TEST_CASE(wake_with_signal, pending_request_blocking_getsockopt);
-  RUN_TEST_CASE(wake_with_signal,
-                pending_request_blocking_getsockopt_multithread);
+  RUN_TEST_CASE(WakeWithSignal, WakeBlockingConnect);
+  RUN_TEST_CASE(WakeWithSignal, WakeBlockingConnectMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, WakeBlockingSend);
+  RUN_TEST_CASE(WakeWithSignal, WakeBlockingSendMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, WakeBlockingRecv);
+  RUN_TEST_CASE(WakeWithSignal, WakeBlockingRecvMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, AbortBlockingConnect);
+  RUN_TEST_CASE(WakeWithSignal, AbortBlockingConnectMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, AbortBlockingSend);
+  RUN_TEST_CASE(WakeWithSignal, AbortBlockingSendMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, AbortBlockingRecv);
+  RUN_TEST_CASE(WakeWithSignal, AbortBlockingRecvMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingConnect);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingConnectMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingSend);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingSendMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingRecv);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingRecvMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingOpen);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingOpenMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingClose);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingCloseMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingPoll);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingPollMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingSetSockOpt);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingSetSockOptMultiThread);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingGetSockOpt);
+  RUN_TEST_CASE(WakeWithSignal, PendingRequestBlockingGetSockOptMultiThread);
 }

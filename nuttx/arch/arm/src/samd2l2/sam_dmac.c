@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/samd2l2/sam_dmac.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,16 +42,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
 #include "sched/sched.h"
 #include "chip.h"
 
@@ -101,8 +113,14 @@ struct sam_dmach_s
  * Private Function Prototypes
  ****************************************************************************/
 
+static int   sam_takechsem(void);
+static inline void sam_givechsem(void);
+#if CONFIG_SAMD2L2_DMAC_NDESC > 0
+static void   sam_takedsem(void);
+static inline void sam_givedsem(void);
+#endif
 static void   sam_dmaterminate(struct sam_dmach_s *dmach, int result);
-static int    sam_dmainterrupt(int irq, void *context, void *arg);
+static int    sam_dmainterrupt(int irq, void *context, FAR void *arg);
 static struct dma_desc_s *sam_alloc_desc(struct sam_dmach_s *dmach);
 static struct dma_desc_s *sam_append_desc(struct sam_dmach_s *dmach,
                 uint16_t btctrl, uint16_t btcnt,
@@ -119,11 +137,11 @@ static int    sam_rxbuffer(struct sam_dmach_s *dmach, uint32_t paddr,
  * Private Data
  ****************************************************************************/
 
-/* These mutex protect the DMA channel and descriptor tables */
+/* These semaphores protect the DMA channel and descriptor tables */
 
-static mutex_t g_chlock = NXMUTEX_INITIALIZER;
+static sem_t g_chsem;
 #if CONFIG_SAMD2L2_DMAC_NDESC > 0
-static sem_t g_dsem = SEM_INITIALIZER(CONFIG_SAMD2L2_DMAC_NDESC);
+static sem_t g_dsem;
 #endif
 
 /* This array describes the state of each DMA channel */
@@ -139,9 +157,9 @@ static struct sam_dmach_s g_dmach[SAMD2L2_NDMACHAN];
  */
 
 static struct dma_desc_s g_base_desc[SAMD2L2_NDMACHAN]
-  locate_data(".lpram") aligned_data(16);
+  __attribute__ ((section(".lpram"), aligned(16)));
 static struct dma_desc_s g_writeback_desc[SAMD2L2_NDMACHAN]
-  locate_data(".lpram") aligned_data(16);
+  __attribute__ ((section(".lpram"), aligned(16)));
 
 #if CONFIG_SAMD2L2_DMAC_NDESC > 0
 /* Additional DMA descriptors for (optional) multi-block transfer support.
@@ -149,12 +167,50 @@ static struct dma_desc_s g_writeback_desc[SAMD2L2_NDMACHAN]
  */
 
 static struct dma_desc_s g_dma_desc[CONFIG_SAMD2L2_DMAC_NDESC]
-  locate_data(".lpram") aligned_data(16);
+  __attribute__ ((section(".lpram"), aligned(16)));
 #endif
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: sam_takechsem() and sam_givechsem()
+ *
+ * Description:
+ *   Used to get exclusive access to the DMA channel table
+ *
+ ****************************************************************************/
+
+static int sam_takechsem(void)
+{
+  return nxsem_wait_uninterruptible(&g_chsem);
+}
+
+static inline void sam_givechsem(void)
+{
+  nxsem_post(&g_chsem);
+}
+
+/****************************************************************************
+ * Name: sam_takedsem() and sam_givedsem()
+ *
+ * Description:
+ *   Used to wait for availability of descriptors in the descriptor table.
+ *
+ ****************************************************************************/
+
+#if CONFIG_SAMD2L2_DMAC_NDESC > 0
+static void sam_takedsem(void)
+{
+  nxsem_wait_uninterruptible(&g_dsem);
+}
+
+static inline void sam_givedsem(void)
+{
+  nxsem_post(&g_dsem);
+}
+#endif
 
 /****************************************************************************
  * Name: sam_dmaterminate
@@ -180,7 +236,7 @@ static void sam_dmaterminate(struct sam_dmach_s *dmach, int result)
 
   /* Disable all channel interrupts */
 
-  putreg8(DMAC_INT_ALL, SAM_DMAC_CHINTENCLR);
+  putreg8(1 << dmach->dc_chan, SAM_DMAC_CHINTENCLR);
   leave_critical_section(flags);
 
   /* Free the DMA descriptor list */
@@ -207,7 +263,7 @@ static void sam_dmaterminate(struct sam_dmach_s *dmach, int result)
  *
  ****************************************************************************/
 
-static int sam_dmainterrupt(int irq, void *context, void *arg)
+static int sam_dmainterrupt(int irq, void *context, FAR void *arg)
 {
   struct sam_dmach_s *dmach;
   unsigned int chndx;
@@ -334,7 +390,7 @@ static struct dma_desc_s *sam_alloc_desc(struct sam_dmach_s *dmach)
        * it is ours.
        */
 
-      nxsem_wait_uninterruptible(&g_dsem);
+      sam_takedsem();
 
       /* Examine each list entry to find an available one -- i.e., one
        * with srcaddr == 0.  That srcaddr field is set to zero by the DMA
@@ -490,7 +546,7 @@ static void sam_free_desc(struct sam_dmach_s *dmach)
 
       next = (struct dma_desc_s *)desc->descaddr;
       memset(desc, 0, sizeof(struct dma_desc_s));
-      nxsem_post(&g_dsem);
+      sam_givedsem();
     }
 #endif
 }
@@ -714,7 +770,7 @@ static int sam_rxbuffer(struct sam_dmach_s *dmach, uint32_t paddr,
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_dma_initialize
+ * Name: up_dma_initialize
  *
  * Description:
  *   Initialize the DMA subsystem
@@ -724,10 +780,17 @@ static int sam_rxbuffer(struct sam_dmach_s *dmach, uint32_t paddr,
  *
  ****************************************************************************/
 
-void weak_function arm_dma_initialize(void)
+void weak_function up_dma_initialize(void)
 {
   dmainfo("Initialize DMAC\n");
   int i;
+
+  /* Initialize global semaphores */
+
+  nxsem_init(&g_chsem, 0, 1);
+#if CONFIG_SAMD2L2_DMAC_NDESC > 0
+  nxsem_init(&g_dsem, 0, CONFIG_SAMD2L2_DMAC_NDESC);
+#endif
 
   /* Initialized the DMA channel table */
 
@@ -805,7 +868,7 @@ DMA_HANDLE sam_dmachannel(uint32_t chflags)
   /* Search for an available DMA channel */
 
   dmach = NULL;
-  ret = nxmutex_lock(&g_chlock);
+  ret = sam_takechsem();
   if (ret < 0)
     {
       return NULL;
@@ -835,13 +898,13 @@ DMA_HANDLE sam_dmachannel(uint32_t chflags)
 
           /* Disable all channel interrupts */
 
-          putreg8(DMAC_INT_ALL, SAM_DMAC_CHINTENCLR);
+          putreg8(1 << chndx, SAM_DMAC_CHINTENCLR);
           leave_critical_section(flags);
           break;
         }
     }
 
-  nxmutex_unlock(&g_chlock);
+  sam_givechsem();
 
   dmainfo("chflags: %08x returning dmach: %p\n",  (int)chflags, dmach);
   return (DMA_HANDLE)dmach;

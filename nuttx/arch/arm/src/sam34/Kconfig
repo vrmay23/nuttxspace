@@ -41,7 +41,7 @@ config ARCH_CHIP_ATSAM3U1C
 	select ARCH_CHIP_SAM3U
 
 config ARCH_CHIP_ATSAM3X8E
-	bool "ATSAM3X8E"
+	bool "ATSAMSAM3X8E"
 	select ARCH_CORTEXM3
 	select ARCH_CHIP_SAM3X
 	select SAM34_HAVE_EXTNOR
@@ -247,7 +247,7 @@ config ARCH_CHIP_SAM4CM
 	default n
 	select ARCH_HAVE_MULTICPU
 	select ARCH_HAVE_TICKLESS
-	select ARCH_HAVE_CUSTOM_VECTORS
+	select ARCH_GLOBAL_IRQDISABLE
 
 config ARCH_CHIP_SAM4L
 	bool
@@ -438,7 +438,8 @@ config SAM34_NAND
 config SAM34_OCD
 	bool "On-chip DEBUG (OCD)"
 	depends on ARCH_CHIP_SAM4L
-	default DEBUG_SYMBOLS
+	default y if DEBUG_SYMBOLS
+	default n if !DEBUG_SYMBOLS
 
 config SAM34_PARC
 	bool "Parallel Capture (PARC)"
@@ -815,18 +816,6 @@ config SAM34_EXTNANDSIZE
 	---help---
 		Size of the external NAND in bytes.
 
-config SAM34_HAVE_NAND
-	bool
-	default n
-
-config SAM34_NAND_DUMP
-	bool "NAND data dump"
-	default n
-	depends on DEBUG_FEATURES && DEBUG_FS
-	---help---
-		Dump the contents of all data read and written to FLASH.  Depends on
-		CONFIG_DEBUG_FEATURES and DEBUG_FS.
-
 endif # SAM34_EXTNAND
 
 config SAM34_EXTNOR
@@ -1083,14 +1072,16 @@ config SAM34_TC5_TIOB
 
 config SAM34_ONESHOT
 	bool "TC one-shot wrapper"
-	default SCHED_TICKLESS
+	default n if !SCHED_TICKLESS
+	default y if SCHED_TICKLESS
 	---help---
 		Enable a wrapper around the low level timer/counter functions to
 		support one-shot timer.
 
 config SAM34_FREERUN
 	bool "TC free-running wrapper"
-	default SCHED_TICKLESS
+	default n if !SCHED_TICKLESS
+	default y if SCHED_TICKLESS
 	---help---
 		Enable a wrapper around the low level timer/counter functions to
 		support a free-running timer.

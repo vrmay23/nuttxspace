@@ -1,27 +1,41 @@
 /****************************************************************************
  * boards/arm/stm32/stm32f429i-disco/src/stm32f429i-disco.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011-2012, 2018-2019 Gregory Nutt. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Marco Krahl <ocram.lhark@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_STM32_STM32F429I_DISCO_SRC_STM32F429I_DISCO_H
-#define __BOARDS_ARM_STM32_STM32F429I_DISCO_SRC_STM32F429I_DISCO_H
+#ifndef __BOARDS_ARM_STM32_STM32F429I_DISCO_SRC_STM32F429I_DISCO__H
+#define __BOARDS_ARM_STM32_STM32F429I_DISCO_SRC_STM32F429I_DISCO__H
 
 /****************************************************************************
  * Included Files
@@ -55,12 +69,14 @@
 #ifndef CONFIG_STM32_OTGHS
 #  undef HAVE_USBDEV
 #  undef HAVE_USBHOST
+#  undef HAVE_USBMONITOR
 #endif
 
 /* Can't support USB device monitor if USB device is not enabled */
 
 #ifndef CONFIG_USBDEV
 #  undef HAVE_USBDEV
+#  undef HAVE_USBMONITOR
 #endif
 
 /* Can't support USB host is USB host is not enabled */
@@ -71,19 +87,7 @@
 
 /* Check if we should enable the USB monitor before starting NSH */
 
-#ifndef CONFIG_USBMONITOR
-#  undef HAVE_USBMONITOR
-#endif
-
-#ifndef HAVE_USBDEV
-#  undef CONFIG_USBDEV_TRACE
-#endif
-
-#ifndef HAVE_USBHOST
-#  undef CONFIG_USBHOST_TRACE
-#endif
-
-#if !defined(CONFIG_USBDEV_TRACE) && !defined(CONFIG_USBHOST_TRACE)
+#if !defined(CONFIG_USBDEV_TRACE) || !defined(CONFIG_USBMONITOR)
 #  undef HAVE_USBMONITOR
 #endif
 
@@ -113,13 +117,15 @@
 
 /* STMPE811 on I2C3 */
 
+//#define GPIO_I2C3_SCL GPIO_I2C3_SCL_1
+//#define GPIO_I2C3_SDA GPIO_I2C3_SDA_1
+
 #define STMPE811_ADDR1    0x41
 #define STMPE811_ADDR2    0x44
 
 #define GPIO_IO_EXPANDER (GPIO_INPUT|GPIO_FLOAT|GPIO_EXTI|GPIO_PORTA|GPIO_PIN15)
 
 /* STM32F429 Discovery GPIOs ************************************************/
-
 /* LEDs */
 
 #define GPIO_LED1       (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|\
@@ -137,8 +143,8 @@
 
 /* PWM
  *
- * The STM32F429 Discovery has no real on-board PWM devices, but the board
- * can be configured to output a pulse train using TIM4 CH2 on PD13.
+ * The STM32F429 Discovery has no real on-board PWM devices, but the board can be
+ * configured to output a pulse train using TIM4 CH2 on PD13.
  */
 
 #define STM32F429I_DISCO_PWMTIMER   4
@@ -156,6 +162,11 @@
                          GPIO_OUTPUT_CLEAR|GPIO_PORTF|GPIO_PIN10)
 #define GPIO_CS_SST25   (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|\
                          GPIO_OUTPUT_SET|GPIO_PORTE|GPIO_PIN4)
+
+/* L3GD20 MEMS */
+
+#define GPIO_L3GD20_DREADY (GPIO_INPUT|GPIO_FLOAT|GPIO_EXTI|GPIO_PORTA|GPIO_PIN2)
+#define L3GD20_IRQ      (2 + STM32_IRQ_EXTI0)
 
 /* USB OTG HS
  *
@@ -180,13 +191,14 @@
 
 /****************************************************************************
 
- * Public Data
+ * Public data
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 
 /****************************************************************************
- * Public Function Prototypes
+
+ * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
@@ -198,7 +210,7 @@
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_LIB_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -220,8 +232,8 @@ void weak_function stm32_spidev_initialize(void);
  * Name: stm32_usbinitialize
  *
  * Description:
- *   Called from stm32_usbinitialize very early in initialization to setup
- *   USB-related GPIO pins for the STM32F429Discovery board.
+ *   Called from stm32_usbinitialize very early in inialization to setup USB-
+ *   related GPIO pins for the STM32F429Discovery board.
  *
  ****************************************************************************/
 
@@ -290,6 +302,7 @@ void stm32_ledpminitialize(void);
 #endif
 
 /****************************************************************************
+
  * Name: stm32_pmbuttons
  *
  * Description:
@@ -319,7 +332,7 @@ void stm32_pmbuttons(void);
  ****************************************************************************/
 
 #ifdef CONFIG_STM32F429I_DISCO_ILI9341
-struct ili9341_lcd_s *stm32_ili93414ws_initialize(void);
+FAR struct ili9341_lcd_s *stm32_ili93414ws_initialize(void);
 #endif
 
 /****************************************************************************
@@ -345,7 +358,7 @@ struct ili9341_lcd_s *stm32_ili93414ws_initialize(void);
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_SPI5
-struct spi_dev_s *stm32_spi5initialize(void);
+FAR struct spi_dev_s *stm32_spi5initialize(void);
 #endif
 
 /****************************************************************************
@@ -363,7 +376,7 @@ struct spi_dev_s *stm32_spi5initialize(void);
  ****************************************************************************/
 
 #if defined(CONFIG_SPI) & defined(CONFIG_SENSORS_L3GD20)
-int stm32_l3gd20initialize(const char *devpath);
+int stm32_l3gd20initialize(FAR const char *devpath);
 #endif
 
 /****************************************************************************
@@ -388,18 +401,6 @@ int stm32_pwm_setup(void);
 
 #ifdef CONFIG_ADC
 int stm32_adc_setup(void);
-#endif
-
-/****************************************************************************
- * Name: stm32_can_setup
- *
- * Description:
- *  Initialize CAN and register the CAN device
- *
- ****************************************************************************/
-
-#ifdef CONFIG_STM32_CAN_CHARDRIVER
-int stm32_can_setup(void);
 #endif
 
 #endif /* __ASSEMBLY__ */

@@ -1,27 +1,42 @@
-/****************************************************************************
- * arch/arm/src/stm32/stm32l15xx_flash.c
+/************************************************************************************
+ * arch/arm/src/stm32/stm3l15xx_flash.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011 Uros Platise. All rights reserved.
+ *   Author: Uros Platise <uros.platise@isotel.eu>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * STM32L1 support:
+ *   Author: Juha Niskanen <juha.niskanen@haltian.com>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- ****************************************************************************/
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ************************************************************************************/
 
-/* Provides standard flash access functions, to be used by the
- * flash mtd driver.
+/* Provides standard flash access functions, to be used by the  flash mtd driver.
  * The interface is defined in the include/nuttx/progmem.h
  *
  * Requirements during write/erase operations on FLASH:
@@ -29,32 +44,31 @@
  *  - Low Power Modes are not permitted during write/erase
  */
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 
-#include <inttypes.h>
 #include <stdbool.h>
 #include <assert.h>
-#include <debug.h>
 #include <errno.h>
 
 #include "stm32_flash.h"
 #include "stm32_rcc.h"
 #include "stm32_waste.h"
-#include "arm_internal.h"
+
+#include "up_arch.h"
 
 /* Only for the STM32L15xx family. */
 
 #if defined(CONFIG_STM32_STM32L15XX)
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
 #define FLASH_KEY1        0x8c9daebf
 #define FLASH_KEY2        0x13141516
@@ -73,21 +87,31 @@
 
 #define FLASH_ERASEDVALUE  0x00
 
-/****************************************************************************
+/************************************************************************************
  * Private Data
- ****************************************************************************/
+ ************************************************************************************/
 
-static mutex_t g_lock = NXMUTEX_INITIALIZER;
+static sem_t g_sem = SEM_INITIALIZER(1);
 
-/****************************************************************************
+/************************************************************************************
  * Private Functions
- ****************************************************************************/
+ ************************************************************************************/
+
+static int sem_lock(void)
+{
+  return nxsem_wait_uninterruptible(&g_sem);
+}
+
+static inline void sem_unlock(void)
+{
+  nxsem_post(&g_sem);
+}
 
 static void stm32_eeprom_unlock(void)
 {
   while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY)
     {
-      stm32_waste();
+      up_waste();
     }
 
   if (getreg32(STM32_FLASH_PECR) & FLASH_PECR_PELOCK)
@@ -197,7 +221,7 @@ static ssize_t stm32_eeprom_erase_write(size_t addr, const void *buf,
 
       while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY)
         {
-          stm32_waste();
+          up_waste();
         }
 
       /* Verify */
@@ -256,22 +280,22 @@ static ssize_t stm32_eeprom_erase_write(size_t addr, const void *buf,
   return buflen;
 }
 
-/****************************************************************************
+/************************************************************************************
  * Public Functions
- ****************************************************************************/
+ ************************************************************************************/
 
 int stm32_flash_unlock(void)
 {
   int ret;
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return ret;
     }
 
   flash_unlock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   return ret;
 }
@@ -280,14 +304,14 @@ int stm32_flash_lock(void)
 {
   int ret;
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return ret;
     }
 
   flash_lock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   return ret;
 }
@@ -312,14 +336,14 @@ ssize_t stm32_eeprom_write(size_t addr, const void *buf, size_t buflen)
       return -EINVAL;
     }
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return (ssize_t)ret;
     }
 
   outlen = stm32_eeprom_erase_write(addr, buf, buflen);
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   return outlen;
 }
@@ -329,14 +353,14 @@ ssize_t stm32_eeprom_erase(size_t addr, size_t eraselen)
   ssize_t outlen;
   int ret;
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return (ssize_t)ret;
     }
 
   outlen = stm32_eeprom_erase_write(addr, NULL, eraselen);
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   return outlen;
 }
@@ -429,7 +453,7 @@ ssize_t up_progmem_eraseblock(size_t block)
 
   /* Get flash ready and begin erasing single page */
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -448,11 +472,11 @@ ssize_t up_progmem_eraseblock(size_t block)
 
   while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY)
     {
-      stm32_waste();
+      up_waste();
     }
 
   flash_lock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
 
   /* Verify */
 
@@ -498,7 +522,7 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
 
   /* Get flash ready and begin flashing */
 
-  ret = nxmutex_lock(&g_lock);
+  ret = sem_lock();
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -514,7 +538,7 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
 
       while (getreg32(STM32_FLASH_SR) & FLASH_SR_BSY)
         {
-          stm32_waste();
+          up_waste();
         }
 
       /* Verify */
@@ -540,19 +564,12 @@ out:
 
   if (ret != OK)
     {
-      ferr("flash write error: %d, status: 0x%" PRIx32 "\n",
-           ret, getreg32(STM32_FLASH_SR));
+      ferr("flash write error: %d, status: 0x%x\n", ret, getreg32(STM32_FLASH_SR));
       modifyreg32(STM32_FLASH_SR, 0, FLASH_SR_ALLERRS);
     }
 
   flash_lock();
-  nxmutex_unlock(&g_lock);
+  sem_unlock();
   return (ret == OK) ? written : ret;
 }
-
-uint8_t up_progmem_erasestate(void)
-{
-  return FLASH_ERASEDVALUE;
-}
-
 #endif /* defined(CONFIG_STM32_STM32L15XX) */

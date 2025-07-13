@@ -1,11 +1,13 @@
-/****************************************************************************
- * arch/arm/src/lpc2378/lpc23xx_gpio.h
+/************************************************************************************
+ * arch/arm/src/lpc2378/lpc231x_gpio.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2010 Rommel Marcelo. All rights reserved.
- * SPDX-FileCopyrightText: 2010 Gregory Nutt. All rights reserved.
- * SPDX-FileContributor: Rommel Marcelo
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2010 Rommel Marcelo. All rights reserved.
+ *   Author: Rommel Marcelo
+ *
+ * This file is part of the NuttX RTOS and based on the lpc2148 port:
+ *
+ *   Copyright (C) 2010 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,40 +36,36 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_LPC2378_LPC23XX_GPIO_H
 #define __ARCH_ARM_SRC_LPC2378_LPC23XX_GPIO_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
-
+ ************************************************************************************/
 #include "chip.h"
-
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
-
-#define io_getreg8(o)       getreg8(LPC23XX_FIO_BASE+(o))
-#define io_getreg(r)        getreg32(LPC23XX_FIO_BASE+ (r))
-#define dir_getreg8(o)      getreg8(LPC23XX_FIO_BASE+(o))
-#define dir_getreg(r)       getreg32(LPC23XX_FIO_BASE+ (r))
-#define dir_putreg8(v,o)    putreg8((v), LPC23XX_FIO_BASE+(o))
-#define dir_putreg(v,r)     putreg32((v),LPC23XX_FIO_BASE+ (r))
-#define fio_putreg8(v,o)    putreg8((v), LPC23XX_FIO_BASE+(o))
-#define fio_getreg8(o)      getreg8(LPC23XX_FIO_BASE+(o))
-
-/****************************************************************************
+ ************************************************************************************/
+#define io_getreg8(o)  		getreg8(LPC23XX_FIO_BASE+(o))
+#define io_getreg(r)   		getreg32(LPC23XX_FIO_BASE+ (r))
+#define dir_getreg8(o)  	getreg8(LPC23XX_FIO_BASE+(o))
+#define dir_getreg(r)   	getreg32(LPC23XX_FIO_BASE+ (r))
+#define dir_putreg8(v,o)  	putreg8((v), LPC23XX_FIO_BASE+(o))
+#define dir_putreg(v,r)   	putreg32((v),LPC23XX_FIO_BASE+ (r))
+#define fio_putreg8(v,o)	putreg8((v), LPC23XX_FIO_BASE+(o))
+#define fio_getreg8(o)  	getreg8(LPC23XX_FIO_BASE+(o))
+/************************************************************************************
  * Public Types
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Inline Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ************************************************************************************/
 
 #endif /* __ARCH_ARM_SRC_LPC2378_LPC23XX_GPIO_H */

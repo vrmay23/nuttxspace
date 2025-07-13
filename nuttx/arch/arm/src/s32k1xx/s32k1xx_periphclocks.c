@@ -1,11 +1,8 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/s32k1xx/s32k1xx_periphclocks.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2016-2018 NXP
- * SPDX-FileCopyrightText: 2013 - 2015, Freescale Semiconductor, Inc.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -53,11 +50,11 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -65,17 +62,17 @@
 #include <assert.h>
 #include <debug.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "hardware/s32k1xx_scg.h"
 #include "hardware/s32k1xx_pcc.h"
 #include "s32k1xx_clockconfig.h"
 #include "s32k1xx_periphclocks.h"
 
-/****************************************************************************
+/************************************************************************************
  * Private Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_get_pclkctrl
  *
  * Description:
@@ -89,13 +86,11 @@
  *   Address of peripheral control register.  NULL is returned if the clock
  *   name does not map to a PCC control register.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 static uint32_t *s32k1xx_get_pclkctrl(enum clock_names_e clkname)
 {
-  /* Map the clock name to an index to the corresponding PCC control
-   * register.
-   */
+  /* Map the clock name to an index to the corresponding PCC control register. */
 
   uintptr_t index = (uintptr_t)g_clkname_mapping[clkname];
 
@@ -109,7 +104,30 @@ static uint32_t *s32k1xx_get_pclkctrl(enum clock_names_e clkname)
   return NULL;
 }
 
-/****************************************************************************
+/************************************************************************************
+ * Name: s32k1xx_pclk_disable
+ *
+ * Description:
+ *   This function enables/disables the clock for a given peripheral.
+ *
+ * Input Parameters:
+ *   clkname - The name of the peripheral clock to be disabled
+ *   enable  - true:  Enable the peripheral clock.
+ *
+ * Returned Value:
+ *   None
+ *
+ ************************************************************************************/
+
+static void s32k1xx_pclk_disable(enum clock_names_e clkname)
+{
+  uint32_t *ctrlp = s32k1xx_get_pclkctrl(clkname);
+  DEBUGASSERT(ctrlp != NULL);
+
+  *ctrlp &= ~PCC_CGC;
+}
+
+/************************************************************************************
  * Name: s32k1xx_set_pclkctrl
  *
  * Description:
@@ -121,7 +139,7 @@ static uint32_t *s32k1xx_get_pclkctrl(enum clock_names_e clkname)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 static inline void
 s32k1xx_set_pclkctrl(const struct peripheral_clock_config_s *pclk)
@@ -155,7 +173,7 @@ s32k1xx_set_pclkctrl(const struct peripheral_clock_config_s *pclk)
   *ctrlp = regval;
 }
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_get_pclkfreq_divided
  *
  * Description:
@@ -168,11 +186,10 @@ s32k1xx_set_pclkctrl(const struct peripheral_clock_config_s *pclk)
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ************************************************************************************/
 
-static uint32_t
-s32k1xx_get_pclkfreq_divided(enum clock_names_e clkname,
-                             enum scg_async_clock_type_e divider)
+static uint32_t s32k1xx_get_pclkfreq_divided(enum clock_names_e clkname,
+                                             enum scg_async_clock_type_e divider)
 {
   uint32_t *ctrlp;
   uint32_t frequency = 0;
@@ -229,11 +246,11 @@ s32k1xx_get_pclkfreq_divided(enum clock_names_e clkname,
   return frequency;
 }
 
-/****************************************************************************
+/************************************************************************************
  * Public Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_periphclocks
  *
  * Description:
@@ -246,7 +263,7 @@ s32k1xx_get_pclkfreq_divided(enum clock_names_e clkname,
  * Returned Value:
  *   None
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 void s32k1xx_periphclocks(unsigned int count,
                           const struct peripheral_clock_config_s *pclks)
@@ -259,7 +276,7 @@ void s32k1xx_periphclocks(unsigned int count,
     {
       /* Disable the peripheral clock */
 
-      s32k1xx_pclk_enable(pclks->clkname, false);
+      s32k1xx_pclk_disable(pclks->clkname);
 
       /* Set peripheral clock control */
 
@@ -267,7 +284,7 @@ void s32k1xx_periphclocks(unsigned int count,
     }
 }
 
-/****************************************************************************
+/************************************************************************************
  * Name: s32k1xx_get_pclkfreq
  *
  * Description:
@@ -284,7 +301,7 @@ void s32k1xx_periphclocks(unsigned int count,
  *   any failure.  -ENODEV is returned if the clock is not enabled or is not
  *   being clocked.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 int s32k1xx_get_pclkfreq(enum clock_names_e clkname, uint32_t *frequency)
 {
@@ -306,8 +323,7 @@ int s32k1xx_get_pclkfreq(enum clock_names_e clkname, uint32_t *frequency)
           busclk = s32k1xx_get_sysclk(SCG_SYSTEM_CLOCK_BUS);
           ret    = (busclk == 0) ? -ENODEV : OK;
         }
-      else if ((g_periph_features[clkname] &
-                HAS_INT_CLOCK_FROM_SYS_CLOCK) != 0)
+      else if ((g_periph_features[clkname] & HAS_INT_CLOCK_FROM_SYS_CLOCK) != 0)
         {
           uint32_t sysclk;
 
@@ -316,8 +332,7 @@ int s32k1xx_get_pclkfreq(enum clock_names_e clkname, uint32_t *frequency)
           sysclk = s32k1xx_get_sysclk(SCG_SYSTEM_CLOCK_CORE);
           ret    = (sysclk == 0) ? -ENODEV : OK;
         }
-      else if ((g_periph_features[clkname] &
-                HAS_INT_CLOCK_FROM_SLOW_CLOCK) != 0)
+      else if ((g_periph_features[clkname] & HAS_INT_CLOCK_FROM_SLOW_CLOCK) != 0)
         {
           uint32_t slowclk;
 
@@ -339,26 +354,21 @@ int s32k1xx_get_pclkfreq(enum clock_names_e clkname, uint32_t *frequency)
         {
           /* Check whether peripheral has protocol clock (functional clock) */
 
-          if ((g_periph_features[clkname] &
-              (HAS_PROTOCOL_CLOCK_FROM_ASYNC1 |
-               HAS_PROTOCOL_CLOCK_FROM_ASYNC2)) != 0)
+          if ((g_periph_features[clkname] & (HAS_PROTOCOL_CLOCK_FROM_ASYNC1 |
+                                             HAS_PROTOCOL_CLOCK_FROM_ASYNC2)) != 0)
             {
-              if ((g_periph_features[clkname] &
-                   HAS_PROTOCOL_CLOCK_FROM_ASYNC1) != 0)
+              if ((g_periph_features[clkname] & HAS_PROTOCOL_CLOCK_FROM_ASYNC1) != 0)
                 {
                   /* Check whether the functional clock is clocked */
 
-                  freq = s32k1xx_get_pclkfreq_divided(clkname,
-                                                      SCG_ASYNC_CLOCK_DIV1);
+                  freq = s32k1xx_get_pclkfreq_divided(clkname, SCG_ASYNC_CLOCK_DIV1);
                 }
 
-              if ((g_periph_features[clkname] &
-                   HAS_PROTOCOL_CLOCK_FROM_ASYNC2) != 0)
+              if ((g_periph_features[clkname] & HAS_PROTOCOL_CLOCK_FROM_ASYNC2) != 0)
                 {
                   /* Check whether the functional clock is clocked */
 
-                  freq = s32k1xx_get_pclkfreq_divided(clkname,
-                                                      SCG_ASYNC_CLOCK_DIV2);
+                  freq = s32k1xx_get_pclkfreq_divided(clkname, SCG_ASYNC_CLOCK_DIV2);
                 }
 
               if (freq == 0)
@@ -377,40 +387,4 @@ int s32k1xx_get_pclkfreq(enum clock_names_e clkname, uint32_t *frequency)
     }
 
   return ret;
-}
-
-/****************************************************************************
- * Name: s32k1xx_pclk_enable
- *
- * Description:
- *   This function enables/disables the clock for a given peripheral.
- *
- * Input Parameters:
- *   clkname - The name of the peripheral clock to be disabled
- *   enable  - true:  Enable the peripheral clock.
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-void s32k1xx_pclk_enable(enum clock_names_e clkname, bool enable)
-{
-  uint32_t *ctrlp = s32k1xx_get_pclkctrl(clkname);
-  DEBUGASSERT(ctrlp != NULL);
-
-  /* check if it needs to be enabled */
-
-  if (enable)
-    {
-      /* enable it */
-
-      *ctrlp |= PCC_CGC;
-    }
-  else
-    {
-      /* disable it */
-
-      *ctrlp &= ~PCC_CGC;
-    }
 }

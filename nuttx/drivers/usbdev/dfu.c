@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/usbdev/dfu.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011-2018 Gregory Nutt. All rights reserved.
+ *   Authors: Petteri Aimonen <jpa@git.mail.kapsi.fi>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -41,7 +54,6 @@
 #include <nuttx/usb/dfu.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/wqueue.h>
-#include <debug.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -147,7 +159,7 @@ static const struct dfu_cfgdesc_s g_dfu_cfgdesc =
     .ifno           = 0,
     .alt            = 0,
     .neps           = 0,
-    .classid        = 0xfe,
+    .classid        = 0xFE,
     .subclass       = 0x01,
     .protocol       = 0x01, /* DFU runtime protocol */
     .iif            = 0
@@ -155,22 +167,10 @@ static const struct dfu_cfgdesc_s g_dfu_cfgdesc =
   {
     .len            = sizeof(struct dfu_funcdesc_s),
     .type           = 0x21,
-    .attributes     = 0x0b,
-    .detach_timeout =
-      {
-        LSBYTE(DFU_MAX_TIMEOUT),
-        MSBYTE(DFU_MAX_TIMEOUT)
-      },
-    .transfer_size  =
-      {
-        LSBYTE(DFU_MAX_TRANSFER),
-        MSBYTE(DFU_MAX_TRANSFER)
-      },
-    .dfu_version    =
-      {
-        LSBYTE(DFU_VERSION),
-        MSBYTE(DFU_VERSION)
-      }
+    .attributes     = 0x0B,
+    .detach_timeout = { LSBYTE(DFU_MAX_TIMEOUT), MSBYTE(DFU_MAX_TIMEOUT) },
+    .transfer_size  = { LSBYTE(DFU_MAX_TRANSFER), MSBYTE(DFU_MAX_TRANSFER) },
+    .dfu_version    = { LSBYTE(DFU_VERSION), MSBYTE(DFU_VERSION) }
   }
 };
 
@@ -178,19 +178,66 @@ static const struct dfu_cfgdesc_s g_dfu_cfgdesc =
  * Private Functions
  ****************************************************************************/
 
+/****************************************************************************
+ * Name: usbclass_freereq
+ *
+ * Description:
+ *   Free a request instance along with its buffer
+ *
+ ****************************************************************************/
+
+static void usbclass_freereq(FAR struct usbdev_ep_s *ep,
+                             FAR struct usbdev_req_s *req)
+{
+  if (ep != NULL && req != NULL)
+    {
+      if (req->buf != NULL)
+        {
+          EP_FREEBUFFER(ep, req->buf);
+        }
+
+      EP_FREEREQ(ep, req);
+    }
+}
+
+/****************************************************************************
+ * Name: usbclass_allocreq
+ *
+ * Description:
+ *   Allocate a request instance along with its buffer
+ *
+ ****************************************************************************/
+
+static FAR struct usbdev_req_s *usbclass_allocreq(FAR struct usbdev_ep_s *ep,
+                                                  uint16_t len)
+{
+  FAR struct usbdev_req_s *req;
+
+  req = EP_ALLOCREQ(ep);
+  if (req != NULL)
+    {
+      req->len = len;
+      req->buf = EP_ALLOCBUFFER(ep, len);
+
+      if (req->buf == NULL)
+        {
+          EP_FREEREQ(ep, req);
+          req = NULL;
+        }
+    }
+
+  return req;
+}
+
 static void usbclass_ep0incomplete(FAR struct usbdev_ep_s *ep,
                                  FAR struct usbdev_req_s *req)
 {
 }
 
 static int16_t usbclass_mkcfgdesc(FAR uint8_t *buf,
-                                  FAR struct usbdev_devinfo_s *devinfo,
-                                  uint8_t speed, uint8_t type)
+                                  FAR struct usbdev_devinfo_s *devinfo)
 {
   FAR struct dfu_cfgdesc_s *dest = (FAR struct dfu_cfgdesc_s *)buf;
-
-  UNUSED(speed);
-  UNUSED(type);
 
   *dest = g_dfu_cfgdesc;
   dest->ifdesc.ifno += devinfo->ifnobase;
@@ -226,7 +273,7 @@ static int usbclass_mkstrdesc(uint8_t id, FAR struct usb_strdesc_s *strdesc)
       return -EINVAL;
     }
 
-  strdesc->len  = 2 + convert_to_utf16((FAR uint8_t *)(strdesc + 1), str);
+  strdesc->len  = 2 + convert_to_utf16(strdesc->data, str);
   strdesc->type = USB_DESC_TYPE_STRING;
   return strdesc->len;
 }
@@ -268,7 +315,6 @@ static int dfu_make_msft_extprop_desc(FAR uint8_t *buf)
   *payload++ = LSBYTE(namelen); /* wPropertyNameLength */
   *payload++ = MSBYTE(namelen);
   payload   += convert_to_utf16(payload, propname); /* bPropertyName */
-
   *payload++ = 0; /* Null terminator */
   *payload++ = 0;
   *payload++ = LSBYTE(valuelen); /* dwPropertyDataLength */
@@ -314,13 +360,12 @@ static int  usbclass_setup(FAR struct usbdevclass_driver_s *driver,
         {
           if (ctrl->value[1] == USB_DESC_TYPE_CONFIG)
             {
-              ret = usbclass_mkcfgdesc(ctrlreq->buf, &priv->devinfo,
-                                       dev->speed, ctrl->value[1]);
+              ret = usbclass_mkcfgdesc(ctrlreq->buf, &priv->devinfo);
             }
           else if (ctrl->value[1] == USB_DESC_TYPE_STRING)
             {
               ret = usbclass_mkstrdesc(ctrl->value[0],
-                               (FAR struct usb_strdesc_s *)ctrlreq->buf);
+                                       (FAR struct usb_strdesc_s *)ctrlreq->buf);
             }
         }
       else if (ctrl->req == USB_REQ_SETCONFIGURATION)
@@ -350,8 +395,7 @@ static int  usbclass_setup(FAR struct usbdevclass_driver_s *driver,
            * we can send the USB reply packet first.
            */
 
-          work_queue(HPWORK, &priv->work_item,
-                     dfu_workqueue_callback, NULL, 1);
+          work_queue(HPWORK, &priv->work_item, dfu_workqueue_callback, NULL, 1);
           ret = 0;
         }
       else if (ctrl->req == USB_REQ_DFU_GETSTATUS)
@@ -380,7 +424,7 @@ static int  usbclass_setup(FAR struct usbdevclass_driver_s *driver,
     {
       ctrlreq->len   = (len < ret) ? len : ret;
       ctrlreq->flags = USBDEV_REQFLAGS_NULLPKT;
-      ret            = composite_ep0submit(driver, dev, ctrlreq, ctrl);
+      ret            = composite_ep0submit(driver, dev, ctrlreq);
       if (ret < 0)
         {
           usbtrace(TRACE_CLSERROR(USBSER_TRACEERR_EPRESPQ), (uint16_t)-ret);
@@ -396,7 +440,7 @@ static int  usbclass_bind(FAR struct usbdevclass_driver_s *driver,
 {
   FAR struct dfu_driver_s *priv = (FAR struct dfu_driver_s *)driver;
 
-  priv->ctrlreq = usbdev_allocreq(dev->ep0, DFU_MAX_DESCRIPTOR_LEN);
+  priv->ctrlreq = usbclass_allocreq(dev->ep0, DFU_MAX_DESCRIPTOR_LEN);
   if (priv->ctrlreq == NULL)
     {
       usbtrace(TRACE_CLSERROR(USBSER_TRACEERR_ALLOCCTRLREQ), 0);
@@ -415,7 +459,7 @@ static void usbclass_unbind(FAR struct usbdevclass_driver_s *driver,
 
   if (priv->ctrlreq != NULL)
     {
-      usbdev_freereq(dev->ep0, priv->ctrlreq);
+      usbclass_freereq(dev->ep0, priv->ctrlreq);
       priv->ctrlreq = NULL;
     }
 }

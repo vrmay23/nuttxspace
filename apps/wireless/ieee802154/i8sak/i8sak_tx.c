@@ -1,26 +1,45 @@
 /****************************************************************************
  * apps/wireless/ieee802154/i8sak/i8sak_tx.c
+ * IEEE 802.15.4 Swiss Army Knife
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2015, 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2014-2015 Sebastien Lorquet. All rights reserved.
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
+ *   Author: Anthony Merlino <anthony@vergeaero.com>
+ *   Author: Gregory Nuttx <gnutt@nuttx.org>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-/****************************************************************************
+ /****************************************************************************
  * Included Files
  ****************************************************************************/
 
@@ -30,7 +49,6 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/ioctl.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/wireless/ieee802154/ieee802154_device.h>
@@ -44,8 +62,7 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-static void tx_eventcb(FAR struct ieee802154_primitive_s *primitive,
-                       FAR void *arg);
+static void tx_eventcb(FAR struct ieee802154_primitive_s *primitive, FAR void *arg);
 
 /****************************************************************************
  * Public Functions
@@ -169,9 +186,9 @@ void i8sak_tx_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
     }
   else
     {
-      /* We cannot send a frame as direct if we are the PAN coordinator.
-       * Maybe this should be the hook for sending payload in beacon? But
-       * for now, let's just throw an error.
+      /* We cannot send a frame as direct if we are the PAN coordinator. Maybe
+       * this should be the hook for sending payload in beacon? But for now,
+       * let's just throw an error.
        */
 
       if (devmode == IEEE802154_DEVMODE_PANCOORD)
@@ -186,7 +203,7 @@ void i8sak_tx_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
 
   i8sak_requestdaemon(i8sak);
 
-  /* Register new callback for receiving the association notifications */
+  /* Register new oneshot callback for receiving the association notifications */
 
   memset(&eventfilter, 0, sizeof(struct i8sak_eventfilter_s));
   eventfilter.confevents.data = true;
@@ -226,8 +243,7 @@ void i8sak_tx_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
       tx.meta.ranging = IEEE802154_NON_RANGING;
 
       tx.meta.srcmode = i8sak->addrmode;
-      memcpy(&tx.meta.destaddr, &i8sak->ep_addr,
-             sizeof(struct ieee802154_addr_s));
+      memcpy(&tx.meta.destaddr, &i8sak->ep_addr, sizeof(struct ieee802154_addr_s));
 
       /* Each byte is represented by 2 chars */
 
@@ -245,14 +261,15 @@ void i8sak_tx_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
       addr.sin6_port       = HTONS(0);
       memset(addr.sin6_addr.s6_addr, 0, sizeof(struct in6_addr));
 
-      ret = bind(i8sak->fd, (struct sockaddr *)&addr,
-                 sizeof(struct sockaddr_in6));
-      if (ret >= 0)
+      if (bind(i8sak->fd, (struct sockaddr*)&addr, sizeof(struct sockaddr_in6)) < 0)
         {
-          ret = sendto(fd, i8sak->payload, i8sak->payload_len, 0,
-                      (struct sockaddr *)&i8sak->ep_in6addr,
-                      sizeof(struct sockaddr_in6));
+          fprintf(stderr, "ERROR: failure to bind sock: %d\n", errno);
+          close(fd);
+          i8sak_cmd_error(i8sak);
         }
+
+      ret = sendto(fd, i8sak->payload, i8sak->payload_len, 0,
+                   (struct sockaddr*)&i8sak->ep_in6addr, sizeof(struct sockaddr_in6));
     }
 #endif
 
@@ -266,8 +283,7 @@ void i8sak_tx_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
   close(fd);
 }
 
-static void tx_eventcb(FAR struct ieee802154_primitive_s *primitive,
-                       FAR void *arg)
+static void tx_eventcb(FAR struct ieee802154_primitive_s *primitive, FAR void *arg)
 {
   FAR struct i8sak_s *i8sak = (FAR struct i8sak_s *)arg;
 
@@ -283,5 +299,5 @@ static void tx_eventcb(FAR struct ieee802154_primitive_s *primitive,
 
   sem_post(&i8sak->sigsem);
 
-  i8sak_releasedaemon(i8sak);
+  i8sak_requestdaemon(i8sak);
 }

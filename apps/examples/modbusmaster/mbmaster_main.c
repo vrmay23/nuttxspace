@@ -1,9 +1,9 @@
 /****************************************************************************
  * apps/examples/modbusmaster/mbmaster_main.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016 Vytautas Lukenskas <lukevyta@gmail.com>
- * SPDX-FileCopyrightText: 2019 Alan Carvalho de Assis <acassis@gmail.com>
+ * Copyright (c) 2016 Vytautas Lukenskas <lukevyta@gmail.com>
+ * Copyright (c) 2019 Alan Carvalho de Assis <acassis@gmail.com>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -218,7 +218,7 @@ static FAR void *mbmaster_pollthread(FAR void *pvarg)
 
 static void mbmaster_showstatistics(void)
 {
-  printf("Modbus master statistics:\n");
+  printf("Modbus master statistics: \n");
   printf("Requests count:  %d\n", g_mbmaster.statistics.reqcount);
   printf("Responses count: %d\n", g_mbmaster.statistics.rspcount);
   printf("Errors count:    %d\n", g_mbmaster.statistics.errcount);
@@ -280,7 +280,7 @@ int main(int argc, FAR char *argv[])
 
   if (ret != OK)
     {
-      fprintf(stderr, "mbmaster_main: "
+      fprintf(stderr, "mbmaster_main: ",
               "ERROR: mbmaster_initialize failed: %d\n", ret);
       goto errout;
     }
@@ -292,14 +292,10 @@ int main(int argc, FAR char *argv[])
 
   if (ret != OK)
     {
-      fprintf(stderr, "mbmaster_main: "
+      fprintf(stderr, "mbmaster_main: ",
               "ERROR: mbmaster_pollthread create failed: %d\n", ret);
       goto errout_with_initialize;
     }
-
-  /* Work around to give time to pthread_create run the modbus poller */
-
-  usleep(100000);
 
   printf("Sending %d requests to slave %d\n",
          MBMASTER_REQUESTS_COUNT, SLAVE_ID);

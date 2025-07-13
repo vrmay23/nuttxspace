@@ -1,8 +1,6 @@
 /****************************************************************************
  * drivers/mmcsd/mmcsd_spi.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -30,20 +28,17 @@
 
 #include <sys/types.h>
 
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <unistd.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/clock.h>
-#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/fs/fs.h>
@@ -59,10 +54,27 @@
 
 /* Configuration ************************************************************/
 
+#ifndef CONFIG_MMCSD_NSLOTS
+#  ifdef CONFIG_CPP_HAVE_WARNING
+#    warning "CONFIG_MMCSD_NSLOTS not defined"
+#  endif
+#  define CONFIG_MMCSD_NSLOTS 1
+#endif
+
+#define MMCSD_IDMODE_CLOCK           (400000)
+
 #if !defined(CONFIG_MMCSD_READONLY)
 #  define MMCSD_MODE 0666
 #else
 #  define MMCSD_MODE 0444
+#endif
+
+#ifndef CONFIG_MMCSD_SPICLOCK
+#  define CONFIG_MMCSD_SPICLOCK 20000000
+#endif
+
+#ifndef CONFIG_MMCSD_SPIMODE
+#  define CONFIG_MMCSD_SPIMODE SPIDEV_MODE0
 #endif
 
 #ifndef CONFIG_MMCSD_SECTOR512
@@ -106,8 +118,8 @@
 #define MMCSD_DELAY_1SEC             (CLK_TCK      + 1)
 #define MMCSD_DELAY_10SEC            (10 * CLK_TCK + 1)
 
-#define ELAPSED_TIME(t)              (clock_systime_ticks()-(t))
-#define START_TIME                   (clock_systime_ticks())
+#define ELAPSED_TIME(t)              (clock_systimer()-(t))
+#define START_TIME                   (clock_systimer())
 
 /* SD read timeout: ~100msec, Write Time out ~250ms.  Units of clock ticks */
 
@@ -123,7 +135,7 @@
 struct mmcsd_slot_s
 {
   FAR struct spi_dev_s *spi; /* SPI port bound to this slot */
-  mutex_t  lock;             /* Assures mutually exclusive access to card and SPI */
+  sem_t  sem;                /* Assures mutually exclusive access to card and SPI */
   uint8_t  state;            /* State of the slot (see MMCSD_SLOTSTATUS_* definitions) */
   uint8_t  type;             /* Disk type */
   uint8_t  csd[16];          /* Copy of card CSD */
@@ -151,59 +163,53 @@ struct mmcsd_cmdinfo_s
 
 /* Misc *********************************************************************/
 
-static int      mmcsd_lock(FAR struct mmcsd_slot_s *slot);
-static void     mmcsd_unlock(FAR struct mmcsd_slot_s *slot);
+static int      mmcsd_semtake(FAR struct mmcsd_slot_s *slot);
+static void     mmcsd_semgive(FAR struct mmcsd_slot_s *slot);
 
 /* Card SPI interface *******************************************************/
 
 static int      mmcsd_waitready(FAR struct mmcsd_slot_s *slot);
 static uint32_t mmcsd_sendcmd(FAR struct mmcsd_slot_s *slot,
-                              FAR const struct mmcsd_cmdinfo_s *cmd,
-                              uint32_t arg);
+                  const struct mmcsd_cmdinfo_s *cmd, uint32_t arg);
 static void     mmcsd_setblklen(FAR struct mmcsd_slot_s *slot,
-                                uint32_t length);
-static uint32_t mmcsd_nsac(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd,
-                           uint32_t frequency);
-static uint32_t mmcsd_taac(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd);
-static void     mmcsd_decodecsd(FAR struct mmcsd_slot_s *slot,
-                                FAR uint8_t *csd);
+                  uint32_t length);
+static uint32_t mmcsd_nsac(FAR struct mmcsd_slot_s *slot, uint8_t *csd,
+                  uint32_t frequency);
+static uint32_t mmcsd_taac(FAR struct mmcsd_slot_s *slot, uint8_t *csd);
+static void     mmcsd_decodecsd(FAR struct mmcsd_slot_s *slot, uint8_t *csd);
 static void     mmcsd_checkwrprotect(FAR struct mmcsd_slot_s *slot,
-                                     FAR uint8_t *csd);
+                  uint8_t *csd);
 static int      mmcsd_getcardinfo(FAR struct mmcsd_slot_s *slot,
-                                  FAR uint8_t *buffer,
-                                  FAR const struct mmcsd_cmdinfo_s *cmd);
+                  uint8_t *buffer, const struct mmcsd_cmdinfo_s *cmd);
 
 #define mmcsd_getcsd(slot, csd) mmcsd_getcardinfo(slot, csd, &g_cmd9);
 #define mmcsd_getcid(slot, cid) mmcsd_getcardinfo(slot, cid, &g_cmd10);
 
 static int      mmcsd_recvblock(FAR struct mmcsd_slot_s *slot,
-                                FAR uint8_t *buffer, int nbytes);
+                 uint8_t *buffer, int nbytes);
 #if !defined(CONFIG_MMCSD_READONLY)
 static int      mmcsd_xmitblock(FAR struct mmcsd_slot_s *slot,
-                                FAR const uint8_t *buffer, int nbytes,
-                                uint8_t token);
+                 const uint8_t *buffer, int nbytes, uint8_t token);
 #endif
 
 /* Block driver interfaces **************************************************/
 
 static int       mmcsd_open(FAR struct inode *inode);
 static int       mmcsd_close(FAR struct inode *inode);
-static ssize_t   mmcsd_read(FAR struct inode *inode,
-                            FAR unsigned char *buffer,
-                            blkcnt_t start_sector, unsigned int nsectors);
+static ssize_t   mmcsd_read(FAR struct inode *inode, unsigned char *buffer,
+                   size_t start_sector, unsigned int nsectors);
 #if !defined(CONFIG_MMCSD_READONLY)
 static ssize_t   mmcsd_write(FAR struct inode *inode,
-                             FAR const unsigned char *buffer,
-                             blkcnt_t start_sector,
-                             unsigned int nsectors);
+                   const unsigned char *buffer, size_t start_sector,
+                   unsigned int nsectors);
 #endif
 static int       mmcsd_geometry(FAR struct inode *inode,
-                                FAR struct geometry *geometry);
+                    struct geometry *geometry);
 
 /* Initialization ***********************************************************/
 
 static int      mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot);
-static void     mmcsd_mediachanged(FAR void *arg);
+static void     mmcsd_mediachanged(void *arg);
 
 /****************************************************************************
  * Private Data
@@ -377,18 +383,18 @@ static const struct mmcsd_cmdinfo_s g_acmd41 =
  ****************************************************************************/
 
 /****************************************************************************
- * Name: mmcsd_lock
+ * Name: mmcsd_semtake
  ****************************************************************************/
 
-static int mmcsd_lock(FAR struct mmcsd_slot_s *slot)
+static int mmcsd_semtake(FAR struct mmcsd_slot_s *slot)
 {
   int ret;
 
   /* Get exclusive access to the MMC/SD device (possibly unnecessary if
-   * SPI_LOCK is also implemented as a mutex).
+   * SPI_LOCK is also implemented as a semaphore).
    */
 
-  ret = nxmutex_lock(&slot->lock);
+  ret = nxsem_wait_uninterruptible(&slot->sem);
   if (ret < 0)
     {
       return ret;
@@ -411,10 +417,10 @@ static int mmcsd_lock(FAR struct mmcsd_slot_s *slot)
 }
 
 /****************************************************************************
- * Name: mmcsd_unlock
+ * Name: mmcsd_semgive
  ****************************************************************************/
 
-static void mmcsd_unlock(FAR struct mmcsd_slot_s *slot)
+static void mmcsd_semgive(FAR struct mmcsd_slot_s *slot)
 {
   /* Relinquish the lock on the SPI bus */
 
@@ -430,7 +436,7 @@ static void mmcsd_unlock(FAR struct mmcsd_slot_s *slot)
 
   /* Relinquish the lock on the MMC/SD device */
 
-  nxmutex_unlock(&slot->lock);
+  nxsem_post(&slot->sem);
 }
 
 /****************************************************************************
@@ -574,11 +580,11 @@ static uint32_t mmcsd_sendcmd(FAR struct mmcsd_slot_s *slot,
 
         if (busy != 0xff)
           {
-            ferr("ERROR: Failed: card still busy (%02" PRIx32 ")\n", busy);
+            ferr("ERROR: Failed: card still busy (%02x)\n", busy);
             return (uint32_t)-1;
           }
 
-        finfo("CMD%d[%08" PRIx32 "] R1B=%02" PRIx8 "\n",
+        finfo("CMD%d[%08x] R1B=%02x\n",
               cmd->cmd & 0x3f, arg, response);
       }
       break;
@@ -587,7 +593,7 @@ static uint32_t mmcsd_sendcmd(FAR struct mmcsd_slot_s *slot,
 
     case MMCSD_CMDRESP_R1:
       {
-        finfo("CMD%d[%08" PRIx32 "] R1=%02" PRIx8 "\n",
+        finfo("CMD%d[%08x] R1=%02x\n",
               cmd->cmd & 0x3f, arg, response);
       }
       break;
@@ -599,7 +605,7 @@ static uint32_t mmcsd_sendcmd(FAR struct mmcsd_slot_s *slot,
         result  = ((uint32_t)(response & 0xff) << 8);
         result |= SPI_SEND(spi, 0xff) & 0xff;
 
-        finfo("CMD%d[%08" PRIx32 "] R2=%04" PRIx32 "\n",
+        finfo("CMD%d[%08x] R2=%04x\n",
               cmd->cmd & 0x3f, arg, result);
       }
       break;
@@ -613,7 +619,7 @@ static uint32_t mmcsd_sendcmd(FAR struct mmcsd_slot_s *slot,
         slot->ocr |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 8);
         slot->ocr |= SPI_SEND(spi, 0xff) & 0xff;
 
-        finfo("CMD%d[%08" PRIx32 "] R1=%02" PRIx8 " OCR=%08" PRIx32 "\n",
+        finfo("CMD%d[%08x] R1=%02x OCR=%08x\n",
               cmd->cmd & 0x3f, arg, response, slot->ocr);
       }
       break;
@@ -628,7 +634,7 @@ static uint32_t mmcsd_sendcmd(FAR struct mmcsd_slot_s *slot,
         slot->r7 |= ((uint32_t)(SPI_SEND(spi, 0xff) & 0xff) << 8);
         slot->r7 |= SPI_SEND(spi, 0xff) & 0xff;
 
-        finfo("CMD%d[%08" PRIx32 "] R1=%02" PRIx8 " R7=%08" PRIx32 "\n",
+        finfo("CMD%d[%08x] R1=%02x R7=%08x\n",
               cmd->cmd & 0x3f, arg, response, slot->r7);
       }
       break;
@@ -652,11 +658,11 @@ static void mmcsd_setblklen(FAR struct mmcsd_slot_s *slot, uint32_t length)
 {
   uint32_t response;
 
-  finfo("Set block length to %" PRId32 "\n", length);
+  finfo("Set block length to %d\n", length);
   response = mmcsd_sendcmd(slot, &g_cmd16, length);
   if (response != MMCSD_SPIR1_OK)
     {
-      ferr("ERROR: Failed to set block length: %02" PRIx32 "\n", response);
+      ferr("ERROR: Failed to set block length: %02x\n", response);
     }
 }
 
@@ -667,7 +673,7 @@ static void mmcsd_setblklen(FAR struct mmcsd_slot_s *slot, uint32_t length)
  *
  ****************************************************************************/
 
-static uint32_t mmcsd_nsac(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd,
+static uint32_t mmcsd_nsac(FAR struct mmcsd_slot_s *slot, uint8_t *csd,
                            uint32_t frequency)
 {
   /* NSAC is 8-bits wide and is in units of 100 clock cycles.  Therefore,
@@ -686,7 +692,7 @@ static uint32_t mmcsd_nsac(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd,
  *
  ****************************************************************************/
 
-static uint32_t mmcsd_taac(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd)
+static uint32_t mmcsd_taac(FAR struct mmcsd_slot_s *slot, uint8_t *csd)
 {
   int tundx;
 
@@ -726,7 +732,7 @@ static uint32_t mmcsd_taac(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd)
  *
  ****************************************************************************/
 
-static void mmcsd_decodecsd(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd)
+static void mmcsd_decodecsd(FAR struct mmcsd_slot_s *slot, uint8_t *csd)
 {
   FAR struct spi_dev_s *spi = slot->spi;
   uint32_t maxfrequency;
@@ -803,10 +809,10 @@ static void mmcsd_decodecsd(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd)
     }
 
   finfo("SPI Frequency\n");
-  finfo("  Maximum:         %" PRId32 " Hz\n", maxfrequency);
-  finfo("  Actual:          %" PRId32 " Hz\n", frequency);
-  finfo("Read access time:  %" PRId32 " ticks\n", slot->taccess);
-  finfo("Write access time: %" PRId32 " ticks\n", slot->twrite);
+  finfo("  Maximum:         %d Hz\n", maxfrequency);
+  finfo("  Actual:          %d Hz\n", frequency);
+  finfo("Read access time:  %d ticks\n", slot->taccess);
+  finfo("Write access time: %d ticks\n", slot->twrite);
 
   /* Get the physical geometry of the card: sector size and number of
    * sectors. The card's total capacity is computed from
@@ -877,7 +883,7 @@ static void mmcsd_decodecsd(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd)
 #endif
   slot->nsectors   = csize << csizemult;
   finfo("Sector size:       %d\n", SECTORSIZE(slot));
-  finfo("Number of sectors: %" PRId32 "\n", slot->nsectors);
+  finfo("Number of sectors: %d\n", slot->nsectors);
 }
 
 /****************************************************************************
@@ -887,8 +893,7 @@ static void mmcsd_decodecsd(FAR struct mmcsd_slot_s *slot, FAR uint8_t *csd)
  *
  ****************************************************************************/
 
-static void mmcsd_checkwrprotect(FAR struct mmcsd_slot_s *slot,
-                                 FAR uint8_t *csd)
+static void mmcsd_checkwrprotect(FAR struct mmcsd_slot_s *slot, uint8_t *csd)
 {
   FAR struct spi_dev_s *spi = slot->spi;
 
@@ -920,9 +925,8 @@ static void mmcsd_checkwrprotect(FAR struct mmcsd_slot_s *slot,
  *
  ****************************************************************************/
 
-static int mmcsd_getcardinfo(FAR struct mmcsd_slot_s *slot,
-                             FAR uint8_t *buffer,
-                             FAR const struct mmcsd_cmdinfo_s *cmd)
+static int mmcsd_getcardinfo(FAR struct mmcsd_slot_s *slot, uint8_t *buffer,
+                             const struct mmcsd_cmdinfo_s *cmd)
 {
   FAR struct spi_dev_s *spi = slot->spi;
   uint32_t result;
@@ -936,7 +940,7 @@ static int mmcsd_getcardinfo(FAR struct mmcsd_slot_s *slot,
   result = mmcsd_sendcmd(slot, cmd, 0);
   if (result != MMCSD_SPIR1_OK)
     {
-      ferr("ERROR: CMD9/10 failed: R1=%02" PRIx32 "\n", result);
+      ferr("ERROR: CMD9/10 failed: R1=%02x\n", result);
       return -EIO;
     }
 
@@ -972,7 +976,7 @@ static int mmcsd_getcardinfo(FAR struct mmcsd_slot_s *slot,
         }
     }
 
-  ferr("ERROR: Did not find start of block\n");
+  ferr("ERROR: %d. Did not find start of block\n");
   return -EIO;
 }
 
@@ -983,8 +987,8 @@ static int mmcsd_getcardinfo(FAR struct mmcsd_slot_s *slot,
  *
  ****************************************************************************/
 
-static int mmcsd_recvblock(FAR struct mmcsd_slot_s *slot,
-                           FAR uint8_t *buffer, int nbytes)
+static int mmcsd_recvblock(FAR struct mmcsd_slot_s *slot, uint8_t *buffer,
+                           int nbytes)
 {
   FAR struct spi_dev_s *spi = slot->spi;
   clock_t start;
@@ -1098,7 +1102,7 @@ static int mmcsd_open(FAR struct inode *inode)
 
   /* Extract our private data from the inode structure */
 
-  slot = inode->i_private;
+  slot = (FAR struct mmcsd_slot_s *)inode->i_private;
   spi  = slot->spi;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -1109,7 +1113,7 @@ static int mmcsd_open(FAR struct inode *inode)
     }
 #endif
 
-  ret = mmcsd_lock(slot);
+  ret = mmcsd_semtake(slot);
   if (ret < 0)
     {
       return ret;
@@ -1131,7 +1135,7 @@ static int mmcsd_open(FAR struct inode *inode)
           if (ret < 0)
             {
               finfo("Failed to initialize card\n");
-              goto errout_with_lock;
+              goto errout_with_sem;
             }
         }
 
@@ -1142,8 +1146,8 @@ static int mmcsd_open(FAR struct inode *inode)
       SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
     }
 
-errout_with_lock:
-  mmcsd_unlock(slot);
+errout_with_sem:
+  mmcsd_semgive(slot);
   return ret;
 }
 
@@ -1167,20 +1171,18 @@ static int mmcsd_close(FAR struct inode *inode)
  *
  ****************************************************************************/
 
-static ssize_t mmcsd_read(FAR struct inode *inode, FAR unsigned char *buffer,
-                          blkcnt_t start_sector, unsigned int nsectors)
+static ssize_t mmcsd_read(FAR struct inode *inode, unsigned char *buffer,
+                          size_t start_sector, unsigned int nsectors)
 {
   FAR struct mmcsd_slot_s *slot;
   FAR struct spi_dev_s *spi;
-  FAR unsigned char *restore = buffer;
-  int retry_count = 0;
   size_t nbytes;
-  off_t offset;
+  off_t  offset;
   uint8_t response;
-  int i;
+  int    i;
   int ret;
 
-  finfo("start_sector=%" PRIuOFF " nsectors=%u\n", start_sector, nsectors);
+  finfo("start_sector=%d nsectors=%d\n", start_sector, nsectors);
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!buffer)
@@ -1198,7 +1200,7 @@ static ssize_t mmcsd_read(FAR struct inode *inode, FAR unsigned char *buffer,
 
   /* Extract our private data from the inode structure */
 
-  slot = inode->i_private;
+  slot = (FAR struct mmcsd_slot_s *)inode->i_private;
   spi  = slot->spi;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -1232,23 +1234,22 @@ static ssize_t mmcsd_read(FAR struct inode *inode, FAR unsigned char *buffer,
   if (IS_BLOCK(slot->type))
     {
       offset = start_sector;
-      finfo("nbytes=%zu sector offset=%" PRIdOFF "\n", nbytes, offset);
+      finfo("nbytes=%d sector offset=%d\n", nbytes, offset);
     }
   else
     {
       offset = start_sector * SECTORSIZE(slot);
-      finfo("nbytes=%zu byte offset=%" PRIdOFF "\n", nbytes, offset);
+      finfo("nbytes=%d byte offset=%d\n", nbytes, offset);
     }
 
   /* Select the slave */
 
-  ret = mmcsd_lock(slot);
+  ret = mmcsd_semtake(slot);
   if (ret < 0)
     {
       return (ssize_t)ret;
     }
 
-retry:
   SPI_SELECT(spi, SPIDEV_MMCSD(0), true);
 
   /* Single or multiple block read? */
@@ -1294,10 +1295,6 @@ retry:
           if (mmcsd_recvblock(slot, buffer, SECTORSIZE(slot)) != 0)
             {
               ferr("ERROR: Failed: to receive the block\n");
-
-              /* Send CMD12: Stops transmission */
-
-              response = mmcsd_sendcmd(slot, &g_cmd12, 0);
               goto errout_with_eio;
             }
 
@@ -1313,30 +1310,15 @@ retry:
 
   SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
   SPI_SEND(spi, 0xff);
-  mmcsd_unlock(slot);
+  mmcsd_semgive(slot);
 
-  finfo("Read %zu bytes:\n", nbytes);
+  finfo("Read %d bytes:\n", nbytes);
   mmcsd_dumpbuffer("Read buffer", buffer, nbytes);
   return nsectors;
 
 errout_with_eio:
   SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
-  if (retry_count++ < CONFIG_MMCSD_SPIRETRY_COUNT)
-    {
-      buffer = restore;
-      ret = mmcsd_mediainitialize(slot);
-      if (ret < 0)
-        {
-          ferr("ERROR: Failed to reinitialize card\n");
-        }
-      else
-        {
-          fwarn("ERROR: retry %d\n", retry_count);
-          goto retry;
-        }
-    }
-
-  mmcsd_unlock(slot);
+  mmcsd_semgive(slot);
   return -EIO;
 }
 
@@ -1351,19 +1333,17 @@ errout_with_eio:
 #if !defined(CONFIG_MMCSD_READONLY)
 static ssize_t mmcsd_write(FAR struct inode *inode,
                            FAR const unsigned char *buffer,
-                           blkcnt_t start_sector, unsigned int nsectors)
+                           size_t start_sector, unsigned int nsectors)
 {
   FAR struct mmcsd_slot_s *slot;
   FAR struct spi_dev_s *spi;
-  FAR const unsigned char *restore = buffer;
-  int retry_count = 0;
   size_t nbytes;
-  off_t offset;
+  off_t  offset;
   uint8_t response;
   int i;
   int ret;
 
-  finfo("start_sector=%" PRIuOFF " nsectors=%u\n", start_sector, nsectors);
+  finfo("start_sector=%d nsectors=%d\n", start_sector, nsectors);
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!buffer)
@@ -1381,7 +1361,7 @@ static ssize_t mmcsd_write(FAR struct inode *inode,
 
   /* Extract our private data from the inode structure */
 
-  slot = inode->i_private;
+  slot = (FAR struct mmcsd_slot_s *)inode->i_private;
   spi  = slot->spi;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -1423,25 +1403,24 @@ static ssize_t mmcsd_write(FAR struct inode *inode,
   if (IS_BLOCK(slot->type))
     {
       offset = start_sector;
-      finfo("nbytes=%zu sector offset=%" PRIdOFF "\n", nbytes, offset);
+      finfo("nbytes=%d sector offset=%d\n", nbytes, offset);
     }
   else
     {
       offset = start_sector * SECTORSIZE(slot);
-      finfo("nbytes=%zu byte offset=%" PRIdOFF "\n", nbytes, offset);
+      finfo("nbytes=%d byte offset=%d\n", nbytes, offset);
     }
 
   mmcsd_dumpbuffer("Write buffer", buffer, nbytes);
 
   /* Select the slave */
 
-  ret = mmcsd_lock(slot);
+  ret = mmcsd_semtake(slot);
   if (ret < 0)
     {
       return (ssize_t)ret;
     }
 
-retry:
   SPI_SELECT(spi, SPIDEV_MMCSD(0), true);
 
   /* Single or multiple block transfer? */
@@ -1454,7 +1433,7 @@ retry:
       if (response != MMCSD_SPIR1_OK)
         {
           ferr("ERROR: CMD24 failed: R1=%02x\n", response);
-          goto errout_with_lock;
+          goto errout_with_sem;
         }
 
       /* Then transfer the sector */
@@ -1462,7 +1441,7 @@ retry:
       if (mmcsd_xmitblock(slot, buffer, SECTORSIZE(slot), 0xfe) != 0)
         {
           ferr("ERROR: Block transfer failed\n");
-          goto errout_with_lock;
+          goto errout_with_sem;
         }
     }
   else
@@ -1475,14 +1454,14 @@ retry:
           if (response != MMCSD_SPIR1_OK)
             {
               ferr("ERROR: CMD55 failed: R1=%02x\n", response);
-              goto errout_with_lock;
+              goto errout_with_sem;
             }
 
           response = mmcsd_sendcmd(slot, &g_acmd23, nsectors);
           if (response != MMCSD_SPIR1_OK)
             {
               ferr("ERROR: ACMD23 failed: R1=%02x\n", response);
-              goto errout_with_lock;
+              goto errout_with_sem;
             }
         }
 
@@ -1494,7 +1473,7 @@ retry:
       if (response != MMCSD_SPIR1_OK)
         {
           ferr("ERROR: CMD25 failed: R1=%02x\n", response);
-          goto errout_with_lock;
+          goto errout_with_sem;
         }
 
       /* Transmit each block */
@@ -1504,7 +1483,7 @@ retry:
           if (mmcsd_xmitblock(slot, buffer, SECTORSIZE(slot), 0xfc) != 0)
             {
               ferr("ERROR: Failed: to receive the block\n");
-              goto errout_with_lock;
+              goto errout_with_sem;
             }
 
           buffer += SECTORSIZE(slot);
@@ -1512,7 +1491,7 @@ retry:
           if (mmcsd_waitready(slot) != OK)
             {
               ferr("ERROR: Failed: card is busy\n");
-              goto errout_with_lock;
+              goto errout_with_sem;
             }
         }
 
@@ -1526,30 +1505,15 @@ retry:
   mmcsd_waitready(slot);
   SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
   SPI_SEND(spi, 0xff);
-  mmcsd_unlock(slot);
+  mmcsd_semgive(slot);
 
   /* The success return value is the number of sectors written */
 
   return nsectors;
 
-errout_with_lock:
+errout_with_sem:
   SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
-  if (retry_count++ < CONFIG_MMCSD_SPIRETRY_COUNT)
-    {
-      buffer = restore;
-      ret = mmcsd_mediainitialize(slot);
-      if (ret < 0)
-        {
-          ferr("ERROR: Failed to reinitialize card\n");
-        }
-      else
-        {
-          fwarn("ERROR: retry %d\n", retry_count);
-          goto retry;
-        }
-    }
-
-  mmcsd_unlock(slot);
+  mmcsd_semgive(slot);
   return -EIO;
 }
 #endif
@@ -1562,8 +1526,7 @@ errout_with_lock:
  *
  ****************************************************************************/
 
-static int mmcsd_geometry(FAR struct inode *inode,
-                          FAR struct geometry *geometry)
+static int mmcsd_geometry(FAR struct inode *inode, struct geometry *geometry)
 {
   FAR struct mmcsd_slot_s *slot;
   FAR struct spi_dev_s *spi;
@@ -1586,7 +1549,7 @@ static int mmcsd_geometry(FAR struct inode *inode,
 
   /* Extract our private data from the inode structure */
 
-  slot = inode->i_private;
+  slot = (FAR struct mmcsd_slot_s *)inode->i_private;
   spi  = slot->spi;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -1599,7 +1562,7 @@ static int mmcsd_geometry(FAR struct inode *inode,
 
   /* Re-sample the CSD */
 
-  ret = mmcsd_lock(slot);
+  ret = mmcsd_semtake(slot);
   if (ret < 0)
     {
       return ret;
@@ -1611,7 +1574,7 @@ static int mmcsd_geometry(FAR struct inode *inode,
 
   if (ret < 0)
     {
-      mmcsd_unlock(slot);
+      mmcsd_semgive(slot);
       ferr("ERROR: mmcsd_getcsd returned %d\n", ret);
       return ret;
     }
@@ -1621,8 +1584,6 @@ static int mmcsd_geometry(FAR struct inode *inode,
   mmcsd_checkwrprotect(slot, csd);
 
   /* Then return the card geometry */
-
-  memset(geometry, 0, sizeof(*geometry));
 
   geometry->geo_available =
     ((slot->state & (MMCSD_SLOTSTATUS_NOTREADY |
@@ -1643,13 +1604,13 @@ static int mmcsd_geometry(FAR struct inode *inode,
    */
 
   slot->state &= ~MMCSD_SLOTSTATUS_MEDIACHGD;
-  mmcsd_unlock(slot);
+  mmcsd_semgive(slot);
 
   finfo("geo_available:     %d\n", geometry->geo_available);
   finfo("geo_mediachanged:  %d\n", geometry->geo_mediachanged);
   finfo("geo_writeenabled:  %d\n", geometry->geo_writeenabled);
-  finfo("geo_nsectors:      %" PRIuOFF "\n", geometry->geo_nsectors);
-  finfo("geo_sectorsize:    %" PRIi16 "\n", geometry->geo_sectorsize);
+  finfo("geo_nsectors:      %d\n", geometry->geo_nsectors);
+  finfo("geo_sectorsize:    %d\n", geometry->geo_sectorsize);
 
   return OK;
 }
@@ -1661,7 +1622,7 @@ static int mmcsd_geometry(FAR struct inode *inode,
  *   Detect media and initialize
  *
  * Precondition:
- *   Mutex has been taken.
+ *   Semaphore has been taken.
  ****************************************************************************/
 
 static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
@@ -1695,8 +1656,8 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
 
   /* Clock Freq. Identification Mode < 400kHz */
 
-  slot->spispeed = CONFIG_MMCSD_IDMODE_CLOCK;
-  SPI_SETFREQUENCY(spi, CONFIG_MMCSD_IDMODE_CLOCK);
+  slot->spispeed = MMCSD_IDMODE_CLOCK;
+  SPI_SETFREQUENCY(spi, MMCSD_IDMODE_CLOCK);
 
   /* Set the maximum access time out */
 
@@ -1743,8 +1704,9 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
 
   if (result != MMCSD_SPIR1_IDLESTATE)
     {
-      ferr("ERROR: Send CMD0 failed: R1=%02" PRIx32 "\n", result);
+      ferr("ERROR: Send CMD0 failed: R1=%02x\n", result);
       SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
+      mmcsd_semgive(slot);
       return -EIO;
     }
 
@@ -1772,7 +1734,7 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
           elapsed = 0;
           do
             {
-              finfo("%ju. Send CMD55/ACMD41\n", (uintmax_t)elapsed);
+              finfo("%d. Send CMD55/ACMD41\n", elapsed);
               result = mmcsd_sendcmd(slot, &g_cmd55, 0);
               if (result == MMCSD_SPIR1_IDLESTATE ||
                   result == MMCSD_SPIR1_OK)
@@ -1798,7 +1760,7 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
               result = mmcsd_sendcmd(slot, &g_cmd58, 0);
               if (result == MMCSD_SPIR1_OK)
                 {
-                  finfo("OCR: %08" PRIx32 "\n", slot->ocr);
+                  finfo("OCR: %08x\n", slot->ocr);
                   if ((slot->ocr & MMCSD_OCR_CCS) != 0)
                     {
                       finfo("Identified SD ver2 card/with block access\n");
@@ -1843,7 +1805,7 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
         {
           if (IS_SD(slot->type))
             {
-              finfo("%ju. Send CMD55/ACMD41\n", (uintmax_t)elapsed);
+              finfo("%d. Send CMD55/ACMD41\n", elapsed);
               result = mmcsd_sendcmd(slot, &g_cmd55, 0);
               if (result == MMCSD_SPIR1_IDLESTATE ||
                   result == MMCSD_SPIR1_OK)
@@ -1875,6 +1837,7 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
         {
           ferr("ERROR: Failed to exit IDLE state\n");
           SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
+          mmcsd_semgive(slot);
           return -EIO;
         }
     }
@@ -1883,6 +1846,7 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
     {
       ferr("ERROR: Failed to identify card\n");
       SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
+      mmcsd_semgive(slot);
       return -EIO;
     }
 
@@ -1892,8 +1856,9 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
   result = mmcsd_getcsd(slot, csd);
   if (result != OK)
     {
-      ferr("ERROR: mmcsd_getcsd(CMD9) failed: %" PRId32 "\n", result);
+      ferr("ERROR: mmcsd_getcsd(CMD9) failed: %d\n", result);
       SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
+      mmcsd_semgive(slot);
       return -EIO;
     }
 
@@ -1948,7 +1913,7 @@ static int mmcsd_mediainitialize(FAR struct mmcsd_slot_s *slot)
  *
  ****************************************************************************/
 
-static void mmcsd_mediachanged(FAR void *arg)
+static void mmcsd_mediachanged(void *arg)
 {
   FAR struct mmcsd_slot_s *slot = (FAR struct mmcsd_slot_s *)arg;
   FAR struct spi_dev_s *spi;
@@ -1967,7 +1932,7 @@ static void mmcsd_mediachanged(FAR void *arg)
 
   /* Save the current slot state and reassess the new state */
 
-  ret = mmcsd_lock(slot);
+  ret = mmcsd_semtake(slot);
   if (ret < 0)
     {
       return;
@@ -2012,7 +1977,7 @@ static void mmcsd_mediachanged(FAR void *arg)
         }
     }
 
-  mmcsd_unlock(slot);
+  mmcsd_semgive(slot);
 }
 
 /****************************************************************************
@@ -2056,18 +2021,26 @@ int mmcsd_spislotinitialize(int minor, int slotno, FAR struct spi_dev_s *spi)
 
   slot = &g_mmcsdslot[slotno];
   memset(slot, 0, sizeof(struct mmcsd_slot_s));
-  nxmutex_init(&slot->lock);
+  nxsem_init(&slot->sem, 0, 1);
+
+#ifdef CONFIG_DEBUG_FEATURES
+  if (slot->spi)
+    {
+      ferr("ERROR: Already registered\n");
+      return -EBUSY;
+    }
+#endif
 
   /* Bind the SPI port to the slot */
 
   slot->spi      = spi;
-  slot->spispeed = CONFIG_MMCSD_IDMODE_CLOCK;
+  slot->spispeed = MMCSD_IDMODE_CLOCK;
 
   /* Get exclusive access to the SPI bus and make sure that SPI is properly
    * configured for the MMC/SD card
    */
 
-  ret = mmcsd_lock(slot);
+  ret = mmcsd_semtake(slot);
   if (ret < 0)
     {
       return ret;
@@ -2076,7 +2049,7 @@ int mmcsd_spislotinitialize(int minor, int slotno, FAR struct spi_dev_s *spi)
   /* Initialize for the media in the slot (if any) */
 
   ret = mmcsd_mediainitialize(slot);
-  mmcsd_unlock(slot);
+  mmcsd_semgive(slot);
   if (ret == 0)
     {
       finfo("mmcsd_mediainitialize returned OK\n");
@@ -2085,7 +2058,7 @@ int mmcsd_spislotinitialize(int minor, int slotno, FAR struct spi_dev_s *spi)
 
   /* Create a MMC/SD device name */
 
-  snprintf(devname, sizeof(devname), "/dev/mmcsd%d", minor);
+  snprintf(devname, 16, "/dev/mmcsd%d", minor);
 
   /* Register the driver, even on a failure condition.  A
    * card may be inserted later, for example.
@@ -2095,7 +2068,6 @@ int mmcsd_spislotinitialize(int minor, int slotno, FAR struct spi_dev_s *spi)
   if (ret < 0)
     {
       ferr("ERROR: register_blockdriver failed: %d\n", -ret);
-      nxmutex_destroy(&slot->lock);
       slot->spi = NULL;
       return ret;
     }
@@ -2104,7 +2076,7 @@ int mmcsd_spislotinitialize(int minor, int slotno, FAR struct spi_dev_s *spi)
    * removal of cards.
    */
 
-  SPI_REGISTERCALLBACK(spi, mmcsd_mediachanged, slot);
+  SPI_REGISTERCALLBACK(spi, mmcsd_mediachanged, (FAR void *)slot);
   return OK;
 }
 

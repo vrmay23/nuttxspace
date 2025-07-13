@@ -1,22 +1,35 @@
 /****************************************************************************
  * mm/shm/shmget.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,24 +43,14 @@
 #include <sys/ipc.h>
 #include <unistd.h>
 #include <string.h>
-#include <debug.h>
 #include <errno.h>
 
 #include <nuttx/pgalloc.h>
-#include <nuttx/sched.h>
+#include <nuttx/mm/shm.h>
 
 #include "shm/shm.h"
 
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-/* State of the all shared memory */
-
-struct shm_info_s g_shminfo =
-{
-  NXMUTEX_INITIALIZER
-};
+#ifdef CONFIG_MM_SHM
 
 /****************************************************************************
  * Private Functions
@@ -118,7 +121,7 @@ static int shm_reserve(key_t key, int shmflg)
           region->sr_key   = key;
           region->sr_flags = SRFLAG_INUSE;
 
-          nxmutex_init(&region->sr_lock);
+          nxsem_init(&region->sr_sem, 0, 1);
 
           /* Set the low-order nine bits of shm_perm.mode to the low-order
            * nine bits of shmflg.
@@ -163,7 +166,7 @@ static int shm_reserve(key_t key, int shmflg)
 
 static int shm_extend(int shmid, size_t size)
 {
-  FAR struct shm_region_s *region = &g_shminfo.si_region[shmid];
+  FAR struct shm_region_s *region =  &g_shminfo.si_region[shmid];
   unsigned int pgalloc;
   unsigned int pgneeded;
 
@@ -187,10 +190,6 @@ static int shm_extend(int shmid, size_t size)
           shmerr("ERROR: mm_pgalloc(1) failed\n");
           break;
         }
-
-      /* Zero the allocated page. */
-
-      memset((FAR void *)region->sr_pages[pgalloc], 0, MM_PGSIZE);
 
       /* Increment the number of pages successfully allocated */
 
@@ -273,7 +272,7 @@ static int shm_create(key_t key, size_t size, int shmflg)
   /* Save the process ID of the creator */
 
   region = &g_shminfo.si_region[shmid];
-  region->sr_ds.shm_cpid = _SCHED_GETPID();
+  region->sr_ds.shm_cpid = getpid();
 
   /* Return the shared memory ID */
 
@@ -381,7 +380,7 @@ int shmget(key_t key, size_t size, int shmflg)
 
   /* Get exclusive access to the global list of shared memory regions */
 
-  ret = nxmutex_lock(&g_shminfo.si_lock);
+  ret = nxsem_wait(&g_shminfo.si_sem);
   if (ret < 0)
     {
       goto errout;
@@ -404,7 +403,7 @@ int shmget(key_t key, size_t size, int shmflg)
           if (ret < 0)
             {
               shmerr("ERROR: shm_create failed: %d\n", ret);
-              goto errout_with_lock;
+              goto errout_with_semaphore;
             }
 
           /* Return the shared memory ID */
@@ -415,7 +414,7 @@ int shmget(key_t key, size_t size, int shmflg)
         {
           /* Fail with ENOENT */
 
-          goto errout_with_lock;
+          goto errout_with_semaphore;
         }
     }
 
@@ -447,7 +446,7 @@ int shmget(key_t key, size_t size, int shmflg)
               if (ret < 0)
                 {
                   shmerr("ERROR: shm_create failed: %d\n", ret);
-                  goto errout_with_lock;
+                  goto errout_with_semaphore;
                 }
             }
           else
@@ -455,7 +454,7 @@ int shmget(key_t key, size_t size, int shmflg)
               /* Fail with EINVAL */
 
               ret = -EINVAL;
-              goto errout_with_lock;
+              goto errout_with_semaphore;
             }
         }
 
@@ -470,14 +469,15 @@ int shmget(key_t key, size_t size, int shmflg)
 
   /* Release our lock on the shared memory region list */
 
-  nxmutex_unlock(&g_shminfo.si_lock);
+  nxsem_post(&g_shminfo.si_sem);
   return shmid;
 
-errout_with_lock:
-  nxmutex_unlock(&g_shminfo.si_lock);
+errout_with_semaphore:
+  nxsem_post(&g_shminfo.si_sem);
 
 errout:
   set_errno(-ret);
   return ERROR;
 }
 
+#endif /* CONFIG_MM_SHM */

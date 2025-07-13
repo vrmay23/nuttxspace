@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/include/armv6-m/irq.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013-2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -42,18 +55,10 @@
 #include <arch/chip/chip.h>
 
 /****************************************************************************
- * Pre-processor Prototypes
+ * Pre-processor Definitions
  ****************************************************************************/
-
-#ifdef __ghs__
-#  define __ARM_ARCH 6
-#endif
-
 /* Configuration ************************************************************/
-
-/* If this is a kernel build,
- * how many nested system calls should we support?
- */
+/* If this is a kernel build, how many nested system calls should we support? */
 
 #ifndef CONFIG_SYS_NNEST
 #  define CONFIG_SYS_NNEST 2
@@ -75,9 +80,17 @@
 #define REG_R9              (7)  /* R9 */
 #define REG_R10             (8)  /* R10 */
 #define REG_R11             (9)  /* R11 */
-#define REG_CONTROL         (10) /* CONTROL */
-#define REG_EXC_RETURN      (11) /* EXC_RETURN */
-#define SW_XCPT_REGS        (12)
+
+/* In the kernel build, we may return to either privileged or unprivileged
+ * modes.
+ */
+
+#ifdef CONFIG_BUILD_PROTECTED
+#  define REG_EXC_RETURN    (10) /* EXC_RETURN */
+#  define SW_XCPT_REGS      (11)
+#else
+#  define SW_XCPT_REGS      (10)
+#endif
 
 /* The total number of registers saved by software */
 
@@ -117,7 +130,7 @@
 #define REG_V7              REG_R10
 #define REG_SB              REG_R9
 #define REG_SL              REG_R10
-#define REG_FP              REG_R7
+#define REG_FP              REG_R11
 #define REG_IP              REG_R12
 #define REG_SP              REG_R13
 #define REG_LR              REG_R14
@@ -128,12 +141,6 @@
  */
 
 #define REG_PIC             REG_R10
-
-/* CONTROL register */
-
-#define CONTROL_FPCA        (1 << 2) /* Bit 2: Floating-point context active */
-#define CONTROL_SPSEL       (1 << 1) /* Bit 1: Stack-pointer select */
-#define CONTROL_NPRIV       (1 << 0) /* Bit 0: Not privileged */
 
 /****************************************************************************
  * Public Types
@@ -148,7 +155,6 @@ struct xcpt_syscall_s
 {
   uint32_t excreturn;   /* The EXC_RETURN value */
   uint32_t sysreturn;   /* The return PC */
-  uint32_t ctrlreturn;  /* The return CONTROL value */
 };
 #endif
 
@@ -158,13 +164,27 @@ struct xcpt_syscall_s
 
 struct xcptcontext
 {
-  /* These are saved copies of the context used during
-   * signal processing.
+  /* The following function pointer is non-zero if there
+   * are pending signals to be processed.
    */
 
-  uint32_t *saved_regs;
+  void *sigdeliver; /* Actual type is sig_deliver_t */
 
+  /* These are saved copies of LR, PRIMASK, and xPSR used during
+   * signal processing.
+   *
+   * REVISIT:  Because there is only one copy of these save areas,
+   * only a single signal handler can be active.  This precludes
+   * queuing of signal actions.  As a result, signals received while
+   * another signal handler is executing will be ignored!
+   */
+
+  uint32_t saved_pc;
+  uint32_t saved_primask;
+  uint32_t saved_xpsr;
 #ifdef CONFIG_BUILD_PROTECTED
+  uint32_t saved_lr;
+
   /* This is the saved address to use when returning from a user-space
    * signal handler.
    */
@@ -181,22 +201,17 @@ struct xcptcontext
   struct xcpt_syscall_s syscall[CONFIG_SYS_NNEST];
 #endif
 
-  /* Register save area with XCPTCONTEXT_SIZE, only valid when:
-   * 1.The task isn't running or
-   * 2.The task is interrupted
-   * otherwise task is running, and regs contain the stale value.
-   */
+  /* Register save area */
 
-  uint32_t *regs;
+  uint32_t regs[XCPTCONTEXT_REGS];
 };
-
-/****************************************************************************
- * Public Data
- ****************************************************************************/
+#endif
 
 /****************************************************************************
  * Inline functions
  ****************************************************************************/
+
+#ifndef __ASSEMBLY__
 
 /* Name: up_irq_save, up_irq_restore, and friends.
  *
@@ -209,7 +224,8 @@ struct xcptcontext
 
 /* Get/set the PRIMASK register */
 
-static always_inline_function uint8_t getprimask(void)
+static inline uint8_t getprimask(void) inline_function;
+static inline uint8_t getprimask(void)
 {
   uint32_t primask;
   __asm__ __volatile__
@@ -222,7 +238,8 @@ static always_inline_function uint8_t getprimask(void)
   return (uint8_t)primask;
 }
 
-static always_inline_function void setprimask(uint32_t primask)
+static inline void setprimask(uint32_t primask) inline_function;
+static inline void setprimask(uint32_t primask)
 {
   __asm__ __volatile__
     (
@@ -234,14 +251,16 @@ static always_inline_function void setprimask(uint32_t primask)
 
 /* Disable IRQs */
 
-static always_inline_function void up_irq_disable(void)
+static inline void up_irq_disable(void) inline_function;
+static inline void up_irq_disable(void)
 {
   __asm__ __volatile__ ("\tcpsid  i\n");
 }
 
 /* Save the current primask state & disable IRQs */
 
-static always_inline_function irqstate_t up_irq_save(void)
+static inline irqstate_t up_irq_save(void) inline_function;
+static inline irqstate_t up_irq_save(void)
 {
   unsigned short primask;
 
@@ -262,14 +281,16 @@ static always_inline_function irqstate_t up_irq_save(void)
 
 /* Enable IRQs */
 
-static always_inline_function void up_irq_enable(void)
+static inline void up_irq_enable(void) inline_function;
+static inline void up_irq_enable(void)
 {
   __asm__ __volatile__ ("\tcpsie  i\n");
 }
 
 /* Restore saved primask state */
 
-static always_inline_function void up_irq_restore(irqstate_t flags)
+static inline void up_irq_restore(irqstate_t flags) inline_function;
+static inline void up_irq_restore(irqstate_t flags)
 {
   /* If bit 0 of the primask is 0, then we need to restore
    * interrupts.
@@ -285,7 +306,8 @@ static always_inline_function void up_irq_restore(irqstate_t flags)
 
 /* Get/set IPSR */
 
-static always_inline_function uint32_t getipsr(void)
+static inline uint32_t getipsr(void) inline_function;
+static inline uint32_t getipsr(void)
 {
   uint32_t ipsr;
   __asm__ __volatile__
@@ -300,7 +322,8 @@ static always_inline_function uint32_t getipsr(void)
 
 /* Get/set CONTROL */
 
-static always_inline_function uint32_t getcontrol(void)
+static inline uint32_t getcontrol(void) inline_function;
+static inline uint32_t getcontrol(void)
 {
   uint32_t control;
   __asm__ __volatile__
@@ -313,7 +336,8 @@ static always_inline_function uint32_t getcontrol(void)
   return control;
 }
 
-static always_inline_function void setcontrol(uint32_t control)
+static inline void setcontrol(uint32_t control) inline_function;
+static inline void setcontrol(uint32_t control)
 {
   __asm__ __volatile__
     (
@@ -323,60 +347,17 @@ static always_inline_function void setcontrol(uint32_t control)
       : "memory");
 }
 
-static always_inline_function uint32_t getpsp(void)
-{
-  uint32_t psp;
-
-  __asm__ __volatile__
-    (
-     "\tmrs  %0, psp\n"
-     : "=r" (psp)
-     :
-     : "memory");
-
-  return psp;
-}
+#endif /* __ASSEMBLY__ */
 
 /****************************************************************************
- * Name: up_cpu_index
- *
- * Description:
- *   Return the real core number regardless CONFIG_SMP setting
- *
+ * Public Data
  ****************************************************************************/
-
-#ifdef CONFIG_ARCH_HAVE_MULTICPU
-int up_cpu_index(void) noinstrument_function;
-#endif /* CONFIG_ARCH_HAVE_MULTICPU */
-
-static always_inline_function uint32_t up_getsp(void)
-{
-  register uint32_t sp;
-
-  __asm__ __volatile__
-  (
-    "mov %0, sp\n"
-    : "=r" (sp)
-  );
-
-  return sp;
-}
-
-static always_inline_function uintptr_t up_getusrsp(void *regs)
-{
-  uint32_t *ptr = (uint32_t *)regs;
-  return ptr[REG_SP];
-}
-
-static always_inline_function bool up_interrupt_context(void)
-{
-  return getipsr() != 0;
-}
 
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
 
+#ifndef __ASSEMBLY__
 #ifdef __cplusplus
 #define EXTERN extern "C"
 extern "C"
@@ -389,6 +370,6 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
-#endif /* __ASSEMBLY__ */
+#endif
 
 #endif /* __ARCH_ARM_INCLUDE_ARMV6_M_IRQ_H */

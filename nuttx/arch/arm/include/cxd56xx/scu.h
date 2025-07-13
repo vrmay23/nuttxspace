@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/include/cxd56xx/scu.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -32,7 +45,7 @@
 #include <nuttx/fs/ioctl.h>
 
 /****************************************************************************
- * Pre-processor Prototypes
+ * Pre-processor Definitions
  ****************************************************************************/
 
 #define _SCUIOCBASE   (0xa000)
@@ -329,7 +342,7 @@ struct scuev_notify_s
 
   uint32_t               ctrl;   /* Event control */
 
-  struct scuev_arg_s     *arg;   /* Arguments for event raised */
+  FAR struct scuev_arg_s *arg;   /* Arguments for event raised */
 };
 
 /* Offset/gain adjustment parameter */
@@ -366,7 +379,7 @@ struct scufifo_wm_s
 
   /* Pointer to memory to be timestamp stored */
 
-  struct scutimestamp_s *ts;
+  FAR struct scutimestamp_s *ts;
 
   /* Watermark value. SCU notifies when
    * stored samples over watermark in FIFO.
@@ -391,14 +404,14 @@ struct seq_s;     /* The sequencer object */
  * return: struct seq_s pointer is success. NULL is failure.
  */
 
-struct seq_s *seq_open(int type, int bustype);
+FAR struct seq_s *seq_open(int type, int bustype);
 
 /* Close sequencer device
  *
  * param [in] seq : Sequencer instance
  */
 
-void seq_close(struct seq_s *seq);
+void seq_close(FAR struct seq_s *seq);
 
 /* Read sequencer FIFO data
  *
@@ -410,7 +423,7 @@ void seq_close(struct seq_s *seq);
  * return : OK(0) is success. negative value is failure.
  */
 
-int seq_read(struct seq_s *seq, int fifoid, char *buffer, int length);
+int seq_read(FAR struct seq_s *seq, int fifoid, char *buffer, int length);
 
 /* Sequencer specific ioctl
  *
@@ -426,7 +439,7 @@ int seq_read(struct seq_s *seq, int fifoid, char *buffer, int length);
  * return: OK(0) is success. negative value is failure.
  */
 
-int seq_ioctl(struct seq_s *seq, int fifoid, int cmd, unsigned long arg);
+int seq_ioctl(FAR struct seq_s *seq, int fifoid, int cmd, unsigned long arg);
 
 /* Set cyclic sequencer instruction
  *
@@ -437,7 +450,7 @@ int seq_ioctl(struct seq_s *seq, int fifoid, int cmd, unsigned long arg);
  * return  OK(0) is success. negative value is failure.
  */
 
-int seq_setinstruction(struct seq_s *seq, const uint16_t *inst,
+int seq_setinstruction(FAR struct seq_s *seq, const uint16_t *inst,
                        uint16_t nr_insts);
 
 /* Set sample data format
@@ -445,13 +458,13 @@ int seq_setinstruction(struct seq_s *seq, const uint16_t *inst,
  * param [in] seq      : Sequencer instance
  * param [in] sample   : Bytes per sample
  * param [in] offset   : Start offset of sampling data
- * param [in] elemsize : Number of vector elements - 1 (e.g. 3 axis = 2)
+ * param [in] elemsize : Bytes of 1 element in sample
  * param [in] swapbyte : Enable/Disable byte swapping
  *
  * return  OK(0) is success. negative value is failure.
  */
 
-void seq_setsample(struct seq_s *seq, uint8_t sample, uint8_t offset,
+void seq_setsample(FAR struct seq_s *seq, uint8_t sample, uint8_t offset,
                    uint8_t elemsize, bool swapbyte);
 
 /* Set slave ID or address
@@ -460,7 +473,7 @@ void seq_setsample(struct seq_s *seq, uint8_t sample, uint8_t offset,
  * param [in] slave_addr : In SPI, slave select ID. In I2C, bus address.
  */
 
-void seq_setaddress(struct seq_s *seq, uint32_t slave_addr);
+void seq_setaddress(FAR struct seq_s *seq, uint32_t slave_addr);
 
 /* SPI data transfer via sequencer.
  *
@@ -479,7 +492,7 @@ void seq_setaddress(struct seq_s *seq, uint32_t slave_addr);
  */
 
 int scu_spitransfer(int slavesel, uint16_t *inst, uint32_t nr_insts,
-                    uint8_t *buffer, int len);
+                         uint8_t *buffer, int len);
 
 /* I2C data transfer via sequencer
  *
@@ -499,7 +512,7 @@ int scu_spitransfer(int slavesel, uint16_t *inst, uint32_t nr_insts,
  */
 
 int scu_i2ctransfer(int port, int slave, uint16_t *inst, uint32_t nr_insts,
-                    uint8_t *buffer, int len);
+                         uint8_t *buffer, int len);
 
 /* Initialize SCU
  *

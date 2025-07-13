@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/local/local_release.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -25,12 +38,12 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#if defined(CONFIG_NET) && defined(CONFIG_NET_LOCAL)
 
 #include <errno.h>
+#include <queue.h>
 #include <assert.h>
 
-#include <nuttx/nuttx.h>
-#include <nuttx/queue.h>
 #include <nuttx/net/net.h>
 
 #include <arch/irq.h>
@@ -67,26 +80,39 @@ int local_release(FAR struct local_conn_s *conn)
 
   DEBUGASSERT(conn->lc_state != LOCAL_STATE_ACCEPT);
 
+  /* If the socket is connected (SOCK_STREAM client), then disconnect it */
+
+  if (conn->lc_state == LOCAL_STATE_CONNECTED ||
+      conn->lc_state == LOCAL_STATE_DISCONNECTED)
+    {
+      DEBUGASSERT(conn->lc_proto == SOCK_STREAM);
+
+      /* Just free the connection structure */
+    }
+
   /* Is the socket is listening socket (SOCK_STREAM server) */
 
-  if (conn->lc_state == LOCAL_STATE_LISTENING)
+  else if (conn->lc_state == LOCAL_STATE_LISTENING)
     {
-      FAR struct local_conn_s *accept;
-      FAR dq_entry_t *waiter;
-      FAR dq_entry_t *tmp;
+      FAR struct local_conn_s *client;
 
       DEBUGASSERT(conn->lc_proto == SOCK_STREAM);
 
       /* Are there still clients waiting for a connection to the server? */
 
-      dq_for_every_safe(&conn->u.server.lc_waiters, waiter, tmp)
+      for (client = (FAR struct local_conn_s *)conn->u.server.lc_waiters.head;
+           client;
+           client = (FAR struct local_conn_s *)dq_next(&client->lc_node))
         {
-          accept = container_of(waiter, struct local_conn_s,
-                                u.accept.lc_waiter);
-          local_subref(accept);
+          client->u.client.lc_result = -ENOTCONN;
+          nxsem_post(&client->lc_waitsem);
         }
 
       conn->u.server.lc_pending = 0;
+
+      /* Remove the server from the list of listeners. */
+
+      dq_rem(&conn->lc_node, &g_local_listeners);
     }
 #endif /* CONFIG_NET_LOCAL_STREAM */
 
@@ -100,3 +126,5 @@ int local_release(FAR struct local_conn_s *conn)
   net_unlock();
   return OK;
 }
+
+#endif /* CONFIG_NET && CONFIG_NET_LOCAL */

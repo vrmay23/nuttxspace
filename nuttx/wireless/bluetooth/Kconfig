@@ -42,45 +42,17 @@
 menuconfig WIRELESS_BLUETOOTH
 	bool "Bluetooth LE support"
 	default n
-	depends on ALLOW_BSD_COMPONENTS
 	select MM_IOB
 	select SCHED_HPWORK
 	select SCHED_LPWORK
 	---help---
 		This option enables Bluetooth Low Energy support.
 
+		NOTE: This selection is marked EXPERIMENTAL.  It is incomplete and,
+		hence, untested.  It still lacks any low-level Bluetooth drivers and
+		is missing the network interface driver.
+
 if WIRELESS_BLUETOOTH
-
-menuconfig WIRELESS_BLUETOOTH_HOST
-	bool "BLE Host Layer"
-	default y
-	---help---
-		This enables support for BLE host layer implementation. This can be
-		used to interface to a BLE controller via HCI protocol (either to a local
-		BLE link-layer or to an external device over HCI UART).
-
-if WIRELESS_BLUETOOTH_HOST
-config DEVICE_APPEARANCE
-	int "Appearance sub-category value"
-	default 0
-	range 0 5188
-	---help---
-		This value comes from the "Appearance sub-category"
-		section (2.6.3) in the Bluetooth Assigned Numbers document.
-
-config DEVICE_NAME
-	string "Device name"
-	default "Apache NuttX"
-	---help---
-		The device name.
-
-config DEVICE_LOCAL_NAME
-	string "Device local name"
-	default "NuttX"
-	---help---
-		The device name used for advertising.
-
-endif # WIRELESS_BLUETOOTH_HOST
 
 config BLUETOOTH_MAX_CONN
 	int "Maximum number of simultaneous connections"
@@ -165,36 +137,11 @@ config BLUETOOTH_BUFFER_IRQRESERVE
 		interrupt level.  This setting only needs to be non-zero if your
 		low-level Bluetooth driver needs to do such allocations.
 
-config BLUETOOTH_CNTRL_HOST_FLOW_DISABLE
-	bool "Disable Controller to Host Flow Control"
-	default n
-	---help---
-		Controller to Host Flow Control prevents buffer overflow
-		between the Controller and the Host layers. When enabled, the Controller can
-		indicate to the Host when its buffers are nearly full, allowing the Host to
-		stop sending data until buffer space becomes available.
-
-config BLUETOOTH_SMP_IO_CAPABILITY
-	int "Bluetooth SMP I/O Capability"
-	default 3
-	range 0 4
-	---help---
-		Defines the Input/Output capabilities of this device
-		for SMP pairing purposes.
-		Values based on Bluetooth Core Spec v4.2, Vol 3, Part H, Section 2.3.2:
-		  0: DisplayOnly       (Can display a 6-digit code)
-		  1: DisplayYesNo    (Can display a 6-digit code and has Yes/No input)
-		  2: KeyboardOnly    (Has numeric keyboard input, no display)
-		  3: NoInputNoOutput (Cannot display or input codes, e.g., headset)
-		  4: KeyboardDisplay (Has both display and keyboard)
-
-		NOTE: Current implementation supports NoInputNoOutput and DisplayOnly.
-
 menu "Kernel Thread Configuration"
 
 config BLUETOOTH_TXCMD_STACKSIZE
 	int "Tx command thread stack size"
-	default DEFAULT_TASK_STACKSIZE
+	default 1024
 
 config BLUETOOTH_TXCMD_PRIORITY
 	int "Tx command thread priority"
@@ -207,7 +154,7 @@ config BLUETOOTH_TXCMD_NMSGS
 
 config BLUETOOTH_TXCONN_STACKSIZE
 	int "Tx connection thread stack size"
-	default DEFAULT_TASK_STACKSIZE
+	default 1024
 
 config BLUETOOTH_TXCONN_PRIORITY
 	int "Tx connection thread priority"
@@ -217,25 +164,6 @@ config BLUETOOTH_TXCONN_PRIORITY
 config BLUETOOTH_TXCONN_NMSGS
 	int "Tx connection thread mqueue size"
 	default 16
-
-config BLUETOOTH_TXCMD_PINNED_TO_CORE
-	bool "Pin Tx command thread to specific core"
-	depends on SMP
-	default n
-	---help---
-		This option enables us to set the affinity of the Tx command thread
-		to make it run on a specific core.
-
-if BLUETOOTH_TXCMD_PINNED_TO_CORE
-
-config BLUETOOTH_TXCMD_CORE
-	int "Tx command thread CPU core"
-	default 1
-	range 1 SMP_NCPUS
-	---help---
-		Select the core to pin the Tx command thread.
-
-endif # BLUETOOTH_TXCMD_PINNED_TO_CORE
 
 endmenu # Kernel Thread Configuration
 

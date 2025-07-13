@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/c5471/c5471_watchdog.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2009, 2012-2014 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +40,6 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -39,7 +51,7 @@
 #include <nuttx/timers/watchdog.h>
 
 #include "chip.h"
-#include "arm_internal.h"
+#include "up_arch.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -62,7 +74,7 @@
 #define C5471_DISABLE_VALUE2   (0xa0 << 22)
 
 #define CLOCK_KHZ              47500
-#define CLOCK_MHZ_X2           95
+#define CLOCK_MHZx2            95
 
 /* Macros to manage access to the watchdog timer */
 
@@ -82,14 +94,13 @@
 static inline unsigned int wdt_prescaletoptv(unsigned int prescale);
 
 static int     wdt_setusec(uint32_t usec);
-static int     wdt_interrupt(int irq, void *context, void *arg);
+static int     wdt_interrupt(int irq, void *context, FAR void *arg);
 
 static int     wdt_open(struct file *filep);
 static int     wdt_close(struct file *filep);
 static ssize_t wdt_read(struct file *filep, char *buffer, size_t buflen);
-static ssize_t wdt_write(struct file *filep, const char *buffer,
-                         size_t buflen);
-static int     wdt_ioctl(struct file *filep, int cmd, unsigned long arg);
+static ssize_t wdt_write(struct file *filep, const char *buffer, size_t buflen);
+static int     wdt_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -161,7 +172,7 @@ static int wdt_setusec(uint32_t usec)
   uint32_t divisor   = 1;
   uint32_t mode;
 
-  wdinfo("usec=%" PRId32 "\n", usec);
+  wdinfo("usec=%d\n", usec);
 
   /* Calculate a value of prescaler and divisor that will be able
    * to count to the usec.  It may not be exact or the best
@@ -173,9 +184,8 @@ static int wdt_setusec(uint32_t usec)
 
   do
     {
-      divisor = (CLOCK_MHZ_X2 * usec) / (prescaler * 2);
-      wdinfo("divisor=0x%" PRIx32 " prescaler=0x%" PRIx32 "\n",
-             divisor, prescaler);
+      divisor = (CLOCK_MHZx2 * usec) / (prescaler * 2);
+      wdinfo("divisor=0x%x prescaler=0x%x\n", divisor, prescaler);
 
       if (divisor >= 0x10000)
         {
@@ -183,7 +193,7 @@ static int wdt_setusec(uint32_t usec)
             {
               /* This is the max possible ~2.5 seconds. */
 
-              wderr("ERROR: prescaler=0x%" PRIx32 " too big!\n", prescaler);
+              wderr("ERROR: prescaler=0x%x too big!\n", prescaler);
               return ERROR;
             }
 
@@ -196,20 +206,19 @@ static int wdt_setusec(uint32_t usec)
     }
   while (divisor >= 0x10000);
 
-  wdinfo("prescaler=0x%" PRIx32 " divisor=0x%" PRIx32 "\n",
-         prescaler, divisor);
+  wdinfo("prescaler=0x%x divisor=0x%x\n", prescaler, divisor);
 
   mode  = wdt_prescaletoptv(prescaler);
   mode &= ~C5471_TIMER_AUTORELOAD; /* One shot mode. */
   mode |= divisor << 5;
-  wdinfo("mode=0x%" PRIx32 "\n", mode);
+  wdinfo("mode=0x%x\n", mode);
 
   c5471_wdt_cntl = mode;
 
   /* Now start the watchdog */
 
   c5471_wdt_cntl |= C5471_TIMER_STARTBIT;
-  wdinfo("cntl_timer=0x%" PRIx32 "\n", c5471_wdt_cntl);
+  wdinfo("cntl_timer=0x%x\n", c5471_wdt_cntl);
 
   return 0;
 }
@@ -222,7 +231,7 @@ static int wdt_setusec(uint32_t usec)
  * Name: wdt_interrupt
  ****************************************************************************/
 
-static int wdt_interrupt(int irq, void *context, void *arg)
+static int wdt_interrupt(int irq, void *context, FAR void *arg)
 {
   wdinfo("expired\n");
 
@@ -252,11 +261,9 @@ static ssize_t wdt_read(struct file *filep, char *buffer, size_t buflen)
   wdinfo("buflen=%d\n", buflen);
   if (buflen >= 18)
     {
-      snprintf(buffer, buflen, "%08" PRIx32 " %08" PRIx32 "\n",
-               c5471_wdt_cntl, c5471_wdt_count);
+      sprintf(buffer, "%08x %08x\n", c5471_wdt_cntl, c5471_wdt_count);
       return 18;
     }
-
   return 0;
 }
 
@@ -264,8 +271,7 @@ static ssize_t wdt_read(struct file *filep, char *buffer, size_t buflen)
  * Name: wdt_write
  ****************************************************************************/
 
-static ssize_t wdt_write(struct file *filep, const char *buffer,
-                         size_t buflen)
+static ssize_t wdt_write(struct file *filep, const char *buffer, size_t buflen)
 {
   wdinfo("buflen=%d\n", buflen);
   if (buflen)
@@ -283,9 +289,9 @@ static ssize_t wdt_write(struct file *filep, const char *buffer,
  * Name: wdt_ioctl
  ****************************************************************************/
 
-static int wdt_ioctl(struct file *filep, int cmd, unsigned long arg)
+static int wdt_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
-  wdinfo("ioctl Call: cmd=0x%x arg=0x%lx", cmd, arg);
+  wdinfo("ioctl Call: cmd=0x%x arg=0x%x", cmd, arg);
 
   /* Process the IOCTL command (see arch/watchdog.h) */
 
@@ -348,10 +354,10 @@ static int wdt_close(struct file *filep)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_wdtinit
+ * Name: up_wdtinit
  ****************************************************************************/
 
-int arm_wdtinit(void)
+int up_wdtinit(void)
 {
   int ret;
 

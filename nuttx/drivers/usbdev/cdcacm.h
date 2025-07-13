@@ -1,22 +1,35 @@
 /****************************************************************************
  * drivers/usbdev/cdcacm.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011-2012, 2015, 2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -30,7 +43,6 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
-#include <sys/param.h>
 
 #include <nuttx/usb/usbdev.h>
 #include <nuttx/usb/cdc.h>
@@ -66,8 +78,8 @@
 #  endif
 #endif
 
-/* Interface IDs.  If the serial driver is built as a component of a
- * composite device, then the interface IDs may need to be offset.
+/* Interface IDs.  If the serial driver is built as a component of a composite
+ * device, then the interface IDs may need to be offset.
  */
 
 #ifndef CONFIG_CDCACM_COMPOSITE
@@ -148,7 +160,7 @@
 #define CDCACM_LASTSTRID           CDCACM_DATAIFSTRID
 #define CDCACM_NSTRIDS             (CDCACM_LASTSTRID - CDCACM_STRBASE)
 
-/* Endpoint configuration ***************************************************/
+/* Endpoint configuration ****************************************************/
 
 #define CDCACM_MKEPINTIN(desc)     (USB_DIR_IN | (desc)->epno[CDCACM_EP_INTIN_IDX])
 #define CDCACM_EPINTIN_ATTR        (USB_EP_ATTR_XFER_INT)
@@ -168,6 +180,18 @@
 #define CDCACM_DEVNAME_FORMAT      "/dev/ttyACM%d"
 #define CDCACM_DEVNAME_SIZE        16
 
+/* Misc Macros **************************************************************/
+
+/* MIN/MAX macros */
+
+#ifndef MIN
+#  define MIN(a,b) ((a)<(b)?(a):(b))
+#endif
+
+#ifndef MAX
+#  define MAX(a,b) ((a)>(b)?(a):(b))
+#endif
+
 /* Trace values *************************************************************/
 
 #define CDCACM_CLASSAPI_SETUP       TRACE_EVENT(TRACE_CLASSAPI_ID, USBSER_TRACECLASSAPI_SETUP)
@@ -183,7 +207,6 @@
 #define CDCACM_CLASSAPI_TXREADY     TRACE_EVENT(TRACE_CLASSAPI_ID, USBSER_TRACECLASSAPI_TXREADY)
 #define CDCACM_CLASSAPI_TXEMPTY     TRACE_EVENT(TRACE_CLASSAPI_ID, USBSER_TRACECLASSAPI_TXEMPTY)
 #define CDCACM_CLASSAPI_FLOWCONTROL TRACE_EVENT(TRACE_CLASSAPI_ID, USBSER_TRACECLASSAPI_FLOWCONTROL)
-#define CDCACM_CLASSAPI_RELEASE     TRACE_EVENT(TRACE_CLASSAPI_ID, USBSER_TRACECLASSAPI_RELEASE)
 
 /****************************************************************************
  * Public Types
@@ -238,7 +261,7 @@ FAR const struct usb_devdesc_s *cdcacm_getdevdesc(void);
 int cdcacm_copy_epdesc(enum cdcacm_epdesc_e epid,
                        FAR struct usb_epdesc_s *epdesc,
                        FAR struct usbdev_devinfo_s *devinfo,
-                       uint8_t speed);
+                       bool hispeed);
 
 /****************************************************************************
  * Name: cdcacm_mkcfgdesc
@@ -248,9 +271,14 @@ int cdcacm_copy_epdesc(enum cdcacm_epdesc_e epid,
  *
  ****************************************************************************/
 
+#ifdef CONFIG_USBDEV_DUALSPEED
 int16_t cdcacm_mkcfgdesc(FAR uint8_t *buf,
                          FAR struct usbdev_devinfo_s *devinfo,
                          uint8_t speed, uint8_t type);
+#else
+int16_t cdcacm_mkcfgdesc(FAR uint8_t *buf,
+                         FAR struct usbdev_devinfo_s *devinfo);
+#endif
 
 /****************************************************************************
  * Name: cdcacm_getqualdesc

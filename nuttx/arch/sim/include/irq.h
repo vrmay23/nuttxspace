@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/sim/include/irq.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2007, 2009 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,17 +44,26 @@
  * Included Files
  ****************************************************************************/
 
-#include <arch/setjmp.h>
-#include <sys/types.h>
-#ifndef __ASSEMBLY__
-#  include <stdbool.h>
-#endif
-
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+/* No interrupts */
 
-#define NR_IRQS 64
+#define NR_IRQS 0
+
+/* Number of registers saved in context switch */
+
+#if defined(CONFIG_HOST_X86_64) && !defined(CONFIG_SIM_M32)
+   /* Storage order: %rbx, %rsp, %rbp, %r12, %r13, %r14, %r15, %rip */
+
+#  define XCPTCONTEXT_REGS    8
+#elif defined(CONFIG_HOST_X86) || defined(CONFIG_SIM_M32)
+   /* Storage order: %ebx, %esi, %edi, %ebp, sp, and return PC */
+
+#  define XCPTCONTEXT_REGS    6
+#elif defined(CONFIG_HOST_ARM)
+#  define XCPTCONTEXT_REGS    16
+#endif
 
 /****************************************************************************
  * Public Types
@@ -49,12 +71,62 @@
 
 #ifndef __ASSEMBLY__
 
+#if defined(CONFIG_HOST_X86_64) && !defined(CONFIG_SIM_M32)
+typedef unsigned long xcpt_reg_t;
+#else
+typedef int xcpt_reg_t;
+#endif
+
 /* This struct defines the way the registers are stored */
 
 struct xcptcontext
 {
-  jmp_buf regs;
+   void *sigdeliver; /* Actual type is sig_deliver_t */
+
+   xcpt_reg_t regs[XCPTCONTEXT_REGS];
 };
+#endif
+
+/****************************************************************************
+ * Inline functions
+ ****************************************************************************/
+
+#ifndef __ASSEMBLY__
+
+/****************************************************************************
+ * Name: up_irqinitialize
+ ****************************************************************************/
+
+static inline void up_irqinitialize(void)
+{
+}
+
+/* Name: up_irq_save, up_irq_restore, and friends.
+ *
+ * NOTE: This function should never be called from application code and,
+ * as a general rule unless you really know what you are doing, this
+ * function should not be called directly from operation system code either:
+ * Typically, the wrapper functions, enter_critical_section() and
+ * leave_critical section(), are probably what you really want.
+ */
+
+static inline irqstate_t up_irq_save(void)
+{
+  return 0;
+}
+
+static inline void up_irq_restore(irqstate_t flags)
+{
+}
+#endif
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
 
 #ifdef __cplusplus
 #define EXTERN extern "C"
@@ -64,136 +136,9 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-/* g_current_regs[] holds a references to the current interrupt level
- * register storage structure.  If is non-NULL only during interrupt
- * processing.  Access to g_current_regs[] must be through the
- * [get/set]_current_regs for portability.
- */
-
-/* For the case of architectures with multiple CPUs, then there must be one
- * such value for each processor that can receive an interrupt.
- */
-
-EXTERN volatile xcpt_reg_t *g_current_regs[CONFIG_SMP_NCPUS];
-
-/****************************************************************************
- * Public Function Prototypes
- ****************************************************************************/
-
-/****************************************************************************
- * Name: up_cpu_index
- *
- * Description:
- *   Return the real core number regardless CONFIG_SMP setting
- *
- ****************************************************************************/
-
-#ifdef CONFIG_ARCH_HAVE_MULTICPU
-int up_cpu_index(void) noinstrument_function;
-#endif /* CONFIG_ARCH_HAVE_MULTICPU */
-
-/* Name: up_irq_save, up_irq_restore, and friends.
- *
- * NOTE: These functions should never be called from application code and,
- * as a general rule unless you really know what you are doing, this
- * function should not be called directly from operation system code either:
- * Typically, the wrapper functions, enter_critical_section() and
- * leave_critical section(), are probably what you really want.
- */
-
-irqstate_t up_irq_flags(void);
-irqstate_t up_irq_save(void);
-void up_irq_restore(irqstate_t flags);
-void up_irq_enable(void);
-
-/****************************************************************************
- * Inline functions
- ****************************************************************************/
-
-noinstrument_function
-static inline_function xcpt_reg_t *up_current_regs(void)
-{
-#ifdef CONFIG_SMP
-  return (xcpt_reg_t *)g_current_regs[up_cpu_index()];
-#else
-  return (xcpt_reg_t *)g_current_regs[0];
-#endif
-}
-
-static inline_function void up_set_current_regs(xcpt_reg_t *regs)
-{
-#ifdef CONFIG_SMP
-  g_current_regs[up_cpu_index()] = regs;
-#else
-  g_current_regs[0] = regs;
-#endif
-}
-
-/* Return the current value of the stack pointer */
-
-static inline_function uintptr_t up_getsp(void)
-{
-#ifdef _MSC_VER
-  uintptr_t tmp;
-  return (uintptr_t)&tmp;
-#else
-  return (uintptr_t)__builtin_frame_address(0);
-#endif
-}
-
-/****************************************************************************
- * Name: up_interrupt_context
- *
- * Description:
- *   Return true is we are currently executing in the interrupt
- *   handler context.
- *
- ****************************************************************************/
-
-noinstrument_function
-static inline_function bool up_interrupt_context(void)
-{
-#ifdef CONFIG_SMP
-  irqstate_t flags = up_irq_save();
-#endif
-
-  bool ret = up_current_regs() != NULL;
-
-#ifdef CONFIG_SMP
-  up_irq_restore(flags);
-#endif
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: up_getusrpc
- *
- * Description:
- *   Get the PC value, The interrupted context PC register cannot be
- *   correctly obtained in sim It will return the PC of the interrupt
- *   handler function, normally it will return sim_doirq
- *
- ****************************************************************************/
-
-#define up_getusrpc(regs) \
-    (((xcpt_reg_t *)((regs) ? (regs) : up_current_regs()))[JB_PC])
-
-/****************************************************************************
- * Name: up_getusrsp
- ****************************************************************************/
-
-#define up_getusrsp(regs) \
-    ((uintptr_t)((xcpt_reg_t *)(regs))[JB_SP])
-
 #undef EXTERN
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* !__ASSEMBLY__ */
 #endif /* __ARCH_SIM_INCLUDE_IRQ_H */

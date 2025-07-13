@@ -1,8 +1,6 @@
 /****************************************************************************
  * net/arp/arp_ipin.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- *
  *   Copyright (C) 2007-2011, 2014 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -47,12 +45,19 @@
 
 #include <netinet/in.h>
 
-#include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
+#include <nuttx/net/arp.h>
 
 #include "arp/arp.h"
 
 #ifdef CONFIG_NET_ARP_IPIN
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#define ETHBUF ((struct eth_hdr_s *)&dev->d_buf[0])
+#define IPBUF  ((struct arp_iphdr_s *)&dev->d_buf[ETH_HDRLEN])
 
 /****************************************************************************
  * Public Functions
@@ -65,8 +70,7 @@
  *   The arp_ipin() function should be called by Ethernet device drivers
  *   whenever an IP packet arrives from the network.  The function will
  *   check if the address is in the ARP cache, and if so the ARP cache entry
- *   will be refreshed. If no ARP cache entry was found, a new one is
- *   created.
+ *   will be refreshed. If no ARP cache entry was found, a new one is created.
  *
  *   This function expects that an IP packet with an Ethernet header is
  *   present in the d_buf buffer and that the length of the packet is in the
@@ -78,25 +82,14 @@ void arp_ipin(FAR struct net_driver_s *dev)
 {
   in_addr_t srcipaddr;
 
-  /* ARP support is only built if the Ethernet link layer is supported.
-   * Continue and send the ARP request only if this device uses the
-   * Ethernet link layer protocol.
-   */
-
-  if (dev->d_lltype != NET_LL_ETHERNET &&
-      dev->d_lltype != NET_LL_IEEE80211)
-    {
-      return;
-    }
-
   /* Only insert/update an entry if the source IP address of the incoming IP
    * packet comes from a host on the local network.
    */
 
-  srcipaddr = net_ip4addr_conv32(ARPIPBUF->eh_srcipaddr);
+  srcipaddr = net_ip4addr_conv32(IPBUF->eh_srcipaddr);
   if (net_ipv4addr_maskcmp(srcipaddr, dev->d_ipaddr, dev->d_netmask))
     {
-      arp_hdr_update(dev, ARPIPBUF->eh_srcipaddr, ETHBUF->src);
+      arp_hdr_update(IPBUF->eh_srcipaddr, ETHBUF->src);
     }
 }
 

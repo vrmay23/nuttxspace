@@ -1,22 +1,35 @@
 /****************************************************************************
  * boards/arm/cxd56xx/drivers/sensors/bmp280_scu.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2018 Sony Semiconductor Solutions Corporation
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
+ *    the names of its contributors may be used to endorse or promote
+ *    products derived from this software without specific prior written
+ *    permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -29,7 +42,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fixedmath.h>
-#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -39,18 +51,18 @@
 #include <nuttx/sensors/bmp280.h>
 #include <arch/chip/scu.h>
 
-#if defined(CONFIG_I2C) && defined(CONFIG_SENSORS_BMP280_SCU)
+#if defined(CONFIG_I2C) && defined(CONFIG_BMP280_SCU)
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_SENSORS_BMI280_SCU_DECI_PRESS
+#ifdef CONFIG_CXD56_DECI_PRESS
 #  define PRESS_SEQ_TYPE SEQ_TYPE_DECI
 #else
 #  define PRESS_SEQ_TYPE SEQ_TYPE_NORMAL
 #endif
-#ifdef CONFIG_SENSORS_BMI280_SCU_DECI_TEMP
+#ifdef CONFIG_CXD56_DECI_TEMP
 #  define TEMP_SEQ_TYPE SEQ_TYPE_DECI
 #else
 #  define TEMP_SEQ_TYPE SEQ_TYPE_NORMAL
@@ -125,44 +137,42 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Private Type Definitions
  ****************************************************************************/
 
 struct bmp280_dev_s
 {
-  struct i2c_master_s *i2c; /* I2C interface */
-  uint8_t addr;             /* BMP280 I2C address */
-  int freq;                 /* BMP280 Frequency <= 3.4MHz */
-  int port;                 /* I2C port */
-  struct seq_s *seq;        /* Sequencer */
-  int id;                   /* Sequencer id */
+  FAR struct i2c_master_s *i2c; /* I2C interface */
+  uint8_t addr;                 /* BMP280 I2C address */
+  int freq;                     /* BMP280 Frequency <= 3.4MHz */
+  int port;                     /* I2C port */
+  struct seq_s *seq;            /* Sequencer */
+  int id;                       /* Sequencer id */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static uint8_t bmp280_getreg8(struct bmp280_dev_s *priv,
-                              uint8_t regaddr);
-static void bmp280_putreg8(struct bmp280_dev_s *priv,
-                           uint8_t regaddr,
+static uint8_t bmp280_getreg8(FAR struct bmp280_dev_s *priv, uint8_t regaddr);
+static void bmp280_putreg8(FAR struct bmp280_dev_s *priv, uint8_t regaddr,
                            uint8_t regval);
 
 /* Character driver methods */
 
-static int bmp280_open_press(struct file *filep);
-static int bmp280_open_temp(struct file *filep);
-static int bmp280_close_press(struct file *filep);
-static int bmp280_close_temp(struct file *filep);
-static ssize_t bmp280_read_press(struct file *filep, char *buffer,
-                                 size_t buflen);
-static ssize_t bmp280_read_temp(struct file *filep, char *buffer,
-                                size_t buflen);
-static ssize_t bmp280_write(struct file *filep, const char *buffer,
+static int bmp280_open_press(FAR struct file *filep);
+static int bmp280_open_temp(FAR struct file *filep);
+static int bmp280_close_press(FAR struct file *filep);
+static int bmp280_close_temp(FAR struct file *filep);
+static ssize_t bmp280_read_press(FAR struct file *filep, FAR char *buffer,
+                           size_t buflen);
+static ssize_t bmp280_read_temp(FAR struct file *filep, FAR char *buffer,
+                           size_t buflen);
+static ssize_t bmp280_write(FAR struct file *filep, FAR const char *buffer,
                             size_t buflen);
-static int bmp280_ioctl_press(struct file *filep, int cmd,
+static int bmp280_ioctl_press(FAR struct file *filep, int cmd,
                               unsigned long arg);
-static int bmp280_ioctl_temp(struct file *filep, int cmd,
+static int bmp280_ioctl_temp(FAR struct file *filep, int cmd,
                              unsigned long arg);
 
 /****************************************************************************
@@ -177,8 +187,9 @@ static const struct file_operations g_bmp280pressfops =
   bmp280_close_press,           /* close */
   bmp280_read_press,            /* read */
   bmp280_write,                 /* write */
-  NULL,                         /* seek */
-  bmp280_ioctl_press            /* ioctl */
+  0,                            /* seek */
+  bmp280_ioctl_press,           /* ioctl */
+  0                             /* unlink */
 };
 
 static const struct file_operations g_bmp280tempfops =
@@ -187,8 +198,9 @@ static const struct file_operations g_bmp280tempfops =
   bmp280_close_temp,            /* close */
   bmp280_read_temp,             /* read */
   bmp280_write,                 /* write */
-  NULL,                         /* seek */
-  bmp280_ioctl_temp             /* ioctl */
+  0,                            /* seek */
+  bmp280_ioctl_temp,            /* ioctl */
+  0                             /* unlink */
 };
 
 /* SCU instructions for pick pressure sensing data. */
@@ -219,8 +231,8 @@ static struct bmp280_temp_adj_s   g_temp_adj;
 
 /* Sequencer instance */
 
-static struct seq_s *g_seq_press = NULL;
-static struct seq_s *g_seq_temp = NULL;
+static FAR struct seq_s *g_seq_press = NULL;
+static FAR struct seq_s *g_seq_temp = NULL;
 
 /****************************************************************************
  * Private Functions
@@ -234,7 +246,7 @@ static struct seq_s *g_seq_temp = NULL;
  *
  ****************************************************************************/
 
-static uint8_t bmp280_getreg8(struct bmp280_dev_s *priv, uint8_t regaddr)
+static uint8_t bmp280_getreg8(FAR struct bmp280_dev_s *priv, uint8_t regaddr)
 {
   uint8_t regval = 0;
   uint16_t inst[2];
@@ -257,7 +269,7 @@ static uint8_t bmp280_getreg8(struct bmp280_dev_s *priv, uint8_t regaddr)
  *
  ****************************************************************************/
 
-static void bmp280_putreg8(struct bmp280_dev_s *priv, uint8_t regaddr,
+static void bmp280_putreg8(FAR struct bmp280_dev_s *priv, uint8_t regaddr,
                            uint8_t regval)
 {
   uint16_t inst[2];
@@ -278,7 +290,7 @@ static void bmp280_putreg8(struct bmp280_dev_s *priv, uint8_t regaddr,
  *
  ****************************************************************************/
 
-static int bmp280_checkid(struct bmp280_dev_s *priv)
+static int bmp280_checkid(FAR struct bmp280_dev_s *priv)
 {
   uint8_t devid = 0;
 
@@ -306,7 +318,7 @@ static int bmp280_checkid(struct bmp280_dev_s *priv)
  *
  ****************************************************************************/
 
-static int bmp280_get_calib_param_press(struct bmp280_dev_s *priv)
+static int bmp280_get_calib_param_press(FAR struct bmp280_dev_s *priv)
 {
   /* Read calibration values */
 
@@ -349,7 +361,7 @@ static int bmp280_get_calib_param_press(struct bmp280_dev_s *priv)
  *
  ****************************************************************************/
 
-static int bmp280_get_calib_param_temp(struct bmp280_dev_s *priv)
+static int bmp280_get_calib_param_temp(FAR struct bmp280_dev_s *priv)
 {
   /* Read calibration values */
 
@@ -374,8 +386,7 @@ static int bmp280_get_calib_param_temp(struct bmp280_dev_s *priv)
  *
  ****************************************************************************/
 
-static void bmp280_set_power_mode(struct bmp280_dev_s *priv,
-                                  uint8_t value)
+static void bmp280_set_power_mode(FAR struct bmp280_dev_s *priv, uint8_t value)
 {
   uint8_t v_data_u8 = 0;
 
@@ -392,8 +403,7 @@ static void bmp280_set_power_mode(struct bmp280_dev_s *priv,
  *
  ****************************************************************************/
 
-static void bmp280_set_oversamp_press(struct bmp280_dev_s *priv,
-                                      uint8_t value)
+static void bmp280_set_oversamp_press(FAR struct bmp280_dev_s *priv, uint8_t value)
 {
   uint8_t v_data_u8 = 0;
 
@@ -410,7 +420,7 @@ static void bmp280_set_oversamp_press(struct bmp280_dev_s *priv,
  *
  ****************************************************************************/
 
-static void bmp280_set_oversamp_temp(struct bmp280_dev_s *priv,
+static void bmp280_set_oversamp_temp(FAR struct bmp280_dev_s *priv,
                                      uint8_t value)
 {
   uint8_t v_data_u8 = 0;
@@ -428,7 +438,7 @@ static void bmp280_set_oversamp_temp(struct bmp280_dev_s *priv,
  *
  ****************************************************************************/
 
-static int bmp280_set_standby(struct bmp280_dev_s *priv, uint8_t value)
+static int bmp280_set_standby(FAR struct bmp280_dev_s *priv, uint8_t value)
 {
   uint8_t v_data_u8;
   uint8_t v_sb_u8;
@@ -461,11 +471,11 @@ static int bmp280_set_standby(struct bmp280_dev_s *priv, uint8_t value)
  *
  ****************************************************************************/
 
-static int bmp280_initialize(struct bmp280_dev_s *priv)
+static int bmp280_initialize(FAR struct bmp280_dev_s *priv)
 {
   int ret;
 
-  ret = bmp280_set_standby(priv, BMP280_STANDBY_05_MS);
+  ret = bmp280_set_standby(priv, BMP280_STANDBY_1_MS);
 
   if (ret != OK)
     {
@@ -476,7 +486,7 @@ static int bmp280_initialize(struct bmp280_dev_s *priv)
   return OK;
 }
 
-static int bmp280_seqinit_press(struct bmp280_dev_s *priv)
+static int bmp280_seqinit_press(FAR struct bmp280_dev_s *priv)
 {
   DEBUGASSERT(!g_seq_press);
 
@@ -502,7 +512,7 @@ static int bmp280_seqinit_press(struct bmp280_dev_s *priv)
   return OK;
 }
 
-static int bmp280_seqinit_temp(struct bmp280_dev_s *priv)
+static int bmp280_seqinit_temp(FAR struct bmp280_dev_s *priv)
 {
   DEBUGASSERT(!g_seq_temp);
 
@@ -536,10 +546,10 @@ static int bmp280_seqinit_temp(struct bmp280_dev_s *priv)
  *
  ****************************************************************************/
 
-static int bmp280_open_press(struct file *filep)
+static int bmp280_open_press(FAR struct file *filep)
 {
-  struct inode        *inode = filep->f_inode;
-  struct bmp280_dev_s *priv  = inode->i_private;
+  FAR struct inode        *inode = filep->f_inode;
+  FAR struct bmp280_dev_s *priv  = inode->i_private;
   int ret;
 
   /* first pressure device initialize */
@@ -583,10 +593,10 @@ static int bmp280_open_press(struct file *filep)
  *
  ****************************************************************************/
 
-static int bmp280_open_temp(struct file *filep)
+static int bmp280_open_temp(FAR struct file *filep)
 {
-  struct inode        *inode = filep->f_inode;
-  struct bmp280_dev_s *priv  = inode->i_private;
+  FAR struct inode        *inode = filep->f_inode;
+  FAR struct bmp280_dev_s *priv  = inode->i_private;
   int ret;
 
   /* first temperature device initialize */
@@ -630,10 +640,10 @@ static int bmp280_open_temp(struct file *filep)
  *
  ****************************************************************************/
 
-static int bmp280_close_press(struct file *filep)
+static int bmp280_close_press(FAR struct file *filep)
 {
-  struct inode        *inode = filep->f_inode;
-  struct bmp280_dev_s *priv  = inode->i_private;
+  FAR struct inode        *inode = filep->f_inode;
+  FAR struct bmp280_dev_s *priv  = inode->i_private;
 
   if (g_refcnt_press <= 1)
     {
@@ -667,10 +677,10 @@ static int bmp280_close_press(struct file *filep)
  *
  ****************************************************************************/
 
-static int bmp280_close_temp(struct file *filep)
+static int bmp280_close_temp(FAR struct file *filep)
 {
-  struct inode        *inode = filep->f_inode;
-  struct bmp280_dev_s *priv  = inode->i_private;
+  FAR struct inode        *inode = filep->f_inode;
+  FAR struct bmp280_dev_s *priv  = inode->i_private;
 
   if (g_refcnt_temp <= 1)
     {
@@ -700,11 +710,11 @@ static int bmp280_close_temp(struct file *filep)
  * Name: bmp280_read_press
  ****************************************************************************/
 
-static ssize_t bmp280_read_press(struct file *filep, char *buffer,
-                                 size_t buflen)
+static ssize_t bmp280_read_press(FAR struct file *filep, FAR char *buffer,
+                           size_t buflen)
 {
-  struct inode        *inode = filep->f_inode;
-  struct bmp280_dev_s *priv  = inode->i_private;
+  FAR struct inode        *inode = filep->f_inode;
+  FAR struct bmp280_dev_s *priv  = inode->i_private;
 
   buflen = buflen / BMP280PRESS_BYTESPERSAMPLE * BMP280PRESS_BYTESPERSAMPLE;
   buflen = seq_read(priv->seq, priv->id, buffer, buflen);
@@ -716,11 +726,11 @@ static ssize_t bmp280_read_press(struct file *filep, char *buffer,
  * Name: bmp280_read_temp
  ****************************************************************************/
 
-static ssize_t bmp280_read_temp(struct file *filep, char *buffer,
-                                size_t buflen)
+static ssize_t bmp280_read_temp(FAR struct file *filep, FAR char *buffer,
+                           size_t buflen)
 {
-  struct inode        *inode = filep->f_inode;
-  struct bmp280_dev_s *priv  = inode->i_private;
+  FAR struct inode        *inode = filep->f_inode;
+  FAR struct bmp280_dev_s *priv  = inode->i_private;
 
   buflen = buflen / BMP280TEMP_BYTESPERSAMPLE * BMP280TEMP_BYTESPERSAMPLE;
   buflen = seq_read(priv->seq, priv->id, buffer, buflen);
@@ -732,7 +742,7 @@ static ssize_t bmp280_read_temp(struct file *filep, char *buffer,
  * Name: bm p280_write
  ****************************************************************************/
 
-static ssize_t bmp280_write(struct file *filep, const char *buffer,
+static ssize_t bmp280_write(FAR struct file *filep, FAR const char *buffer,
                             size_t buflen)
 {
   return -ENOSYS;
@@ -742,11 +752,11 @@ static ssize_t bmp280_write(struct file *filep, const char *buffer,
  * Name: bmp280_ioctrl_press
  ****************************************************************************/
 
-static int bmp280_ioctl_press(struct file *filep, int cmd,
+static int bmp280_ioctl_press(FAR struct file *filep, int cmd,
                               unsigned long arg)
 {
-  struct inode *inode = filep->f_inode;
-  struct bmp280_dev_s *priv  = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct bmp280_dev_s *priv  = inode->i_private;
   int ret = OK;
 
   switch (cmd)
@@ -802,11 +812,11 @@ static int bmp280_ioctl_press(struct file *filep, int cmd,
  * Name: bmp280_ioctrl_temp
  ****************************************************************************/
 
-static int bmp280_ioctl_temp(struct file *filep, int cmd,
+static int bmp280_ioctl_temp(FAR struct file *filep, int cmd,
                              unsigned long arg)
 {
-  struct inode *inode = filep->f_inode;
-  struct bmp280_dev_s *priv  = inode->i_private;
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct bmp280_dev_s *priv  = inode->i_private;
   int ret = OK;
 
   switch (cmd)
@@ -817,8 +827,7 @@ static int bmp280_ioctl_temp(struct file *filep, int cmd,
 
       case SNIOC_GETADJ:
         {
-          struct bmp280_temp_adj_s *user = (struct bmp280_temp_adj_s *)
-                                           (uintptr_t)arg;
+          struct bmp280_temp_adj_s *user = (struct bmp280_temp_adj_s *)(uintptr_t)arg;
 
           user->dig_t1 = g_temp_adj.dig_t1;
           user->dig_t2 = g_temp_adj.dig_t2;
@@ -866,10 +875,10 @@ static int bmp280_ioctl_temp(struct file *filep, int cmd,
  *
  ****************************************************************************/
 
-int bmp280_init(struct i2c_master_s *i2c, int port)
+int bmp280_init(FAR struct i2c_master_s *i2c, int port)
 {
   struct bmp280_dev_s tmp;
-  struct bmp280_dev_s *priv = &tmp;
+  struct *priv = &tmp;
   int ret;
 
   /* Setup temporary device structure for initialization */
@@ -907,14 +916,14 @@ int bmp280_init(struct i2c_master_s *i2c, int port)
  *
  ****************************************************************************/
 
-int bmp280press_register(const char *devpath, int minor,
-                         struct i2c_master_s *i2c, int port)
+int bmp280press_register(FAR const char *devpath, int minor,
+                    FAR struct i2c_master_s *i2c, int port)
 {
-  struct bmp280_dev_s *priv;
+  FAR struct bmp280_dev_s *priv;
   char path[12];
   int ret;
 
-  priv = kmm_malloc(sizeof(struct bmp280_dev_s));
+  priv = (FAR struct bmp280_dev_s *)kmm_malloc(sizeof(struct bmp280_dev_s));
   if (!priv)
     {
       snerr("Failed to allocate instance\n");
@@ -958,14 +967,14 @@ int bmp280press_register(const char *devpath, int minor,
  *
  ****************************************************************************/
 
-int bmp280temp_register(const char *devpath, int minor,
-                        struct i2c_master_s *i2c, int port)
+int bmp280temp_register(FAR const char *devpath, int minor,
+                    FAR struct i2c_master_s *i2c, int port)
 {
-  struct bmp280_dev_s *priv;
+  FAR struct bmp280_dev_s *priv;
   char path[12];
   int ret;
 
-  priv = kmm_malloc(sizeof(struct bmp280_dev_s));
+  priv = (FAR struct bmp280_dev_s *)kmm_malloc(sizeof(struct bmp280_dev_s));
   if (!priv)
     {
       snerr("Failed to allocate instance\n");

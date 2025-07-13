@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/max326xx/common/max326_irq.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -27,7 +40,6 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
-#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -38,7 +50,9 @@
 #include "chip.h"
 #include "nvic.h"
 #include "ram_vectors.h"
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "max326_gpio.h"
 #include "max326_irq.h"
 
@@ -58,6 +72,24 @@
 
 #define NVIC_ENA_OFFSET    (0)
 #define NVIC_CLRENA_OFFSET (NVIC_IRQ0_31_CLEAR - NVIC_IRQ0_31_ENABLE)
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+/* g_current_regs[] holds a references to the current interrupt level
+ * register storage structure.  If is non-NULL only during interrupt
+ * processing.  Access to g_current_regs[] must be through the macro
+ * CURRENT_REGS for portability.
+ */
+
+volatile uint32_t *g_current_regs[1];
+
+/* This is the address of the  exception vector table (determined by the
+ * linker script).
+ */
+
+extern uint32_t _vectors[];
 
 /****************************************************************************
  * Private Functions
@@ -82,40 +114,27 @@ static void max326_dumpnvic(const char *msg, int irq)
   irqinfo("  INTCTRL:    %08x VECTAB: %08x\n",
           getreg32(NVIC_INTCTRL), getreg32(NVIC_VECTAB));
 #if 0
-  irqinfo("  SYSH ENABLE MEMFAULT: %08x BUSFAULT: %08x USGFAULT: %08x "
-          "SYSTICK: %08x\n",
-          getreg32(NVIC_SYSHCON_MEMFAULTENA),
-          getreg32(NVIC_SYSHCON_BUSFAULTENA),
-          getreg32(NVIC_SYSHCON_USGFAULTENA),
-          getreg32(NVIC_SYSTICK_CTRL_ENABLE));
+  irqinfo("  SYSH ENABLE MEMFAULT: %08x BUSFAULT: %08x USGFAULT: %08x SYSTICK: %08x\n",
+          getreg32(NVIC_SYSHCON_MEMFAULTENA), getreg32(NVIC_SYSHCON_BUSFAULTENA),
+          getreg32(NVIC_SYSHCON_USGFAULTENA), getreg32(NVIC_SYSTICK_CTRL_ENABLE));
 #endif
   irqinfo("  IRQ ENABLE: %08x %08x\n",
-          getreg32(NVIC_IRQ0_31_ENABLE),
-          getreg32(NVIC_IRQ32_63_ENABLE));
+          getreg32(NVIC_IRQ0_31_ENABLE), getreg32(NVIC_IRQ32_63_ENABLE));
   irqinfo("  SYSH_PRIO:  %08x %08x %08x\n",
-          getreg32(NVIC_SYSH4_7_PRIORITY),
-          getreg32(NVIC_SYSH8_11_PRIORITY),
+          getreg32(NVIC_SYSH4_7_PRIORITY), getreg32(NVIC_SYSH8_11_PRIORITY),
           getreg32(NVIC_SYSH12_15_PRIORITY));
   irqinfo("  IRQ PRIO:   %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ0_3_PRIORITY),
-          getreg32(NVIC_IRQ4_7_PRIORITY),
-          getreg32(NVIC_IRQ8_11_PRIORITY),
-          getreg32(NVIC_IRQ12_15_PRIORITY));
+          getreg32(NVIC_IRQ0_3_PRIORITY), getreg32(NVIC_IRQ4_7_PRIORITY),
+          getreg32(NVIC_IRQ8_11_PRIORITY), getreg32(NVIC_IRQ12_15_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ16_19_PRIORITY),
-          getreg32(NVIC_IRQ20_23_PRIORITY),
-          getreg32(NVIC_IRQ24_27_PRIORITY),
-          getreg32(NVIC_IRQ28_31_PRIORITY));
+          getreg32(NVIC_IRQ16_19_PRIORITY), getreg32(NVIC_IRQ20_23_PRIORITY),
+          getreg32(NVIC_IRQ24_27_PRIORITY), getreg32(NVIC_IRQ28_31_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ32_35_PRIORITY),
-          getreg32(NVIC_IRQ36_39_PRIORITY),
-          getreg32(NVIC_IRQ40_43_PRIORITY),
-          getreg32(NVIC_IRQ44_47_PRIORITY));
+          getreg32(NVIC_IRQ32_35_PRIORITY), getreg32(NVIC_IRQ36_39_PRIORITY),
+          getreg32(NVIC_IRQ40_43_PRIORITY), getreg32(NVIC_IRQ44_47_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ48_51_PRIORITY),
-          getreg32(NVIC_IRQ52_55_PRIORITY),
-          getreg32(NVIC_IRQ56_59_PRIORITY),
-          getreg32(NVIC_IRQ60_63_PRIORITY));
+          getreg32(NVIC_IRQ48_51_PRIORITY), getreg32(NVIC_IRQ52_55_PRIORITY),
+          getreg32(NVIC_IRQ56_59_PRIORITY), getreg32(NVIC_IRQ60_63_PRIORITY));
 
   leave_critical_section(flags);
 }
@@ -124,7 +143,8 @@ static void max326_dumpnvic(const char *msg, int irq)
 #endif
 
 /****************************************************************************
- * Name: max326_nmi, max326_pendsv, max326_pendsv, max326_reserved
+ * Name: max326_nmi, max326_busfault, max326_usagefault, max326_pendsv,
+ *       max326_dbgmonitor, max326_pendsv, max326_reserved
  *
  * Description:
  *   Handlers for various exceptions.  None are handled and all are fatal
@@ -134,7 +154,7 @@ static void max326_dumpnvic(const char *msg, int irq)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_FEATURES
-static int max326_nmi(int irq, void *context, void *arg)
+static int max326_nmi(int irq, FAR void *context, FAR void *arg)
 {
   up_irq_save();
   _err("PANIC!!! NMI received\n");
@@ -142,7 +162,23 @@ static int max326_nmi(int irq, void *context, void *arg)
   return 0;
 }
 
-static int max326_pendsv(int irq, void *context, void *arg)
+static int max326_busfault(int irq, FAR void *context, FAR void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Bus fault received\n");
+  PANIC();
+  return 0;
+}
+
+static int max326_usagefault(int irq, FAR void *context, FAR void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Usage fault received\n");
+  PANIC();
+  return 0;
+}
+
+static int max326_pendsv(int irq, FAR void *context, FAR void *arg)
 {
   up_irq_save();
   _err("PANIC!!! PendSV received\n");
@@ -150,7 +186,15 @@ static int max326_pendsv(int irq, void *context, void *arg)
   return 0;
 }
 
-static int max326_reserved(int irq, void *context, void *arg)
+static int max326_dbgmonitor(int irq, FAR void *context, FAR void *arg)
+{
+  up_irq_save();
+  _err("PANIC!!! Debug Monitor received\n");
+  PANIC();
+  return 0;
+}
+
+static int max326_reserved(int irq, FAR void *context, FAR void *arg)
 {
   up_irq_save();
   _err("PANIC!!! Reserved interrupt\n");
@@ -168,6 +212,7 @@ static int max326_reserved(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
+#ifdef CONFIG_ARMV7M_USEBASEPRI
 static inline void max326_prioritize_syscall(int priority)
 {
   uint32_t regval;
@@ -179,6 +224,7 @@ static inline void max326_prioritize_syscall(int priority)
   regval |= (priority << NVIC_SYSH_PRIORITY_PR11_SHIFT);
   putreg32(regval, NVIC_SYSH8_11_PRIORITY);
 }
+#endif
 
 /****************************************************************************
  * Name: max326_irqinfo
@@ -252,6 +298,9 @@ static int max326_irqinfo(int irq, uintptr_t *regaddr, uint32_t *bit,
 void up_irqinitialize(void)
 {
   uint32_t regaddr;
+#if defined(CONFIG_DEBUG_FEATURES) && !defined(CONFIG_ARMV7M_USEBASEPRI)
+  uint32_t regval;
+#endif
   int num_priority_registers;
   int i;
 
@@ -275,7 +324,7 @@ void up_irqinitialize(void)
    * vector table that requires special initialization.
    */
 
-  arm_ramvec_initialize();
+  up_ramvec_initialize();
 #endif
 
   /* Set all interrupts (and exceptions) to the default priority */
@@ -304,14 +353,18 @@ void up_irqinitialize(void)
       regaddr += 4;
     }
 
+  /* currents_regs is non-NULL only while processing an interrupt */
+
+  CURRENT_REGS = NULL;
+
   /* Attach the SVCall and Hard Fault exception handlers.  The SVCall
    * exception is used for performing context switches; The Hard Fault
    * must also be caught because a SVCall may show up as a Hard Fault
    * under certain conditions.
    */
 
-  irq_attach(MAX326_IRQ_SVCALL, arm_svcall, NULL);
-  irq_attach(MAX326_IRQ_HARDFAULT, arm_hardfault, NULL);
+  irq_attach(MAX326_IRQ_SVCALL, up_svcall, NULL);
+  irq_attach(MAX326_IRQ_HARDFAULT, up_hardfault, NULL);
 
   /* Set the priority of the SVCall interrupt */
 
@@ -319,14 +372,16 @@ void up_irqinitialize(void)
   /* up_prioritize_irq(MAX326_IRQ_PENDSV, NVIC_SYSH_PRIORITY_MIN); */
 #endif
 
+#ifdef CONFIG_ARMV7M_USEBASEPRI
   max326_prioritize_syscall(NVIC_SYSH_SVCALL_PRIORITY);
+#endif
 
 #ifdef CONFIG_ARM_MPU
   /* If the MPU is enabled, then attach and enable the Memory Management
    * Fault handler.
    */
 
-  irq_attach(MAX326_IRQ_MEMFAULT, arm_memfault, NULL);
+  irq_attach(MAX326_IRQ_MEMFAULT, up_memfault, NULL);
   up_enable_irq(MAX326_IRQ_MEMFAULT);
 #endif
 
@@ -335,17 +390,27 @@ void up_irqinitialize(void)
 #ifdef CONFIG_DEBUG_FEATURES
   irq_attach(MAX326_IRQ_NMI, max326_nmi, NULL);
 #ifndef CONFIG_ARM_MPU
-  irq_attach(MAX326_IRQ_MEMFAULT, arm_memfault, NULL);
+  irq_attach(MAX326_IRQ_MEMFAULT, up_memfault, NULL);
 #endif
-  irq_attach(MAX326_IRQ_BUSFAULT, arm_busfault, NULL);
-  irq_attach(MAX326_IRQ_USAGEFAULT, arm_usagefault, NULL);
+  irq_attach(MAX326_IRQ_BUSFAULT, max326_busfault, NULL);
+  irq_attach(MAX326_IRQ_USAGEFAULT, max326_usagefault, NULL);
   irq_attach(MAX326_IRQ_PENDSV, max326_pendsv, NULL);
-  arm_enable_dbgmonitor();
-  irq_attach(MAX326_IRQ_DBGMONITOR, arm_dbgmonitor, NULL);
+  irq_attach(MAX326_IRQ_DBGMONITOR, max326_dbgmonitor, NULL);
   irq_attach(MAX326_IRQ_RESERVED, max326_reserved, NULL);
 #endif
 
   max326_dumpnvic("initial", MAX326_IRQ_NIRQS);
+
+#if defined(CONFIG_DEBUG_FEATURES) && !defined(CONFIG_ARMV7M_USEBASEPRI)
+  /* If a debugger is connected, try to prevent it from catching hardfaults.
+   * If CONFIG_ARMV7M_USEBASEPRI, no hardfaults are expected in normal
+   * operation.
+   */
+
+  regval  = getreg32(NVIC_DEMCR);
+  regval &= ~NVIC_DEMCR_VCHARDERR;
+  putreg32(regval, NVIC_DEMCR);
+#endif
 
 #ifdef CONFIG_MAX326XX_GPIOIRQ
   /* Initialize GPIO interrupts */
@@ -453,14 +518,14 @@ void up_enable_irq(int irq)
 }
 
 /****************************************************************************
- * Name: arm_ack_irq
+ * Name: up_ack_irq
  *
  * Description:
  *   Acknowledge the IRQ
  *
  ****************************************************************************/
 
-void arm_ack_irq(int irq)
+void up_ack_irq(int irq)
 {
   max326_clrpend(irq);
 }

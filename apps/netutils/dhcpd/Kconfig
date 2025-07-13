@@ -6,7 +6,7 @@
 config NETUTILS_DHCPD
 	bool "DHCP server"
 	default n
-	depends on NET_UDP
+	depends on NET_UDP && NET_IPv4
 	---help---
 		Enable support for the DHCP server.
 
@@ -18,7 +18,7 @@ config NETUTILS_DHCPD_HOST
 	depends on EXPERIMENTAL
 	---help---
 		DHCPD supports a host based build for testing on a PC.  It is
-		enabled by this configuration, however, it cannot really be used
+		enabled by this configuration, however, ti cannot really be used
 		in the context to the NuttX build as it currently stands.
 
 config NETUTILS_DHCPD_IGNOREBROADCAST
@@ -81,17 +81,5 @@ config NETUTILS_DHCPD_DECLINETIME
 	default 3600
 	---help---
 	Default: 1 hour
-
-config NETUTILS_DHCPD_PRIORITY
-	int "DHCPD daemon priority"
-	default 100
-
-config NETUTILS_DHCPD_STACKSIZE
-	int "DHCPD daemon priority"
-	default DEFAULT_TASK_STACKSIZE
-
-config NETUTILS_DHCPD_SIGWAKEUP
-	int "DHCPD wakeup signal number"
-	default 22
 
 endif

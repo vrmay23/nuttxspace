@@ -1,11 +1,17 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_nand.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2016-2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2013 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2012 Atmel Corporation
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.orgr>
+ *   Copyright (C) 2013, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * References:
+ *   SAMA5D3 Series Data Sheet
+ *   Atmel NoOS sample code.
+ *
+ * The Atmel sample code has a BSD compatible license that requires this
+ * copyright notice:
+ *
+ *   Copyright (c) 2011, 2012, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,11 +42,6 @@
  *
  ****************************************************************************/
 
-/* References:
- *   SAMA5D3 Series Data Sheet
- *   Atmel NoOS sample code.
- */
-
 /****************************************************************************
  * Included Files
  ****************************************************************************/
@@ -65,7 +66,8 @@
 #include <nuttx/irq.h>
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "sam_memories.h"
 #include "sam_dmac.h"
 #include "sam_pmecc.h"
@@ -177,7 +179,7 @@ static void     nand_wait_nfcbusy(struct sam_nandcs_s *priv);
 #endif
 static uint32_t nand_nfc_poll(void);
 #ifdef CONFIG_SAMA5_NAND_HSMCINTERRUPTS
-static int      hsmc_interrupt(int irq, void *context, void *arg);
+static int      hsmc_interrupt(int irq, void *context, FAR void *arg);
 #endif
 
 /* DMA Helpers */
@@ -270,36 +272,16 @@ static void     nand_reset(struct sam_nandcs_s *priv);
  */
 
 #ifdef CONFIG_SAMA5_EBICS0_NAND
-static struct sam_nandcs_s g_cs0nand =
-{
-#ifdef CONFIG_SAMA5_NAND_DMA
-  .waitsem = SEM_INITIALIZER(0)
-#endif
-};
+static struct sam_nandcs_s g_cs0nand;
 #endif
 #ifdef CONFIG_SAMA5_EBICS1_NAND
-static struct sam_nandcs_s g_cs1nand =
-{
-#ifdef CONFIG_SAMA5_NAND_DMA
-  .waitsem = SEM_INITIALIZER(0)
-#endif
-};
+static struct sam_nandcs_s g_cs1nand;
 #endif
 #ifdef CONFIG_SAMA5_EBICS2_NAND
-static struct sam_nandcs_s g_cs2nand =
-{
-#ifdef CONFIG_SAMA5_NAND_DMA
-  .waitsem = SEM_INITIALIZER(0)
-#endif
-};
+static struct sam_nandcs_s g_cs2nand;
 #endif
 #ifdef CONFIG_SAMA5_EBICS3_NAND
-static struct sam_nandcs_s g_cs3nand =
-{
-#ifdef CONFIG_SAMA5_NAND_DMA
-  .waitsem = SEM_INITIALIZER(0)
-#endif
-};
+static struct sam_nandcs_s g_cs3nand;
 #endif
 
 /****************************************************************************
@@ -308,15 +290,7 @@ static struct sam_nandcs_s g_cs3nand =
 
 /* NAND global state */
 
-struct sam_nand_s g_nand =
-{
-#if NAND_NBANKS > 1
-  .lock = NXMUTEX_INITIALIZER,
-#endif
-#ifdef CONFIG_SAMA5_NAND_HSMCINTERRUPTS
-  .waitsem = SEM_INITIALIZER(0),
-#endif
-};
+struct sam_nand_s g_nand;
 
 /****************************************************************************
  * Private Functions
@@ -340,7 +314,7 @@ struct sam_nand_s g_nand =
 #if NAND_NBANKS > 1
 static int nand_lock(void)
 {
-  return nxmutex_lock(&g_nand.lock);
+  return nxsem_wait_uninterruptible(&g_nand.exclsem);
 }
 #endif
 
@@ -361,7 +335,7 @@ static int nand_lock(void)
 #if NAND_NBANKS > 1
 static void nand_unlock(void)
 {
-  nxmutex_unlock(&g_nand.lock);
+  nxsem_post(&g_nand.exclsem);
 }
 #endif
 
@@ -448,9 +422,7 @@ static int nand_operation_complete(struct sam_nandcs_s *priv)
   nand_nfc_cleale(priv, 0, COMMAND_STATUS, 0, 0, 0);
   status = READ_DATA8(&priv->raw);
 
-  /* On successful completion,
-   * the NAND will be READY with no ERROR conditions
-   */
+  /* On successful completion, the NAND will be READY with no ERROR conditions */
 
   if ((status & STATUS_ERROR) != 0)
     {
@@ -766,9 +738,7 @@ static void nand_setup_cmddone(struct sam_nandcs_s *priv)
   nand_putreg(SAM_HSMC_IER, HSMC_NFCINT_CMDDONE);
   leave_critical_section(flags);
 #else
-  /* Just sample and clear any pending NFC status,
-   * then clear CMDDONE status
-   */
+  /* Just sample and clear any pending NFC status, then clear CMDDONE status */
 
   nand_nfc_poll();
   g_nand.cmddone = false;
@@ -854,9 +824,7 @@ static void nand_setup_xfrdone(struct sam_nandcs_s *priv)
   nand_putreg(SAM_HSMC_IER, HSMC_NFCINT_XFRDONE);
   leave_critical_section(flags);
 #else
-  /* Just sample and clear any pending NFC status,
-   * then clear XFRDONE status
-   */
+  /* Just sample and clear any pending NFC status, then clear XFRDONE status */
 
   nand_nfc_poll();
   g_nand.xfrdone = false;
@@ -942,9 +910,7 @@ static void nand_setup_rbedge(struct sam_nandcs_s *priv)
   nand_putreg(SAM_HSMC_IER, HSMC_NFCINT_RBEDGE0);
   leave_critical_section(flags);
 #else
-  /* Just sample and clear any pending NFC status,
-   * then clear RBEDGE0 status
-   */
+  /* Just sample and clear any pending NFC status, then clear RBEDGE0 status */
 
   nand_nfc_poll();
   g_nand.rbedge = false;
@@ -1069,7 +1035,7 @@ static uint32_t nand_nfc_poll(void)
  ****************************************************************************/
 
 #ifdef CONFIG_SAMA5_NAND_HSMCINTERRUPTS
-static int hsmc_interrupt(int irq, void *context, void *arg)
+static int hsmc_interrupt(int irq, void *context, FAR void *arg)
 {
   uint32_t sr      = nand_nfc_poll();
   uint32_t imr     = nand_getreg(SAM_HSMC_IMR);
@@ -1943,8 +1909,8 @@ static int nand_readpage_noecc(struct sam_nandcs_s *priv, off_t block,
   off_t coladdr;
   int ret;
 
-  finfo("block=%" PRIdOFF " page=%d data=%p spare=%p\n",
-        block, page, data, spare);
+  finfo("block=%d page=%d data=%p spare=%p\n",
+        (int)block, page, data, spare);
   DEBUGASSERT(priv && (data || spare));
 
   /* Get page and spare sizes */
@@ -2188,8 +2154,8 @@ static int nand_writepage_noecc(struct sam_nandcs_s *priv, off_t block,
   off_t rowaddr;
   int ret = OK;
 
-  finfo("block=%" PRIdOFF " page=%d data=%p spare=%p\n",
-        block, page, data, spare);
+  finfo("block=%d page=%d data=%p spare=%p\n",
+        (int)block, page, data, spare);
 
   /* Get page and spare sizes */
 
@@ -2897,9 +2863,7 @@ struct mtd_dev_s *sam_nand_initialize(int cs)
 
   finfo("CS%d\n", cs);
 
-  /* Select the device structure
-   * (In SAMA5D3, NAND is only supported on CS3).
-   */
+  /* Select the device structure (In SAMA5D3, NAND is only supported on CS3). */
 
 #ifdef CONFIG_SAMA5_EBICS0_NAND
   if (cs == HSMC_CS0)
@@ -2992,6 +2956,7 @@ struct mtd_dev_s *sam_nand_initialize(int cs)
 
   /* Initialize the device structure */
 
+  memset(priv, 0, sizeof(struct sam_nandcs_s));
   priv->raw.cmdaddr    = cmdaddr;
   priv->raw.addraddr   = addraddr;
   priv->raw.dataaddr   = dataaddr;
@@ -3005,15 +2970,44 @@ struct mtd_dev_s *sam_nand_initialize(int cs)
 #endif
   priv->cs             = cs;
 
+#ifdef CONFIG_SAMA5_NAND_DMA
+  /* The waitsem semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
+
+  nxsem_init(&priv->waitsem, 0, 0);
+  nxsem_setprotocol(&priv->waitsem, SEM_PRIO_NONE);
+#endif
+
   /* Perform one-time, global NFC/PMECC initialization */
 
   if (!g_nand.initialized)
     {
+      /* Initialize the global nand state structure */
+
+#if NAND_NBANKS > 1
+      nxsem_init(&g_nand.exclsem, 0, 1);
+#endif
+
+#ifdef CONFIG_SAMA5_NAND_HSMCINTERRUPTS
+      /* The waitsem semaphore is used for signaling and, hence, should not
+       * have priority inheritance enabled.
+       */
+
+      nxsem_init(&g_nand.waitsem, 0, 0);
+      nxsem_setprotocol(&g_nand.waitsem, SEM_PRIO_NONE);
+#endif
+
       /* Enable the NAND FLASH Controller (The NFC is always used) */
 
       nand_putreg(SAM_HSMC_CTRL, HSMC_CTRL_NFCEN);
 
-#ifndef CONFIG_SAMA5_HAVE_PMECC
+#ifdef CONFIG_SAMA5_HAVE_PMECC
+      /* Perform one-time initialization of the PMECC */
+
+      pmecc_initialize();
+
+#else
       /* Disable the PMECC if it is not being used */
 
       nand_putreg(SAM_HSMC_PMECCTRL, HSMC_PMECCTRL_RST);
@@ -3112,7 +3106,7 @@ struct mtd_dev_s *sam_nand_initialize(int cs)
  *
  * Returned Value:
  *   true:  This is the first register access of this type.
- *   false: This is the same as the preceding register access.
+ *   flase: This is the same as the preceding register access.
  *
  ****************************************************************************/
 

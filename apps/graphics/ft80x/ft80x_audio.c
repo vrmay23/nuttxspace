@@ -1,22 +1,35 @@
 /****************************************************************************
  * apps/graphics/ft80x/ft80x_audio.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -170,6 +183,7 @@ int ft80x_audio_playsound(int fd, uint16_t effect, uint16_t pitch)
  *
  ****************************************************************************/
 
+#if CONFIG_NFILE_DESCRIPTORS > 3
 int ft80x_audio_playfile(int fd, FAR struct ft80x_dlbuffer_s *buffer,
                          FAR const char *filepath, uint8_t format,
                          uint16_t frequency, uint8_t volume)
@@ -295,7 +309,7 @@ int ft80x_audio_playfile(int fd, FAR struct ft80x_dlbuffer_s *buffer,
            * free up to the end of the RAM G buffer (actually already
            * handled by the above 'break')
            */
-        }
+       }
       while (freespace < MAX_DLBUFFER &&
              freespace < remaining &&
              freespace < (AUDIO_BUFSIZE - offset));
@@ -350,9 +364,8 @@ int ft80x_audio_playfile(int fd, FAR struct ft80x_dlbuffer_s *buffer,
 
       if (!started)
         {
-          /* Start playing at the beginning of graphics memory
-           * Set the audio playback start address
-           */
+          /* Start playing at the beginning of graphics memory */
+          /* Set the audio playback start address */
 
           ret = ft80x_putreg32(fd, FT80X_REG_PLAYBACK_START,
                                RAMG_STARTADDR);
@@ -419,7 +432,7 @@ int ft80x_audio_playfile(int fd, FAR struct ft80x_dlbuffer_s *buffer,
 
           started = true;
         }
-    }
+   }
 
   /* Transfer is complete.  'offset' points to the end of the file in RAM G.
    * Clear all of the RAM G at the end of the file so that audio is muted
@@ -496,6 +509,7 @@ int ft80x_audio_playfile(int fd, FAR struct ft80x_dlbuffer_s *buffer,
           ft80x_err("ERROR: ft80x_coproc_send failed: %d\n", ret);
           goto errout_with_fd;
         }
+
     }
 
   /* Wait until the read pointer wraps back to the beginning of the buffer */
@@ -530,7 +544,8 @@ int ft80x_audio_playfile(int fd, FAR struct ft80x_dlbuffer_s *buffer,
     }
   while (readptr < offset);
 
-  /* The file is done... Stop looping */
+  /* The file is done... */
+  /* Stop looping */
 
   ret = ft80x_putreg8(fd, FT80X_REG_PLAYBACK_LOOP, 1);
   if (ret < 0)
@@ -569,3 +584,5 @@ errout_with_fd:
   close(audiofd);
   return ret;
 }
+
+#endif /* CONFIG_NFILE_DESCRIPTORS > 3 */

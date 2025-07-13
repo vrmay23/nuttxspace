@@ -1,12 +1,10 @@
-/****************************************************************************
+/************************************************************************************
  * arch/arm/src/stm32/stm32_sdadc.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2009, 2011 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2016 Studelec. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
- * SPDX-FileContributor: Marc Rechté <mrechte@studelec-sa.com>
+ *   Copyright (C) 2009, 2011, 2015 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2016 Studelec. All rights reserved.
+ *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ *            Marc Rechté <mrechte@studelec-sa.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,14 +33,14 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_STM32_STM32_SDADC_H
 #define __ARCH_ARM_SRC_STM32_STM32_SDADC_H
 
-/****************************************************************************
+/************************************************************************************
  * Included Files
- ****************************************************************************/
+ ************************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -58,16 +56,14 @@
 
 #include <nuttx/analog/adc.h>
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
-
-/* Configuration ************************************************************/
-
-/* Timer devices may be used for different purposes.  One special purpose
- * is to control periodic SDADC sampling.  If CONFIG_STM32_TIMn is defined
- * then CONFIG_STM32_TIMn_SDADC must also be defined to indicate that timer
- * "n" is intended to be used for that purpose.
+ ************************************************************************************/
+/* Configuration ********************************************************************/
+/* Timer devices may be used for different purposes.  One special purpose is to
+ * control periodic SDADC sampling.  If CONFIG_STM32_TIMn is defined then
+ * CONFIG_STM32_TIMn_SDADC must also be defined to indicate that timer "n" is intended
+ * to be used for that purpose.
  */
 
 /* For the STM32 F37XX line, timers 2-4, 12-17 an 19 may be used. */
@@ -116,7 +112,7 @@
 #  undef  SDADC3_HAVE_DMA
 #endif
 
-/* SDADC Channels/DMA *******************************************************
+/* SDADC Channels/DMA ******************************************************
  * The maximum number of channels that can be sampled at each scan.
  * If DMA support is not enabled, then only a single channel
  * ought to be sampled.
@@ -348,7 +344,7 @@
 #  undef SDADC3_JEXTSEL_VALUE
 #endif
 
-/* SDADC Configurations *****************************************************
+/* SDADC Configurations ********************************************************
  * Up to 3 configuration profiles may be defined in order to define:
  * - calibration method
  * - SE/differential mode
@@ -378,7 +374,7 @@
 #  define SDADC_CONFCHR2_DEFAULT (SDADC_CONF0R << SDADC_CONFCHR2_CH8_SHIFT)
 #endif
 
-/* SDADC Reference voltage selection ****************************************/
+/* SDADC Reference voltage selection ************************************************/
 
 #ifndef SDADC_REFV_DEFAULT
 #  define SDADC_REFV_DEFAULT  SDADC_CR1_REFV_EXT
@@ -393,13 +389,13 @@
 #  define SDADC3_REFV  SDADC_REFV_DEFAULT
 #endif
 
-/****************************************************************************
+/************************************************************************************
  * Public Types
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Public Function Prototypes
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ASSEMBLY__
 #ifdef __cplusplus
@@ -415,8 +411,7 @@ extern "C"
  *
  ****************************************************************************/
 
-struct adc_dev_s *stm32_sdadcinitialize(int intf,
-                                        const uint8_t *chanlist,
+struct adc_dev_s *stm32_sdadcinitialize(int intf, FAR const uint8_t *chanlist,
                                         int nchannels);
 
 #undef EXTERN

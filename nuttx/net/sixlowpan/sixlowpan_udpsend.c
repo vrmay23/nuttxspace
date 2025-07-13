@@ -1,8 +1,6 @@
 /****************************************************************************
  * net/sixlowpan/sixlowpan_udpsend.c
  *
- * SPDX-License-Identifier: Apache-2.0
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -107,7 +105,7 @@ static uint16_t sixlowpan_udp_chksum(FAR const struct ipv6udp_hdr_s *ipv6udp,
   /* Sum payload data. */
 
   sum = chksum(sum, buf, buflen);
-  return (sum == 0) ? 0xffff : HTONS(sum);
+  return (sum == 0) ? 0xffff : htons(sum);
 }
 #endif
 
@@ -159,7 +157,7 @@ ssize_t psock_6lowpan_udp_sendto(FAR struct socket *psock,
 
   ninfo("buflen %lu\n", (unsigned long)buflen);
 
-  DEBUGASSERT(to != NULL);
+  DEBUGASSERT(psock != NULL && psock->s_crefs > 0 && to != NULL);
   DEBUGASSERT(psock->s_type == SOCK_DGRAM);
 
   sixlowpan_dumpbuffer("Outgoing UDP payload", buf, buflen);
@@ -171,7 +169,7 @@ ssize_t psock_6lowpan_udp_sendto(FAR struct socket *psock,
 
   /* Make sure that this is a datagram valid socket */
 
-  if (psock->s_conn == NULL || psock->s_type != SOCK_DGRAM)
+  if (psock->s_crefs <= 0 || psock->s_type != SOCK_DGRAM)
     {
       nerr("ERROR: Invalid socket\n");
       return (ssize_t)-EBADF;
@@ -188,7 +186,7 @@ ssize_t psock_6lowpan_udp_sendto(FAR struct socket *psock,
 
   /* Get the underlying UDP "connection" structure */
 
-  conn = psock->s_conn;
+  conn = (FAR struct udp_conn_s *)psock->s_conn;
   DEBUGASSERT(conn != NULL);
 
   /* Route outgoing message to the correct device */
@@ -215,7 +213,7 @@ ssize_t psock_6lowpan_udp_sendto(FAR struct socket *psock,
 #ifdef CONFIG_NET_ICMPv6_NEIGHBOR
   /* Make sure that the IP address mapping is in the Neighbor Table */
 
-  ret = icmpv6_neighbor(dev, to6->sin6_addr.in6_u.u6_addr16);
+  ret = icmpv6_neighbor(to6->sin6_addr.in6_u.u6_addr16);
   if (ret < 0)
     {
       nerr("ERROR: Not reachable\n");
@@ -229,7 +227,7 @@ ssize_t psock_6lowpan_udp_sendto(FAR struct socket *psock,
   ipv6udp.ipv6.tcf    = 0x00;
   ipv6udp.ipv6.flow   = 0x00;
   ipv6udp.ipv6.proto  = IP_PROTO_UDP;
-  ipv6udp.ipv6.ttl    = conn->sconn.s_ttl;
+  ipv6udp.ipv6.ttl    = conn->ttl;
 
   /* The IPv6 header length field does not include the size of IPv6 IP
    * header.
@@ -249,8 +247,7 @@ ssize_t psock_6lowpan_udp_sendto(FAR struct socket *psock,
     }
   else
     {
-      net_ipv6addr_hdrcopy(ipv6udp.ipv6.srcipaddr,
-                          netdev_ipv6_srcaddr(dev, ipv6udp.ipv6.destipaddr));
+      net_ipv6addr_hdrcopy(ipv6udp.ipv6.srcipaddr, dev->d_ipv6addr);
     }
 
   ninfo("IPv6 length: %d\n",
@@ -264,7 +261,7 @@ ssize_t psock_6lowpan_udp_sendto(FAR struct socket *psock,
 
   ipv6udp.udp.srcport     = conn->lport;
   ipv6udp.udp.destport    = to6->sin6_port;
-  ipv6udp.udp.udplen      = HTONS(iplen);
+  ipv6udp.udp.udplen      = htons(iplen);
   ipv6udp.udp.udpchksum   = 0;
 
 #ifdef CONFIG_NET_UDP_CHECKSUMS
@@ -295,12 +292,10 @@ ssize_t psock_6lowpan_udp_sendto(FAR struct socket *psock,
    * packet.
    */
 
-  ret = sixlowpan_send(dev,
-                       &conn->sconn.list,
-                       &conn->sconn.list_tail,
+  ret = sixlowpan_send(dev, &conn->list,
                        (FAR const struct ipv6_hdr_s *)&ipv6udp,
                        buf, buflen, &destmac,
-                       _SO_TIMEOUT(conn->sconn.s_sndtimeo));
+                       _SO_TIMEOUT(psock->s_sndtimeo));
   if (ret < 0)
     {
       nerr("ERROR: sixlowpan_send() failed: %d\n", ret);
@@ -339,30 +334,32 @@ ssize_t psock_6lowpan_udp_send(FAR struct socket *psock, FAR const void *buf,
 
   ninfo("buflen %lu\n", (unsigned long)buflen);
 
+  DEBUGASSERT(psock != NULL && psock->s_crefs > 0);
   DEBUGASSERT(psock->s_type == SOCK_DGRAM);
 
   sixlowpan_dumpbuffer("Outgoing UDP payload", buf, buflen);
 
   /* Make sure that this is a valid socket */
 
-  if (psock == NULL || psock->s_conn == NULL)
+  if (psock != NULL || psock->s_crefs <= 0)
     {
       nerr("ERROR: Invalid socket\n");
       return (ssize_t)-EBADF;
     }
 
-  /* Get the underlying UDP "connection" structure */
-
-  conn = psock->s_conn;
-
   /* Was the UDP socket connected via connect()? */
 
-  if (psock->s_type != SOCK_DGRAM || !_SS_ISCONNECTED(conn->sconn.s_flags))
+  if (psock->s_type != SOCK_DGRAM || !_SS_ISCONNECTED(psock->s_flags))
     {
       /* No, then it is not legal to call send() with this socket. */
 
       return -ENOTCONN;
     }
+
+  /* Get the underlying UDP "connection" structure */
+
+  conn = (FAR struct udp_conn_s *)psock->s_conn;
+  DEBUGASSERT(conn != NULL);
 
   /* Ignore if not IPv6 domain */
 
@@ -431,7 +428,7 @@ void sixlowpan_udp_send(FAR struct net_driver_s *dev,
 
       if (ipv6udp->ipv6.proto != IP_PROTO_UDP)
         {
-          nwarn("WARNING: Expected UDP prototype: %u vs %u\n",
+          nwarn("WARNING: Expected UDP prototype: %u vs %s\n",
                 ipv6udp->ipv6.proto, IP_PROTO_UDP);
         }
       else
@@ -461,7 +458,7 @@ void sixlowpan_udp_send(FAR struct net_driver_s *dev,
           if (hdrlen > dev->d_len)
             {
               nwarn("WARNING:  Dropping small UDP packet: %u < %u\n",
-                    dev->d_len, hdrlen);
+                    buflen, hdrlen);
             }
           else
             {

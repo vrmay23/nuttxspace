@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/tms570/tms570_irq.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2015-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -35,11 +48,25 @@
 #include <nuttx/arch.h>
 #include <arch/irq.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+#include "up_internal.h"
+
 #include "hardware/tms570_vim.h"
 #include "tms570_gio.h"
 #include "tms570_esm.h"
 #include "tms570_irq.h"
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+/* g_current_regs[] holds a references to the current interrupt level
+ * register storage structure.  If is non-NULL only during interrupt
+ * processing.  Access to g_current_regs[] must be through the macro
+ * CURRENT_REGS for portability.
+ */
+
+volatile uint32_t *g_current_regs[1];
 
 /****************************************************************************
  * Private Functions
@@ -89,14 +116,14 @@ static void tms570_error_handler(void)
 
 void up_irqinitialize(void)
 {
-  uintptr_t *vimram;
+  FAR uintptr_t *vimram;
   int i;
 
   /* Initialize VIM RAM vectors.  These vectors are not used in the current
    * interrupt handler logic.
    */
 
-  vimram = (uintptr_t *)TMS570_VIMRAM_BASE;
+  vimram = (FAR uintptr_t *)TMS570_VIMRAM_BASE;
   for (i = 0; i < (TMS570_IRQ_NCHANNELS + 1); i++)
     {
       *vimram++ = (uintptr_t)tms570_error_handler;
@@ -127,6 +154,10 @@ void up_irqinitialize(void)
 #ifdef TMS570_VIM_REQENACLR3
   putreg32(0xffffffff, TMS570_VIM_REQENACLR3);
 #endif
+
+  /* currents_regs is non-NULL only while processing an interrupt */
+
+  CURRENT_REGS = NULL;
 
 #ifdef CONFIG_ARMV7R_HAVE_DECODEFIQ
   /* By default, interrupt CHAN0 is mapped to ESM (Error Signal Module)
@@ -219,7 +250,7 @@ uint32_t *arm_decodeirq(uint32_t *regs)
  ****************************************************************************/
 
 #ifdef CONFIG_ARMV7R_HAVE_DECODEFIQ
-uint32_t *arm_decodefiq(uint32_t *regs)
+uint32_t *arm_decodefiq(FAR uint32_t *regs)
 {
   int vector;
 
@@ -359,13 +390,13 @@ void up_enable_fiq(int channel)
 #endif
 
 /****************************************************************************
- * Name: arm_ack_irq
+ * Name: up_ack_irq
  *
  * Description:
  *   Acknowledge the IRQ
  *
  ****************************************************************************/
 
-void arm_ack_irq(int irq)
+void up_ack_irq(int irq)
 {
 }

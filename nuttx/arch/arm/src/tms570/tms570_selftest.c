@@ -1,10 +1,14 @@
 /****************************************************************************
  * arch/arm/src/tms570/tms570_selftest.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2015 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2012 Texas Instruments Incorporated
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * Most logic in this file was leveraged from TI's Project0 which has a
+ * compatible BSD license:
+ *
+ *   Copyright (c) 2012, Texas Instruments Incorporated
+ *   All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,7 +50,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
+
 #include "hardware/tms570_sys.h"
 #include "hardware/tms570_pbist.h"
 #include "tms570_selftest.h"
@@ -251,7 +256,7 @@ void tms570_memtest_selftest(void)
 
 void tms570_memtest_start(uint32_t rinfol)
 {
-  pbist_memtest_start(rinfol, PBIST_ALGO_MARCH13N_SP);
+  pbist_memtest_start(rinfol, PBIST_ALGO_March13N_SP);
 }
 
 /****************************************************************************
@@ -269,22 +274,21 @@ void tms570_memtest_start(uint32_t rinfol)
 int tms570_memtest_complete(void)
 {
   bool pass;
-
   /* Wait for the test to complete */
 
-  while (!pbist_test_complete());
+ while (!pbist_test_complete());
 
-  /* Get the test result */
+ /* Get the test result */
 
-  pass = pbist_test_passed();
+ pass = pbist_test_passed();
 
-  /* Disable PBIST clocks and disable memory self-test mode */
+ /* Disable PBIST clocks and disable memory self-test mode */
 
-  pbist_stop();
+ pbist_stop();
 
-  /* Then return the test result */
+ /* Then return the test result */
 
-  return pass ? OK : ERROR;
+ return pass ? OK : ERROR;
 }
 
 /****************************************************************************

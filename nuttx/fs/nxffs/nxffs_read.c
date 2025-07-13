@@ -1,22 +1,37 @@
 /****************************************************************************
  * fs/nxffs/nxffs_read.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2011, 2013, 2017-2018 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * References: Linux/Documentation/filesystems/romfs.txt
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -26,14 +41,13 @@
 
 #include <nuttx/config.h>
 
-#include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
+#include <crc32.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/crc32.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/mtd/mtd.h>
 
@@ -87,9 +101,7 @@ static ssize_t nxffs_rdseek(FAR struct nxffs_volume_s *volume,
   datend = 0;
   do
     {
-      /* Check if the next data block contains the sought after file
-       * position
-       */
+      /* Check if the next data block contains the sought after file position */
 
       ret = nxffs_nextblock(volume, offset, blkentry);
       if (ret < 0)
@@ -112,8 +124,7 @@ static ssize_t nxffs_rdseek(FAR struct nxffs_volume_s *volume,
   /* Return the offset to the data within the current data block */
 
   blkentry->foffset = fpos - datstart;
-  nxffs_ioseek(volume, blkentry->hoffset + SIZEOF_NXFFS_DATA_HDR +
-               blkentry->foffset);
+  nxffs_ioseek(volume, blkentry->hoffset + SIZEOF_NXFFS_DATA_HDR + blkentry->foffset);
   return OK;
 }
 
@@ -140,11 +151,11 @@ ssize_t nxffs_read(FAR struct file *filep, FAR char *buffer, size_t buflen)
   size_t readsize;
   int ret;
 
-  finfo("Read %zu bytes from offset %jd\n", buflen, (intmax_t)filep->f_pos);
+  finfo("Read %d bytes from offset %d\n", buflen, filep->f_pos);
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv != NULL);
+  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
 
   /* Recover the open file state from the struct file instance */
 
@@ -152,17 +163,17 @@ ssize_t nxffs_read(FAR struct file *filep, FAR char *buffer, size_t buflen)
 
   /* Recover the volume state from the open file */
 
-  volume = filep->f_inode->i_private;
+  volume = (FAR struct nxffs_volume_s *)filep->f_inode->i_private;
   DEBUGASSERT(volume != NULL);
 
-  /* Get exclusive access to the volume.  Note that the volume lock
+  /* Get exclusive access to the volume.  Note that the volume exclsem
    * protects the open file list.
    */
 
-  ret = nxmutex_lock(&volume->lock);
+  ret = nxsem_wait(&volume->exclsem);
   if (ret < 0)
     {
-      ferr("ERROR: nxmutex_lock failed: %d\n", ret);
+      ferr("ERROR: nxsem_wait failed: %d\n", ret);
       goto errout;
     }
 
@@ -172,7 +183,7 @@ ssize_t nxffs_read(FAR struct file *filep, FAR char *buffer, size_t buflen)
     {
       ferr("ERROR: File not open for read access\n");
       ret = -EACCES;
-      goto errout_with_lock;
+      goto errout_with_semaphore;
     }
 
   /* Loop until all bytes have been read */
@@ -196,7 +207,7 @@ ssize_t nxffs_read(FAR struct file *filep, FAR char *buffer, size_t buflen)
         {
           ferr("ERROR: nxffs_rdseek failed: %d\n", -ret);
           ret = -EACCES;
-          goto errout_with_lock;
+          goto errout_with_semaphore;
         }
 
       /* How many bytes are available at this offset */
@@ -221,11 +232,11 @@ ssize_t nxffs_read(FAR struct file *filep, FAR char *buffer, size_t buflen)
       total        += readsize;
     }
 
-  nxmutex_unlock(&volume->lock);
+  nxsem_post(&volume->exclsem);
   return total;
 
-errout_with_lock:
-  nxmutex_unlock(&volume->lock);
+errout_with_semaphore:
+  nxsem_post(&volume->exclsem);
 errout:
   return (ssize_t)ret;
 }
@@ -303,7 +314,7 @@ int nxffs_nextblock(FAR struct nxffs_volume_s *volume, off_t offset,
 
           /* Check for the magic sequence indicating the start of an NXFFS
            * data block or start of the next inode. There is the possibility
-           * of this magic sequence occurring in FLASH data.  However, the
+           * of this magic sequnce occurring in FLASH data.  However, the
            * data block CRC should distinguish between real NXFFS data blocks
            * headers and such false alarms.
            */
@@ -311,8 +322,7 @@ int nxffs_nextblock(FAR struct nxffs_volume_s *volume, off_t offset,
           if (ch != g_datamagic[nmagic])
             {
               /* Ooops... this is the not the right character for the magic
-               * Sequence.  Check if we need to restart or to cancel the
-               * sequence:
+               * Sequence.  Check if we need to restart or to cancel the sequence:
                */
 
               if (ch == g_datamagic[0])
@@ -345,12 +355,11 @@ int nxffs_nextblock(FAR struct nxffs_volume_s *volume, off_t offset,
 
               /* Read the block header and verify the block at that address */
 
-              ret = nxffs_rdblkhdr(volume, blkentry->hoffset,
-                                   &blkentry->datlen);
+              ret = nxffs_rdblkhdr(volume, blkentry->hoffset, &blkentry->datlen);
               if (ret == OK)
                 {
-                  finfo("Found a valid data block, offset: %jd datlen: %d\n",
-                        (intmax_t)blkentry->hoffset, blkentry->datlen);
+                  finfo("Found a valid data block, offset: %d datlen: %d\n",
+                        blkentry->hoffset, blkentry->datlen);
                   return OK;
                 }
 
@@ -377,8 +386,8 @@ int nxffs_nextblock(FAR struct nxffs_volume_s *volume, off_t offset,
  *
  * Input Parameters:
  *   volume - Describes the current volume.
- *   offset - The byte offset from the beginning of FLASH where the data
- *     block header is expected.
+ *   offset - The byte offset from the beginning of FLASH where the data block
+ *     header is expected.
  *   datlen  - A memory location to return the data block length.
  *
  * Returned Value:
@@ -397,9 +406,7 @@ int nxffs_rdblkhdr(FAR struct nxffs_volume_s *volume, off_t offset,
   uint16_t dlen;
   int ret;
 
-  /* Make sure that the block containing the data block header is in the
-   * cache
-   */
+  /* Make sure that the block containing the data block header is in the cache */
 
   nxffs_ioseek(volume, offset);
   ret = nxffs_rdcache(volume, volume->ioblock);
@@ -426,8 +433,7 @@ int nxffs_rdblkhdr(FAR struct nxffs_volume_s *volume, off_t offset,
 
   if ((uint32_t)doffset + (uint32_t)dlen > (uint32_t)volume->geo.blocksize)
     {
-      ferr("ERROR: Data length=%d is unreasonable at offset=%d\n", dlen,
-           doffset);
+      ferr("ERROR: Data length=%d is unreasonable at offset=%d\n", dlen, doffset);
       return -EIO;
     }
 

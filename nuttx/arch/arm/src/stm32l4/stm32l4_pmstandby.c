@@ -1,10 +1,9 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_pmstandby.c
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2012, 2017 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2015 Motorola Mobility LLC. All rights reserved.
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2012, 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2015 Motorola Mobility, LLC. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,7 +42,7 @@
 
 #include <stdbool.h>
 
-#include "arm_internal.h"
+#include "up_arch.h"
 #include "nvic.h"
 #include "stm32l4_pwr.h"
 #include "stm32l4_pm.h"
@@ -76,7 +75,6 @@ int stm32l4_pmstandby(void)
   /* Clear the Wake-Up Flags by setting the CWUFx bits in the power status
    * clear register
    */
-
   regval = PWR_SCR_CWUF1 | PWR_SCR_CWUF2 | PWR_SCR_CWUF3 |
            PWR_SCR_CWUF4 | PWR_SCR_CWUF5;
   putreg32(regval, STM32L4_PWR_SCR);

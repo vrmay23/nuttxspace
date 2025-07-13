@@ -1,22 +1,35 @@
 /****************************************************************************
  * net/arp/arp_send.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2014-2016 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -33,10 +46,10 @@
 #include <netinet/in.h>
 #include <net/if.h>
 
-#include <nuttx/kmalloc.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/net/ip.h>
+#include <nuttx/net/arp.h>
 
 #include "netdev/netdev.h"
 #include "devif/devif.h"
@@ -53,28 +66,19 @@
  * Name: arp_send_terminate
  ****************************************************************************/
 
-static void arp_send_terminate(FAR struct net_driver_s *dev,
-                               FAR struct arp_send_s *state, int result)
+static void arp_send_terminate(FAR struct arp_send_s *state, int result)
 {
   /* Don't allow any further call backs. */
 
-  state->snd_sent      = true;
-  state->snd_result    = (int16_t)result;
-  state->snd_cb->flags = 0;
-  state->snd_cb->priv  = NULL;
-  state->snd_cb->event = NULL;
+  state->snd_sent         = true;
+  state->snd_result       = (int16_t)result;
+  state->snd_cb->flags    = 0;
+  state->snd_cb->priv     = NULL;
+  state->snd_cb->event    = NULL;
 
   /* Wake up the waiting thread */
 
   nxsem_post(&state->snd_sem);
-
-  if (state->finish_cb != NULL)
-    {
-      nxsem_destroy(&state->snd_sem);
-      arp_callback_free(dev, state->snd_cb);
-      state->finish_cb(dev, result);
-      kmm_free(state);
-    }
 }
 
 /****************************************************************************
@@ -82,6 +86,7 @@ static void arp_send_terminate(FAR struct net_driver_s *dev,
  ****************************************************************************/
 
 static uint16_t arp_send_eventhandler(FAR struct net_driver_s *dev,
+                                      FAR void *pvconn,
                                       FAR void *priv, uint16_t flags)
 {
   FAR struct arp_send_s *state = (FAR struct arp_send_s *)priv;
@@ -105,7 +110,7 @@ static uint16_t arp_send_eventhandler(FAR struct net_driver_s *dev,
       if ((flags & NETDEV_DOWN) != 0)
         {
           nerr("ERROR: Interface is down\n");
-          arp_send_terminate(dev, state, -ENETUNREACH);
+          arp_send_terminate(state, -ENETUNREACH);
           return flags;
         }
 
@@ -142,14 +147,10 @@ static uint16_t arp_send_eventhandler(FAR struct net_driver_s *dev,
 
       /* Don't allow any further call backs. */
 
-      arp_send_terminate(dev, state, OK);
+      arp_send_terminate(state, OK);
     }
 
   return flags;
-}
-
-static void arp_send_async_finish(FAR struct net_driver_s *dev, int result)
-{
 }
 
 /****************************************************************************
@@ -204,8 +205,8 @@ int arp_send(in_addr_t ipaddr)
 #ifdef CONFIG_NET_IGMP
   /* Check if the destination address is a multicast address
    *
-   * - IPv4: multicast addresses lie in the class D group -- The address
-   *   range 224.0.0.0 to 239.255.255.255 (224.0.0.0/4)
+   * - IPv4: multicast addresses lie in the class D group -- The address range
+   *   224.0.0.0 to 239.255.255.255 (224.0.0.0/4)
    *
    * - IPv6 multicast addresses are have the high-order octet of the
    *   addresses=0xff (ff00::/8.)
@@ -291,21 +292,28 @@ int arp_send(in_addr_t ipaddr)
       goto errout_with_lock;
     }
 
-  nxsem_init(&state.snd_sem, 0, 0); /* Doesn't really fail */
+  /* This semaphore is used for signaling and, hence, should not have
+   * priority inheritance enabled.
+   */
 
-  state.snd_retries = 0;            /* No retries yet */
-  state.snd_ipaddr  = ipaddr;       /* IP address to query */
+  nxsem_init(&state.snd_sem, 0, 0); /* Doesn't really fail */
+  nxsem_setprotocol(&state.snd_sem, SEM_PRIO_NONE);
+
+  state.snd_retries   = 0;              /* No retries yet */
+  state.snd_ipaddr    = ipaddr;         /* IP address to query */
 
   /* Remember the routing device name */
 
-  strlcpy((FAR char *)state.snd_ifname, (FAR const char *)dev->d_ifname,
+  strncpy((FAR char *)state.snd_ifname, (FAR const char *)dev->d_ifname,
           IFNAMSIZ);
 
   /* Now loop, testing if the address mapping is in the ARP table and re-
    * sending the ARP request if it is not.
    */
 
-  do
+  ret = -ETIMEDOUT; /* Assume a timeout failure */
+
+  while (state.snd_retries < CONFIG_ARP_SEND_MAXTRIES)
     {
       /* Check if the address mapping is present in the ARP table.  This
        * is only really meaningful on the first time through the loop.
@@ -314,21 +322,12 @@ int arp_send(in_addr_t ipaddr)
        * issue.
        */
 
-      ret = arp_find(ipaddr, NULL, dev, true);
-      if (ret >= 0)
+      if (arp_find(ipaddr, NULL) >= 0)
         {
           /* We have it!  Break out with success */
 
-          goto out;
-        }
-      else if (ret == -ENETUNREACH)
-        {
-          /* We have failed before, simply send an asynchronous ARP request
-           * to try to update the ARP table.
-           */
-
-          arp_send_async(ipaddr, NULL);
-          goto out;
+          ret = OK;
+          break;
         }
 
       /* Set up the ARP response wait BEFORE we send the ARP request */
@@ -342,25 +341,18 @@ int arp_send(in_addr_t ipaddr)
       state.snd_cb->flags = (ARP_POLL | NETDEV_DOWN);
       state.snd_cb->priv  = (FAR void *)&state;
       state.snd_cb->event = arp_send_eventhandler;
-      state.finish_cb     = NULL;
 
       /* Notify the device driver that new TX data is available. */
 
       netdev_txnotify_dev(dev);
 
       /* Wait for the send to complete or an error to occur.
-       * net_sem_wait will also terminate if a signal is received.
+       * net_lockedwait will also terminate if a signal is received.
        */
 
       do
         {
-          ret = net_sem_timedwait_uninterruptible(&state.snd_sem,
-                                              CONFIG_ARP_SEND_DELAYMSEC);
-          if (ret == -ETIMEDOUT)
-            {
-              arp_wait_cancel(&notify);
-              goto timeout;
-            }
+          net_lockedwait(&state.snd_sem);
         }
       while (!state.snd_sent);
 
@@ -372,7 +364,6 @@ int arp_send(in_addr_t ipaddr)
           /* Break out on a send failure */
 
           nerr("ERROR: Send failed: %d\n", ret);
-          arp_wait_cancel(&notify);
           break;
         }
 
@@ -388,107 +379,17 @@ int arp_send(in_addr_t ipaddr)
         {
           /* Break out if arp_wait() fails */
 
-          goto out;
+          break;
         }
-
-timeout:
 
       /* Increment the retry count */
 
       state.snd_retries++;
-      nerr("ERROR: arp_wait failed: %d, ipaddr: %u.%u.%u.%u\n", ret,
-           ip4_addr1(ipaddr), ip4_addr2(ipaddr),
-           ip4_addr3(ipaddr), ip4_addr4(ipaddr));
+      nerr("ERROR: arp_wait failed: %d\n", ret);
     }
-  while (state.snd_retries < CONFIG_ARP_SEND_MAXTRIES);
 
-  /* MAC address marked with all zeros, therefore, we can quickly execute
-   * asynchronous ARP request next time.
-   */
-
-  arp_update(dev, ipaddr, NULL);
-
-out:
   nxsem_destroy(&state.snd_sem);
   arp_callback_free(dev, state.snd_cb);
-errout_with_lock:
-  net_unlock();
-errout:
-  return ret;
-}
-
-/****************************************************************************
- * Name: arp_send_async
- *
- * Description:
- *   The arp_send_async() call may be to send an ARP request asyncly to
- *   resolve an IPv4 address.
- *
- * Input Parameters:
- *   ipaddr   The IP address to be queried.
- *   cb       The callback when ARP send is finished, should not be NULL.
- *
- * Returned Value:
- *   Zero (OK) is returned on success the arp been sent to the driver.
- *   On error a negated errno value is returned:
- *
- *     -ETIMEDOUT:    The number or retry counts has been exceed.
- *     -EHOSTUNREACH: Could not find a route to the host
- *
- * Assumptions:
- *   This function is called from the normal tasking context.
- *
- ****************************************************************************/
-
-int arp_send_async(in_addr_t ipaddr, arp_send_finish_cb_t cb)
-{
-  FAR struct net_driver_s *dev;
-  FAR struct arp_send_s *state = kmm_zalloc(sizeof(struct arp_send_s));
-  int ret = 0;
-
-  if (!state)
-    {
-      nerr("ERROR: %s \n", ENOMEM_STR);
-      ret = -ENOMEM;
-      goto errout;
-    }
-
-  dev = netdev_findby_ripv4addr(INADDR_ANY, ipaddr);
-  if (!dev)
-    {
-      nerr("ERROR: Unreachable: %08lx\n", (unsigned long)ipaddr);
-      ret = -EHOSTUNREACH;
-      goto errout;
-    }
-
-  net_lock();
-  state->snd_cb = arp_callback_alloc(dev);
-  if (!state->snd_cb)
-    {
-      nerr("ERROR: Failed to allocate a callback\n");
-      ret = -ENOMEM;
-      goto errout_with_lock;
-    }
-
-  nxsem_init(&state->snd_sem, 0, 0); /* Doesn't really fail */
-  state->snd_ipaddr = ipaddr;        /* IP address to query */
-
-  /* Remember the routing device name */
-
-  strlcpy((FAR char *)state->snd_ifname,
-          (FAR const char *)dev->d_ifname, IFNAMSIZ);
-
-  /* Arm/re-arm the callback */
-
-  state->snd_cb->flags = (ARP_POLL | NETDEV_DOWN);
-  state->snd_cb->priv  = (FAR void *)state;
-  state->snd_cb->event = arp_send_eventhandler;
-  state->finish_cb     = cb ? cb : arp_send_async_finish;
-
-  /* Notify the device driver that new TX data is available. */
-
-  netdev_txnotify_dev(dev);
-
 errout_with_lock:
   net_unlock();
 errout:

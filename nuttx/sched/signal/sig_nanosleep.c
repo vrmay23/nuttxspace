@@ -1,22 +1,35 @@
 /****************************************************************************
- * sched/signal/sig_nanosleep.c
+ * sched/signal/sig/nanosleep.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2013, 2016-2017 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -93,11 +106,94 @@
 int nxsig_nanosleep(FAR const struct timespec *rqtp,
                     FAR struct timespec *rmtp)
 {
+  irqstate_t flags;
+  clock_t starttick;
+  sigset_t set;
   int ret;
 
-  ret = nxsig_clockwait(CLOCK_REALTIME, 0, rqtp, rmtp);
+  /* Sanity check */
 
-  return ret == -EAGAIN ? 0 : ret;
+  if (rqtp == NULL || rqtp->tv_nsec < 0 || rqtp->tv_nsec >= 1000000000)
+    {
+      return -EINVAL;
+    }
+
+  /* Get the start time of the wait.  Interrupts are disabled to prevent
+   * timer interrupts while we do tick-related calculations before and
+   * after the wait.
+   */
+
+  flags     = enter_critical_section();
+  starttick = clock_systimer();
+
+  /* Set up for the sleep.  Using the empty set means that we are not
+   * waiting for any particular signal.  However, any unmasked signal can
+   * still awaken nxsig_timedwait().
+   */
+
+  sigemptyset(&set);
+
+  /* nxsig_nanosleep is a simple application of nxsig_timedwait. */
+
+  ret = nxsig_timedwait(&set, NULL, rqtp);
+
+  /* nxsig_timedwait() cannot succeed.  It should always return error with
+   * either (1) EAGAIN meaning that the timeout occurred, or (2) EINTR
+   * meaning that some other unblocked signal was caught.
+   */
+
+  if (ret == -EAGAIN)
+    {
+      /* The timeout "error" is the normal, successful result */
+
+      leave_critical_section(flags);
+      return OK;
+    }
+
+  /* If we get there, the wait has failed because we were awakened by a
+   * signal.  Return the amount of "unwaited" time if rmtp is non-NULL.
+   */
+
+  if (rmtp)
+    {
+      clock_t elapsed;
+      clock_t remaining;
+      sclock_t ticks;
+
+      /* REVISIT: The conversion from time to ticks and back could
+       * be avoided.  clock_timespec_subtract() would be used instead
+       * to get the time difference.
+       */
+
+      /* First get the number of clock ticks that we were requested to
+       * wait.
+       */
+
+      clock_time2ticks(rqtp, &ticks);
+
+      /* Get the number of ticks that we actually waited */
+
+      elapsed = clock_systimer() - starttick;
+
+      /* The difference between the number of ticks that we were requested
+       * to wait and the number of ticks that we actually waited is that
+       * amount of time that we failed to wait.
+       */
+
+      if (elapsed >= (clock_t)ticks)
+        {
+          remaining = 0;
+        }
+      else
+        {
+          remaining = (clock_t)ticks - elapsed;
+        }
+
+      clock_ticks2time((sclock_t)remaining, rmtp);
+    }
+
+  leave_critical_section(flags);
+  return ret;
 }
 
 /****************************************************************************
@@ -163,13 +259,12 @@ int nxsig_nanosleep(FAR const struct timespec *rqtp,
  *   actually slept). If the rmtp argument is NULL, the remaining time is not
  *   returned.
  *
- *   If clock_nanosleep() fails, it returns a value of errno. The
- *   clock_nanosleep() function will fail if:
+ *   If clock_nanosleep() fails, it returns a value of -1 and sets errno to
+ *   indicate the error. The clock_nanosleep() function will fail if:
  *
  *     EINTR - The clock_nanosleep() function was interrupted by a signal.
  *     EINVAL - The rqtp argument specified a nanosecond value less than
- *       zero or greater than or equal to 1000 million. Or the clockid that
- *       does not specify a known clock.
+ *       zero or greater than or equal to 1000 million.
  *     ENOSYS - The clock_nanosleep() function is not supported by this
  *       implementation.
  *
@@ -185,27 +280,57 @@ int clock_nanosleep(clockid_t clockid, int flags,
 
   enter_cancellation_point();
 
-  if (clockid < CLOCK_REALTIME || clockid > CLOCK_BOOTTIME)
+  /* Check if absolute time is selected */
+
+  if ((flags & TIMER_ABSTIME) != 0)
     {
-      leave_cancellation_point();
-      return EINVAL;
+      struct timespec reltime;
+      struct timespec now;
+      irqstate_t irqstate;
+
+      /* Calculate the relative time delay.  We need to enter a critical
+       * section early to assure the relative time is valid from this
+       * point in time.
+       */
+
+      irqstate = enter_critical_section();
+      ret = clock_gettime(clockid, &now);
+      if (ret < 0)
+        {
+          /* clock_gettime() sets the errno variable */
+
+          leave_critical_section(irqstate);
+          leave_cancellation_point();
+          return ERROR;
+        }
+
+      clock_timespec_subtract(rqtp, &now, &reltime);
+
+      /* Now that we have the relative time, the remaining operations
+       * are equivalent to nxsig_nanosleep().
+       */
+
+      ret = nxsig_nanosleep(&reltime, rmtp);
+      leave_critical_section(irqstate);
+    }
+  else
+    {
+      /* In the relative time case, clock_nanosleep() is equivalent to
+       * nanosleep.  In this case, it is a paper thin wrapper around
+       * nxsig_nanosleep().
+       */
+
+      ret = nxsig_nanosleep(rqtp, rmtp);
     }
 
-  /* Just a wrapper around nxsig_clockwait() */
+  /* Check if nxsig_nanosleep() succeeded */
 
-  ret = nxsig_clockwait(clockid, flags, rqtp, rmtp);
-
-  /* Check if nxsig_clockwait() succeeded */
-
-  if (ret == -EAGAIN)
+  if (ret < 0)
     {
-      ret = OK;
-    }
-  else if (ret < 0)
-    {
-      /* If not return the errno */
+      /* If not set the errno variable and return -1 */
 
-      ret = -ret;
+      set_errno(-ret);
+      ret = ERROR;
     }
 
   leave_cancellation_point();

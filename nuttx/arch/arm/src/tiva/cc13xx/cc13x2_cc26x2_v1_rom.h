@@ -1,10 +1,13 @@
-/****************************************************************************
- * arch/arm/src/tiva/cc13xx/cc13x2_cc26x2_v1_rom.h
+/************************************************************************************
+ * arch/arm/src/tiva/cc13xx/cc13x2_cc26xx2_v1_rom.h
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
- * SPDX-FileCopyrightText: 2015-2017, Texas Instruments Incorporated
- * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *
+ * This is a port of TI's rom.h file which has a fully compatible BSD license:
+ *
+ *    Copyright (c) 2015-2017, Texas Instruments Incorporated
+ *    All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,17 +36,17 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_TIVA_CC13XX_CC13X2_CC26X2_V1_ROM_H
 #define __ARCH_ARM_SRC_TIVA_CC13XX_CC13X2_CC26X2_V1_ROM_H
 
-/****************************************************************************
+/************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
+ ************************************************************************************/
 
-/* Start address of the ROM hard API access table (located after the ROM FW
- * rev field)
+/* Start address of the ROM hard API access table (located after the ROM FW rev
+ * field)
  */
 
 #define ROM_HAPI_TABLE_ADDR 0x10000048
@@ -809,9 +812,9 @@
     ((void (*)(uint32_t powerconfig)) \
     ROM_API_PWR_CTRL_TABLE[0])
 
-/****************************************************************************
+/************************************************************************************
  * Public Types
- ****************************************************************************/
+ ************************************************************************************/
 
 /* ROM Hard-API function interface types */
 
@@ -827,8 +830,8 @@ typedef uint32_t (*fptr_reserved1_t)          (uint32_t);
 
 typedef uint32_t (*fptr_reserved2_t)          (void);
 
-typedef uint32_t (*fptr_reserved3_t)          (uint8_t *, \
-                                               uint32_t, \
+typedef uint32_t (*fptr_reserved3_t)          (uint8_t *,\
+                                               uint32_t,\
                                                uint32_t);
 
 typedef void     (*fptr_resetdev_t)           (void);
@@ -868,7 +871,7 @@ typedef void     (*fptr_dacvref_t)            (uint8_t       /* signal */);
 struct hard_api_s
 {
   fptr_crc32_t               crc32;
-  fptr_getflsize_t           flashgetsize;
+  fptr_getflsize_t           FlashGetSize;
   fptr_getchipid_t           get_chipid;
   fptr_reserved1_t           reserved1;
   fptr_reserved2_t           reserved2;
@@ -890,16 +893,15 @@ struct hard_api_s
 
 typedef struct hard_api_s hard_api_t;
 
-/****************************************************************************
+/************************************************************************************
  * Inline Functions
- ****************************************************************************/
+ ************************************************************************************/
 
-/****************************************************************************
+/************************************************************************************
  * Name: rom_signextend_vddrtrim
  *
  * Description:
- *   Sign extend the VDDR_TRIM setting
- *   (special format ranging from -10 to +21)
+ *   Sign extend the VDDR_TRIM setting (special format ranging from -10 to +21)
  *
  * Input Parameters
  *   vddrtrim - VDDR_TRIM setting
@@ -907,7 +909,7 @@ typedef struct hard_api_s hard_api_t;
  * Returned Value:
  *  Returns sign extended VDDR_TRIM setting.
  *
- ****************************************************************************/
+ ************************************************************************************/
 
 static inline int32_t rom_signextend_vddrtrim(uint32_t vddrtrim)
 {
@@ -924,9 +926,9 @@ static inline int32_t rom_signextend_vddrtrim(uint32_t vddrtrim)
   return signed_vaddrtrim;
 }
 
-/****************************************************************************
+/************************************************************************************
  * Global Function Prototypes
- ****************************************************************************/
+ ************************************************************************************/
 
 /* ROM functions implemented in FLASH */
 

@@ -1,27 +1,40 @@
 /****************************************************************************
  * drivers/wireless/ieee802154/xbee/xbee.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
+ *   Author:  Anthony Merlino <anthony@vergeaero.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
-#ifndef __DRIVERS_WIRELESS_IEEE802154_XBEE_XBEE_H
-#define __DRIVERS_WIRELESS_IEEE802154_XBEE_XBEE_H
+#ifndef __DRIVERS_WIRELESS_IEEE802154_XBEE_H
+#define __DRIVERS_WIRELESS_IEEE802154_XBEE_H
 
 /****************************************************************************
  * Included Files
@@ -33,7 +46,6 @@
 #include <stdbool.h>
 
 #include <nuttx/wqueue.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 
@@ -44,7 +56,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Configuration ************************************************************/
+/* Configuration *************************************************************/
 
 #if !defined(CONFIG_SCHED_HPWORK) || !defined(CONFIG_SCHED_LPWORK)
 #  error Both Low and High priority work queues are required for this driver
@@ -81,8 +93,8 @@
 #define XBEE_COORDASSOCFLAGS_CHAN_REASSIGN  2
 #define XBEE_COORDASSOCFLAGS_ALLOWASSOC     4
 
-/* Size of read buffer active for all of the transaction. i.e. must be big
- * enough to handle full transmit and receive.
+/* Size of read buffer active for all of the transaction. i.e. must be big enough
+ * to handle full transmit and receive.
  */
 
 #define XBEE_RXBUF_SIZE                 256
@@ -147,49 +159,49 @@ struct xbee_priv_s
   FAR struct xbee_maccb_s *cb;    /* Head of a list of XBee MAC callbacks */
   uint8_t nclients;               /* Number of registered callbacks */
   FAR struct iob_s *rx_apiframes; /* List of incoming API frames to process */
-  struct work_s notifwork;        /* For deferring notifications to LPWORK queue */
+  struct work_s notifwork;        /* For deferring notifications to LPWORK queue*/
   struct work_s attnwork;         /* For deferring interrupt work to work queue */
   volatile bool attn_latched;     /* Latched state of ATTN */
-  mutex_t primitive_lock;         /* Exclusive access to the primitive queue */
+  sem_t primitive_sem;            /* Exclusive access to the primitive queue */
   sq_queue_t primitive_queue;     /* Queue of primitives to pass via notify()
                                    * callback to registered receivers */
-  struct wdog_s assocwd;          /* Association watchdog */
+  WDOG_ID assocwd;                /* Association watchdog */
   struct work_s assocwork;        /* For polling for association status */
   bool associating;               /* Are we currently associating */
-  mutex_t atquery_lock;           /* Only allow one AT query at a time */
+  sem_t atquery_sem;              /* Only allow one AT query at a time */
   sem_t atresp_sem;               /* For signaling pending AT response received */
   char querycmd[2];               /* Stores the pending AT Query command */
-  bool querydone;                 /* Used to tell waiting thread query is done */
-  struct wdog_s atquery_wd;       /* Support AT Query timeout and retry */
-  struct wdog_s reqdata_wd;       /* Support send timeout and retry */
+  bool querydone;                 /* Used to tell waiting thread query is done*/
+  WDOG_ID atquery_wd;             /* Support AT Query timeout and retry */
+  WDOG_ID reqdata_wd;             /* Support send timeout and retry */
   uint8_t frameid;                /* For differentiating AT request/response */
-  mutex_t tx_lock;                /* Support a single pending transmit */
+  sem_t tx_sem;                   /* Support a single pending transmit */
   sem_t txdone_sem;               /* For signalling tx is completed */
   bool txdone;
 #ifdef CONFIG_XBEE_LOCKUP_WORKAROUND
-  struct wdog_s lockup_wd;        /* Watchdog to protect for XBee lockup */
-  struct work_s lockupwork;       /* For deferring lockup query check to LPWORK queue */
-  struct work_s backupwork;       /* For deferring backing up parameters to LPWORK queue */
+  WDOG_ID lockup_wd;              /* Watchdog to protect for XBee lockup */
+  struct work_s lockupwork;       /* For deferring lockup query check to LPWORK queue*/
+  struct work_s backupwork;       /* For deferring backing up parameters to LPWORK queue*/
 #endif
 
-  /******************* Fields related to Xbee radio *************************/
+  /******************* Fields related to Xbee radio ***************************/
 
   uint16_t firmwareversion;
 
-  /************* Fields related to addressing and coordinator ***************/
+  /************* Fields related to addressing and coordinator *****************/
 
-  /* Holds all address information(Extended, Short, and PAN ID) for the MAC */
+  /* Holds all address information (Extended, Short, and PAN ID) for the MAC. */
 
   struct ieee802154_addr_s addr;
   struct ieee802154_pandesc_s pandesc;
 
-  /****************** Uncategorized MAC PIB attributes **********************/
+  /****************** Uncategorized MAC PIB attributes ***********************/
 
   /* What type of device is this node acting as */
 
   enum ieee802154_devmode_e devmode : 2;
 
-  /****************** PHY attributes ****************************************/
+  /****************** PHY attributes ***********************/
 
   uint8_t chan;
   uint8_t pwrlvl;
@@ -208,10 +220,9 @@ struct xbee_priv_s
  * Name: xbee_next_frameid
  *
  * Description:
- *   Increment the frame id.  This is used to coordinate TX requests with
- *   subsequent TX status frames received by the XBee device. We must skip
- *   value 0 since that value is to tell the XBee not to provide a status
- *   response.
+ *   Increment the frame id.  This is used to coordinate TX requests with subsequent
+ *   TX status frames received by the XBee device. We must skip value 0 since
+ *   that value is to tell the XBee not to provide a status response.
  *
  ****************************************************************************/
 
@@ -238,8 +249,7 @@ static inline uint8_t xbee_next_frameid(FAR struct xbee_priv_s *priv)
  *
  ****************************************************************************/
 
-static inline void xbee_insert_checksum(FAR uint8_t *frame,
-                                        uint16_t framelen)
+static inline void xbee_insert_checksum(FAR uint8_t *frame, uint16_t framelen)
 {
   int i;
   uint8_t checksum = 0;
@@ -253,7 +263,7 @@ static inline void xbee_insert_checksum(FAR uint8_t *frame,
     checksum += frame[i];
   }
 
-  frame[framelen - 1] = 0xff - checksum;
+  frame[framelen - 1] = 0xFF - checksum;
 }
 
 /****************************************************************************
@@ -289,15 +299,14 @@ int xbee_atquery(FAR struct xbee_priv_s *priv, FAR const char *atcommand);
  *
  ****************************************************************************/
 
-void xbee_send_atquery(FAR struct xbee_priv_s *priv,
-                       FAR const char *atcommand);
+void xbee_send_atquery(FAR struct xbee_priv_s *priv, FAR const char *atcommand);
 
 /****************************************************************************
  * Name: xbee_query_firmwareversion
  *
  * Description:
- *   Sends API frame with AT command request in order to get the firmware
- *   version from the device.
+ *   Sends API frame with AT command request in order to get the firmware version
+ *   from the device.
  *
  ****************************************************************************/
 
@@ -318,8 +327,8 @@ void xbee_send_atquery(FAR struct xbee_priv_s *priv,
  * Name: xbee_query_eaddr
  *
  * Description:
- *   Sends API frame with AT command request in order to get the IEEE
- *   802.15.4 Extended Address. (Serial Number) from the device.
+ *   Sends API frame with AT command request in order to get the IEEE 802.15.4
+ *   Extended Address. (Serial Number) from the device.
  *
  ****************************************************************************/
 
@@ -363,8 +372,8 @@ void xbee_send_atquery(FAR struct xbee_priv_s *priv,
  * Name: xbee_query_powermode
  *
  * Description:
- *   Sends API frame with AT command request in order to get the RF Power
- *   Mode from the device.
+ *   Sends API frame with AT command request in order to get the RF Power Mode
+ *   from the device.
  *
  ****************************************************************************/
 
@@ -407,8 +416,8 @@ void xbee_set_panid(FAR struct xbee_priv_s *priv, FAR const uint8_t *panid);
  * Name: xbee_set_saddr
  *
  * Description:
- *   Sends API frame with AT command request in order to set the Short
- *   Address (Source Address (MY)) of the device
+ *   Sends API frame with AT command request in order to set the Short Address
+ *   (Source Address (MY)) of the device
  *
  ****************************************************************************/
 
@@ -419,7 +428,7 @@ void xbee_set_saddr(FAR struct xbee_priv_s *priv, FAR const uint8_t *saddr);
  *
  * Description:
  *   Sends API frame with AT command request in order to set the RF channel
- *   (Operation Channel) of the device.
+ *   (Operatin Channel) of the device.
  *
  ****************************************************************************/
 
@@ -429,8 +438,8 @@ void xbee_set_chan(FAR struct xbee_priv_s *priv, uint8_t chan);
  * Name: xbee_set_powerlevel
  *
  * Description:
- *   Sends API frame with AT command request in order to set the RF power
- *   level of the device.
+ *   Sends API frame with AT command request in order to set the RF power level
+ *   of the device.
  *
  ****************************************************************************/
 
@@ -482,10 +491,10 @@ void xbee_enable_coord(FAR struct xbee_priv_s *priv, bool enable);
  * Name: xbee_regdump
  *
  * Description:
- *   Perform a series of queries updating struct and printing settings.
+ *   Perform a series of queries updating struct and printing settings to SYSLOG.
  *
  ****************************************************************************/
 
 void xbee_regdump(FAR struct xbee_priv_s *priv);
 
-#endif /* __DRIVERS_WIRELESS_IEEE802154_XBEE_XBEE_H */
+#endif /* __DRIVERS_WIRELESS_IEEE802154_XBEE_H */

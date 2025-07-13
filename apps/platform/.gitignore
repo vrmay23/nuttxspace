@@ -1,1 +1,7 @@
-/board
+/.built
+/.depend
+/Make.dep
+board
+/*.src
+/*.obj
+/*.lst

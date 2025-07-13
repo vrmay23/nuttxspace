@@ -1,22 +1,39 @@
 /****************************************************************************
- * apps/wireless/gs2200m/gs2200m_main.c
+ * apps/wireless/gs2200m_main.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright 2019 Sony Home Entertainment & Sound Products Inc.
+ *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Based on usrsocktest_daemon.c
+ *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
+ *    Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -31,14 +48,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <assert.h>
 #include <debug.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <poll.h>
 #include <unistd.h>
 
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <netinet/in.h>
@@ -46,7 +61,6 @@
 #include <net/if.h>
 
 #include <nuttx/net/usrsock.h>
-#include <nuttx/wireless/wireless.h>
 #include <nuttx/wireless/gs2200m.h>
 
 /****************************************************************************
@@ -56,9 +70,13 @@
 /* #define GS2200M_TRACE */
 
 #ifdef GS2200M_TRACE
-#  define gs2200m_printf(v, ...) printf(v, ##__VA_ARGS__)
+# define gs2200m_printf(v, ...) printf(v, ##__VA_ARGS__)
 #else
-#  define gs2200m_printf(v, ...)
+# define gs2200m_printf(v, ...)
+#endif
+
+#ifndef MIN
+#  define MIN(a,b)  (((a) < (b)) ? (a) : (b))
 #endif
 
 #define SOCKET_BASE  10000
@@ -72,17 +90,14 @@ enum sock_state_e
 {
   CLOSED,
   OPENED,
-  BOUND,
   CONNECTED,
 };
 
 struct usock_s
 {
-  int8_t   type;
-  char     cid;
+  int8_t  type;
+  char    cid;
   enum sock_state_e state;
-  uint16_t lport;           /* local port */
-  struct sockaddr_in raddr; /* remote addr */
 };
 
 struct gs2200m_s
@@ -92,25 +107,7 @@ struct gs2200m_s
   uint8_t mode;
   uint8_t ch;
   int     gsfd;
-  int     usock_enable;
   struct usock_s sockets[SOCKET_COUNT];
-};
-
-union usrsock_request_u
-{
-  struct usrsock_request_socket_s       socket;
-  struct usrsock_request_close_s        close;
-  struct usrsock_request_connect_s      connect;
-  struct usrsock_request_sendto_s       sendto;
-  struct usrsock_request_recvfrom_s     recvfrom;
-  struct usrsock_request_setsockopt_s   setsockopt;
-  struct usrsock_request_getsockopt_s   getsockopt;
-  struct usrsock_request_getsockname_s  getsockname;
-  struct usrsock_request_getpeername_s  getpeername;
-  struct usrsock_request_bind_s         bind;
-  struct usrsock_request_listen_s       listen;
-  struct usrsock_request_accept_s       accept;
-  struct usrsock_request_ioctl_s        ioctl;
 };
 
 /****************************************************************************
@@ -243,13 +240,11 @@ static int _write_to_usock(int fd, void *buf, size_t count)
  ****************************************************************************/
 
 static int _send_ack_common(int fd,
-                            uint16_t events,
-                            uint32_t xid,
+                            uint8_t xid,
                             FAR struct usrsock_message_req_ack_s *resp)
 {
-  resp->head.msgid  = USRSOCK_MESSAGE_RESPONSE_ACK;
-  resp->head.flags  = 0;
-  resp->head.events = events;
+  resp->head.msgid = USRSOCK_MESSAGE_RESPONSE_ACK;
+  resp->head.flags = 0;
   resp->xid = xid;
 
   /* Send ACK response. */
@@ -379,16 +374,16 @@ read_req(int fd, FAR const struct usrsock_request_common_s *com_hdr,
 }
 
 /****************************************************************************
- * Name: usrsock_handle_request
+ * Name: usrsock_request
  ****************************************************************************/
 
-static int usrsock_handle_request(int fd, FAR struct gs2200m_s *priv)
+static int usrsock_request(int fd, FAR struct gs2200m_s *priv)
 {
   FAR struct usrsock_request_common_s *com_hdr;
-  union usrsock_request_u req;
+  uint8_t hdrbuf[16];
   ssize_t rlen;
 
-  com_hdr = (FAR void *)&req;
+  com_hdr = (FAR void *)hdrbuf;
   rlen = read(fd, com_hdr, sizeof(*com_hdr));
 
   if (rlen < 0)
@@ -408,9 +403,9 @@ static int usrsock_handle_request(int fd, FAR struct gs2200m_s *priv)
       return -EIO;
     }
 
-  assert(handlers[com_hdr->reqid].hdrlen <= sizeof(req));
+  assert(handlers[com_hdr->reqid].hdrlen < sizeof(hdrbuf));
 
-  rlen = read_req(fd, com_hdr, &req,
+  rlen = read_req(fd, com_hdr, hdrbuf,
                   handlers[com_hdr->reqid].hdrlen);
 
   if (rlen < 0)
@@ -418,7 +413,7 @@ static int usrsock_handle_request(int fd, FAR struct gs2200m_s *priv)
       return rlen;
     }
 
-  return handlers[com_hdr->reqid].fn(fd, priv, &req);
+  return handlers[com_hdr->reqid].fn(fd, priv, hdrbuf);
 }
 
 /****************************************************************************
@@ -449,27 +444,9 @@ static int usock_send_event(int fd, FAR struct gs2200m_s *priv,
     }
 
   event.usockid = i + SOCKET_BASE;
-  event.head.events = events;
+  event.events  = events;
 
   return _write_to_usock(fd, &event, sizeof(event));
-}
-
-/****************************************************************************
- * Name: usock_sendevent_toall
- ****************************************************************************/
-
-static void usock_sendevent_toall(FAR struct gs2200m_s *priv, int fd)
-{
-  int i;
-
-  for (i = 0; i < SOCKET_COUNT; i++)
-    {
-      if (priv->sockets[i].state != CLOSED)
-        {
-          usock_send_event(fd, priv, &priv->sockets[i],
-                           USRSOCK_EVENT_RECVFROM_AVAIL);
-        }
-    }
 }
 
 /****************************************************************************
@@ -481,11 +458,11 @@ static int socket_request(int fd, FAR struct gs2200m_s *priv,
 {
   FAR struct usrsock_request_socket_s *req = hdrbuf;
   struct usrsock_message_req_ack_s resp;
-  uint16_t events = 0;
+  FAR struct usock_s *usock;
   int16_t usockid;
   int ret;
 
-  gs2200m_printf("%s: start type=%d\n",
+  gs2200m_printf("%s: start type=%d \n",
                  __func__, req->type);
 
   /* Check domain requested */
@@ -493,16 +470,6 @@ static int socket_request(int fd, FAR struct gs2200m_s *priv,
   if (req->domain != AF_INET)
     {
       usockid = -EAFNOSUPPORT;
-    }
-  else if (!priv->usock_enable && req->domain == AF_INET &&
-           req->type != SOCK_CTRL)
-    {
-      /* If domain is AF_INET while usock_enable is false,
-       * set usockid to -ENOTSUP to fallback kernel
-       * network stack.
-       */
-
-      usockid = -ENOTSUP;
     }
   else
     {
@@ -516,19 +483,25 @@ static int socket_request(int fd, FAR struct gs2200m_s *priv,
 
   memset(&resp, 0, sizeof(resp));
   resp.result = usockid;
-  if (req->type == SOCK_DGRAM)
-    {
-      events = USRSOCK_EVENT_SENDTO_READY;
-    }
-
-  ret = _send_ack_common(fd, events, req->head.xid, &resp);
+  ret = _send_ack_common(fd, req->head.xid, &resp);
 
   if (0 > ret)
     {
       return ret;
     }
 
-  gs2200m_printf("%s: end\n", __func__);
+  if (req->type == SOCK_DGRAM)
+    {
+      /* NOTE: If the socket type is DGRAM, it's ready to send
+       * a packet after creating user socket.
+       */
+
+      usock = gs2200m_socket_get(priv, usockid);
+      usock_send_event(fd, priv, usock,
+                       USRSOCK_EVENT_SENDTO_READY);
+    }
+
+  gs2200m_printf("%s: end \n", __func__);
   return OK;
 }
 
@@ -546,7 +519,7 @@ static int close_request(int fd, FAR struct gs2200m_s *priv,
   char cid;
   int ret = 0;
 
-  gs2200m_printf("%s: start\n", __func__);
+  gs2200m_printf("%s: start \n", __func__);
 
   /* Check if this socket exists. */
 
@@ -554,9 +527,16 @@ static int close_request(int fd, FAR struct gs2200m_s *priv,
 
   cid = usock->cid;
 
-  if ((BOUND != usock->state) && (CONNECTED != usock->state))
+  if (SOCK_STREAM == usock->type && CONNECTED != usock->state)
     {
       ret = -EBADFD;
+      goto errout;
+    }
+
+  if (SOCK_DGRAM == usock->type && 'z' == cid)
+    {
+      /* the udp socket is not bound */
+
       goto errout;
     }
 
@@ -570,7 +550,7 @@ errout:
 
   memset(&resp, 0, sizeof(resp));
   resp.result = ret;
-  ret = _send_ack_common(fd, 0, req->head.xid, &resp);
+  ret = _send_ack_common(fd, req->head.xid, &resp);
 
   if (0 > ret)
     {
@@ -581,7 +561,7 @@ errout:
 
   ret = gs2200m_socket_free(priv, req->usockid);
 
-  gs2200m_printf("%s: end\n", __func__);
+  gs2200m_printf("%s: end \n", __func__);
 
   return OK;
 }
@@ -606,7 +586,7 @@ static int connect_request(int fd, FAR struct gs2200m_s *priv,
   DEBUGASSERT(priv);
   DEBUGASSERT(req);
 
-  gs2200m_printf("%s: start\n", __func__);
+  gs2200m_printf("%s: start \n", __func__);
 
   /* Check if this socket exists. */
 
@@ -624,35 +604,6 @@ static int connect_request(int fd, FAR struct gs2200m_s *priv,
     {
       ret = -EISCONN;
       goto prepare;
-    }
-
-  memset(&cmsg, 0, sizeof(cmsg));
-
-  /* Check if this socket is already connected. */
-
-  if (BOUND == usock->state)
-    {
-      if (usock->type == SOCK_STREAM)
-        {
-          ret = -EISCONN;
-          goto prepare;
-        }
-      else
-        {
-          /* Firstly, close the socket */
-
-          struct gs2200m_close_msg clmsg;
-          memset(&clmsg, 0, sizeof(clmsg));
-          clmsg.cid = usock->cid;
-
-          ioctl(priv->gsfd, GS2200M_IOC_CLOSE, (unsigned long)&clmsg);
-
-          /* Copy the local port info */
-
-          cmsg.lport = usock->lport;
-
-          usock->state = OPENED;
-        }
     }
 
   /* Check if address size ok. */
@@ -696,7 +647,6 @@ static int connect_request(int fd, FAR struct gs2200m_s *priv,
     {
       usock->cid   = cmsg.cid;
       usock->state = CONNECTED;
-      usock->raddr = addr;
     }
   else
     {
@@ -709,7 +659,7 @@ prepare:
 
   memset(&resp, 0, sizeof(resp));
   resp.result = ret;
-  ret = _send_ack_common(fd, 0, req->head.xid, &resp);
+  ret = _send_ack_common(fd, req->head.xid, &resp);
 
   if (0 > ret)
     {
@@ -724,7 +674,7 @@ prepare:
       return wlen;
     }
 
-  gs2200m_printf("%s: end\n", __func__);
+  gs2200m_printf("%s: end \n", __func__);
   return OK;
 }
 
@@ -748,7 +698,7 @@ static int sendto_request(int fd, FAR struct gs2200m_s *priv,
   DEBUGASSERT(priv);
   DEBUGASSERT(req);
 
-  gs2200m_printf("%s: start (buflen=%d)\n",
+  gs2200m_printf("%s: start (buflen=%d) \n",
                  __func__, req->buflen);
 
   /* Check if this socket exists. */
@@ -779,41 +729,26 @@ static int sendto_request(int fd, FAR struct gs2200m_s *priv,
       goto prepare;
     }
 
-  memset(&smsg, 0, sizeof(smsg));
-
   smsg.is_tcp = (usock->type == SOCK_STREAM) ? true : false;
 
   /* For UDP, addlen must be provided */
 
-  if (usock->type == SOCK_DGRAM)
+  if (usock->type == SOCK_DGRAM && CONNECTED != usock->state)
     {
-      if (CONNECTED != usock->state)
+      if (req->addrlen == 0)
         {
-          if (req->addrlen == 0)
-            {
-              ret = -EINVAL;
-              goto prepare;
-            }
-
-          /* In UDP case, read the address. */
-
-          rlen = read(fd, &smsg.addr, sizeof(smsg.addr));
-
-          if (rlen < 0 || rlen < req->addrlen)
-            {
-              ret = -EFAULT;
-              goto prepare;
-            }
+          ret = -EINVAL;
+          goto prepare;
         }
-      else if (CONNECTED == usock->state)
-        {
-          /* Copy remote address */
 
-          smsg.addr = usock->raddr;
-        }
-      else
+      /* In UDP case, read the address. */
+
+      rlen = read(fd, &smsg.addr, sizeof(smsg.addr));
+
+      if (rlen < 0 || rlen < req->addrlen)
         {
-          ASSERT(false);
+          ret = -EFAULT;
+          goto prepare;
         }
 
       gs2200m_printf("%s: addr: %s:%d",
@@ -848,15 +783,12 @@ static int sendto_request(int fd, FAR struct gs2200m_s *priv,
 
       if (usock->cid != smsg.cid)
         {
-          /* cid is newly assigned (bound) */
-
           usock->cid = smsg.cid;
-          usock->state = BOUND;
         }
 
       if (0 != nret)
         {
-          ret = -errno;
+          ret = -EINVAL;
           goto prepare;
         }
 
@@ -866,6 +798,7 @@ static int sendto_request(int fd, FAR struct gs2200m_s *priv,
     }
 
 prepare:
+
   if (sendbuf)
     {
       free(sendbuf);
@@ -875,7 +808,7 @@ prepare:
 
   memset(&resp, 0, sizeof(resp));
   resp.result = ret;
-  ret = _send_ack_common(fd, 0, req->head.xid, &resp);
+  ret = _send_ack_common(fd, req->head.xid, &resp);
 
   if (0 > ret)
     {
@@ -892,7 +825,7 @@ prepare:
       return wlen;
     }
 
-  gs2200m_printf("%s: end\n", __func__);
+  gs2200m_printf("%s: end \n", __func__);
 
   return OK;
 }
@@ -906,7 +839,6 @@ static int recvfrom_request(int fd, FAR struct gs2200m_s *priv,
 {
   FAR struct usrsock_request_recvfrom_s *req = hdrbuf;
   struct usrsock_message_datareq_ack_s resp;
-  struct usrsock_message_req_ack_s resp1;
   struct gs2200m_recv_msg rmsg;
   FAR struct usock_s *usock;
   int ret = 0;
@@ -914,10 +846,8 @@ static int recvfrom_request(int fd, FAR struct gs2200m_s *priv,
   DEBUGASSERT(priv);
   DEBUGASSERT(req);
 
-  gs2200m_printf("%s: start (req->max_buflen=%d)\n",
+  gs2200m_printf("%s: start (req->max_buflen=%d) \n",
                  __func__, req->max_buflen);
-
-  memset(&rmsg, 0, sizeof(rmsg));
 
   /* Check if this socket exists. */
 
@@ -937,19 +867,14 @@ static int recvfrom_request(int fd, FAR struct gs2200m_s *priv,
       goto prepare;
     }
 
+  memset(&rmsg, 0, sizeof(rmsg));
+  rmsg.buf = calloc(1, 1500);
   rmsg.cid = usock->cid;
   rmsg.reqlen = req->max_buflen;
   rmsg.is_tcp = (usock->type == SOCK_STREAM) ? true : false;
-  rmsg.flags = req->flags;
 
-  if (0 < req->max_buflen)
-    {
-      rmsg.buf = calloc(1, req->max_buflen);
-      ASSERT(rmsg.buf);
-
-      ret = ioctl(priv->gsfd, GS2200M_IOC_RECV,
-                  (unsigned long)&rmsg);
-    }
+  ret = ioctl(priv->gsfd, GS2200M_IOC_RECV,
+              (unsigned long)&rmsg);
 
   if (0 == ret)
     {
@@ -962,7 +887,7 @@ static int recvfrom_request(int fd, FAR struct gs2200m_s *priv,
 
   if (!rmsg.is_tcp)
     {
-      gs2200m_printf("%s: from (%s:%d)\n",
+      gs2200m_printf("%s: from (%s:%d) \n",
                      __func__,
                      inet_ntoa(rmsg.addr.sin_addr),
                      ntohs(rmsg.addr.sin_port));
@@ -975,9 +900,8 @@ prepare:
   memset(&resp, 0, sizeof(resp));
   resp.reqack.result = ret;
   resp.reqack.xid = req->head.xid;
-  resp.reqack.head.msgid  = USRSOCK_MESSAGE_RESPONSE_DATA_ACK;
-  resp.reqack.head.flags  = 0;
-  resp.reqack.head.events = 0;
+  resp.reqack.head.msgid = USRSOCK_MESSAGE_RESPONSE_DATA_ACK;
+  resp.reqack.head.flags = 0;
 
   if (0 <= ret)
     {
@@ -985,19 +909,11 @@ prepare:
       resp.valuelen = MIN(resp.valuelen_nontrunc,
                           req->max_addrlen);
 
-      if ((0 == rmsg.len) && (0 != rmsg.reqlen))
+      if (0 == rmsg.len)
         {
           usock_send_event(fd, priv, usock,
                            USRSOCK_EVENT_REMOTE_CLOSED
                            );
-
-          /* Send ack only */
-
-          memset(&resp1, 0, sizeof(resp1));
-          resp1.result = ret;
-          ret = _send_ack_common(fd, 0, req->head.xid, &resp1);
-
-          goto err_out;
         }
     }
 
@@ -1035,12 +951,10 @@ prepare:
     }
 
 err_out:
-  gs2200m_printf("%s: *** end ret=%d\n", __func__, ret);
 
-  if (rmsg.buf)
-    {
-      free(rmsg.buf);
-    }
+  gs2200m_printf("%s: *** end ret=%d \n", __func__, ret);
+
+  free(rmsg.buf);
 
   return ret;
 }
@@ -1063,7 +977,7 @@ static int bind_request(int fd, FAR struct gs2200m_s *priv,
   DEBUGASSERT(priv);
   DEBUGASSERT(req);
 
-  gs2200m_printf("%s: called ****\n", __func__);
+  gs2200m_printf("%s: called **** \n", __func__);
 
   /* Check if this socket exists. */
 
@@ -1108,9 +1022,7 @@ static int bind_request(int fd, FAR struct gs2200m_s *priv,
 
   if (0 == ret)
     {
-      usock->cid   = bmsg.cid;
-      usock->lport = ntohs(addr.sin_port);
-      usock->state = BOUND;
+      usock->cid = bmsg.cid;
     }
 
 prepare:
@@ -1119,14 +1031,14 @@ prepare:
 
   memset(&resp, 0, sizeof(resp));
   resp.result = ret;
-  ret = _send_ack_common(fd, 0, req->head.xid, &resp);
+  ret = _send_ack_common(fd, req->head.xid, &resp);
 
   if (0 > ret)
     {
       return ret;
     }
 
-  gs2200m_printf("%s: end\n", __func__);
+  gs2200m_printf("%s: end \n", __func__);
   return OK;
 }
 
@@ -1145,7 +1057,7 @@ static int listen_request(int fd, FAR struct gs2200m_s *priv,
   DEBUGASSERT(priv);
   DEBUGASSERT(req);
 
-  gs2200m_printf("%s: called ****\n", __func__);
+  gs2200m_printf("%s: called **** \n", __func__);
 
   /* Check if this socket exists. */
 
@@ -1160,14 +1072,14 @@ static int listen_request(int fd, FAR struct gs2200m_s *priv,
 
   memset(&resp, 0, sizeof(resp));
   resp.result = ret;
-  ret = _send_ack_common(fd, 0, req->head.xid, &resp);
+  ret = _send_ack_common(fd, req->head.xid, &resp);
 
   if (0 > ret)
     {
       return ret;
     }
 
-  gs2200m_printf("%s: end\n", __func__);
+  gs2200m_printf("%s: end \n", __func__);
   return ret;
 }
 
@@ -1183,13 +1095,14 @@ static int accept_request(int fd, FAR struct gs2200m_s *priv,
   struct gs2200m_accept_msg amsg;
   FAR struct usock_s *usock;
   FAR struct usock_s *new_usock = NULL;
+  struct sockaddr_in ep_addr;
   int ret = 0;
   int16_t usockid; /* usockid for new client */
 
   DEBUGASSERT(priv);
   DEBUGASSERT(req);
 
-  gs2200m_printf("%s: called ****\n", __func__);
+  gs2200m_printf("%s: called **** \n", __func__);
 
   /* Check if this socket exists. */
 
@@ -1223,7 +1136,6 @@ static int accept_request(int fd, FAR struct gs2200m_s *priv,
 
   new_usock->cid   = amsg.cid;
   new_usock->state = CONNECTED;
-  new_usock->raddr = amsg.addr;
 
 prepare:
 
@@ -1231,14 +1143,13 @@ prepare:
 
   memset(&resp, 0, sizeof(resp));
   resp.reqack.xid = req->head.xid;
-  resp.reqack.head.msgid  = USRSOCK_MESSAGE_RESPONSE_DATA_ACK;
-  resp.reqack.head.flags  = 0;
-  resp.reqack.head.events = 0;
+  resp.reqack.head.msgid = USRSOCK_MESSAGE_RESPONSE_DATA_ACK;
+  resp.reqack.head.flags = 0;
 
   if (0 == ret)
     {
-      resp.reqack.result = 2; /* new_usock->raddr + usock */
-      resp.valuelen_nontrunc = sizeof(new_usock->raddr);
+      resp.reqack.result = 2; /* ep_addr + usock */
+      resp.valuelen_nontrunc = sizeof(ep_addr);
       resp.valuelen = resp.valuelen_nontrunc;
     }
   else
@@ -1260,7 +1171,11 @@ prepare:
     {
       /* Send address (value) */
 
-      ret = _write_to_usock(fd, &new_usock->raddr, resp.valuelen);
+      /* TODO: ep_addr should be set */
+
+      memset(&ep_addr, 0, sizeof(ep_addr));
+
+      ret = _write_to_usock(fd, &ep_addr, resp.valuelen);
 
       if (0 > ret)
         {
@@ -1284,7 +1199,7 @@ prepare:
     }
 
 err_out:
-  gs2200m_printf("%s: end\n", __func__);
+  gs2200m_printf("%s: end \n", __func__);
   return ret;
 }
 
@@ -1305,7 +1220,7 @@ static int setsockopt_request(int fd, FAR struct gs2200m_s *priv,
   DEBUGASSERT(priv);
   DEBUGASSERT(req);
 
-  gs2200m_printf("%s: called ****\n", __func__);
+  gs2200m_printf("%s: called **** \n", __func__);
 
   /* Check if this socket exists. */
 
@@ -1363,9 +1278,9 @@ prepare:
   memset(&resp, 0, sizeof(resp));
   resp.result = ret;
 
-  ret = _send_ack_common(fd, 0, req->head.xid, &resp);
+  ret = _send_ack_common(fd, req->head.xid, &resp);
 
-  gs2200m_printf("%s: end (ret=%d)\n", __func__, ret);
+  gs2200m_printf("%s: end (ret=%d) \n", __func__, ret);
   return ret;
 }
 
@@ -1387,169 +1302,19 @@ static int getsockopt_request(int fd, FAR struct gs2200m_s *priv,
 static int getsockname_request(int fd, FAR struct gs2200m_s *priv,
                                FAR void *hdrbuf)
 {
-  FAR struct usrsock_request_getsockname_s *req = hdrbuf;
-  struct usrsock_message_datareq_ack_s resp;
-  struct gs2200m_name_msg nmsg;
-  FAR struct usock_s *usock;
-  int ret = 0;
-
-  DEBUGASSERT(priv);
-  DEBUGASSERT(req);
-
-  gs2200m_printf("%s: called ****\n", __func__);
-
-  /* Check if this socket exists. */
-
-  usock = gs2200m_socket_get(priv, req->usockid);
-
-  if (!usock)
-    {
-      ret = -EBADFD;
-      goto prepare;
-    }
-
-  memset(&nmsg, 0, sizeof(nmsg));
-  nmsg.cid = usock->cid;
-  nmsg.local = true; /* Obtain local address & port */
-
-  ret = ioctl(priv->gsfd, GS2200M_IOC_NAME, (unsigned long)&nmsg);
-
-prepare:
-
-  /* Prepare response. */
-
-  memset(&resp, 0, sizeof(resp));
-  resp.reqack.xid = req->head.xid;
-  resp.reqack.head.msgid  = USRSOCK_MESSAGE_RESPONSE_DATA_ACK;
-  resp.reqack.head.flags  = 0;
-  resp.reqack.head.events = 0;
-  resp.reqack.result = ret;
-
-  if (0 == ret)
-    {
-      resp.valuelen_nontrunc = sizeof(nmsg.addr);
-      resp.valuelen = resp.valuelen_nontrunc;
-
-      if (resp.valuelen > req->max_addrlen)
-        {
-          resp.valuelen = req->max_addrlen;
-        }
-    }
-  else
-    {
-      resp.valuelen_nontrunc = 0;
-      resp.valuelen = 0;
-    }
-
-  /* Send response. */
-
-  ret = _write_to_usock(fd, &resp, sizeof(resp));
-
-  if (0 > ret)
-    {
-      goto err_out;
-    }
-
-  if (resp.valuelen > 0)
-    {
-      /* Send address (value) */
-
-      ret = _write_to_usock(fd, &nmsg.addr, resp.valuelen);
-
-      if (0 > ret)
-        {
-          goto err_out;
-        }
-    }
-
-err_out:
-  gs2200m_printf("%s: end\n", __func__);
-  return ret;
+  DEBUGASSERT(false);
+  return -ENOSYS;
 }
 
 /****************************************************************************
- * Name: getpeername_request
+ * Name: getsockname_request
  ****************************************************************************/
 
 static int getpeername_request(int fd, FAR struct gs2200m_s *priv,
                                FAR void *hdrbuf)
 {
-  FAR struct usrsock_request_getpeername_s *req = hdrbuf;
-  struct usrsock_message_datareq_ack_s resp;
-  FAR struct usock_s *usock;
-  int ret = 0;
-
-  DEBUGASSERT(priv);
-  DEBUGASSERT(req);
-
-  gs2200m_printf("%s: called ****\n", __func__);
-
-  /* Check if this socket exists. */
-
-  usock = gs2200m_socket_get(priv, req->usockid);
-
-  if (!usock)
-    {
-      ret = -EBADFD;
-      goto prepare;
-    }
-
-  if (CONNECTED != usock->state)
-    {
-      ret = -ENOTCONN;
-    }
-
-prepare:
-
-  /* Prepare response. */
-
-  memset(&resp, 0, sizeof(resp));
-  resp.reqack.xid = req->head.xid;
-  resp.reqack.head.msgid  = USRSOCK_MESSAGE_RESPONSE_DATA_ACK;
-  resp.reqack.head.flags  = 0;
-  resp.reqack.head.events = 0;
-  resp.reqack.result = ret;
-
-  if (0 == ret)
-    {
-      resp.valuelen_nontrunc = sizeof(usock->raddr);
-      resp.valuelen = resp.valuelen_nontrunc;
-
-      if (resp.valuelen > req->max_addrlen)
-        {
-          resp.valuelen = req->max_addrlen;
-        }
-    }
-  else
-    {
-      resp.valuelen_nontrunc = 0;
-      resp.valuelen = 0;
-    }
-
-  /* Send response. */
-
-  ret = _write_to_usock(fd, &resp, sizeof(resp));
-
-  if (0 > ret)
-    {
-      goto err_out;
-    }
-
-  if (resp.valuelen > 0)
-    {
-      /* Send address (value) */
-
-      ret = _write_to_usock(fd, &usock->raddr, resp.valuelen);
-
-      if (0 > ret)
-        {
-          goto err_out;
-        }
-    }
-
-err_out:
-  gs2200m_printf("%s: end\n", __func__);
-  return ret;
+  DEBUGASSERT(false);
+  return -ENOSYS;
 }
 
 /****************************************************************************
@@ -1563,78 +1328,30 @@ static int ioctl_request(int fd, FAR struct gs2200m_s *priv,
   struct usrsock_message_req_ack_s resp;
   struct usrsock_message_datareq_ack_s resp2;
   struct gs2200m_ifreq_msg imsg;
-  uint8_t sock_type;
   bool getreq = false;
-  bool drvreq = true;
   int ret = -EINVAL;
 
   memset(&imsg.ifr, 0, sizeof(imsg.ifr));
 
   switch (req->cmd)
     {
-      case SIOCGIFADDR:
-      case SIOCGIFFLAGS:
       case SIOCGIFHWADDR:
-      case SIOCGIWNWID:
-      case SIOCGIWFREQ:
-      case SIOCGIWSENS:
-        if (priv->usock_enable)
-          {
-            getreq = true;
-          }
-        else
-          {
-            ret = -ENOTTY;
-            drvreq = false;
-          }
+        getreq = true;
         break;
 
       case SIOCSIFADDR:
       case SIOCSIFDSTADDR:
       case SIOCSIFNETMASK:
-        if (priv->usock_enable)
-          {
-            read(fd, &imsg.ifr, sizeof(imsg.ifr));
-          }
-        else
-          {
-            ret = -ENOTTY;
-            drvreq = false;
-          }
-        break;
 
-      case SIOCDENYINETSOCK:
-
-        read(fd, &sock_type, sizeof(uint8_t));
-
-        if (sock_type == DENY_INET_SOCK_ENABLE)
-          {
-            /* Block to create INET socket */
-
-            priv->usock_enable = FALSE;
-          }
-        else
-          {
-            /* Allow to create INET socket */
-
-            priv->usock_enable = TRUE;
-          }
+        read(fd, &imsg.ifr, sizeof(imsg.ifr));
         break;
 
       default:
-        if (!priv->usock_enable)
-          {
-            ret = -ENOTTY;
-            drvreq = false;
-          }
         break;
     }
 
-  if (drvreq)
-    {
-      imsg.cmd = req->cmd;
-      ret = ioctl(priv->gsfd, GS2200M_IOC_IFREQ, (unsigned long)&imsg);
-    }
+  imsg.cmd = req->cmd;
+  ret = ioctl(priv->gsfd, GS2200M_IOC_IFREQ, (unsigned long)&imsg);
 
   if (!getreq)
     {
@@ -1642,7 +1359,7 @@ static int ioctl_request(int fd, FAR struct gs2200m_s *priv,
 
       memset(&resp, 0, sizeof(resp));
       resp.result = ret;
-      ret = _send_ack_common(fd, 0, req->head.xid, &resp);
+      ret = _send_ack_common(fd, req->head.xid, &resp);
 
       if (0 > ret)
         {
@@ -1654,9 +1371,8 @@ static int ioctl_request(int fd, FAR struct gs2200m_s *priv,
     {
       resp2.reqack.result = ret;
       resp2.reqack.xid = req->head.xid;
-      resp2.reqack.head.msgid  = USRSOCK_MESSAGE_RESPONSE_DATA_ACK;
-      resp2.reqack.head.flags  = 0;
-      resp2.reqack.head.events = 0;
+      resp2.reqack.head.msgid = USRSOCK_MESSAGE_RESPONSE_DATA_ACK;
+      resp2.reqack.head.flags = 0;
       resp2.valuelen_nontrunc = sizeof(imsg.ifr);
       resp2.valuelen = sizeof(imsg.ifr);
 
@@ -1722,13 +1438,13 @@ static int gs2200m_loop(FAR struct gs2200m_s *priv)
 
       if (fds[0].revents & POLLIN)
         {
-          ret = usrsock_handle_request(fd[0], priv);
+          ret = usrsock_request(fd[0], priv);
           ASSERT(0 == ret);
         }
 
       if (fds[1].revents & POLLIN)
         {
-          gs2200m_printf("=== %s: event from /dev/gs2200m\n",
+          gs2200m_printf("=== %s: event from /dev/gs2200m \n",
                          __func__);
 
           /* retrieve cid from gs2200m driver */
@@ -1737,37 +1453,21 @@ static int gs2200m_loop(FAR struct gs2200m_s *priv)
           ret = read(fd[1], &cid, sizeof(cid));
           ASSERT(ret == sizeof(cid));
 
-          /* Check if all socket destroy or not */
+          /* find usock by the cid */
 
-          if (cid == DISASSOCIATION_CID)
+          usock = gs2200m_find_socket_by_cid(priv, cid);
+
+          if (NULL == usock)
             {
-              gs2200m_printf("=== %s: Disassocitaion event\n",
-                            __func__);
-
-              /* To release sockets blocking in user-sock,
-               * send event to all opened sockets.
-               */
-
-              usock_sendevent_toall(priv, fd[0]);
+              gs2200m_printf("=== %s: cid=%c not found (ignored) \n",
+                             __func__, cid);
             }
           else
             {
-              /* find usock by the cid */
+              /* send event to call xxxx_request() */
 
-              usock = gs2200m_find_socket_by_cid(priv, cid);
-
-              if (NULL == usock)
-                {
-                  gs2200m_printf("=== %s: cid=%c not found (ignored)\n",
-                                __func__, cid);
-                }
-              else
-                {
-                  /* send event to call xxxx_request() */
-
-                  usock_send_event(fd[0], priv, usock,
-                                  USRSOCK_EVENT_RECVFROM_AVAIL);
-                }
+              usock_send_event(fd[0], priv, usock,
+                               USRSOCK_EVENT_RECVFROM_AVAIL);
             }
         }
     }
@@ -1787,13 +1487,12 @@ static int gs2200m_loop(FAR struct gs2200m_s *priv)
 static void _show_usage(FAR char *cmd)
 {
   fprintf(stderr,
-          "Usage: %s [-a [ch]] ssid passphrase(key) \n\n", cmd);
+          "Usage: %s [-a [ch]] ssid key \n\n", cmd);
   fprintf(stderr,
           "AP mode : specify -a option (optionally with channel) with ssid\n"
-          "          and 8 to 63 ascii passphrase for WPA2-PSK\n"
-          "          or 10 hex digits key for WEP\n");
+          "          and 10 hex digits for WEP key \n");
   fprintf(stderr,
-          "STA mode: specify ssid and passphrase for WPA/WPA2 PSK\n");
+          "STA mode: specify ssid and passphrase (key) for WPA/WPA2 PSK \n");
 }
 
 /****************************************************************************
@@ -1808,7 +1507,7 @@ int main(int argc, FAR char *argv[])
 
   if (_daemon)
     {
-      fprintf(stderr, "%s is already running!\n", argv[0]);
+      fprintf(stderr, "%s is already running! \n", argv[0]);
       return -1;
     }
 
@@ -1835,8 +1534,6 @@ int main(int argc, FAR char *argv[])
         }
     }
 
-  _daemon->usock_enable = TRUE;
-
   if ((ap_mode && (4 != argc) && (5 != argc))
       || (!ap_mode && 3 != argc))
     {
@@ -1851,6 +1548,7 @@ int main(int argc, FAR char *argv[])
   ret = gs2200m_loop(_daemon);
 
 errout:
+
   if (_daemon)
     {
       free(_daemon);

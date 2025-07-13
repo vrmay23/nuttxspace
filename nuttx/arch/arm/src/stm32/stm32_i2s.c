@@ -1,22 +1,35 @@
 /****************************************************************************
  * arch/arm/src/stm32/stm32_i2s.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Author: Taras Drozdovskiy <t.drozdovskiy@gmail.com>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -36,7 +49,7 @@
  *      is configured.
  *   3. Add a calls to up_spiinitialize() in your low level application
  *      initialization logic
- *   4. The handle returned by stm32_i2sbus_initialize() may then be used to
+ *   4. The handle returned by stm32_i2sdev_initialize() may then be used to
  *     bind the I2S driver to higher level logic
  *
  ****************************************************************************/
@@ -48,29 +61,31 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
+#include <queue.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
-#include <nuttx/kmalloc.h>
-#include <nuttx/queue.h>
-#include <nuttx/wdog.h>
-#include <nuttx/wqueue.h>
 #include <nuttx/spi/spi.h>
-#include <nuttx/audio/audio.h>
-#include <nuttx/audio/i2s.h>
 
 #include <arch/board/board.h>
 
-#include "arm_internal.h"
+#include <nuttx/arch.h>
+#include <nuttx/kmalloc.h>
+#include <nuttx/wdog.h>
+#include <nuttx/wqueue.h>
+#include <nuttx/audio/audio.h>
+#include <nuttx/audio/i2s.h>
+
+#include "up_internal.h"
+#include "up_arch.h"
+
 #include "stm32_dma.h"
 #include "stm32_spi.h"
 #include "stm32_rcc.h"
@@ -262,7 +277,7 @@ struct stm32_buffer_s
 struct stm32_transport_s
 {
   DMA_HANDLE dma;               /* I2S DMA handle */
-  struct wdog_s dog;            /* Watchdog that handles DMA timeouts */
+  WDOG_ID dog;                  /* Watchdog that handles DMA timeouts */
   sq_queue_t pend;              /* A queue of pending transfers */
   sq_queue_t act;               /* A queue of active transfers */
   sq_queue_t done;              /* A queue of completed transfers */
@@ -279,10 +294,12 @@ struct stm32_i2s_s
 {
   struct i2s_dev_s  dev;          /* Externally visible I2S interface */
   uintptr_t         base;         /* I2S controller register base address */
-  mutex_t           lock;         /* Assures mutually exclusive access to I2S */
+  sem_t             exclsem;      /* Assures mutually exclusive access to I2S */
   bool              initialized;  /* Has I2S interface been initialized */
   uint8_t           datalen;      /* Data width (8 or 16) */
+#ifdef CONFIG_DEBUG_FEATURES
   uint8_t           align;        /* Log2 of data width (0 or 1) */
+#endif
   uint8_t           rxenab:1;     /* True: RX transfers enabled */
   uint8_t           txenab:1;     /* True: TX transfers enabled */
   uint8_t           i2sno:6;      /* I2S controller number (0 or 1) */
@@ -325,7 +342,7 @@ struct stm32_i2s_s
 static bool     i2s_checkreg(struct stm32_i2s_s *priv, bool wr,
                              uint16_t regval, uint32_t regaddr);
 #else
-#  define       i2s_checkreg(priv,wr,regval,regaddr) (false)
+# define        i2s_checkreg(priv,wr,regval,regaddr) (false)
 #endif
 
 static inline uint16_t i2s_getreg(struct stm32_i2s_s *priv, uint8_t offset);
@@ -345,6 +362,14 @@ static void     i2s_dump_regs(struct stm32_i2s_s *priv, const char *msg);
 #  define       i2s_init_buffer(b,s)
 #  define       i2s_dump_buffer(m,b,s)
 #endif
+
+/* Semaphore helpers */
+
+static int      i2s_exclsem_take(struct stm32_i2s_s *priv);
+#define         i2s_exclsem_give(priv) nxsem_post(&priv->exclsem)
+
+static int      i2s_bufsem_take(struct stm32_i2s_s *priv);
+#define         i2s_bufsem_give(priv) nxsem_post(&priv->bufsem)
 
 /* Buffer container helpers */
 
@@ -386,7 +411,7 @@ static void     i2s_txdma_sampledone(struct stm32_i2s_s *priv, int result);
 #endif
 
 #ifdef I2S_HAVE_RX
-static void     i2s_rxdma_timeout(wdparm_t arg);
+static void     i2s_rxdma_timeout(int argc, uint32_t arg, ...);
 static int      i2s_rxdma_setup(struct stm32_i2s_s *priv);
 static void     i2s_rx_worker(void *arg);
 static void     i2s_rx_schedule(struct stm32_i2s_s *priv, int result);
@@ -394,7 +419,7 @@ static void     i2s_rxdma_callback(DMA_HANDLE handle, uint8_t result,
                                    void *arg);
 #endif
 #ifdef I2S_HAVE_TX
-static void     i2s_txdma_timeout(wdparm_t arg);
+static void     i2s_txdma_timeout(int argc, uint32_t arg, ...);
 static int      i2s_txdma_setup(struct stm32_i2s_s *priv);
 static void     i2s_tx_worker(void *arg);
 static void     i2s_tx_schedule(struct stm32_i2s_s *priv, int result);
@@ -469,7 +494,7 @@ static const struct i2s_ops_s g_i2sops =
  *
  * Returned Value:
  *   true:  This is the first register access of this type.
- *   false: This is the same as the preceding register access.
+ *   flase: This is the same as the preceding register access.
  *
  ****************************************************************************/
 
@@ -526,7 +551,7 @@ static bool i2s_checkreg(struct stm32_i2s_s *priv, bool wr, uint16_t regval,
  *
  ****************************************************************************/
 
-static inline uint16_t i2s_getreg(struct stm32_i2s_s *priv,
+static inline uint16_t i2s_getreg(FAR struct stm32_i2s_s *priv,
                                   uint8_t offset)
 {
   uint32_t regaddr = priv->base + offset;
@@ -558,7 +583,7 @@ static inline uint16_t i2s_getreg(struct stm32_i2s_s *priv,
  *
  ****************************************************************************/
 
-static inline void i2s_putreg(struct stm32_i2s_s *priv, uint8_t offset,
+static inline void i2s_putreg(FAR struct stm32_i2s_s *priv, uint8_t offset,
                               uint16_t regval)
 {
   uint32_t regaddr = priv->base + offset;
@@ -604,6 +629,46 @@ static void i2s_dump_regs(struct stm32_i2s_s *priv, const char *msg)
 #endif
 
 /****************************************************************************
+ * Name: i2s_exclsem_take
+ *
+ * Description:
+ *   Take the exclusive access semaphore handling any exceptional conditions
+ *
+ * Input Parameters:
+ *   priv - A reference to the i2s peripheral state
+ *
+ * Returned Value:
+ *   Normally OK, but may return -ECANCELED in the rare event that the task
+ *   has been canceled.
+ *
+ ****************************************************************************/
+
+static int i2s_exclsem_take(struct stm32_i2s_s *priv)
+{
+  return nxsem_wait_uninterruptible(&priv->exclsem);
+}
+
+/****************************************************************************
+ * Name: i2s_bufsem_take
+ *
+ * Description:
+ *   Take the buffer semaphore handling any exceptional conditions
+ *
+ * Input Parameters:
+ *   priv - A reference to the i2s peripheral state
+ *
+ * Returned Value:
+ *   Normally OK, but may return -ECANCELED in the rare event that the task
+ *   has been canceled.
+ *
+ ****************************************************************************/
+
+static int i2s_bufsem_take(struct stm32_i2s_s *priv)
+{
+  return nxsem_wait_uninterruptible(&priv->bufsem);
+}
+
+/****************************************************************************
  * Name: i2s_buf_allocate
  *
  * Description:
@@ -633,7 +698,7 @@ static struct stm32_buffer_s *i2s_buf_allocate(struct stm32_i2s_s *priv)
    * have at least one free buffer container.
    */
 
-  ret = nxsem_wait_uninterruptible(&priv->bufsem);
+  ret = i2s_bufsem_take(priv);
   if (ret < 0)
     {
       return NULL;
@@ -684,7 +749,7 @@ static void i2s_buf_free(struct stm32_i2s_s *priv,
 
   /* Wake up any threads waiting for a buffer container */
 
-  nxsem_post(&priv->bufsem);
+  i2s_bufsem_give(priv);
 }
 
 /****************************************************************************
@@ -882,7 +947,8 @@ static void i2s_txdma_sampledone(struct stm32_i2s_s *priv, int result)
  *   The RX watchdog timeout without completion of the RX DMA.
  *
  * Input Parameters:
- *   arg    - The argument
+ *   argc   - The number of arguments (should be 1)
+ *   arg    - The argument (state structure reference cast to uint32_t)
  *
  * Returned Value:
  *   None
@@ -893,7 +959,7 @@ static void i2s_txdma_sampledone(struct stm32_i2s_s *priv, int result)
  ****************************************************************************/
 
 #ifdef I2S_HAVE_RX
-static void i2s_rxdma_timeout(wdparm_t arg)
+static void i2s_rxdma_timeout(int argc, uint32_t arg, ...)
 {
   struct stm32_i2s_s *priv = (struct stm32_i2s_s *)arg;
   DEBUGASSERT(priv != NULL);
@@ -1031,8 +1097,8 @@ static int i2s_rxdma_setup(struct stm32_i2s_s *priv)
 
   if (!notimeout)
     {
-      ret = wd_start(&priv->rx.dog, timeout,
-                     i2s_rxdma_timeout, (wdparm_t)priv);
+      ret = wd_start(priv->rx.dog, timeout, i2s_rxdma_timeout,
+                     1, (uint32_t)priv);
 
       /* Check if we have successfully started the watchdog timer.  Note
        * that we do nothing in the case of failure to start the timer.  We
@@ -1042,7 +1108,7 @@ static int i2s_rxdma_setup(struct stm32_i2s_s *priv)
 
       if (ret < 0)
         {
-          i2serr("ERROR: wd_start failed: %d\n", ret);
+          i2serr("ERROR: wd_start failed: %d\n", errno);
         }
     }
 
@@ -1256,7 +1322,7 @@ static void i2s_rxdma_callback(DMA_HANDLE handle, uint8_t result, void *arg)
 
   /* Cancel the watchdog timeout */
 
-  wd_cancel(&priv->rx.dog);
+  wd_cancel(priv->rx.dog);
 
   /* Sample DMA registers at the time of the DMA completion */
 
@@ -1281,7 +1347,8 @@ static void i2s_rxdma_callback(DMA_HANDLE handle, uint8_t result, void *arg)
  *   The RX watchdog timeout without completion of the RX DMA.
  *
  * Input Parameters:
- *   arg    - The argument
+ *   argc   - The number of arguments (should be 1)
+ *   arg    - The argument (state structure reference cast to uint32_t)
  *
  * Returned Value:
  *   None
@@ -1292,7 +1359,7 @@ static void i2s_rxdma_callback(DMA_HANDLE handle, uint8_t result, void *arg)
  ****************************************************************************/
 
 #ifdef I2S_HAVE_TX
-static void i2s_txdma_timeout(wdparm_t arg)
+static void i2s_txdma_timeout(int argc, uint32_t arg, ...)
 {
   struct stm32_i2s_s *priv = (struct stm32_i2s_s *)arg;
   DEBUGASSERT(priv != NULL);
@@ -1430,8 +1497,8 @@ static int i2s_txdma_setup(struct stm32_i2s_s *priv)
 
   if (!notimeout)
     {
-      ret = wd_start(&priv->tx.dog, timeout,
-                     i2s_txdma_timeout, (wdparm_t)priv);
+      ret = wd_start(priv->tx.dog, timeout, i2s_txdma_timeout,
+                     1, (uint32_t)priv);
 
       /* Check if we have successfully started the watchdog timer.  Note
        * that we do nothing in the case of failure to start the timer.  We
@@ -1441,7 +1508,7 @@ static int i2s_txdma_setup(struct stm32_i2s_s *priv)
 
       if (ret < 0)
         {
-          i2serr("ERROR: wd_start failed: %d\n", ret);
+          i2serr("ERROR: wd_start failed: %d\n", errno);
         }
     }
 
@@ -1642,7 +1709,7 @@ static void i2s_txdma_callback(DMA_HANDLE handle, uint8_t result, void *arg)
 
   /* Cancel the watchdog timeout */
 
-  wd_cancel(&priv->tx.dog);
+  wd_cancel(priv->tx.dog);
 
   /* Sample DMA registers at the time of the DMA completion */
 
@@ -1686,11 +1753,15 @@ static int i2s_checkwidth(struct stm32_i2s_s *priv, int bits)
   switch (bits)
     {
     case 8:
+#ifdef CONFIG_DEBUG
       priv->align = 0;
+#endif
       break;
 
     case 16:
+#ifdef CONFIG_DEBUG
       priv->align = 1;
+#endif
       break;
 
     default:
@@ -1830,7 +1901,7 @@ static int stm32_i2s_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 #endif
 
   DEBUGASSERT(priv && apb && ((uintptr_t)apb->samp & priv->align) == 0);
-  i2sinfo("apb=%p nmaxbytes=%d arg=%p timeout=%" PRId32 "\n",
+  i2sinfo("apb=%p nmaxbytes=%d arg=%p timeout=%d\n",
           apb, apb->nmaxbytes, arg, timeout);
 
   i2s_init_buffer(apb->samp, apb->nmaxbytes);
@@ -1843,7 +1914,7 @@ static int stm32_i2s_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
   /* Get exclusive access to the I2S driver data */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = i2s_exclsem_take(priv);
   if (ret < 0)
     {
       goto errout_with_buf;
@@ -1855,7 +1926,7 @@ static int stm32_i2s_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
     {
       i2serr("ERROR: I2S%d has no receiver\n", priv->i2sno);
       ret = -EAGAIN;
-      goto errout_with_lock;
+      goto errout_with_exclsem;
     }
 
   /* Add a reference to the audio buffer */
@@ -1882,11 +1953,11 @@ static int stm32_i2s_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
   ret = i2s_rxdma_setup(priv);
   DEBUGASSERT(ret == OK);
   leave_critical_section(flags);
-  nxmutex_unlock(&priv->lock);
+  i2s_exclsem_give(priv);
   return OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_exclsem:
+  i2s_exclsem_give(priv);
 
 errout_with_buf:
   i2s_buf_free(priv, bfcontainer);
@@ -1899,7 +1970,7 @@ errout_with_buf:
 #endif
 }
 
-static int stm32_i2s_roundf(float num)
+static int roundf(float num)
 {
   if (((int)(num + 0.5f)) > num)
     {
@@ -2040,7 +2111,7 @@ static int stm32_i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
    */
 
   DEBUGASSERT(priv && apb);
-  i2sinfo("apb=%p nbytes=%d arg=%p timeout=%" PRId32 "\n",
+  i2sinfo("apb=%p nbytes=%d arg=%p timeout=%d\n",
           apb, apb->nbytes - apb->curbyte, arg, timeout);
 
   i2s_dump_buffer("Sending", &apb->samp[apb->curbyte],
@@ -2055,7 +2126,7 @@ static int stm32_i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
   /* Get exclusive access to the I2S driver data */
 
-  ret = nxmutex_lock(&priv->lock);
+  ret = i2s_exclsem_take(priv);
   if (ret < 0)
     {
       goto errout_with_buf;
@@ -2067,7 +2138,7 @@ static int stm32_i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
     {
       i2serr("ERROR: I2S%d has no transmitter\n", priv->i2sno);
       ret = -EAGAIN;
-      goto errout_with_lock;
+      goto errout_with_exclsem;
     }
 
   /* Add a reference to the audio buffer */
@@ -2094,11 +2165,11 @@ static int stm32_i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
   ret = i2s_txdma_setup(priv);
   DEBUGASSERT(ret == OK);
   leave_critical_section(flags);
-  nxmutex_unlock(&priv->lock);
+  i2s_exclsem_give(priv);
   return OK;
 
-errout_with_lock:
-  nxmutex_unlock(&priv->lock);
+errout_with_exclsem:
+  i2s_exclsem_give(priv);
 
 errout_with_buf:
   i2s_buf_free(priv, bfcontainer);
@@ -2162,8 +2233,8 @@ static uint32_t i2s_mckdivider(struct stm32_i2s_s *priv)
             {
               for (n = 2; n <= 256; ++n)
                 {
-                  napprox = stm32_i2s_roundf(priv->samplerate / 1000000.0f *
-                                             (8 * 32 * R * (2 * n + od)));
+                  napprox = roundf(priv->samplerate / 1000000.0f *
+                                   (8 * 32 * R * (2 * n + od)));
                   if ((napprox > 432) || (napprox < 50))
                     {
                       continue;
@@ -2311,6 +2382,15 @@ static int i2s_dma_allocate(struct stm32_i2s_s *priv)
           i2serr("ERROR: Failed to allocate the RX DMA channel\n");
           goto errout;
         }
+
+      /* Create a watchdog time to catch RX DMA timeouts */
+
+      priv->rx.dog = wd_create();
+      if (!priv->rx.dog)
+        {
+          i2serr("ERROR: Failed to create the RX DMA watchdog\n");
+          goto errout;
+        }
     }
 #endif
 
@@ -2323,6 +2403,15 @@ static int i2s_dma_allocate(struct stm32_i2s_s *priv)
       if (!priv->tx.dma)
         {
           i2serr("ERROR: Failed to allocate the TX DMA channel\n");
+          goto errout;
+        }
+
+      /* Create a watchdog time to catch TX DMA timeouts */
+
+      priv->tx.dog = wd_create();
+      if (!priv->tx.dog)
+        {
+          i2serr("ERROR: Failed to create the TX DMA watchdog\n");
           goto errout;
         }
     }
@@ -2356,7 +2445,11 @@ errout:
 static void i2s_dma_free(struct stm32_i2s_s *priv)
 {
 #ifdef I2S_HAVE_TX
-  wd_cancel(&priv->tx.dog);
+  if (priv->tx.dog)
+    {
+       wd_delete(priv->tx.dog);
+    }
+
   if (priv->tx.dma)
     {
       stm32_dmafree(priv->tx.dma);
@@ -2364,7 +2457,11 @@ static void i2s_dma_free(struct stm32_i2s_s *priv)
 #endif
 
 #ifdef I2S_HAVE_RX
-  wd_cancel(&priv->rx.dog);
+  if (priv->rx.dog)
+    {
+       wd_delete(priv->rx.dog);
+    }
+
   if (priv->rx.dma)
     {
       stm32_dmafree(priv->rx.dma);
@@ -2507,7 +2604,7 @@ static void i2s3_configure(struct stm32_i2s_s *priv)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: stm32_i2sbus_initialize
+ * Name: stm32_i2sdev_initialize
  *
  * Description:
  *   Initialize the selected i2S port
@@ -2520,9 +2617,9 @@ static void i2s3_configure(struct stm32_i2s_s *priv)
  *
  ****************************************************************************/
 
-struct i2s_dev_s *stm32_i2sbus_initialize(int port)
+FAR struct i2s_dev_s *stm32_i2sdev_initialize(int port)
 {
-  struct stm32_i2s_s *priv = NULL;
+  FAR struct stm32_i2s_s *priv = NULL;
   irqstate_t flags;
   int ret;
 
@@ -2535,7 +2632,7 @@ struct i2s_dev_s *stm32_i2sbus_initialize(int port)
    * chip select structures.
    */
 
-  priv = kmm_zalloc(sizeof(struct stm32_i2s_s));
+  priv = (struct stm32_i2s_s *)zalloc(sizeof(struct stm32_i2s_s));
   if (!priv)
     {
       i2serr("ERROR: Failed to allocate a chip select structure\n");
@@ -2543,12 +2640,12 @@ struct i2s_dev_s *stm32_i2sbus_initialize(int port)
     }
 
   /* Set up the initial state for this chip select structure.  Other fields
-   * were zeroed by kmm_zalloc().
+   * were zeroed by zalloc().
    */
 
   /* Initialize the common parts for the I2S device structure */
 
-  nxmutex_init(&priv->lock);
+  nxsem_init(&priv->exclsem, 0, 1);
   priv->dev.ops = &g_i2sops;
   priv->i2sno   = port;
 
@@ -2578,7 +2675,6 @@ struct i2s_dev_s *stm32_i2sbus_initialize(int port)
 #endif
     {
       i2serr("ERROR: Unsupported I2S port: %d\n", port);
-      leave_critical_section(flags);
       return NULL;
     }
 
@@ -2600,9 +2696,7 @@ struct i2s_dev_s *stm32_i2sbus_initialize(int port)
   /* Failure exits */
 
 errout_with_alloc:
-  leave_critical_section(flags);
-  nxmutex_destroy(&priv->lock);
-  nxsem_destroy(&priv->bufsem);
+  nxsem_destroy(&priv->exclsem);
   kmm_free(priv);
   return NULL;
 }

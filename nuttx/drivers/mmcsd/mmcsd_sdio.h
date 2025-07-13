@@ -1,100 +1,51 @@
-/****************************************************************************
+/********************************************************************************************
  * drivers/mmcsd/mmcsd_sdio.h
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2009, 2011, 2019 Gregory Nutt. All rights reserved.
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************/
+ ********************************************************************************************/
 
 #ifndef __DRIVERS_MMCSD_MMCSD_SDIO_H
 #define __DRIVERS_MMCSD_MMCSD_SDIO_H
 
-/****************************************************************************
+/********************************************************************************************
  * Included Files
- ****************************************************************************/
+ ********************************************************************************************/
 
 #include <nuttx/config.h>
 #include <stdint.h>
 
-/****************************************************************************
+/********************************************************************************************
  * Pre-processor Definitions
- ****************************************************************************/
-
-/* CMD6 (MMC_SWITCH) argument
- * MMC_SWITCH argument format:
- *
- *  [31:26] Always 0
- *  [25:24] Access Mode
- *  [23:16] Location of target Byte in EXT_CSD
- *  [15:08] Value Byte
- *  [07:03] Always 0
- *  [02:00] Command Set(Ignored if not used to change the command set)
- */
-
-#define MMC_CMD6_CMDSET_SHIFT       (0)
-#define MMC_CMD6_VALUE_SHIFT        (8)
-#define MMC_CMD6_INDEX_SHIFT        (16)
-#define MMC_CMD6_MODE_SHIFT         (24)
-
-#define MMC_CMD6_CMDSET(cmdset)     ((uint32_t)(cmdset) << MMC_CMD6_CMDSET_SHIFT)
-#define MMC_CMD6_VALUE(value)       ((uint32_t)(value) << MMC_CMD6_VALUE_SHIFT)
-#define MMC_CMD6_INDEX(index)       ((uint32_t)(index) << MMC_CMD6_INDEX_SHIFT)
-#define MMC_CMD6_MODE(mode)         ((uint32_t)(mode) << MMC_CMD6_MODE_SHIFT)
-
-#define MMC_CMD6_MODE_CMD_SET       (0x00)  /* Change the command set */
-#define MMC_CMD6_MODE_SET_BITS      (0x01)  /* Set bits which are 1 in value */
-#define MMC_CMD6_MODE_CLEAR_BITS    (0x02)  /* Clear bits which are 1 in value */
-#define MMC_CMD6_MODE_WRITE_BYTE    (0x03)  /* Set target to value */
-
-#define EXT_CSD_PART_CONF           179     /* R/W */
-#define EXT_CSD_BUS_WIDTH           183     /* WO */
-#define EXT_CSD_HS_TIMING           185     /* R/W */
-
-/* EXT_CSD_BUS_WIDTH */
-#define EXT_CSD_BUS_WIDTH_1         (0x00)  /* Card is in 1 bit mode */
-#define EXT_CSD_BUS_WIDTH_4         (0x01)  /* Card is in 4 bit mode */
-#define EXT_CSD_BUS_WIDTH_8         (0x02)  /* Card is in 8 bit mode */
-#define EXT_CSD_DDR_BUS_WIDTH_4     (0x05)  /* Card is in 4 bit DDR mode */
-#define EXT_CSD_DDR_BUS_WIDTH_8     (0x06)  /* Card is in 8 bit DDR mode */
-
-#define MMC_CMD6_BUSWIDTH(width)    (MMC_CMD6_VALUE(width) | \
-                                     MMC_CMD6_INDEX(EXT_CSD_BUS_WIDTH) | \
-                                     MMC_CMD6_MODE(MMC_CMD6_MODE_WRITE_BYTE))
-
-/* EXT_CSD_HS_TIMING */
-#define EXT_CSD_HS_TIMING_BC        0
-#define EXT_CSD_HS_TIMING_HS        1
-#define EXT_CSD_HS_TIMING_HS200     2
-#define EXT_CSD_HS_TIMING_HS400     3
-
-#define MMC_CMD6_HS_TIMING(timing)  (MMC_CMD6_VALUE(timing) | \
-                                     MMC_CMD6_INDEX(EXT_CSD_HS_TIMING) | \
-                                     MMC_CMD6_MODE(MMC_CMD6_MODE_WRITE_BYTE))
-
-/* Partition type */
-
-#  define MMCSD_PART_UDATA            0
-#  define MMCSD_PART_BOOT0            1
-#  define MMCSD_PART_BOOT1            2
-#  define MMCSD_PART_RPMB             3
-#  define MMCSD_PART_GENP0            4
-#  define MMCSD_PART_GENP1            5
-#  define MMCSD_PART_GENP2            6
-#  define MMCSD_PART_GENP3            7
+ ********************************************************************************************/
 
 /* CMD8 Argument:
  *    [31:12]: Reserved (shall be set to '0')
@@ -106,7 +57,6 @@
 #define MMCSD_CMD8VOLTAGE_SHIFT     (8)                    /* Bits 8-11: Supply voltage */
 #define MMCSD_CMD8VOLTAGE_MASK      ((uint32_t)0x0f << MMCSD_CMD8VOLTAGE_SHIFT)
 #  define MMCSD_CMD8VOLTAGE_27      ((uint32_t)0x01 << MMCSD_CMD8VOLTAGE_SHIFT) /* 2.7-3.6V */
-
 #define MMCSD_CMD8ECHO_SHIFT        (0)                    /* Bits 0-7: Check pattern */
 #define MMCSD_CMD8ECHO_MASK         ((uint32_t)0xff << MMCSD_CMD8ECHO_SHIFT)
 #  define MMCSD_CMD8CHECKPATTERN    ((uint32_t)0xaa << MMCSD_CMD8ECHO_SHIFT)
@@ -121,8 +71,8 @@
 #define MMCSD_ACMD41_VOLTAGEWINDOW_34_33 ((uint32_t)1 << 21)
 #define MMCSD_ACMD41_VOLTAGEWINDOW_33_32 ((uint32_t)1 << 20)
 #define MMCSD_ACMD41_VOLTAGEWINDOW_32_31 ((uint32_t)1 << 19)
-#define MMCSD_ACMD41_HIGHCAPACITY        ((uint32_t)1 << 30)
-#define MMCSD_ACMD41_STDCAPACITY         ((uint32_t)0 << 30)
+#define MMCSD_ACMD41_HIGHCAPACITY   ((uint32_t)1 << 30)
+#define MMCSD_ACMD41_STDCAPACITY    ((uint32_t)0)
 
 /* ACMD42 argument */
 
@@ -152,27 +102,21 @@
 #define MMCSD_R1_ERASERESET         ((uint32_t)1 << 13)    /* Reset sequence cleared */
 #define MMCSD_R1_STATE_SHIFT        (9)                    /* Current card state */
 #define MMCSD_R1_STATE_MASK         ((uint32_t)15 << MMCSD_R1_STATE_SHIFT)
-
-/* Card identification mode states */
-
+                                                           /* Card identification mode states */
 #  define MMCSD_R1_STATE_IDLE       ((uint32_t)0 << MMCSD_R1_STATE_SHIFT) /* 0=Idle state */
 #  define MMCSD_R1_STATE_READY      ((uint32_t)1 << MMCSD_R1_STATE_SHIFT) /* 1=Ready state */
 #  define MMCSD_R1_STATE_IDENT      ((uint32_t)2 << MMCSD_R1_STATE_SHIFT) /* 2=Identification state */
-
-/* Data transfer states */
-
+                                                           /* Data transfer states */
 #  define MMCSD_R1_STATE_STBY       ((uint32_t)3 << MMCSD_R1_STATE_SHIFT) /* 3=Standby state */
 #  define MMCSD_R1_STATE_TRAN       ((uint32_t)4 << MMCSD_R1_STATE_SHIFT) /* 4=Transfer state */
 #  define MMCSD_R1_STATE_DATA       ((uint32_t)5 << MMCSD_R1_STATE_SHIFT) /* 5=Sending data state */
 #  define MMCSD_R1_STATE_RCV        ((uint32_t)6 << MMCSD_R1_STATE_SHIFT) /* 6=Receiving data state */
 #  define MMCSD_R1_STATE_PRG        ((uint32_t)7 << MMCSD_R1_STATE_SHIFT) /* 7=Programming state */
 #  define MMCSD_R1_STATE_DIS        ((uint32_t)8 << MMCSD_R1_STATE_SHIFT) /* 8=Disconnect state */
-
 #define MMCSD_R1_READYFORDATA       ((uint32_t)1 << 8)     /* Buffer empty */
-#define MMCSD_R1_SWITCHERROR        ((uint32_t)1 << 7)     /* Device mode switch error */
 #define MMCSD_R1_APPCMD             ((uint32_t)1 << 5)     /* Next CMD is ACMD */
 #define MMCSD_R1_AKESEQERROR        ((uint32_t)1 << 3)     /* Authentication error */
-#define MMCSD_R1_ERRORMASK          ((uint32_t)0xfdffe088) /* Error mask */
+#define MMCSD_R1_ERRORMASK          ((uint32_t)0xfdffe008) /* Error mask */
 
 #define IS_STATE(v,s)               ((((uint32_t)v)&MMCSD_R1_STATE_MASK)==(s))
 
@@ -217,22 +161,17 @@
 #define MMCSD_R6_ERROR              ((uint32_t)1 << 13)    /* General error */
 #define MMCSD_R6_STATE_SHIFT        (9)                    /* Current card state */
 #define MMCSD_R6_STATE_MASK         ((uint32_t)15 << MMCSD_R6_STATE_SHIFT)
-
-/* Card identification mode states */
-
+                                                           /* Card identification mode states */
 #  define MMCSD_R6_STATE_IDLE       ((uint32_t)0 << MMCSD_R6_STATE_SHIFT) /* 0=Idle state */
 #  define MMCSD_R6_STATE_READY      ((uint32_t)1 << MMCSD_R6_STATE_SHIFT) /* 1=Ready state */
 #  define MMCSD_R6_STATE_IDENT      ((uint32_t)2 << MMCSD_R6_STATE_SHIFT) /* 2=Identification state */
-
-/* Data transfer states */
-
+                                                           /* Data transfer states */
 #  define MMCSD_R6_STATE_STBY       ((uint32_t)3 << MMCSD_R6_STATE_SHIFT) /* 3=Standby state */
 #  define MMCSD_R6_STATE_TRAN       ((uint32_t)4 << MMCSD_R6_STATE_SHIFT) /* 4=Transfer state */
-#  define MMCSD_R6_STATE_DATA       ((uint32_t)5 << MMCSD_R6_STATE_SHIFT) /* 5=Sending data state */
+#  define MMCSD_R6_STATE_DATA       (5(uint32_t) << MMCSD_R6_STATE_SHIFT) /* 5=Sending data state */
 #  define MMCSD_R6_STATE_RCV        ((uint32_t)6 << MMCSD_R6_STATE_SHIFT) /* 6=Receiving data state */
 #  define MMCSD_R6_STATE_PRG        ((uint32_t)7 << MMCSD_R6_STATE_SHIFT) /* 7=Programming state */
-#  define MMCSD_R6_STATE_DIS        ((uint32_t)8 << MMCSD_R6_STATE_SHIFT) /* 8=Disconnect state */
-
+#  define MMCSD_R6_STATE_DIS        ((uint32_t) << MMCSD_R6_STATE_SHIFT) /* 8=Disconnect state */
 #define MMCSD_R6_ERRORMASK          ((uint32_t)0x0000e000)  /* Error mask */
 
 /* SD Configuration Register (SCR) encoding */
@@ -249,26 +188,25 @@
 #define MMCSD_R7VOLTAGE_SHIFT       (8)                    /* Bits 8-11: Voltage accepted */
 #define MMCSD_R7VOLTAGE_MASK        ((uint32_t)0x0f << MMCSD_R7VOLTAGE_SHIFT)
 #  define MMCSD_R7VOLTAGE_27        ((uint32_t)0x01 << MMCSD_R7VOLTAGE_SHIFT) /* 2.7-3.6V */
-
 #define MMCSD_R7ECHO_SHIFT          (0)                    /* Bits 0-7: Echoed check pattern */
 #define MMCSD_R7ECHO_MASK           ((uint32_t)0xff << MMCSD_R7ECHO_SHIFT)
 #  define MMCSD_R7CHECKPATTERN      ((uint32_t)0xaa << MMCSD_R7ECHO_SHIFT)
 
-/****************************************************************************
+/********************************************************************************************
  * Public Types
- ****************************************************************************/
+ ********************************************************************************************/
 
 /* Decoded Card Identification (CID) register */
 
 struct mmcsd_cid_s
 {
   uint8_t  mid;     /* 127:120  8-bit Manufacturer ID */
-  uint8_t  cbx;     /* 113:112  2-bit Device/BGA */
-  uint8_t  oid;     /* 111:104  8-bit OEM/Application ID (ascii) */
-  uint8_t  pnm[7];  /* 103:56   48-bit Product Name (ascii) + null terminator */
-  uint8_t  prv;     /*  55:48   8-bit Product revision */
-  uint32_t psn;     /*  47:16   32-bit Product serial number */
-  uint8_t  mdt;     /*  15:8    8-bit Manufacturing date */
+  uint16_t oid;     /* 119:104 16-bit OEM/Application ID (ascii) */
+  uint8_t  pnm[6];  /* 103:64  40-bit Product Name (ascii) + null terminator */
+  uint8_t  prv;     /*  63:56   8-bit Product revision */
+  uint32_t psn;     /*  55:24  32-bit Product serial number */
+                    /*  23:20   4-bit (reserved) */
+  uint16_t mdt;     /*  19:8   12-bit Manufacturing date */
   uint8_t  crc;     /*   7:1    7-bit CRC7 */
                     /*   0:0    1-bit (not used) */
 };
@@ -346,7 +284,6 @@ struct mmcsd_csd_s
     struct
     {
                                /*  73:70  (reserved) */
-
       uint32_t csize;          /*  69:48  Device size */
                                /*  47:47  (reserved) */
       uint8_t sderblen;        /*  46:46  Erase single block enable (SD) */
@@ -381,9 +318,9 @@ struct mmcsd_scr_s
   uint32_t mfgdata;            /* 31:0  Reserved for manufacturing data */
 };
 
-/****************************************************************************
+/********************************************************************************************
  * Public Data
- ****************************************************************************/
+ ********************************************************************************************/
 
 #undef EXTERN
 #if defined(__cplusplus)
@@ -394,9 +331,9 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/****************************************************************************
- * Public Functions Definitions
- ****************************************************************************/
+/********************************************************************************************
+ * Public Functions
+ ********************************************************************************************/
 
 #undef EXTERN
 #if defined(__cplusplus)

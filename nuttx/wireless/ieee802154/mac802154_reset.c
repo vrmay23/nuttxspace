@@ -1,22 +1,40 @@
 /****************************************************************************
  * wireless/ieee802154/mac802154_reset.c
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   Copyright (C) 2016 Sebastien Lorquet. All rights reserved.
+ *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2017 Verge Inc. All rights reserved.
  *
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.  The
- * ASF licenses this file to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the
- * License.  You may obtain a copy of the License at
+ *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
+ *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *   Author: Anthony Merlino <anthony@vergeaero.com>
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -38,7 +56,7 @@
 #include <nuttx/wireless/ieee802154/ieee802154_mac.h>
 
 /****************************************************************************
- * Public Functions
+ * Public MAC Functions
  ****************************************************************************/
 
 /****************************************************************************
@@ -50,13 +68,13 @@
  *
  *   NOTE: The standard specifies that confirmation should be provided via
  *   via the asynchronous MLME-RESET.confirm primitive.  However, in our
- *   implementation we synchronously return the value immediately.
- *   Therefore, we merge the functionality of the MLME-RESET.request and
- *   MLME-RESET.confirm primitives together.
+ *   implementation we synchronously return the value immediately. Therefore,
+ *   we merge the functionality of the MLME-RESET.request and MLME-RESET.confirm
+ *   primitives together.
  *
  * Input Parameters:
- *   mac       - Handle to the MAC layer instance
- *   resetattr - Whether or not to reset the MAC PIB attributes to defaults
+ *   mac          - Handle to the MAC layer instance
+ *   resetattr    - Whether or not to reset the MAC PIB attributes to defaults
  *
  ****************************************************************************/
 
@@ -95,12 +113,11 @@ int mac802154_req_reset(MACHANDLE mac, bool resetattr)
       priv->sec_enabled = false;        /* Security disabled by default */
       priv->tx_totaldur = 0;            /* 0 transmit duration */
 
-      priv->trans_persisttime = 0x01f4;
+      priv->trans_persisttime = 0x01F4;
 
       /* Reset the short address and PAN ID. The extended address does not
        * get reset. It is a read-only attribute and the radio driver should
-       * be in charge of managing it. We pull a local copy for us to use
-       * below.
+       * be in charge of managing it. We pull a local copy for us to use below.
        */
 
       priv->addr.mode = IEEE802154_ADDRMODE_EXTENDED;
@@ -118,14 +135,11 @@ int mac802154_req_reset(MACHANDLE mac, bool resetattr)
        * reset.
        */
 
-      priv->radio->getattr(priv->radio,
-                           IEEE802154_ATTR_MAC_EADDR, &attr);
-      IEEE802154_EADDRCOPY(priv->addr.eaddr,
-                           attr.mac.eaddr);
+      priv->radio->getattr(priv->radio, IEEE802154_ATTR_MAC_EADDR, &attr);
+      IEEE802154_EADDRCOPY(priv->addr.eaddr, attr.mac.eaddr);
 
-      priv->radio->getattr(priv->radio,
-                           IEEE802154_ATTR_MAC_MAX_FRAME_WAITTIME,
-                           &attr);
+      priv->radio->getattr(priv->radio, IEEE802154_ATTR_MAC_MAX_FRAME_WAITTIME,
+                            &attr);
       priv->max_frame_waittime = attr.mac.max_frame_waittime;
     }
 
